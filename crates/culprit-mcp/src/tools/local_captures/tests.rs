@@ -71,7 +71,8 @@ fn the_offline_tool_is_absent_by_default_and_has_no_path_or_sql_arguments_when_e
     let tool = culprit_core::i18n::scope("fr", || host.server.get_tool("analyze_capture").unwrap());
     let title = culprit_core::i18n::scope("en", || culprit_core::t!("mcp.local_capture.analyze.title"));
     assert_eq!(tool.title.as_deref(), Some(title.as_str()));
-    let description = culprit_core::i18n::scope("en", || culprit_core::t!("mcp.local_capture.analyze.description"));
+    let description =
+        culprit_core::i18n::scope("en", || culprit_core::t!("view.hyperscale_log_components.intake.mcp_description"));
     assert!(tool.description.as_deref().unwrap().starts_with(&description));
     assert_eq!(tool.annotations.as_ref().and_then(|value| value.read_only_hint), Some(true));
     assert_eq!(tool.annotations.as_ref().and_then(|value| value.open_world_hint), Some(false));

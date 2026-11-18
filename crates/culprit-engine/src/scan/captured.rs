@@ -11,6 +11,7 @@ pub(crate) enum CapturedScanEvidence {
     #[cfg(feature = "collector")]
     CachedRuntime(Box<CachedRuntimeRead>),
     MemoryClerks(Box<CapturedOperationalRead>),
+    HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
 impl CapturedScanEvidence {
     pub(crate) fn memory_clerks(read: Box<CapturedOperationalRead>) -> Result<Self> {
@@ -19,6 +20,10 @@ impl CapturedScanEvidence {
         Ok(Self::MemoryClerks(read))
     }
 
+    pub(crate) fn hyperscale_log_components(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::hyperscale_log_components::explain_captured(&read)?;
+        Ok(Self::HyperscaleLogComponents(read))
+    }
     pub(crate) fn attach(self, snapshot: &mut Snapshot) -> Result<()> {
         match self {
             #[cfg(feature = "collector")]
@@ -33,6 +38,15 @@ impl CapturedScanEvidence {
                     return Err(DeliveryProblem::InvalidContract.error());
                 }
                 snapshot.operations.cached_runtime = Some(read);
+            }
+            Self::HyperscaleLogComponents(read) => {
+                if snapshot.operations.hyperscale_log_components.is_some() {
+                    return Err(DeliveryProblem::Conflict.error());
+                }
+                if !read.is_valid() || !read.description.target.matches_native_database(snapshot) {
+                    return Err(DeliveryProblem::InvalidContract.error());
+                }
+                snapshot.operations.hyperscale_log_components = Some(read);
             }
             Self::MemoryClerks(read) => {
                 if snapshot.operations.memory_clerks.is_some()

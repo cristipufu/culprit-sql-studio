@@ -38,7 +38,7 @@ async fn governance_configuration_is_a_separate_point_in_the_existing_identity_q
             break;
         }
     }
-    assert_eq!(points.len(), 10);
+    assert_eq!(points.len(), 11);
     let capture = CaptureIdentity { observation_id: "current-native-governance".into(), revision: None };
     let exported =
         points.into_iter().map(|row| ExportedRecord::new(&description, &capture, row).unwrap()).collect::<Vec<_>>();
@@ -75,7 +75,7 @@ async fn malformed_optional_configuration_does_not_erase_other_operational_facts
     let mut source = source_initial(true, false, initial, identity());
     let description = source.describe().await.unwrap();
     let header = description.observation.snapshot().unwrap();
-    assert_eq!(header.records, 9);
+    assert_eq!(header.records, 10);
     let coverage = header.sources.iter().find(|source| source.source == CONFIGURED_LOG_RATES_SOURCE).unwrap();
     assert_eq!(coverage.state, SourceState::Unavailable);
     assert_eq!(coverage.records, 0);

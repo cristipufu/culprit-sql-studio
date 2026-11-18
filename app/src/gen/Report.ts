@@ -8,7 +8,9 @@ import type { CompletedSpillReport } from "./CompletedSpillReport";
 import type { ConfiguredLogRateReport } from "./ConfiguredLogRateReport";
 import type { ConnectionOutcomeReport } from "./ConnectionOutcomeReport";
 import type { CounterRatioReport } from "./CounterRatioReport";
+import type { DatabasePropertiesReport } from "./DatabasePropertiesReport";
 import type { Finding } from "./Finding";
+import type { HyperscaleLogComponentReport } from "./HyperscaleLogComponentReport";
 import type { JobsReport } from "./JobsReport";
 import type { LockedCheck } from "./LockedCheck";
 import type { MaintenanceProgressReport } from "./MaintenanceProgressReport";
@@ -16,6 +18,7 @@ import type { MemoryClerkReport } from "./MemoryClerkReport";
 import type { MemoryParticipantsReport } from "./MemoryParticipantsReport";
 import type { PageServerReadReport } from "./PageServerReadReport";
 import type { PageWaitReport } from "./PageWaitReport";
+import type { PerformanceCounterReport } from "./PerformanceCounterReport";
 import type { RefinementDecision } from "./RefinementDecision";
 import type { ReplicationReport } from "./ReplicationReport";
 import type { ReportEvidence } from "./ReportEvidence";
@@ -29,7 +32,7 @@ import type { WaitCounterReport } from "./WaitCounterReport";
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { memory_clerks?: MemoryClerkReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
+export type Report = { performance_counters?: PerformanceCounterReport, memory_clerks?: MemoryClerkReport, database_properties?: DatabasePropertiesReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */
@@ -69,4 +72,4 @@ maintenance_progress?: MaintenanceProgressReport,
 /**
  * Native replication points retain original scope, clocks and availability independently of legacy summaries.
  */
-replication?: ReplicationReport, connection_outcomes?: ConnectionOutcomeReport, configured_log_rates?: ConfiguredLogRateReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+replication?: ReplicationReport, connection_outcomes?: ConnectionOutcomeReport, configured_log_rates?: ConfiguredLogRateReport, hyperscale_log_components?: HyperscaleLogComponentReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

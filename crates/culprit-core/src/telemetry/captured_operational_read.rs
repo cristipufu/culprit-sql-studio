@@ -1,4 +1,4 @@
-//! A completed original Operational capture, retained independently from live database observations.
+//! Canonical OperationalSamples positions for the two implemented snapshot datasets; independent of live observations.
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -51,8 +51,16 @@ impl CapturedOperationalRead {
     }
 
     fn accepts_rows(&self) -> bool {
-        let SourceObservation::Snapshot(header) = &self.description.observation else { return false };
-        if header.dataset != SnapshotDataset::Operational
+        let header = match &self.description.observation {
+            SourceObservation::Snapshot(header) => header,
+            SourceObservation::SourceRead { snapshot, .. }
+                if snapshot.dataset == SnapshotDataset::HyperscaleLogComponents =>
+            {
+                snapshot
+            }
+            _ => return false,
+        };
+        if !matches!(header.dataset, SnapshotDataset::Operational | SnapshotDataset::HyperscaleLogComponents)
             || !header.is_valid()
             || !self.description.target.is_valid()
             || !self.description.partition_is_consistent()

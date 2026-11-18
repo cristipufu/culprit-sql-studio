@@ -238,7 +238,12 @@ impl FleetBackend for Backend {
                     let intent =
                         admission.investigation.as_ref().expect("source history retains its exact admitted question");
                     assert_eq!(intent.selection().unwrap(), request.selection);
-                    super::source_reads::frame(focus, execution)
+                    match focus.question {
+                        SourceReadQuestion::CompilationHistory => super::source_reads::frame(focus, execution),
+                        SourceReadQuestion::HyperscaleLogComponents => {
+                            super::source_reads::log_rates::frame(focus, execution)
+                        }
+                    }
                 }
                 CollectionSelection::FocusedCompilationAdmission { focus } => {
                     let intent =

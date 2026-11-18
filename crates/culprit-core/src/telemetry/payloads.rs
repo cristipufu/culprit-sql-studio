@@ -199,6 +199,8 @@ impl OperationalFact {
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::ConfiguredLogRateLimits(_)
+            | Self::HyperscaleLogComponent(_)
+            | Self::DatabaseProperties(_)
             | Self::MssqlPersistentVersionStore(_)
             | Self::MssqlIndexOperations(_)
             | Self::MssqlTable(_)

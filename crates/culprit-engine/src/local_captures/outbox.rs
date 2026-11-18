@@ -116,6 +116,26 @@ impl OutboxCaptureReader {
                     })
                     .await
             }
+            LocalCaptureAnalysisKind::HyperscaleLogComponents => {
+                delivery
+                    .with_completed_snapshot(
+                        lookup,
+                        SnapshotDataset::HyperscaleLogComponents,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        move |capture| {
+                            let result = explain_hyperscale_log_components(capture)
+                                .map(LocalCapturedAnalysis::HyperscaleLogComponents);
+                            #[cfg(test)]
+                            if let Some(boundary) = boundary {
+                                boundary()?;
+                            }
+                            result
+                        },
+                    )
+                    .await
+            }
             LocalCaptureAnalysisKind::MemoryClerks => {
                 delivery
                     .with_completed_snapshot(
@@ -215,6 +235,22 @@ fn explain_page_server_reads(capture: CompletedQueryHistory) -> Result<LocalPage
     })
 }
 
+fn explain_hyperscale_log_components(capture: CompletedSnapshot) -> Result<LocalHyperscaleLogComponents> {
+    let connection = capture.connection().into();
+    let collected_from = capture.collected_from().into();
+    let collected_until = capture.collected_until().into();
+    let bytes_read = capture.bytes_read();
+    let read = capture.into_operational_read()?;
+    let report = culprit_checks::hyperscale_log_components::explain_captured(&read)?;
+    Ok(LocalHyperscaleLogComponents {
+        connection,
+        read: Box::new(read),
+        report: Box::new(report),
+        collected_from,
+        collected_until,
+        bytes_read,
+    })
+}
 fn explain_memory_clerks(capture: CompletedSnapshot) -> Result<LocalMemoryClerks> {
     let connection = capture.connection().into();
     let collected_from = capture.collected_from().into();

@@ -179,6 +179,8 @@ pub mod source_id {
         QUERY_COSTS,
         QUERY_COMPILATION,
         crate::telemetry::CONFIGURED_LOG_RATES_SOURCE,
+        crate::telemetry::HYPERSCALE_LOG_COMPONENTS_SOURCE,
+        crate::telemetry::DATABASE_PROPERTIES_SOURCE,
         QUERY_ERRORS,
         QUERY_FAMILIES,
         PLAN_CACHE_USE,

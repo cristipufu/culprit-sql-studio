@@ -127,7 +127,7 @@ fn exact_fixed_selector_adds_no_object_family_guess_limit_or_extra_query() {
     assert!(sql.contains("counter_name=N'RBPEX cache hit ratio base'"));
     assert!(!sql.contains("%RBPEX%"));
     assert!(sql.contains("DECLARE @counter_observed_at"));
-    assert_eq!(MAX_COUNTERS, 32);
+    assert_eq!(MAX_COUNTERS, MAX_NATIVE_COUNTERS);
 }
 
 #[tokio::test]

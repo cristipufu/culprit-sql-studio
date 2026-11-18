@@ -185,11 +185,11 @@ impl DiagnosticFocus {
         };
         let mut seen = Vec::new();
         let prerequisite = match self {
-            Self::SourceRead { focus } => Some(focus.prerequisite.as_ref()),
+            Self::SourceRead { focus } => Some(&focus.prerequisite),
             _ => None,
         };
         std::iter::once(self.parent())
-            .chain(prerequisite.into_iter().flat_map(CompilationAdmissionReport::references))
+            .chain(prerequisite.into_iter().flat_map(SourceReadPrerequisite::references))
             .chain(page)
             .chain(candidates.iter().map(|candidate| &candidate.parent))
             .filter(move |reference| {

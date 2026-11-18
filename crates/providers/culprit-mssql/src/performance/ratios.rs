@@ -7,9 +7,6 @@ use culprit_core::telemetry::{
 };
 use std::collections::BTreeMap;
 
-const NUMERATOR: &str = "RBPEX cache hit ratio";
-const BASE: &str = "RBPEX cache hit ratio base";
-
 #[derive(Clone, Debug)]
 pub(crate) struct PerformanceRead {
     pub(crate) sample: NativeCounterSet,
@@ -49,27 +46,42 @@ pub(super) fn captured(
     if rows.iter().skip(1).any(|row| ReadMetadata::decode(row) != metadata) {
         return Err(CollectionStop::SourceChanged.error());
     }
-    let mut populations = BTreeMap::<(String, Option<String>), BTreeMap<String, String>>::new();
+    let mut populations =
+        BTreeMap::<(CounterRatioKind, String, Option<String>), (Option<String>, Option<String>)>::new();
     for (key, object, name, instance) in counters
         .iter()
         .map(|row| (&row.key, &row.native_object, &row.native_name, &row.native_instance))
         .chain(ratio_gaps.iter().map(|row| (&row.key, &row.native_object, &row.native_name, &row.native_instance)))
     {
-        if name == NUMERATOR || name == BASE {
-            populations.entry((object.clone(), instance.clone())).or_default().insert(name.clone(), key.clone());
+        let Some(spec) = specs().iter().find(|spec| spec.matches(object, name, instance.as_deref())) else {
+            return Err(invalid_data());
+        };
+        if let Some(kind) = spec.ratio {
+            let pair = populations.entry((kind, object.clone(), instance.clone())).or_default();
+            match spec.nature {
+                CounterNature::FractionNumerator => pair.0 = Some(key.clone()),
+                CounterNature::FractionBase => pair.1 = Some(key.clone()),
+                _ => return Err(invalid_data()),
+            }
         }
     }
     let mut ratios = Vec::new();
-    for names in populations.values() {
+    for ((kind, _, _), (numerator, base)) in &populations {
         ratios.push(NativeCounterRatio {
-            kind: CounterRatioKind::LocalSsdCacheHit,
-            numerator: names.get(NUMERATOR).cloned(),
-            base: names.get(BASE).cloned(),
-            support: metadata.support(),
+            kind: *kind,
+            numerator: numerator.clone(),
+            base: base.clone(),
+            support: if *kind == CounterRatioKind::LocalSsdCacheHit {
+                metadata.support()
+            } else {
+                CounterRatioSupport::Supported
+            },
             observed_at: metadata.at.clone(),
         });
     }
-    if populations.is_empty() && metadata.support() == CounterRatioSupport::Supported {
+    if !populations.keys().any(|(kind, _, _)| *kind == CounterRatioKind::LocalSsdCacheHit)
+        && metadata.support() == CounterRatioSupport::Supported
+    {
         // This is an expectation of the genuine fully drained source read. Neither input claims a native row or
         // object/instance existed. The read has its actual ordinary counters; no empty synthetic object is emitted.
         ratios.push(NativeCounterRatio {
@@ -80,18 +92,31 @@ pub(super) fn captured(
             observed_at: metadata.at.clone(),
         });
     }
+    let profile = culprit_core::Engine::Mssql.spec().performance_counters().ok_or_else(invalid_data)?;
     let sample = NativeCounterSet {
-        identity: NativeIdentity::new("sys.dm_os_performance_counters")
-            .qualified("native_object", "sys.dm_os_performance_counters"),
+        identity: NativeIdentity::new(profile.native_object).qualified("native_object", profile.native_object),
         scope: MeasurementScope::Server,
         counters,
         ratios,
         ratio_gaps,
-        properties: BTreeMap::new(),
+        properties: {
+            let mut properties = BTreeMap::from([
+                (
+                    culprit_core::telemetry::PERFORMANCE_COUNTER_PROFILE_PROPERTY.into(),
+                    culprit_core::telemetry::PERFORMANCE_COUNTER_PROFILE.into(),
+                ),
+                (culprit_core::telemetry::PERFORMANCE_COUNTER_ROWS_PROPERTY.into(), rows.len().to_string()),
+            ]);
+            if let Some(at) = &metadata.at {
+                properties.insert(
+                    culprit_core::telemetry::PERFORMANCE_COUNTER_CLOCK_PROPERTY.into(),
+                    culprit_core::telemetry::canonical_time(at)?,
+                );
+            }
+            properties
+        },
     };
-    if !sample.is_valid() {
-        return Err(invalid_data());
-    }
+    profile.validate(&sample)?;
     // The native witness is the original raw row count, independently of one aggregate archive observation.
     Ok(PerformanceRead { sample, native_rows: rows.len() })
 }

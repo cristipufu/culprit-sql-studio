@@ -19,9 +19,10 @@ pub use outbox::OutboxCaptureReader;
 pub enum LocalCaptureAnalysisKind {
     PageServerReads,
     MemoryClerks,
+    HyperscaleLogComponents,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 2] = [Self::PageServerReads, Self::MemoryClerks];
+    pub const ALL: [Self; 3] = [Self::PageServerReads, Self::MemoryClerks, Self::HyperscaleLogComponents];
 }
 
 /// The host delegates one saved connection; the reader independently checks the original journal association.
@@ -39,12 +40,14 @@ pub type LocalCaptureTask<'a> = Pin<Box<dyn Future<Output = Result<LocalCaptured
 pub enum LocalCapturedAnalysis {
     PageServerReads(LocalPageServerReads),
     MemoryClerks(LocalMemoryClerks),
+    HyperscaleLogComponents(LocalHyperscaleLogComponents),
 }
 impl LocalCapturedAnalysis {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
         match self {
             Self::PageServerReads(_) => LocalCaptureAnalysisKind::PageServerReads,
             Self::MemoryClerks(_) => LocalCaptureAnalysisKind::MemoryClerks,
+            Self::HyperscaleLogComponents(_) => LocalCaptureAnalysisKind::HyperscaleLogComponents,
         }
     }
 }
@@ -120,6 +123,40 @@ impl LocalMemoryClerks {
         &self.report
     }
     /// Client acquisition bounds, kept separately from original native clocks in the raw carrier.
+    pub fn collected_from(&self) -> &str {
+        &self.collected_from
+    }
+    pub fn collected_until(&self) -> &str {
+        &self.collected_until
+    }
+    pub fn bytes_read(&self) -> u64 {
+        self.bytes_read
+    }
+}
+
+/// One original bounded component capture; no current route or native source is acquired by this value.
+#[derive(Debug)]
+pub struct LocalHyperscaleLogComponents {
+    connection: String,
+    read: Box<CapturedOperationalRead>,
+    report: Box<culprit_core::HyperscaleLogComponentReport>,
+    collected_from: String,
+    collected_until: String,
+    bytes_read: u64,
+}
+impl LocalHyperscaleLogComponents {
+    pub fn connection(&self) -> &str {
+        &self.connection
+    }
+    pub fn read(&self) -> &CapturedOperationalRead {
+        &self.read
+    }
+    pub fn into_read(self) -> Box<CapturedOperationalRead> {
+        self.read
+    }
+    pub fn report(&self) -> &culprit_core::HyperscaleLogComponentReport {
+        &self.report
+    }
     pub fn collected_from(&self) -> &str {
         &self.collected_from
     }

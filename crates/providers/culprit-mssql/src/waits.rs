@@ -294,6 +294,8 @@ pub(crate) fn activity_wait_class(native: &str) -> Option<culprit_core::telemetr
         Some(ActivityWaitClass::ExecutionGrant)
     } else if native == COMPILATION_ADMISSION_WAIT {
         Some(ActivityWaitClass::CompilationAdmission)
+    } else if native == "LOG_RATE_GOVERNOR" || matches!(mechanism(native), Some(WaitMechanism::LogRateGovernance(_))) {
+        Some(ActivityWaitClass::LogRateGovernance)
     } else {
         None
     }

@@ -1,4 +1,5 @@
 use super::*;
+mod hyperscale_log_components;
 use crate::analytical::test_support::{LocalCaptureFixture, MemoryClerkCase, memory_clerk_evidence};
 use culprit_core::{SourceState, limits::OperationGuard};
 
@@ -15,7 +16,7 @@ async fn read(fixture: &LocalCaptureFixture) -> Result<CompletedSnapshot> {
         .completed_snapshot_for_connection(
             "local-evidence",
             &attempt,
-            SnapshotDataset::Operational,
+            fixture.manifest.description.as_ref().unwrap().observation.snapshot().unwrap().dataset,
             CompletedCaptureBudget::default(),
             &CollectionCancellation::default(),
         )

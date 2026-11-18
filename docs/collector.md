@@ -60,7 +60,7 @@ facts and uncertainty without granting trusted query totals or diagnostic escala
 An explicitly configured MCP host can also read original local captures through `LocalCaptureReader` and the
 engine's optional `OutboxCaptureReader` adapter. `culprit mcp --evidence-outbox DIRECTORY` installs that capability;
 `analyze_capture` accepts a delegated connection, its exact original observation ID and the closed analysis choice
-`page_server_reads` or `memory_clerks`. The existing
+`page_server_reads`, `memory_clerks` or `hyperscale_log_components`. The existing
 Outbox owner checks the journal association, Ready state, confirmed native shutdown, manifest and every artifact
 in one canonical verification pass before projecting the requested analysis. Page-server reads keep runtime rows
 and independently matched query definitions. Memory clerks retain all original Operational rows and source
@@ -73,6 +73,21 @@ collector clocks and actual local verification bytes remain distinct in the resu
 one verified clerk capture to the normal report after confirmed native scan shutdown. Existing captured or live
 clerk input is refused rather than overwritten. Both original capture association and raw rows survive saved-report
 reanalysis; ordinary scans neither discover an outbox nor acquire clerks.
+
+`culprit scan CONNECTION --evidence-outbox DIRECTORY --hyperscale-log-components-capture OBSERVATION` attaches
+one verified component capture through that same reader and scan owner. Choose exactly one capture attachment.
+The original database incarnation must positively match the scan; the original member, clocks, rows and receipts
+remain unchanged. Saved reports replay the evidence without retaining an outbox connection. Sharing withholds
+the complete carrier and records an explicit gap.
+
+Selected-database properties use the existing database-settings catalog read during a scan. Selected database
+Operational captures retain the same finite point in their first-clock dispatch; other clock and authority reads
+remain independent. `culprit collect evidence analyze --config FILE --range SHA256 --analysis database-properties`
+replays that original Operational evidence without reconnecting to the source. Health folds the same shared
+interpretation under **Selected database properties**. Native codes, descriptions, connected updateability,
+catalog read-only flag and unknown fields remain separate. Query Store enablement is not its actual capture mode;
+no property alone establishes a problem or authorizes a configuration change. Sharing deliberately withholds this
+carrier and records an explicit evidence gap.
 
 `CompletedCaptureBudget` applies to both local snapshot and query-history reads: 10,000 retained rows, 8 MiB of
 all verified artifact/manifest bytes and five seconds by default, including queueing. Limits refuse rather than
@@ -503,6 +518,11 @@ After a completed compiler-admission answer, the controller can retain one separ
 It authenticates the original request and gateway captures before admission, then uses the existing compilation
 reader under an independently qualified native member, process and updateability scope. Dataset identity stays
 logical. A recovered wait keeps this owed context; it does not reopen the gateway question.
+
+A source-classified log-governance request wait can instead owe one Hyperscale component question directly,
+without a fabricated compiler prerequisite. Its original Activity receipt remains the basis after recovery.
+The same recipe, cost-artifact, native-scope, scheduler and shutdown checks apply; an unqualified recipe cannot
+open the source. The resulting component capture supplies context, not proof that the waiting query caused it.
 
 The result becomes one retained capture pointer through the existing offline queue and atomic checkpoint update.
 Restart reconciliation cannot replace an admitted read or clear an unconfirmed shutdown. Capturing history does
@@ -1531,6 +1551,33 @@ and rejected signed native inputs remain exact; missing inputs, an unknown profi
 its base withhold the percentage. There is no selected-database denominator, recent rate, pressure grade or query-cause
 claim. Native read time is independent of counter reset/lifetime, and unavailable archive rows remain partial.
 
-The query retains the existing 32-row cap and adds no default roundtrip. That cap does not bound native counter
+The query retains at most 128 native counter rows and adds no default roundtrip. That cap does not bound native counter
 enumeration work. Actual Hyperscale compatibility and measured native cost remain unqualified; boxed SQL Server
 fixtures cannot establish positive RBPEX support.
+
+### Performance counters and Hyperscale log components
+
+`--analysis performance-counters` explains the original execution-memory, optimizer/cache-memory,
+parameterization, temporary-table, plan-cache and log-flush counters. Their 34 fixed names share the existing
+native SELECT; plan-cache instances are finite and database log counters use only `_Total`. Native types determine
+units and gauge/cumulative/fraction meaning. Shared counters remain shared; missing fields remain unknown.
+Collection time does not supply a reset boundary or justify a recent rate. The SDK, CLI, Health and MCP reuse
+the same interpreter and existing cache-ratio policy.
+
+For an explicit Hyperscale read into an existing outbox:
+
+```sh
+culprit collect once CONNECTION --collection hyperscale-log-components --outbox DIRECTORY
+```
+
+This dedicated source reads `sys.dm_hs_database_log_rate(DB_ID())` for the selected database. It validates the
+native schema, permissions and updateability before reading, and rechecks the same authority afterward.
+Its ceilings are 1,024 rows, 2 MiB, one second per statement and five seconds overall; the source declares
+at most ten queries including admission and rechecks. A standalone read uses eight; its cost evidence cannot
+qualify the ten-query incident route. These limits do not establish server CPU/I/O cost approval.
+See the [native function and required permission](https://learn.microsoft.com/en-us/sql/relational-databases/system-functions/sys-dm-hs-database-log-rate).
+
+`--analysis hyperscale-log-components` replays committed evidence through the same pure view. Maximum log rates,
+catch-up rates and unapplied-log bytes retain their separate units, zeroes and unknowns. Component GUIDs and
+native role codes remain independent. A report clock without an offset is not relabeled UTC or matched to a wait
+clock. These reports alone establish neither query ownership, measured throughput nor a catch-up estimate.

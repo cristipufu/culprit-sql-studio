@@ -221,8 +221,11 @@ enum Analysis {
     Replication,
     ConnectionOutcomes,
     ConfiguredLogRates,
+    HyperscaleLogComponents,
     CounterRatios,
+    PerformanceCounters,
     MemoryClerks,
+    DatabaseProperties,
     WaitCounters,
     Cleanup,
     Tuning,
@@ -255,9 +258,12 @@ impl Analysis {
             | Self::StatementWork
             | Self::CompletedSpills
             | Self::CounterRatios
+            | Self::PerformanceCounters
             | Self::MemoryClerks
+            | Self::DatabaseProperties
             | Self::ConnectionOutcomes
             | Self::ConfiguredLogRates
+            | Self::HyperscaleLogComponents
             | Self::StatementGrants
             | Self::CacheEntryMemory
             | Self::RuntimeDistributions
@@ -424,13 +430,27 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             let analysis = culprit_engine::collected_resources::wait_counters(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::wait_counters(&analysis.report))?;
         }
+        Some(Analysis::DatabaseProperties) => {
+            let analysis = culprit_engine::collected_resources::database_properties(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::database_properties(&analysis.report))?;
+        }
         Some(Analysis::MemoryClerks) => {
             let analysis = culprit_engine::collected_resources::memory_clerks(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::memory_clerks(&analysis.report))?;
         }
+        Some(Analysis::PerformanceCounters) => {
+            let analysis = culprit_engine::collected_resources::performance_counters(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::performance_counters(&analysis.report))?;
+        }
         Some(Analysis::CounterRatios) => {
             let analysis = culprit_engine::collected_resources::counter_ratios(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::counter_ratios(&analysis.report))?;
+        }
+        Some(Analysis::HyperscaleLogComponents) => {
+            let analysis = culprit_engine::collected_resources::hyperscale_log_components(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || {
+                observations::hyperscale_log_components(&analysis.report)
+            })?;
         }
         Some(Analysis::ConfiguredLogRates) => {
             let analysis = culprit_engine::collected_resources::configured_log_rates(&capture)?;

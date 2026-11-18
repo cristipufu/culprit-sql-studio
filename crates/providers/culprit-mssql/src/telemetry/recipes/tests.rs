@@ -30,8 +30,9 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.current-request-memory", 2),
             ("mssql.focused-request-memory", 2),
             ("mssql.task-space", 2),
-            ("mssql.operational", 3),
-            ("mssql.shared-operational", 2),
+            ("mssql.operational", 4),
+            ("mssql.shared-operational", 3),
+            ("mssql.settings", 2),
             ("mssql.query-compilation", 3),
         ])
     );
@@ -323,5 +324,18 @@ fn native_resource_discovery_derives_its_routes_from_registrations_and_observed_
     assert_eq!(
         collections_for(&pool, crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE),
         vec![TelemetryCollection::ResourceHistory, TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures)]
+    );
+}
+
+#[test]
+fn hyperscale_component_source_is_independent_and_does_not_grant_automatic_production_admission() {
+    let declarations = declarations();
+    let recipe = declarations.iter().find(|recipe| recipe.id == "mssql.hyperscale-log-components").unwrap();
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.budget.max_queries, 10);
+    assert_eq!(
+        recipe.selector,
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::HyperscaleLogComponents))
     );
 }

@@ -53,11 +53,15 @@ impl NativeSourceReadScope {
 #[ts(export)]
 pub enum SourceReadQuestion {
     CompilationHistory,
+    HyperscaleLogComponents,
 }
 impl SourceReadQuestion {
+    pub const ALL: &'static [Self] = &[Self::CompilationHistory, Self::HyperscaleLogComponents];
+
     pub const fn dataset(self) -> SnapshotDataset {
         match self {
             Self::CompilationHistory => SnapshotDataset::QueryCompilation,
+            Self::HyperscaleLogComponents => SnapshotDataset::HyperscaleLogComponents,
         }
     }
     pub const fn selector(self) -> RecipeSelector {
@@ -66,10 +70,42 @@ impl SourceReadQuestion {
     pub fn accepts_dataset(self, dataset: SnapshotDataset) -> bool {
         self.dataset() == dataset
     }
+    pub fn for_dataset(dataset: SnapshotDataset) -> Option<Self> {
+        Self::ALL.iter().copied().find(|question| question.accepts_dataset(dataset))
+    }
 }
 
-/// An exact genuine incident receipt justifies a finite historical context question. No Activity/request/SQL
-/// envelope is invented for source-global compiler history. The caller authenticates this original independently.
+/// Only compilation history requires a prior gateway answer. A native log-governance wait is itself the
+/// original incident evidence; it cannot borrow or manufacture a compilation prerequisite.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+#[ts(export)]
+pub enum SourceReadPrerequisite {
+    CompilationAdmission { report: Box<CompilationAdmissionReport> },
+    ObservedLogRateWait,
+}
+impl SourceReadPrerequisite {
+    pub fn references(&self) -> impl Iterator<Item = &DiagnosticEvidenceRef> {
+        self.compilation_admission().into_iter().flat_map(CompilationAdmissionReport::references)
+    }
+
+    pub fn compilation_admission(&self) -> Option<&CompilationAdmissionReport> {
+        match self {
+            Self::CompilationAdmission { report } => Some(report),
+            Self::ObservedLogRateWait => None,
+        }
+    }
+    fn is_valid_for(&self, question: SourceReadQuestion) -> bool {
+        match (self, question) {
+            (Self::CompilationAdmission { report }, SourceReadQuestion::CompilationHistory) => report.is_valid(),
+            (Self::ObservedLogRateWait, SourceReadQuestion::HyperscaleLogComponents) => true,
+            _ => false,
+        }
+    }
+}
+
+/// An exact genuine incident receipt justifies one finite context question. No Activity/request/SQL
+/// envelope is invented for source-global evidence. The caller authenticates the original independently.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
@@ -78,12 +114,12 @@ pub struct SourceReadFocus {
     /// Logical dataset namespace. An admitted native execution partition never replaces it.
     pub target: CollectionTarget,
     pub question: SourceReadQuestion,
-    pub prerequisite: Box<CompilationAdmissionReport>,
+    pub prerequisite: SourceReadPrerequisite,
 }
 impl SourceReadFocus {
     pub fn is_valid(&self) -> bool {
         self.basis.is_valid()
-            && self.prerequisite.is_valid()
+            && self.prerequisite.is_valid_for(self.question)
             && self.basis.stream == TelemetryStream::ActivityObservations
             && matches!(self.basis.native_key, NativeRecordIdentity::Activity(_))
             && self.target.is_valid()
@@ -104,6 +140,7 @@ impl SourceReadFocus {
         source: &CollectionDescription,
         rows: impl IntoIterator<Item = (&'a DiagnosticEvidenceRef, &'a OperationalObservation)>,
     ) -> bool {
+        let Some(prerequisite) = self.prerequisite.compilation_admission() else { return false };
         let (
             Ok(original),
             SourceObservation::FocusedCompilationAdmission { result, .. },
@@ -129,7 +166,7 @@ impl SourceReadFocus {
                 .request_key(&actor.key, statement)
                 .zip(context.request_key(&participant.original.key, &participant.statement_identity))
                 .is_some_and(|(left, right)| left == right)
-            && self.prerequisite.matches_input(source, rows)
+            && prerequisite.matches_input(source, rows)
     }
     pub fn matches_basis(
         &self,
@@ -141,8 +178,11 @@ impl SourceReadFocus {
             && execution.matches_target(&self.target)
             && source.target.telemetry_id().ok() == self.target.telemetry_id().ok()
             && matches!(&row.record, TelemetryRecord::Activity(original)
-                if original.scope == ActivityScopeBasis::RequestDatabase
-                    && original.wait.as_ref().is_some_and(|wait| wait.class == Some(ActivityWaitClass::CompilationAdmission)))
+            if original.scope == ActivityScopeBasis::RequestDatabase
+                && original.wait.as_ref().is_some_and(|wait| wait.class == Some(match self.question {
+                    SourceReadQuestion::CompilationHistory => ActivityWaitClass::CompilationAdmission,
+                    SourceReadQuestion::HyperscaleLogComponents => ActivityWaitClass::LogRateGovernance,
+                })))
             && NativeReadContext::from_activity(source).is_ok_and(|context| execution.matches_context(&context))
             && self.basis.validate_canonical_record(source, &row.record).is_ok()
             && self.basis.capture == row.capture
@@ -209,8 +249,15 @@ impl SourceReadStage {
         self.is_valid()
             && self.focus.basis.as_ref() == &episode.first
             && self.focus.target.telemetry_id().ok() == episode.scope.target.telemetry_id().ok()
-            && matches!(episode.signal, DiagnosticSignal::CompilationAdmission { .. })
-            && matches!(&episode.report, Some(DiagnosticReport::CompilationAdmission { report }) if report == &self.focus.prerequisite)
+            && match (&episode.signal, &self.focus.prerequisite, &episode.report) {
+                (
+                    DiagnosticSignal::CompilationAdmission { .. },
+                    SourceReadPrerequisite::CompilationAdmission { report },
+                    Some(DiagnosticReport::CompilationAdmission { report: original }),
+                ) => report == original,
+                (DiagnosticSignal::LogRateGovernance { .. }, SourceReadPrerequisite::ObservedLogRateWait, None) => true,
+                _ => false,
+            }
     }
     pub fn transition(&self, state: SourceReadStageState) -> Result<Self> {
         if !self.is_valid() {
@@ -245,6 +292,33 @@ impl SourceReadStage {
     }
 }
 impl DiagnosticEpisode {
+    /// Construct only the logical question justified by this incident. Original-body authentication, native
+    /// execution scope and source-issued cost approval are separate mandatory admission checks.
+    pub fn source_read_focus(&self) -> Result<Option<SourceReadFocus>> {
+        if !self.is_valid() {
+            return Err(invalid());
+        }
+        let (question, prerequisite) = match (&self.signal, &self.report) {
+            (
+                DiagnosticSignal::CompilationAdmission { .. },
+                Some(DiagnosticReport::CompilationAdmission { report }),
+            ) => (
+                SourceReadQuestion::CompilationHistory,
+                SourceReadPrerequisite::CompilationAdmission { report: report.clone() },
+            ),
+            (DiagnosticSignal::LogRateGovernance { .. }, None) => {
+                (SourceReadQuestion::HyperscaleLogComponents, SourceReadPrerequisite::ObservedLogRateWait)
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(SourceReadFocus {
+            basis: Box::new(self.first.clone()),
+            target: self.scope.target.clone(),
+            question,
+            prerequisite,
+        }))
+    }
+
     pub fn has_owed_question(&self) -> bool {
         self.source_read.as_deref().map_or_else(|| self.analysis.needs_work(), SourceReadStage::needs_work)
     }
@@ -270,20 +344,11 @@ impl DiagnosticEpisode {
         if !self.is_valid() {
             return Err(invalid());
         }
-        if !matches!(self.signal, DiagnosticSignal::CompilationAdmission { .. })
-            || !matches!(self.report, Some(DiagnosticReport::CompilationAdmission { .. }))
-            || self.source_read.as_deref().is_some_and(|stage| !stage.needs_admission())
-        {
+        if self.source_read.as_deref().is_some_and(|stage| !stage.needs_admission()) {
             return Ok(DiagnosticFocusPlan::NotRequired);
         }
+        let Some(focus) = self.source_read_focus()? else { return Ok(DiagnosticFocusPlan::NotRequired) };
         self.first.validate_canonical_record(source, &row.record)?;
-        let Some(DiagnosticReport::CompilationAdmission { report }) = &self.report else { return Err(invalid()) };
-        let focus = SourceReadFocus {
-            basis: Box::new(self.first.clone()),
-            target: self.scope.target.clone(),
-            question: SourceReadQuestion::CompilationHistory,
-            prerequisite: report.clone(),
-        };
         let context = NativeReadContext::from_activity(source)?;
         let Ok(execution) = NativeSourceReadScope::from_context(&context) else {
             return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));

@@ -59,7 +59,8 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         SnapshotDataset::Tuning => crate::query_store::tuning::Kind::ALL.into_iter().map(Family::Tuning).collect(),
         SnapshotDataset::WaitCounters => vec![Family::WaitCounters],
         SnapshotDataset::Settings => crate::settings::Kind::ALL.into_iter().map(Family::Settings).collect(),
-        SnapshotDataset::StatementCounters
+        SnapshotDataset::HyperscaleLogComponents
+        | SnapshotDataset::StatementCounters
         | SnapshotDataset::RuntimeDistributions
         | SnapshotDataset::StatementDefinitions
         | SnapshotDataset::Sequences

@@ -7,7 +7,7 @@ mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
 pub const MAX_DIAGNOSTIC_INPUTS: usize = 256;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 10;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 11;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -343,6 +343,11 @@ pub enum DiagnosticSignal {
         key: ActivityKey,
         statement_identity: Option<NativeIdentity>,
     },
+    /// An affected native request, not proof that this query caused the service's log-rate limit.
+    LogRateGovernance {
+        key: ActivityKey,
+        statement_identity: Option<NativeIdentity>,
+    },
     PageWait {
         key: ActivityKey,
         statement_identity: Option<NativeIdentity>,
@@ -365,6 +370,7 @@ impl DiagnosticSignal {
                 Self::Activity { policy, .. } => policy.validate().is_ok(),
                 Self::LockWait { key } => key.request.is_some(),
                 Self::RequestMemory { key, statement_identity }
+                | Self::LogRateGovernance { key, statement_identity }
                 | Self::CompilationAdmission { key, statement_identity } => {
                     key.request.is_some() && statement_identity.as_ref().is_none_or(NativeIdentity::is_valid)
                 }
@@ -393,6 +399,7 @@ impl DiagnosticSignal {
             | Self::PageWait { key, .. }
             | Self::PageTaskWait { key, .. }
             | Self::RequestMemory { key, .. }
+            | Self::LogRateGovernance { key, .. }
             | Self::CompilationAdmission { key, .. } => key,
         }
     }

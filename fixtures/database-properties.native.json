@@ -1,0 +1,22 @@
+{
+  "profile": "mssql-sys-databases",
+  "database": "sample",
+  "native_database_id": "5",
+  "observed_at": "2020-01-01T12:00:00.0000001Z",
+  "catalog_state": {"code": 0, "description": "ONLINE"},
+  "user_access": {"code": 0, "description": "MULTI_USER"},
+  "updateability": "READ_WRITE",
+  "catalog_read_only": false,
+  "collation": "Latin1_General_100_CI_AS",
+  "compatibility_level": 160,
+  "snapshot_isolation": {"code": 1, "description": "ON"},
+  "read_committed_snapshot": true,
+  "auto_create_statistics": true,
+  "auto_update_statistics": true,
+  "auto_update_statistics_async": false,
+  "forced_parameterization": false,
+  "query_store_enabled": true,
+  "page_verify": {"code": 2, "description": "CHECKSUM"},
+  "recovery_model": {"code": 1, "description": "FULL"},
+  "target_recovery_time_seconds": 0
+}

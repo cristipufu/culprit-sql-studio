@@ -1,4 +1,5 @@
 //! Controlled native facts test structural retention; the fixture issues no archive authentication.
+mod hyperscale_log_components;
 use super::*;
 use crate::{Engine, MeasurementScope, SourceState};
 

@@ -14,6 +14,7 @@ use culprit_core::telemetry::*;
 use std::sync::atomic::Ordering;
 
 mod failures;
+pub(super) mod log_rates;
 mod recovery;
 
 pub(super) fn frame(focus: &SourceReadFocus, execution: &NativeSourceReadScope) -> Frame {

@@ -20,7 +20,7 @@ use std::time::Duration;
 pub struct CompletedSnapshot {
     connection: String,
     source: CollectionDescription,
-    capture: DiagnosticCaptureRef,
+    original: CapturedSnapshotOrigin,
     records: Vec<ExportedRecord>,
     row_ordinals: Vec<u32>,
     collected_from: String,
@@ -36,7 +36,7 @@ impl CompletedSnapshot {
         &self.source
     }
     pub fn capture(&self) -> &DiagnosticCaptureRef {
-        &self.capture
+        &self.original.capture
     }
     pub fn records(&self) -> &[ExportedRecord] {
         &self.records
@@ -58,17 +58,31 @@ impl CompletedSnapshot {
         true
     }
     pub fn reference(&self, index: usize) -> Result<DiagnosticEvidenceRef> {
+        let position = self.original_position(index)?.clone();
         let row = self.records.get(index).ok_or_else(integrity)?;
-        let ordinal = *self.row_ordinals.get(index).ok_or_else(integrity)?;
-        DiagnosticEvidenceRef::from_export(&self.source, &self.capture.manifest_sha256, row, ordinal)
+        // Select the unchanged original position; the shared validator checks its source and canonical body.
+        let original = CapturedSnapshotOrigin {
+            capture: self.original.capture.clone(),
+            source_sha256: self.original.source_sha256.clone(),
+            positions: vec![position],
+        };
+        original
+            .references(&self.source, [row.record.clone()], false)
+            .map_err(|_| integrity())?
+            .pop()
+            .ok_or_else(integrity)
     }
     /// Move the original rows once into the shared model; no fake native read or warehouse wrapper is introduced.
     pub fn into_cached_runtime_read(self) -> Result<CachedRuntimeRead> {
         if !self.source.observation.snapshot().is_some_and(|header| header.dataset == SnapshotDataset::CachedRuntime) {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
-        let positions = self.positions()?;
-        let origin = CachedRuntimeReadOrigin::captured(&self.source, self.capture, positions)?;
+        self.validate_original_positions()?;
+        let origin = CachedRuntimeReadOrigin::Captured {
+            capture: self.original.capture,
+            source_sha256: self.original.source_sha256,
+            positions: self.original.positions,
+        };
         let observations = operational_observations(self.records)?;
         let read = CachedRuntimeRead { origin, description: self.source, observations, read_complete: true };
         if !read.is_valid() {
@@ -79,33 +93,69 @@ impl CompletedSnapshot {
 
     /// Retain the whole original Operational dataset, including unrelated source rows and coverage.
     pub fn into_operational_read(self) -> Result<CapturedOperationalRead> {
-        if !self.source.observation.snapshot().is_some_and(|header| header.dataset == SnapshotDataset::Operational) {
+        if !self.source.observation.snapshot().is_some_and(|header| {
+            matches!(header.dataset, SnapshotDataset::Operational | SnapshotDataset::HyperscaleLogComponents)
+        }) {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
-        let positions = self.positions()?;
+        self.validate_original_positions()?;
         let observations = operational_observations(self.records)?;
-        CapturedOperationalRead::captured(self.source, self.capture, positions, observations, true)
+        let read = CapturedOperationalRead {
+            origin: self.original,
+            description: self.source,
+            observations,
+            read_complete: true,
+        };
+        read.is_valid().then_some(read).ok_or_else(integrity)
     }
 
-    fn positions(&self) -> Result<Vec<CapturedSnapshotPosition>> {
-        self.records
+    fn original_position(&self, index: usize) -> Result<&CapturedSnapshotPosition> {
+        let position = self.original_positions()?.get(index).ok_or_else(integrity)?;
+        let row = self.records.get(index).ok_or_else(integrity)?;
+        if self.row_ordinals[index] != position.row_ordinal || row.payload_sha256()? != position.payload_sha256 {
+            return Err(integrity());
+        }
+        Ok(position)
+    }
+
+    fn original_positions(&self) -> Result<&[CapturedSnapshotPosition]> {
+        if self.records.len() != self.row_ordinals.len() || self.records.len() != self.original.positions.len() {
+            return Err(integrity());
+        }
+        Ok(&self.original.positions)
+    }
+
+    fn validate_original_positions(&self) -> Result<()> {
+        self.original_positions()?;
+        for index in 0..self.records.len() {
+            self.original_position(index)?;
+        }
+        Ok(())
+    }
+
+    fn from_completed(completed: CompletedCapture) -> Result<Self> {
+        if completed.records.len() != completed.row_ordinals.len() {
+            return Err(integrity());
+        }
+        // Still inside the canonical read worker: bind its verified original once, before any projection.
+        // Conversion moves this proof unchanged rather than hashing a later body or repairing its descriptor.
+        let positions = completed
+            .records
             .iter()
-            .zip(&self.row_ordinals)
+            .zip(&completed.row_ordinals)
             .map(|(row, ordinal)| CapturedSnapshotPosition::from_export(row, *ordinal))
-            .collect()
-    }
-
-    fn from_completed(completed: CompletedCapture) -> Self {
-        Self {
+            .collect::<Result<Vec<_>>>()?;
+        let original = CapturedSnapshotOrigin::captured(&completed.source, completed.capture, positions)?;
+        Ok(Self {
             connection: completed.connection,
             source: completed.source,
-            capture: completed.capture,
+            original,
             records: completed.records,
             row_ordinals: completed.row_ordinals,
             collected_from: completed.collected_from,
             collected_until: completed.collected_until,
             bytes_read: completed.bytes_read,
-        }
+        })
     }
 }
 
@@ -120,7 +170,7 @@ impl OutboxDelivery {
         cancellation: &CollectionCancellation,
     ) -> Result<CompletedSnapshot> {
         let read = CompletedCaptureRead::snapshot(attempt.clone(), dataset, budget, cancellation.clone())?;
-        self.with_completed_capture(read, (), |completed| Ok(CompletedSnapshot::from_completed(completed))).await
+        self.with_completed_capture(read, (), CompletedSnapshot::from_completed).await
     }
 
     /// Authenticate both the original receipt and its saved connection before exposing any retained rows.
@@ -134,7 +184,7 @@ impl OutboxDelivery {
     ) -> Result<CompletedSnapshot> {
         let read = CompletedCaptureRead::snapshot(attempt.clone(), dataset, budget, cancellation.clone())?
             .for_connection(connection)?;
-        self.with_completed_capture(read, (), |completed| Ok(CompletedSnapshot::from_completed(completed))).await
+        self.with_completed_capture(read, (), CompletedSnapshot::from_completed).await
     }
 
     /// The same worker owns lookup, authentication and projection under the caller's original operation.
@@ -150,7 +200,7 @@ impl OutboxDelivery {
     ) -> Result<T> {
         let read = CompletedCaptureRead::snapshot_lookup(lookup, dataset, budget, operation)?;
         self.with_completed_capture(read, worker_guard, move |completed| {
-            project(CompletedSnapshot::from_completed(completed))
+            project(CompletedSnapshot::from_completed(completed)?)
         })
         .await
     }

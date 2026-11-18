@@ -91,12 +91,48 @@ fn read_session(accounting: &Value) -> Result<NativeActivityIdentity> {
 
 fn verify_input(read: &PerformanceRead, raw_rows: &[crate::value::Rec], metrics: &ReadWorkMetrics, accounting: &Value) {
     assert!(read.sample.is_valid());
+    let profile = culprit_core::Engine::Mssql.spec().performance_counters().unwrap();
+    profile.validate(&read.sample).unwrap();
+    assert!(profile.declares_selection(&read.sample));
+    assert_eq!(profile.native_rows(&read.sample).unwrap(), Some(raw_rows.len() as u32));
+    for counter in &read.sample.counters {
+        let spec = profile
+            .field(&counter.native_object, &counter.native_name, counter.native_instance.as_deref())
+            .expect("fixed documented selector");
+        assert_eq!(
+            (counter.nature, counter.unit),
+            spec.meaning(counter.native_type.as_ref().unwrap().parse().unwrap())
+        );
+        let original = raw_rows
+            .iter()
+            .find(|row| {
+                text(row, "native_object").ok().as_ref() == Some(&counter.native_object)
+                    && text(row, "native_name").ok().as_ref() == Some(&counter.native_name)
+                    && optional_text(row, "native_instance").ok().flatten().unwrap_or_default()
+                        == counter.native_instance.clone().unwrap_or_default()
+            })
+            .unwrap();
+        assert_eq!(counter.value.integer(), Some(integer(original, "value").unwrap() as u64));
+    }
+    for family in [
+        PerformanceCounterFamily::WorkspaceMemory,
+        PerformanceCounterFamily::PlanCache,
+        PerformanceCounterFamily::TemporaryTables,
+        PerformanceCounterFamily::TransactionLog,
+    ] {
+        assert!(
+            read.sample.counters.iter().any(|row| profile
+                .field(&row.native_object, &row.native_name, row.native_instance.as_deref())
+                .is_some_and(|spec| spec.family == family)),
+            "owned boxed endpoint family {family:?}"
+        );
+    }
     assert!(metrics.is_valid() && !metrics.has_unconfirmed_work());
     assert_eq!(metrics.untracked_tasks, 0);
     assert_eq!(read.native_rows, raw_rows.len());
     assert_eq!(read.native_rows, read.sample.counters.len() + read.sample.ratio_gaps.len());
     assert!(read.native_rows <= MAX_COUNTERS);
-    let ordinary = SPECS.iter().filter(|spec| spec.family.is_some()).collect::<Vec<_>>();
+    let ordinary = specs().iter().filter(|spec| spec.application).collect::<Vec<_>>();
     assert_eq!(ordinary.len(), 6, "the existing independent six-counter projection");
     for spec in &ordinary {
         let counter = global(&read.sample.counters, spec).expect("owned SQL2022 exposes the existing counter");
@@ -114,7 +150,7 @@ fn verify_input(read: &PerformanceRead, raw_rows: &[crate::value::Rec], metrics:
         );
         assert_eq!(counter.scope, MeasurementScope::Server);
         assert_eq!(counter.reset, ResetMarker::Unknown);
-        assert!(application(&read.sample.counters).contains_key(spec.name));
+        assert!(application(&read.sample.counters).contains_key(spec.native_name));
     }
     let exported = observations(read.clone()).unwrap();
     assert_eq!(exported.len(), 1, "native inputs are retained in one canonical aggregate observation");
@@ -139,7 +175,11 @@ fn verify_input(read: &PerformanceRead, raw_rows: &[crate::value::Rec], metrics:
         })
     );
     assert!(
-        read.sample.ratios.iter().all(|ratio| ratio.support == CounterRatioSupport::Unsupported),
+        read.sample
+            .ratios
+            .iter()
+            .filter(|ratio| ratio.kind == CounterRatioKind::LocalSsdCacheHit)
+            .all(|ratio| ratio.support == CounterRatioSupport::Unsupported),
         "native RBPEX names on a boxed server cannot authorize Hyperscale ratio interpretation"
     );
 }

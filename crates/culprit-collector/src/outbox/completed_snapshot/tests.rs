@@ -7,6 +7,7 @@ use culprit_read::admission::SourceGate;
 use std::path::PathBuf;
 
 mod operational;
+mod original_proofs;
 
 #[derive(Clone)]
 struct FixtureSource {

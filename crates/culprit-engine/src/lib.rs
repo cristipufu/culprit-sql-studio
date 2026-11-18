@@ -41,7 +41,7 @@ mod local_captures;
 pub use local_captures::OutboxCaptureReader;
 pub use local_captures::{
     LocalCaptureAnalysisKind, LocalCaptureReader, LocalCaptureRequest, LocalCaptureTask, LocalCapturedAnalysis,
-    LocalMemoryClerks, LocalPageServerReads,
+    LocalHyperscaleLogComponents, LocalMemoryClerks, LocalPageServerReads,
 };
 pub mod marks;
 #[cfg(feature = "postgres")]

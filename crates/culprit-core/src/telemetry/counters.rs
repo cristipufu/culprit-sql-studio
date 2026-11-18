@@ -3,6 +3,9 @@ use super::*;
 mod ratios;
 pub use ratios::{CounterRatioGap, CounterRatioIssue, CounterRatioKind, CounterRatioSupport, NativeCounterRatio};
 
+/// The existing generic set ceiling also bounds each native performance-counter acquisition.
+pub const MAX_NATIVE_COUNTERS: usize = 128;
+
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
@@ -14,6 +17,19 @@ pub enum CounterNature {
     FractionBase,
     Unknown,
 }
+impl CounterNature {
+    /// Native Windows counter types establish formatting semantics; a '/sec' suffix establishes none.
+    pub fn from_windows_type(code: i32) -> Self {
+        match code {
+            272_696_320 | 272_696_576 => Self::Cumulative,
+            65_792 => Self::Gauge,
+            537_003_264 => Self::FractionNumerator,
+            1_073_939_712 => Self::FractionBase,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[ts(export)]
@@ -113,7 +129,7 @@ impl NativeCounterSet {
     pub fn is_valid(&self) -> bool {
         let mut keys = std::collections::BTreeSet::new();
         self.identity.is_valid()
-            && self.counters.len() <= 128
+            && self.counters.len() <= MAX_NATIVE_COUNTERS
             && self
                 .counters
                 .iter()

@@ -97,6 +97,27 @@ impl CollectionTarget {
             .unwrap_or(Comparison::Incompatible(ComparisonReason::UnknownIdentity))
     }
 
+    /// Match a captured database to a scan using its known native incarnation. Endpoint aliases and
+    /// renamed labels may identify the same native database; unknown identity never establishes a match.
+    /// Original body and provenance validation remain the captured input owner's responsibility.
+    pub fn matches_native_database(&self, snapshot: &crate::Snapshot) -> bool {
+        let (Some(original), Some(current)) = (self.database(), snapshot.identity.as_ref()) else {
+            return false;
+        };
+        if !snapshot.identity_names_this_database()
+            || original.engine != current.engine
+            || current.database.trim().is_empty()
+            || !original.incarnation.as_deref().is_some_and(|value| !value.trim().is_empty())
+            || !current.incarnation.as_deref().is_some_and(|value| !value.trim().is_empty())
+        {
+            return false;
+        }
+        match (original.telemetry_id(), current.telemetry_id()) {
+            (Ok(original), Ok(current)) => original == current,
+            _ => false,
+        }
+    }
+
     pub fn is_valid(&self) -> bool {
         match self {
             Self::Database(database) => !database.database.trim().is_empty(),

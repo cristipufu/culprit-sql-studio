@@ -75,6 +75,7 @@ struct MiscPart {
     tuning: Option<culprit_core::TuningAdvice>,
     waits: Vec<WaitStat>,
     settings: Vec<Setting>,
+    database_properties: Option<Box<culprit_core::telemetry::DatabasePropertiesRead>>,
     outcome: Outcome,
 }
 
@@ -448,14 +449,24 @@ async fn collect_misc(
         part.tuning = tuning.finish(out, &probe.grant_hint(), shutdown, query_store);
     }
     let query_store_options = probe.query_store.as_ref().map(|qs| &qs.options);
-    part.settings = crate::settings::collect(
+    let settings = crate::settings::collect(
         provider.pool.clone(),
+        culprit_core::DatabaseIdentity::server(
+            Engine::Mssql,
+            &probe.database,
+            &provider.endpoint_host,
+            provider.endpoint_port,
+            None,
+        )
+        .into(),
         probe.is_azure_sql_database(),
         query_store_options,
         &mut part.outcome,
         &grant(),
     )
     .await;
+    part.settings = settings.settings;
+    part.database_properties = settings.database_properties;
     part
 }
 
@@ -597,6 +608,7 @@ async fn acquire(
             index_usage_scope: Some(culprit_core::operations::IndexUsageScope::ConnectedMember),
             cleanup: misc_part.cleanup,
             compiler_admission: misc_part.compiler_admission,
+            database_properties: misc_part.database_properties,
             ..Default::default()
         },
     });

@@ -1,4 +1,5 @@
 //! This is a local ownership/integration proof over controlled native-shaped facts, not native cost qualification.
+mod hyperscale_log_components;
 use super::*;
 use clap::Parser;
 use culprit_collector::analytical::test_support::{LocalCaptureFixture, MemoryClerkCase, memory_clerk_evidence};
@@ -12,6 +13,10 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use tokio::sync::Notify;
+
+fn clerk_original(observation_id: &str) -> CapturedOriginal<'_> {
+    CapturedOriginal { observation_id, analysis: LocalCaptureAnalysisKind::MemoryClerks }
+}
 
 fn args(values: &[&str]) -> std::result::Result<crate::ScanArgs, clap::Error> {
     let cli = crate::Cli::try_parse_from([&["culprit", "scan", "local-evidence"], values].concat())?;
@@ -64,7 +69,7 @@ impl Drop for PendingSnapshot {
     }
 }
 
-struct ScanProvider(Arc<AtomicUsize>, Option<Arc<PendingScan>>);
+struct ScanProvider(Arc<AtomicUsize>, Option<Arc<PendingScan>>, Option<&'static str>);
 #[async_trait::async_trait]
 impl Provider for ScanProvider {
     fn engine(&self) -> Engine {
@@ -90,6 +95,8 @@ impl Provider for ScanProvider {
         let mut snapshot: Snapshot =
             serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
         snapshot.options = Some(options.clone());
+        // Only the new database-scoped control supplies this independent synthetic native identity.
+        snapshot.identity.as_mut().unwrap().incarnation = self.2.map(str::to_owned);
         Ok(snapshot)
     }
     async fn explain(&self, _: &str, _: ExplainMode) -> Result<Plan> {
@@ -103,6 +110,14 @@ impl Provider for ScanProvider {
     }
 }
 fn workspace(fixture: &LocalCaptureFixture, calls: Arc<AtomicUsize>, pending: Option<Arc<PendingScan>>) -> Workspace {
+    workspace_with_incarnation(fixture, calls, pending, None)
+}
+fn workspace_with_incarnation(
+    fixture: &LocalCaptureFixture,
+    calls: Arc<AtomicUsize>,
+    pending: Option<Arc<PendingScan>>,
+    incarnation: Option<&'static str>,
+) -> Workspace {
     let workspace = Workspace::open_in(fixture.directory.parent().unwrap().join("workspace")).with_provider(
         Engine::Mssql,
         ProviderRegistration::new(
@@ -110,7 +125,7 @@ fn workspace(fixture: &LocalCaptureFixture, calls: Arc<AtomicUsize>, pending: Op
                 if let Some(pending) = &pending {
                     pending.factories.fetch_add(1, Ordering::SeqCst);
                 }
-                Ok(Box::new(ScanProvider(calls.clone(), pending.clone())) as Box<dyn Provider>)
+                Ok(Box::new(ScanProvider(calls.clone(), pending.clone(), incarnation)) as Box<dyn Provider>)
             }),
             vec![],
         )
@@ -231,7 +246,13 @@ async fn local_cli_cancellation_awaits_the_same_reader_and_preserves_unconfirmed
     let workspace = workspace(&fixture, Arc::new(AtomicUsize::new(0)), None);
     let reader = AwaitedReader { started: Notify::new(), release: Notify::new(), settled: AtomicUsize::new(0) };
     let cancellation = CollectionCancellation::default();
-    let reading = read(&workspace, &reader, "local-evidence", &fixture.manifest.capture.observation_id, &cancellation);
+    let reading = read(
+        &workspace,
+        &reader,
+        "local-evidence",
+        clerk_original(&fixture.manifest.capture.observation_id),
+        &cancellation,
+    );
     let signal = async {
         reader.started.notified().await;
         Ok(())
@@ -267,15 +288,17 @@ async fn original(workspace: &Workspace, fixture: &LocalCaptureFixture) -> culpr
     let reader =
         OutboxCaptureReader::delivery(fixture.outbox.as_ref().unwrap().delivery(), CompletedCaptureBudget::default())
             .unwrap();
-    read(
+    let captured = read(
         workspace,
         &reader,
         "local-evidence",
-        &fixture.manifest.capture.observation_id,
+        clerk_original(&fixture.manifest.capture.observation_id),
         &CollectionCancellation::default(),
     )
     .await
-    .unwrap()
+    .unwrap();
+    let LocalCapturedAnalysis::MemoryClerks(captured) = captured else { panic!("requested clerk original") };
+    captured
 }
 
 #[tokio::test]
@@ -293,7 +316,7 @@ async fn simultaneous_local_success_and_cancellation_cannot_enter_the_scan_facto
         &workspace,
         &args(&[]).unwrap(),
         &reader,
-        &fixture.manifest.capture.observation_id,
+        clerk_original(&fixture.manifest.capture.observation_id),
         &cancellation,
     )
     .await
@@ -338,7 +361,13 @@ async fn an_already_ready_signal_precedes_even_an_immediately_ready_local_origin
         cancellation_on_completion: CollectionCancellation::default(),
     };
     let parsed = args(&[]).unwrap();
-    let action = captured_scan(&workspace, &parsed, &reader, &fixture.manifest.capture.observation_id, &cancellation);
+    let action = captured_scan(
+        &workspace,
+        &parsed,
+        &reader,
+        clerk_original(&fixture.manifest.capture.observation_id),
+        &cancellation,
+    );
     let error = crate::collection_shutdown::with_signal(&cancellation, action, async { Ok(()) }).await.unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::Cancelled);
     assert_eq!(pending.factories.load(Ordering::SeqCst), 0);
@@ -357,7 +386,13 @@ async fn one_signal_owner_retires_the_same_pending_scan_and_keeps_durable_native
             .unwrap();
     let cancellation = CollectionCancellation::default();
     let parsed = args(&[]).unwrap();
-    let action = captured_scan(&workspace, &parsed, &reader, &fixture.manifest.capture.observation_id, &cancellation);
+    let action = captured_scan(
+        &workspace,
+        &parsed,
+        &reader,
+        clerk_original(&fixture.manifest.capture.observation_id),
+        &cancellation,
+    );
     let signal = async {
         pending.started.notified().await;
         Ok(())

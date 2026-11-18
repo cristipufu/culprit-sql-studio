@@ -75,21 +75,7 @@ impl CachedRuntimeRead {
     /// A native database incarnation may survive a rename or endpoint alias. Labels and routes alone never
     /// authorize attaching an independent captured population to a scan; body/provenance validation is separate.
     pub fn matches_native_database(&self, snapshot: &crate::Snapshot) -> bool {
-        let (Some(original), Some(current)) = (self.description.target.database(), snapshot.identity.as_ref()) else {
-            return false;
-        };
-        if !snapshot.identity_names_this_database()
-            || original.engine != current.engine
-            || current.database.trim().is_empty()
-            || !original.incarnation.as_deref().is_some_and(|value| !value.trim().is_empty())
-            || !current.incarnation.as_deref().is_some_and(|value| !value.trim().is_empty())
-        {
-            return false;
-        }
-        match (original.telemetry_id(), current.telemetry_id()) {
-            (Ok(original), Ok(current)) => original == current,
-            _ => false,
-        }
+        self.description.target.matches_native_database(snapshot)
     }
 
     /// Structural matching of an original captured row. The input owner must authenticate the manifest separately.

@@ -7,15 +7,16 @@ pub(super) async fn authenticate(store: &dyn RecoveryStore, intent: &DiagnosticI
     if !intent.matches_parent_record(original.source(), original.record()) {
         return Err(invalid());
     }
-    let advertised = store.capture_manifest(&focus.prerequisite.observation.capture).await?;
-    verify_reference(&advertised, &focus.prerequisite.observation)?;
+    let Some(prerequisite) = focus.prerequisite.compilation_admission() else { return Ok(()) };
+    let advertised = store.capture_manifest(&prerequisite.observation.capture).await?;
+    verify_reference(&advertised, &prerequisite.observation)?;
     // Guard the native family before opening its body. This helper cannot recurse through another SourceRead.
     if !matches!(advertised.source.observation, SourceObservation::FocusedCompilationAdmission { .. }) {
         return Err(invalid());
     }
     let range = recovery::reopen(store, &advertised.range_id).await?;
     if range.manifest_digest() != advertised.digest()?
-        || capture_reference(range.manifest())? != focus.prerequisite.observation.capture_ref()
+        || capture_reference(range.manifest())? != prerequisite.observation.capture_ref()
     {
         return Err(invalid());
     }

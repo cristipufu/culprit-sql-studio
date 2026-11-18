@@ -1,6 +1,8 @@
 //! A queued directory read is woken only after the previous real filesystem owner has been released.
 use super::*;
-use culprit_collector::analytical::test_support::{MemoryClerkCase, memory_clerk_evidence};
+use culprit_collector::analytical::test_support::{
+    MemoryClerkCase, hyperscale_log_component_evidence_cases, memory_clerk_evidence,
+};
 use std::{
     future::Future,
     sync::{
@@ -47,6 +49,10 @@ async fn fixture(analysis: LocalCaptureAnalysisKind) -> LocalCaptureFixture {
         LocalCaptureAnalysisKind::PageServerReads => {
             let case = page_server_read_evidence_cases().remove(0);
             LocalCaptureFixture::query_history(case.source, case.records).await
+        }
+        LocalCaptureAnalysisKind::HyperscaleLogComponents => {
+            let (source, rows) = hyperscale_log_component_evidence_cases().remove(0);
+            LocalCaptureFixture::snapshot(source, rows).await
         }
         LocalCaptureAnalysisKind::MemoryClerks => {
             let (source, rows) = memory_clerk_evidence(MemoryClerkCase::SharedInstance);
@@ -154,7 +160,7 @@ async fn assert_settlement(analysis: LocalCaptureAnalysisKind, exit: Exit) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn directory_gate_spans_projection_postcheck_worker_and_async_owner_settlement_for_both_analyses() {
+async fn directory_gate_spans_projection_postcheck_worker_and_async_owner_settlement_for_every_analysis() {
     for analysis in LocalCaptureAnalysisKind::ALL {
         for exit in [Exit::Success, Exit::ProjectionError, Exit::PostcheckCancellation, Exit::Panic, Exit::CallerDrop] {
             assert_settlement(analysis, exit).await;

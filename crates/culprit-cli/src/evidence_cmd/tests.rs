@@ -4,10 +4,12 @@ mod compilation_definitions;
 mod completed_spills;
 mod configured_log_rates;
 mod connection_outcomes;
+mod database_properties;
 mod maintenance_blocking;
 mod memory_clerks;
 mod page_server_reads;
 mod page_task_holders;
+mod performance_counters;
 mod source_overhead;
 
 #[test]

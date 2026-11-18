@@ -10,6 +10,7 @@ const MAX_REJECTED_INPUTS: usize = MAX_RATIOS * 2;
 #[ts(export)]
 pub enum CounterRatioKind {
     LocalSsdCacheHit,
+    PlanCacheHit,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]

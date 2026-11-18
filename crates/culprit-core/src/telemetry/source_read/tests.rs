@@ -1,5 +1,6 @@
 use super::*;
 use crate::{DatabaseIdentity, Engine, MeasurementScope};
+mod log_rates;
 
 struct Original {
     source: CollectionDescription,
@@ -147,7 +148,7 @@ fn original_in_epoch(epoch: Option<&str>) -> Original {
         basis: Box::new(basis),
         target: source.target.clone(),
         question: SourceReadQuestion::CompilationHistory,
-        prerequisite,
+        prerequisite: SourceReadPrerequisite::CompilationAdmission { report: prerequisite },
     };
     episode.analysis = DiagnosticAnalysisStatus::Partial;
     assert!(episode.is_valid());
@@ -589,7 +590,13 @@ fn exact_closed_gateway_prerequisite_cannot_be_missing_foreign_or_rebound_to_a_s
     let mut rebound = original.focus.clone();
     rebound.prerequisite = foreign.focus.prerequisite.clone();
     assert!(rebound.is_valid());
-    assert!(rebound.prerequisite.matches_input(&foreign.prerequisite_source, prerequisite_rows(&foreign)));
+    assert!(
+        rebound
+            .prerequisite
+            .compilation_admission()
+            .unwrap()
+            .matches_input(&foreign.prerequisite_source, prerequisite_rows(&foreign))
+    );
     assert!(!rebound.matches_prerequisite_input(
         &original.source,
         &original.row,
@@ -597,7 +604,8 @@ fn exact_closed_gateway_prerequisite_cannot_be_missing_foreign_or_rebound_to_a_s
         prerequisite_rows(&foreign)
     ));
     let mut changed = original.focus.clone();
-    changed.prerequisite.observation.payload_sha256 = digest(b"different-valid-digest");
+    let SourceReadPrerequisite::CompilationAdmission { report } = &mut changed.prerequisite else { panic!() };
+    report.observation.payload_sha256 = digest(b"different-valid-digest");
     assert!(changed.is_valid());
     assert!(!changed.matches_prerequisite_input(
         &original.source,

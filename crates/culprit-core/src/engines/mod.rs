@@ -109,6 +109,11 @@ impl SessionIdFormat {
 
 /// One engine, as checks and every surface see it.
 pub trait EngineSpec: Send + Sync {
+    /// Fixed native counter vocabulary is source-owned, not inferred by common consumers from an engine name.
+    fn performance_counters(&self) -> Option<&'static crate::telemetry::PerformanceCounterProfile> {
+        None
+    }
+
     /// Only the native source owner defines connection-counter populations and optional same-read clocks.
     fn connection_outcome_profile(
         &self,

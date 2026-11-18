@@ -5,9 +5,13 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod database_properties;
 mod memory_clerks;
+pub use database_properties::{DatabasePropertiesCase, database_properties_evidence};
 pub use memory_clerks::{MemoryClerkCase, memory_clerk_evidence};
 mod counter_ratios;
+mod performance_counters;
+pub use performance_counters::{PerformanceCounterCase, performance_counter_evidence};
 mod resource_io;
 mod wait_counters;
 pub use counter_ratios::{CounterRatioCase, counter_ratio_evidence};
@@ -68,6 +72,8 @@ pub use completed_spills::{CompletedSpillCase, completed_spill_evidence_cases};
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
 mod configured_log_rates;
+mod hyperscale_log_components;
+pub use hyperscale_log_components::hyperscale_log_component_evidence_cases;
 mod file_io;
 pub use configured_log_rates::configured_log_rate_evidence_cases;
 pub use file_io::file_io_evidence_cases;

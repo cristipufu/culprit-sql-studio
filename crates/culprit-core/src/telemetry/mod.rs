@@ -15,6 +15,11 @@ mod cache_entry_memory;
 mod cached_definitions;
 mod cached_runtime_read;
 mod captured_operational_read;
+mod database_properties;
+pub use database_properties::{
+    DATABASE_PROPERTIES_SOURCE, DatabasePropertiesObservation, DatabasePropertiesProfile, DatabasePropertiesRead,
+    DatabasePropertyCode, DatabasePropertyCodeKind, DatabasePropertyState,
+};
 mod captured_snapshot;
 pub use cached_runtime_read::{
     CACHED_RUNTIME_READ_SOURCE, CachedRuntimeRead, CachedRuntimeReadOrigin, cached_statement_read_id,
@@ -34,9 +39,12 @@ mod columns;
 mod compilation;
 mod compiler_admission;
 mod configured_log_rates;
+mod hyperscale_log_components;
 mod memory_clerks;
 pub use memory_clerks::{MEMORY_CLERK_NATIVE_OBJECT, memory_clerk_candidate, memory_clerk_source_is_valid};
 mod counters;
+mod performance_counters;
+pub use performance_counters::*;
 mod current_request_work;
 mod definitions;
 mod delivery;
@@ -92,7 +100,8 @@ mod settings;
 mod source_read;
 use source_read::same_time;
 pub use source_read::{
-    NativeSourceReadScope, SourceReadFocus, SourceReadQuestion, SourceReadStage, SourceReadStageState,
+    NativeSourceReadScope, SourceReadFocus, SourceReadPrerequisite, SourceReadQuestion, SourceReadStage,
+    SourceReadStageState,
 };
 mod source_partition;
 mod state;
@@ -137,6 +146,7 @@ pub use focus::*;
 pub use focused_request::*;
 pub use foreign_keys::*;
 pub use grants::*;
+pub use hyperscale_log_components::*;
 pub use identity::*;
 pub use index_operations::*;
 pub use indexes::*;
@@ -321,7 +331,9 @@ impl CollectionRequest {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
-            CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs } => self.subject.require_database()?,
+            CollectionSelection::Snapshot {
+                dataset: SnapshotDataset::Jobs | SnapshotDataset::HyperscaleLogComponents,
+            } => self.subject.require_database()?,
             CollectionSelection::Snapshot {
                 dataset:
                     SnapshotDataset::CacheEntryMemory
@@ -674,6 +686,8 @@ impl TelemetryRecord {
                     (SourceObservation::MaintenanceProgress { .. }, _)
                     | (_, OperationalFact::MaintenanceProgress(_)) => false,
                     (_, OperationalFact::ConfiguredLogRateLimits(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::HyperscaleLogComponent(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::DatabaseProperties(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::PageWait(page)) => {
                         accepted
                             && page.fits_source_scope(source)

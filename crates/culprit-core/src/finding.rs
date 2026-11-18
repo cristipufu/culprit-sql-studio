@@ -378,7 +378,13 @@ pub struct SeverityCount {
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub performance_counters: Option<Box<crate::PerformanceCounterReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub memory_clerks: Option<Box<crate::MemoryClerkReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub database_properties: Option<Box<crate::DatabasePropertiesReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub wait_counters: Option<Box<crate::WaitCounterReport>>,
@@ -443,6 +449,9 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub configured_log_rates: Option<Box<crate::ConfiguredLogRateReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hyperscale_log_components: Option<Box<crate::HyperscaleLogComponentReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cleanup: Option<crate::CleanupReport>,

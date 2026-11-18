@@ -3,4 +3,4 @@
 /**
  * A closed analysis choice; selecting an analysis starts no native collection or source discovery.
  */
-export type LocalCaptureAnalysisKind = "page_server_reads" | "memory_clerks";
+export type LocalCaptureAnalysisKind = "page_server_reads" | "memory_clerks" | "hyperscale_log_components";

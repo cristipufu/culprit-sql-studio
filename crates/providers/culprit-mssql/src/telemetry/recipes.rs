@@ -95,6 +95,13 @@ macro_rules! state {
 }
 
 const REGISTRATIONS: &[Registration] = &[
+    streamed!(
+        "mssql.hyperscale-log-components",
+        HyperscaleLogComponents,
+        hyperscale_log_components::HyperscaleLogComponents
+    )
+    .bounded(hyperscale_log_components::bounded_budget)
+    .on_editions(&[5]),
     Registration::database(
         "mssql.query-history",
         RecipeSelector::Collection(TelemetryCollection::QueryHistory),
@@ -225,11 +232,11 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(crate::task_space::bounded_budget)
     .version(2),
-    state!("mssql.operational", Operational).baseline().version(3),
+    state!("mssql.operational", Operational).baseline().version(4),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
-        .version(2),
+        .version(3),
     state!("mssql.memory-failures", MemoryFailures)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance), RecipeSubject::Shared(SharedResourceKind::Pool)])
         .bounded(state::memory_failure_budget)
@@ -246,7 +253,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(replication::bounded_budget)
     .baseline(),
-    state!("mssql.settings", Settings).baseline(),
+    state!("mssql.settings", Settings).baseline().version(2),
     streamed!("mssql.statement-grants", StatementGrants, grants::Grants),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations),
     streamed!("mssql.tables", Tables, tables::Tables),

@@ -12,6 +12,7 @@ pub enum SnapshotDataset {
     Sequences,
     Cleanup,
     Operational,
+    HyperscaleLogComponents,
     WaitCounters,
     Replication,
     Settings,
@@ -58,6 +59,7 @@ impl SnapshotDataset {
             | Self::Sequences
             | Self::Cleanup
             | Self::Operational
+            | Self::HyperscaleLogComponents
             | Self::PlanCacheSummary
             | Self::CacheEntryMemory
             | Self::StatementGrants
@@ -474,6 +476,8 @@ pub enum OperationalFact {
     MssqlMissingIndex(Box<MssqlMissingIndexSnapshot>),
     MssqlQueryCompilation(Box<MssqlQueryCompilation>),
     ConfiguredLogRateLimits(Box<ConfiguredLogRateLimits>),
+    HyperscaleLogComponent(Box<HyperscaleLogComponent>),
+    DatabaseProperties(Box<DatabasePropertiesObservation>),
     MssqlCachedRuntime(Box<CachedStatementRuntime>),
     SuspectPages {
         count: String,
@@ -515,6 +519,8 @@ impl OperationalFact {
             Self::MssqlMissingIndex(index) => index.key(),
             Self::MssqlQueryCompilation(compilation) => compilation.key(),
             Self::ConfiguredLogRateLimits(point) => point.key(),
+            Self::HyperscaleLogComponent(point) => point.key(),
+            Self::DatabaseProperties(point) => point.key(),
             Self::MssqlCachedRuntime(runtime) => runtime.context.identity.key(),
             Self::Space(_)
             | Self::Sequence(_)
@@ -530,7 +536,7 @@ impl OperationalFact {
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         match self {
             Self::CompilerWaiter(waiter) => waiter.request.redact(engine),
-            Self::ConfiguredLogRateLimits(_) => {}
+            Self::ConfiguredLogRateLimits(_) | Self::HyperscaleLogComponent(_) | Self::DatabaseProperties(_) => {}
             Self::MssqlIndex(index) => index.redact(engine),
             Self::CatalogCounters(counters) => counters.catalog.redact(engine),
             Self::ExecutionGrant(grant) => grant.redact(engine),
@@ -638,6 +644,8 @@ impl OperationalFact {
             Self::MssqlMissingIndex(index) => index.is_valid(),
             Self::MssqlQueryCompilation(compilation) => compilation.is_valid(),
             Self::ConfiguredLogRateLimits(point) => point.is_valid(),
+            Self::HyperscaleLogComponent(point) => point.is_valid(),
+            Self::DatabaseProperties(point) => point.is_valid(),
             Self::MssqlCachedRuntime(runtime) => runtime.is_valid(),
         }
     }
@@ -671,6 +679,8 @@ impl OperationalObservation {
                 OperationalFact::TimescaleJobRun(_) => self.source == TIMESCALE_JOB_RUNS_SOURCE,
                 OperationalFact::CompilerWaiter(_) => self.source == crate::source_id::COMPILATION_GATEWAYS,
                 OperationalFact::ConfiguredLogRateLimits(_) => self.source == CONFIGURED_LOG_RATES_SOURCE,
+                OperationalFact::HyperscaleLogComponent(_) => self.source == HYPERSCALE_LOG_COMPONENTS_SOURCE,
+                OperationalFact::DatabaseProperties(_) => self.source == DATABASE_PROPERTIES_SOURCE,
                 OperationalFact::Retention(retainer) => retainer.source == self.source,
                 OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,
                 OperationalFact::ExecutionGrant(grant) => grant.source == self.source,

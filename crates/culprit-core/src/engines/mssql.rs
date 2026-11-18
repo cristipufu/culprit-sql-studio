@@ -1,12 +1,17 @@
 //! SQL Server and Azure SQL.
 
 use super::*;
+mod performance_counters;
 use crate::dialect::{NewIndex, Online, included, keys, unique};
 use crate::model::Capability;
 
 pub(super) struct Mssql;
 
 impl EngineSpec for Mssql {
+    fn performance_counters(&self) -> Option<&'static crate::telemetry::PerformanceCounterProfile> {
+        Some(&performance_counters::PROFILE)
+    }
+
     fn session_id_format(&self) -> SessionIdFormat {
         SessionIdFormat::NativeId
     }

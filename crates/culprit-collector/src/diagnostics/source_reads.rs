@@ -18,8 +18,9 @@ pub(super) async fn parents(
     if !intent.matches_parent_record(&source, &original) {
         return Err(DeliveryProblem::Integrity.error());
     }
+    let Some(prerequisite) = focus.prerequisite.compilation_admission() else { return Ok(true) };
     let context = outbox
-        .diagnostic_input(&focus.prerequisite.observation.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+        .diagnostic_input(&prerequisite.observation.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
         .await?;
     let SourceObservation::FocusedCompilationAdmission { result, .. } = &context.source.observation else {
         return Err(DeliveryProblem::Integrity.error());
@@ -35,7 +36,7 @@ pub(super) async fn parents(
             _ => Err(DeliveryProblem::Integrity.error()),
         })
         .collect::<Result<Vec<_>>>()?;
-    if context.parent != focus.prerequisite.observation.capture_ref()
+    if context.parent != prerequisite.observation.capture_ref()
         || !focus.matches_prerequisite_input(&source, &original, &context.source, rows)
     {
         return Err(DeliveryProblem::Integrity.error());

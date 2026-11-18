@@ -79,7 +79,7 @@ impl CollectionDescription {
                 SourceObservation::SourceRead { .. } => self.observation.covers_request(),
                 SourceObservation::PagedSourceRead { snapshot, focus_key, .. } => {
                     snapshot.is_valid()
-                        && snapshot.dataset == SourceReadQuestion::CompilationHistory.dataset()
+                        && SourceReadQuestion::for_dataset(snapshot.dataset).is_some()
                         && valid_digest(focus_key)
                         && same_time(&snapshot.observed_from, &execution.observed_from)
                 }

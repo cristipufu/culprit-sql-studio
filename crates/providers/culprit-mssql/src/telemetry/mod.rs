@@ -7,6 +7,7 @@ mod columns;
 mod compilation;
 mod compiler_admission;
 mod grants;
+mod hyperscale_log_components;
 mod index_operations;
 mod indexes;
 mod objects;

@@ -8,10 +8,6 @@ use culprit_core::{
     telemetry::{CollectionStop, SettingDefaultSource, SettingNature, SettingObservation},
 };
 
-const DATABASE: &str = r#"SELECT compatibility_level, is_read_committed_snapshot_on, snapshot_isolation_state_desc,
- is_auto_create_stats_on, is_auto_update_stats_on, is_auto_update_stats_async_on,
- is_parameterization_forced, is_query_store_on, page_verify_option_desc, recovery_model_desc,
- target_recovery_time_in_seconds FROM sys.databases WHERE database_id=DB_ID() OPTION(MAXDOP 1)"#;
 const SCOPED: &str = r#"SELECT c.*, CONVERT(nvarchar(128),c.value) AS value_text,
  CONVERT(nvarchar(128),c.value_for_secondary) AS secondary_value_text FROM sys.database_scoped_configurations c
  OPTION(MAXDOP 1)"#;
@@ -109,24 +105,30 @@ fn query_store_nature(name: &str) -> SettingNature {
     }
 }
 pub(crate) async fn read<R: NativeRead>(reader: &mut R, kind: Kind, limit: usize) -> Result<Vec<SettingObservation>> {
+    Ok(read_family(reader, kind, limit).await?.values)
+}
+struct FamilyRead {
+    values: Vec<SettingObservation>,
+    properties: Option<culprit_core::telemetry::DatabasePropertiesObservation>,
+}
+async fn read_family<R: NativeRead>(reader: &mut R, kind: Kind, limit: usize) -> Result<FamilyRead> {
+    if kind == Kind::Database {
+        let point = crate::database_properties::read(reader).await?.properties?;
+        let values = database_settings(&point)?;
+        if values.len() > limit {
+            return Err(CollectionStop::RowLimit.error());
+        }
+        return Ok(FamilyRead { values, properties: Some(point) });
+    }
     let sql = match kind {
-        Kind::Database => DATABASE,
+        Kind::Database => return Err(invalid_data()),
         Kind::Scoped => SCOPED,
         Kind::Server => SERVER,
         Kind::QueryStore => crate::query_store::catalog_sql::OPTIONS,
     };
     let rows = reader.query(sql, vec![], limit.saturating_add(1)).await.map_err(ReadError::into_error)?;
     let values = match kind {
-        Kind::Database => {
-            let [row] = rows.as_slice() else { return Err(invalid_data()) };
-            wide_row(row, kind, |name| {
-                if matches!(name, "snapshot_isolation_state_desc" | "is_query_store_on") {
-                    SettingNature::State
-                } else {
-                    SettingNature::Configuration
-                }
-            })?
-        }
+        Kind::Database => return Err(invalid_data()),
         Kind::QueryStore => {
             let [row] = rows.as_slice() else { return Err(invalid_data()) };
             query_store_options(row)?
@@ -136,7 +138,37 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R, kind: Kind, limit: usize
     if values.len() > limit {
         return Err(CollectionStop::RowLimit.error());
     }
-    ordered(values)
+    Ok(FamilyRead { values: ordered(values)?, properties: None })
+}
+
+fn database_settings(
+    point: &culprit_core::telemetry::DatabasePropertiesObservation,
+) -> Result<Vec<SettingObservation>> {
+    let bit = |value: Option<bool>| value.map(|value| u8::from(value).to_string());
+    let configuration = SettingNature::Configuration;
+    let state = SettingNature::State;
+    ordered(
+        [
+            ("compatibility_level", point.compatibility_level.map(|value| value.to_string()), configuration),
+            ("is_read_committed_snapshot_on", bit(point.read_committed_snapshot), configuration),
+            ("snapshot_isolation_state_desc", point.snapshot_isolation.description.clone(), state),
+            ("is_auto_create_stats_on", bit(point.auto_create_statistics), configuration),
+            ("is_auto_update_stats_on", bit(point.auto_update_statistics), configuration),
+            ("is_auto_update_stats_async_on", bit(point.auto_update_statistics_async), configuration),
+            ("is_parameterization_forced", bit(point.forced_parameterization), configuration),
+            ("is_query_store_on", bit(point.query_store_enabled), state),
+            ("page_verify_option_desc", point.page_verify.description.clone(), configuration),
+            ("recovery_model_desc", point.recovery_model.description.clone(), configuration),
+            (
+                "target_recovery_time_in_seconds",
+                point.target_recovery_time_seconds.map(|value| value.to_string()),
+                configuration,
+            ),
+        ]
+        .into_iter()
+        .map(|(name, value, nature)| base(Kind::Database, name.into(), value, nature))
+        .collect(),
+    )
 }
 fn wide_row(row: &Rec, kind: Kind, nature: impl Fn(&str) -> SettingNature) -> Result<Vec<SettingObservation>> {
     row.columns().map(|(name, value)| Ok(base(kind, name.into(), scalar(value)?, nature(name)))).collect()
@@ -200,61 +232,139 @@ pub(crate) fn application(value: &SettingObservation) -> Option<Setting> {
     })
 }
 
+pub(crate) struct CollectedSettings {
+    pub settings: Vec<Setting>,
+    pub database_properties: Option<Box<culprit_core::telemetry::DatabasePropertiesRead>>,
+}
+
 pub(crate) async fn collect(
     pool: std::sync::Arc<crate::conn::Pool>,
+    target: culprit_core::telemetry::CollectionTarget,
     azure_sql_database: bool,
     options: Option<&Rec>,
     coverage: &mut culprit_core::Coverage,
     grant: &str,
-) -> Vec<Setting> {
+) -> CollectedSettings {
     let mut reader = crate::read::ReadSession::new(pool, culprit_core::telemetry::CollectionBudget::default());
-    collect_with(&mut reader, azure_sql_database, options, coverage, grant).await
+    collect_with(&mut reader, target, azure_sql_database, options, coverage, grant).await
 }
 
 async fn collect_with<R: NativeRead>(
     reader: &mut R,
+    target: culprit_core::telemetry::CollectionTarget,
     azure_sql_database: bool,
     options: Option<&Rec>,
     coverage: &mut culprit_core::Coverage,
     grant: &str,
-) -> Vec<Setting> {
+) -> CollectedSettings {
+    let started = std::time::SystemTime::now();
     let mut settings = Vec::new();
+    let mut properties = Err(CollectionStop::InvalidPage.error());
     let mut failed = false;
-    let mut stopped = false;
+    let mut stopped: Option<culprit_core::Error> = None;
     for kind in Kind::ALL {
         if (kind == Kind::Server && azure_sql_database) || (kind == Kind::QueryStore && options.is_none()) {
             coverage.not_applicable(kind.source(), culprit_core::message!("provider.mssql.settings.not_applicable"));
             continue;
         }
-        let result = if stopped {
-            Err(CollectionStop::CancellationUnconfirmed.error())
-        } else if kind == Kind::QueryStore {
+        let result = if kind == Kind::QueryStore {
             // Probe already read these options through the shared Query Store source.
             query_store_options(options.expect("the applicable options were checked above"))
+                .map(|values| FamilyRead { values, properties: None })
+        } else if let Some(error) = &stopped {
+            Err(error.clone())
         } else {
-            read(reader, kind, MAX_SETTINGS_PER_SOURCE).await
+            read_family(reader, kind, MAX_SETTINGS_PER_SOURCE).await
         };
+        let result = result.and_then(|read| {
+            if read
+                .properties
+                .as_ref()
+                .is_some_and(|point| target.database().is_none_or(|database| point.database != database.database))
+            {
+                return Err(CollectionStop::SourceChanged.error());
+            }
+            Ok(read)
+        });
+        if kind == Kind::Database {
+            properties =
+                result.as_ref().map_err(Clone::clone).and_then(|read| read.properties.clone().ok_or_else(invalid_data));
+        }
         let result = result.map_err(|error| {
-            stopped |= CollectionStop::from_error(&error) == CollectionStop::CancellationUnconfirmed;
+            if stopped.is_none() && crate::read::stops_remaining_reads(&error) {
+                stopped = Some(error.clone());
+            }
             if error.code == culprit_core::ErrorCode::PermissionDenied {
                 error.with_hint(grant.to_owned())
             } else {
                 error
             }
         });
-        match coverage.read_rows(kind.source(), result) {
+        match coverage.read_rows(kind.source(), result.map(|read| read.values)) {
             Some(rows) => settings.extend(rows.iter().filter_map(application)),
             None => failed = true,
         }
     }
     if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         coverage.source_failed(&crate::sources::SETTINGS, &CollectionStop::CancellationUnconfirmed.error());
+        properties = Err(CollectionStop::CancellationUnconfirmed.error());
     } else if failed {
         coverage.partial(&crate::sources::SETTINGS, culprit_core::message!("provider.mssql.settings.partial"));
     } else {
         coverage.completed(&crate::sources::SETTINGS, settings.len());
     }
-    settings
+    let database_properties = retain_properties(target, properties, started, std::time::SystemTime::now(), coverage);
+    CollectedSettings { settings, database_properties }
+}
+
+fn retain_properties(
+    target: culprit_core::telemetry::CollectionTarget,
+    result: Result<culprit_core::telemetry::DatabasePropertiesObservation>,
+    started: std::time::SystemTime,
+    finished: std::time::SystemTime,
+    coverage: &mut culprit_core::Coverage,
+) -> Option<Box<culprit_core::telemetry::DatabasePropertiesRead>> {
+    use culprit_core::telemetry::*;
+    let (source, observation, context) = match result {
+        Ok(point) => {
+            coverage.completed(&crate::sources::DATABASE_PROPERTIES, 1);
+            let context = NativeReadContext {
+                target: target.clone(),
+                partition: SourcePartition::Target,
+                observed_from: point.observed_at.clone(),
+                observed_until: point.observed_at.clone(),
+                database_writable: point.writable(),
+            };
+            (
+                StateSourceCoverage::collected(DATABASE_PROPERTIES_SOURCE.into(), 1),
+                Some(Box::new(point)),
+                Ok(ObservationReadContext::Native { context: Box::new(context) }),
+            )
+        }
+        Err(error) => {
+            coverage.source_failed(&crate::sources::DATABASE_PROPERTIES, &error);
+            (
+                StateSourceCoverage::unavailable(
+                    DATABASE_PROPERTIES_SOURCE.into(),
+                    error.code,
+                    Some(CollectionStop::from_error(&error)),
+                ),
+                None,
+                ObservationReadContext::collector(started, finished),
+            )
+        }
+    };
+    let result = context.and_then(|context| {
+        let read = DatabasePropertiesRead { target, context, source, observation, read_complete: true };
+        read.is_valid().then_some(Box::new(read)).ok_or_else(invalid_data)
+    });
+    match result {
+        Ok(read) => Some(read),
+        Err(error) => {
+            coverage.source_failed(&crate::sources::DATABASE_PROPERTIES, &error);
+            None
+        }
+    }
 }
 
 #[cfg(test)]

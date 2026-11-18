@@ -26,10 +26,13 @@ mod completed_spills;
 mod configured_log_rates;
 mod connection_outcomes;
 mod counter_ratios;
+mod database_properties;
+mod hyperscale_log_components;
 mod jobs;
 mod maintenance_progress;
 mod memory_clerks;
 mod page_server_reads;
+mod performance_counters;
 mod replication;
 mod runtime_populations;
 mod statement_work;
@@ -274,13 +277,16 @@ impl Pipeline {
         let task_space = explained_task_space(&mut snapshot);
         let query_compilation = explained_compilation(&mut snapshot);
         let compiler_admission = compiler_admission::explain(&mut snapshot);
+        let performance_counters = performance_counters::explain(&mut snapshot);
         let counter_ratios = counter_ratios::explain(&mut snapshot);
         let wait_counters = wait_counters::explain(&mut snapshot);
         let maintenance_progress = maintenance_progress::explain(&mut snapshot);
         let replication = replication::explain(&mut snapshot);
         let connection_outcomes = connection_outcomes::explain(&mut snapshot);
         let configured_log_rates = configured_log_rates::explain(&mut snapshot);
+        let hyperscale_log_components = hyperscale_log_components::explain(&mut snapshot);
         let memory_clerks = memory_clerks::explain(&mut snapshot);
+        let database_properties = database_properties::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
         let page_server_reads = page_server_reads::explain(&mut snapshot);
@@ -397,13 +403,16 @@ impl Pipeline {
             query_compilation,
             compiler_admission,
             counter_ratios,
+            performance_counters,
             wait_counters,
             maintenance_progress,
             jobs,
             replication,
             connection_outcomes,
             configured_log_rates,
+            hyperscale_log_components,
             memory_clerks,
+            database_properties,
             statement_work,
             page_server_reads,
             completed_spills,

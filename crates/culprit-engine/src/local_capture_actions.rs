@@ -22,6 +22,22 @@ impl Workspace {
         Ok(result)
     }
 
+    /// Attach the exact original database capture only after the ordinary native scan has settled.
+    pub async fn scan_with_captured_hyperscale_log_components(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalHyperscaleLogComponents,
+    ) -> Result<Report> {
+        if captured.connection() != name {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::hyperscale_log_components(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
     /// Consume one opaque authenticated result, retaining all original rows for normal persistence/reanalysis.
     /// Its shared-server scope and historical clocks remain independent of the scan's database and populations.
     pub async fn scan_with_captured_memory_clerks(

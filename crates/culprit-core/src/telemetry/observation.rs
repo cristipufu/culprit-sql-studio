@@ -571,7 +571,7 @@ impl SourceObservation {
         match self {
             Self::SourceRead { snapshot, focus_key, execution } => {
                 snapshot.is_valid()
-                    && snapshot.dataset == SourceReadQuestion::CompilationHistory.dataset()
+                    && SourceReadQuestion::for_dataset(snapshot.dataset).is_some()
                     && valid_digest(focus_key)
                     && NativeSourceReadScope::from_context(execution).is_ok()
                     && same_time(&snapshot.observed_from, &execution.observed_from)

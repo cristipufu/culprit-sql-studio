@@ -23,7 +23,7 @@ fn request() -> CollectionRequest {
                 basis: Box::new(original.parent),
                 target: original.target,
                 question: SourceReadQuestion::CompilationHistory,
-                prerequisite: Box::new(prerequisite),
+                prerequisite: SourceReadPrerequisite::CompilationAdmission { report: Box::new(prerequisite) },
             }),
             execution: Box::new(NativeSourceReadScope::from_context(&context).unwrap()),
         },

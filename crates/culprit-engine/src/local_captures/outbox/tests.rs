@@ -196,6 +196,7 @@ async fn journal_scope_and_queued_cancellation_cannot_return_another_connections
     assert!(read(&reader, &fixture.manifest.capture.observation_id).await.is_ok());
 }
 
+mod hyperscale_log_components;
 mod memory_clerks;
 
 mod settlement;

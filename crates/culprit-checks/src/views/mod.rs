@@ -25,6 +25,7 @@ mod memory_participants;
 pub mod native_failures;
 pub mod page_server_reads;
 pub mod page_waits;
+pub mod performance_counters;
 pub(crate) mod plan_advice;
 pub mod plan_view;
 pub mod replication;
@@ -45,4 +46,6 @@ pub mod waits;
 pub mod query_store_definitions;
 
 pub mod configured_log_rates;
+pub mod database_properties;
+pub mod hyperscale_log_components;
 pub mod memory_clerks;

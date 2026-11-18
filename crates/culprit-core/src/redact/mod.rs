@@ -202,9 +202,17 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
             (crate::source_id::SESSIONS, "view.connection_outcomes.invalid")
                 | (crate::source_id::RESOURCES, "collection.invalid_source")
                 | (crate::telemetry::CONFIGURED_LOG_RATES_SOURCE, "view.configured_log_rates.invalid")
+                | (crate::telemetry::HYPERSCALE_LOG_COMPONENTS_SOURCE, "view.hyperscale_log_components.invalid")
+                | (
+                    crate::telemetry::HYPERSCALE_LOG_COMPONENTS_SOURCE,
+                    "view.hyperscale_log_components.sharing_withheld"
+                )
                 | (crate::source_id::PERFORMANCE_COUNTERS, "view.counter_ratios.invalid")
+                | (crate::source_id::PERFORMANCE_COUNTERS, "view.performance_counters.invalid")
                 | (crate::source_id::MEMORY_CLERKS, "collected.memory_clerks.invalid")
                 | (crate::source_id::MEMORY_CLERKS, "collected.memory_clerks.sharing_withheld")
+                | (crate::telemetry::DATABASE_PROPERTIES_SOURCE, "view.database_properties.invalid")
+                | (crate::telemetry::DATABASE_PROPERTIES_SOURCE, "view.database_properties.sharing_withheld")
                 | (crate::source_id::WAITS, "view.wait_counters.invalid")
                 | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
                 | (crate::telemetry::CACHED_RUNTIME_READ_SOURCE, "view.completed_spills.invalid")
@@ -267,11 +275,23 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             }
         }
     }
+    if s.operations.hyperscale_log_components.take().is_some() {
+        s.record_unavailable_evidence(
+            crate::telemetry::HYPERSCALE_LOG_COMPONENTS_SOURCE,
+            crate::message!("view.hyperscale_log_components.sharing_withheld"),
+        );
+    }
     if s.operations.memory_clerks.take().is_some() {
         // Original receipt inputs are indivisible: withholding cannot repair or re-sign a masked body.
         s.record_unavailable_evidence(
             crate::source_id::MEMORY_CLERKS,
             crate::message!("collected.memory_clerks.sharing_withheld"),
+        );
+    }
+    if s.operations.database_properties.take().is_some() {
+        s.record_unavailable_evidence(
+            crate::telemetry::DATABASE_PROPERTIES_SOURCE,
+            crate::message!("view.database_properties.sharing_withheld"),
         );
     }
     let counters = s.pressure.as_mut().and_then(|pressure| pressure.resource_counters.take());
@@ -284,7 +304,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
                 crate::message!("collected.memory_clerks.sharing_withheld"),
             );
         }
-        let result = resource_counters::redact(counters);
+        let result = resource_counters::redact(counters, engine.spec().performance_counters());
         let redacted = admit_shared_evidence(
             &mut s,
             crate::source_id::PERFORMANCE_COUNTERS,

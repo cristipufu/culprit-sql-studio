@@ -23,6 +23,9 @@ fn database_context() -> subject::Identity {
 pub(super) fn clock(metadata: bool, at: &str) -> Rec {
     Rec::of(&[("observed_at", Val::Text(at.into())), ("metadata_visibility", Val::Int(i64::from(metadata)))])
 }
+pub(super) fn property_clock(metadata: bool, at: &str) -> Rec {
+    replace(&crate::database_properties::tests::row(at), &[("metadata_visibility", Val::Int(i64::from(metadata)))])
+}
 pub(super) fn pressure(high: bool) -> Rec {
     replace(
         &latest_row("2020-01-01T06:01:30Z"),
@@ -76,6 +79,21 @@ fn source_initial(
     initial_identity: Rec,
     final_identity: Rec,
 ) -> StateSource<FakeRead> {
+    source_with_properties(
+        metadata,
+        fail_files,
+        initial_identity,
+        final_identity,
+        property_clock(metadata, "2020-01-01T06:02:00Z"),
+    )
+}
+fn source_with_properties(
+    metadata: bool,
+    fail_files: bool,
+    initial_identity: Rec,
+    final_identity: Rec,
+    properties: Rec,
+) -> StateSource<FakeRead> {
     let has_configured_log_rates = initial_identity.columns().any(|(name, _)| name == "configured_log_database_id");
     let mut replies = vec![
         Ok(vec![Rec::of(&[
@@ -83,7 +101,7 @@ fn source_initial(
             ("configured_log_rate_capability", Val::Int(i64::from(has_configured_log_rates))),
         ])]),
         Ok(vec![initial_identity]),
-        Ok(vec![clock(metadata, "2020-01-01T06:02:00Z")]),
+        Ok(vec![properties]),
     ];
     for kind in native::Kind::ALL {
         if matches!(kind, native::Kind::SuspectPages | native::Kind::Temp)
@@ -179,7 +197,7 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
     let mut source = source(true, false, identity());
     let description = source.describe().await.unwrap();
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.records, 9);
+    assert_eq!(snapshot.records, 10);
     assert_eq!(
         snapshot.sources.iter().find(|source| source.source == crate::sources::SUSPECT_PAGES.name).unwrap().state,
         SourceState::NotApplicable
@@ -207,7 +225,7 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
         }
         cursor = next_cursor;
     }
-    assert_eq!(records.len(), 9);
+    assert_eq!(records.len(), 10);
     assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
     for record in &records {
         let exported = ExportedRecord::new(
@@ -260,7 +278,7 @@ async fn source_pressure_stops_before_further_statistics_clocks_or_verification_
         let replies = vec![
             Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
             Ok(vec![identity()]),
-            Ok(vec![clock(true, "2020-01-01T06:02:00Z")]),
+            Ok(vec![property_clock(true, "2020-01-01T06:02:00Z")]),
             Ok(vec![sample]),
         ];
         let mut source =
@@ -443,12 +461,12 @@ async fn settings_use_one_point_profile_with_source_coverage_and_stable_capture_
     let request = CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings },
-        budget: CollectionBudget { page_rows: 10, ..Default::default() },
+        budget: CollectionBudget { page_rows: 32, ..Default::default() },
     };
     let mut source = StateSource::with_io(FakeRead::new(replies), &request, "fixture.invalid".into(), 1433).unwrap();
     let description = source.describe().await.unwrap();
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.records, 8);
+    assert_eq!(snapshot.records, 17);
     assert_eq!(snapshot.sources.len(), 4);
     assert_eq!(
         snapshot.sources.iter().find(|row| row.source == Kind::Server.source().name).unwrap().state,
@@ -465,7 +483,7 @@ async fn settings_use_one_point_profile_with_source_coverage_and_stable_capture_
         .iter()
         .map(|record| ExportedRecord::new(&description, &capture, record.clone()).unwrap().record_id.unwrap())
         .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(ids.len(), 8);
+    assert_eq!(ids.len(), 17);
     assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
@@ -743,7 +761,7 @@ async fn total_snapshot_row_exhaustion_stops_without_another_native_probe_or_fin
         FakeRead::new(vec![
             Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
             Ok(vec![identity()]),
-            Ok(vec![clock(true, "2020-01-01T06:02:00Z")]),
+            Ok(vec![property_clock(true, "2020-01-01T06:02:00Z")]),
             Ok(vec![pressure(false)]),
             Ok(vec![space_row()]),
         ]),
@@ -757,8 +775,56 @@ async fn total_snapshot_row_exhaustion_stops_without_another_native_probe_or_fin
     assert!(source.description.is_none());
     assert!(source.finish().await.is_err());
     assert!(source.read_page(TelemetryStream::OperationalSamples, None).await.is_err());
-    assert_eq!(source.query_count(), 5);
+    assert_eq!(source.query_count(), 3);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
 
 mod configured_log_rates;
+
+#[tokio::test]
+async fn selected_operational_properties_share_the_first_clock_dispatch_and_keep_native_state_separate() {
+    let mut source = source(true, false, identity());
+    let description = source.describe().await.unwrap();
+    let header = description.observation.snapshot().unwrap();
+    let coverage = header.sources.iter().find(|row| row.source == DATABASE_PROPERTIES_SOURCE).unwrap();
+    assert_eq!(coverage.records, 1);
+    let TelemetryRecord::Operational(OperationalObservation {
+        fact: OperationalFact::DatabaseProperties(point), ..
+    }) = &source.rows[0]
+    else {
+        panic!()
+    };
+    assert_eq!(point.database, "sample");
+    assert_eq!(point.catalog_state.code, Some(0));
+    assert_eq!(point.catalog_read_only, Some(false));
+    assert_eq!(source.io.calls.iter().filter(|call| call.sql == crate::database_properties::query()).count(), 1);
+    assert_eq!(
+        source.io.calls.iter().filter(|call| call.sql == CLOCK).count(),
+        1,
+        "only final clock remains the ordinary clock statement"
+    );
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn hidden_optional_database_properties_keep_the_original_clock_and_other_operational_sources() {
+    // The dynamic batch's permission catch returns the native clock without a fabricated catalog point.
+    let properties = Rec::of(&[
+        ("observed_at", Val::Text("2020-01-01T06:02:00Z".into())),
+        ("metadata_visibility", Val::Int(1)),
+        ("selected_database", Val::Text("sample".into())),
+        ("property_error_number", Val::Int(229)),
+    ]);
+    let mut source = source_with_properties(true, false, identity(), identity(), properties);
+    let description = source.describe().await.unwrap();
+    let header = description.observation.snapshot().unwrap();
+    let coverage = header.sources.iter().find(|row| row.source == DATABASE_PROPERTIES_SOURCE).unwrap();
+    assert_eq!(coverage.state, SourceState::Unavailable);
+    assert_eq!(coverage.records, 0);
+    assert_eq!(coverage.error_code, Some(ErrorCode::PermissionDenied));
+    assert_eq!(header.records, 9);
+    assert_eq!(header.observed_from, canonical_time("2020-01-01T06:02:00Z").unwrap());
+    assert!(header.sources.iter().any(|row| row.state == SourceState::Collected));
+    assert_eq!(source.io.calls.iter().filter(|call| call.sql == crate::database_properties::query()).count(), 1);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}

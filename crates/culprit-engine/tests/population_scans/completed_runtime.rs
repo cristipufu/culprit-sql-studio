@@ -9,6 +9,7 @@ use culprit_core::{CompletedSpillState, DatabaseLocation, SourceState, telemetry
 use culprit_engine::{CompletedCaptureAnalysis, CompletedCaptureScanInput};
 use culprit_read::admission::SourceGate;
 
+mod hyperscale_log_components;
 mod memory_clerks;
 
 #[derive(Clone)]

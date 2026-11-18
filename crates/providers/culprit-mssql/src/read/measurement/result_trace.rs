@@ -1,6 +1,7 @@
 //! An opt-in fixture inspection keeps only one original successful result, independent of source ownership.
 use super::*;
-const MAX_RESULT_ROWS: usize = 32;
+// Private inspection retains one complete bounded response without changing the source reader's own limits.
+const MAX_INSPECTED_RESULT_ROWS: usize = 128;
 const MAX_RESULT_VALUE_BYTES: usize = 64 * 1024;
 
 pub(super) struct ResultTrace {
@@ -16,7 +17,7 @@ impl ResultTrace {
         if self.result.is_some() || self.consumed || digest(sql.as_bytes()) != self.template_id {
             return;
         }
-        self.result = Some(if rows.len() > MAX_RESULT_ROWS {
+        self.result = Some(if rows.len() > MAX_INSPECTED_RESULT_ROWS {
             Err(CollectionStop::RowLimit.error())
         } else if rows
             .iter()
@@ -52,13 +53,13 @@ fn a_result_trace_cannot_substitute_a_later_or_different_template_body() {
 #[test]
 fn inspection_limits_return_a_gap_without_a_truncated_successful_trace() {
     let sql = "SELECT /* culprit */ native_metadata";
-    for rows in [
-        vec![Rec::of(&[("value", Val::Int(1))]); MAX_RESULT_ROWS + 1],
-        vec![Rec::of(&[("value", Val::Text("x".repeat(MAX_RESULT_VALUE_BYTES + 1)))])],
+    for (rows, stop) in [
+        (vec![Rec::of(&[("value", Val::Int(1))]); MAX_INSPECTED_RESULT_ROWS + 1], CollectionStop::RowLimit),
+        (vec![Rec::of(&[("value", Val::Text("x".repeat(MAX_RESULT_VALUE_BYTES + 1)))])], CollectionStop::ByteLimit),
     ] {
         let mut trace = ResultTrace::new(&digest(sql.as_bytes()));
         trace.retain(sql, &rows);
-        assert!(trace.take().is_err());
+        assert_eq!(CollectionStop::from_error(&trace.take().unwrap_err()), stop);
         assert!(trace.take().unwrap().is_none());
     }
 }
@@ -71,4 +72,19 @@ fn an_empty_original_result_is_distinct_from_no_completed_result() {
     let mut empty = ResultTrace::new(&digest(sql.as_bytes()));
     empty.retain(sql, &[]);
     assert!(empty.take().unwrap().unwrap().is_empty());
+}
+
+#[test]
+fn a_complete_fifty_nine_row_result_keeps_every_exact_native_value_without_trimming() {
+    let sql = "SELECT /* culprit */ bounded_native_profile";
+    let rows =
+        (0..59).map(|ordinal| Rec::of(&[("value", Val::Int(9_007_199_254_740_993 + ordinal))])).collect::<Vec<_>>();
+    let mut trace = ResultTrace::new(&digest(sql.as_bytes()));
+    trace.retain(sql, &rows);
+    let retained = trace.take().unwrap().unwrap();
+    assert_eq!(retained.len(), rows.len());
+    for (actual, original) in retained.iter().zip(&rows) {
+        assert_eq!(integer(actual, "value").unwrap(), integer(original, "value").unwrap());
+    }
+    assert!(trace.take().unwrap().is_none(), "inspection cannot reopen or substitute a later result");
 }

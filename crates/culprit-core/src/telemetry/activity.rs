@@ -153,6 +153,7 @@ impl ActivityCounters {
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum ActivityWaitClass {
+    LogRateGovernance,
     /// A native execution-memory grant wait, distinct from compilation admission and allocator contention.
     ExecutionGrant,
     /// A native optimizer admission wait. It identifies an affected request, not a memory holder.

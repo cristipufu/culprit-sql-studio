@@ -1,0 +1,13 @@
+{
+  "database_id": "7",
+  "database_incarnation": "native-hs-logical-database",
+  "replica_id": "11111111-2222-3333-4444-555555555555",
+  "file_id": null,
+  "component_id": "00000001-2222-3333-4444-555555555555",
+  "role": 4,
+  "role_desc": "Replica",
+  "current_max_log_rate_bps": "9007199254740993",
+  "catchup_rate_bps": "0",
+  "catchup_distance_bytes": "9223372036854775807",
+  "last_reported_time_without_offset": "2026-11-18T12:00:00.003"
+}

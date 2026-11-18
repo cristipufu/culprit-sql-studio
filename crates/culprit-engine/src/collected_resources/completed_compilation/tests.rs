@@ -131,7 +131,7 @@ impl Fixture {
             basis: Box::new(original.reference.clone()),
             target: input.source.target.clone(),
             question: SourceReadQuestion::CompilationHistory,
-            prerequisite: Box::new(prerequisite),
+            prerequisite: SourceReadPrerequisite::CompilationAdmission { report: Box::new(prerequisite) },
         };
         let (mut source, rows) = query_compilation_evidence();
         source.target = input.source.target.clone();

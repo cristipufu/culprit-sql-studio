@@ -29,7 +29,13 @@ pub(super) fn qualify_questions(
     if matches!(input.source.observation, SourceObservation::FocusedCompilationAdmission { .. }) {
         return source_read::qualify(input, assignment, update);
     }
-    let Some(recipes) = &assignment.recipes else { return Ok(()) };
+    let Some(recipes) = &assignment.recipes else {
+        return if input.source.observation.activity().is_some() {
+            source_read::qualify(input, assignment, update)
+        } else {
+            Ok(())
+        };
+    };
     if matches!(input.source.observation, SourceObservation::FocusedPageWait { .. }) {
         return qualify_writer_question(input, assignment, recipes, update);
     }
@@ -107,7 +113,7 @@ pub(super) fn qualify_questions(
         &serde_json::to_vec(&("diagnostic-recipe-policy-v1", &update.step_id, recipes))
             .map_err(|_| CollectionStop::InvalidPage.error())?,
     );
-    rebuild_revisions(input, update)
+    source_read::qualify(input, assignment, update)
 }
 
 /// A declared narrower request reader is not bypassed because its cost is unqualified or its evidence is

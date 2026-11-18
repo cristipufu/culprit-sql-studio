@@ -3,7 +3,10 @@ use crate::resources::test_support::{FakeRead, replace};
 use culprit_core::{Coverage, SourceState, telemetry::SourceShutdown};
 
 pub(crate) fn database() -> Rec {
-    Rec::of(&[("compatibility_level", Val::Int(160)), ("is_query_store_on", Val::Bool(true))])
+    crate::database_properties::tests::row("2020-01-01T06:02:00Z")
+}
+fn target() -> culprit_core::telemetry::CollectionTarget {
+    culprit_core::DatabaseIdentity::server(Engine::Mssql, "sample", "fixture.invalid", 1433, None).into()
 }
 pub(crate) fn scoped() -> Rec {
     Rec::of(&[
@@ -95,11 +98,18 @@ async fn malformed_duplicate_or_oversized_native_results_never_become_complete_s
 async fn application_reuses_probe_options_and_reports_each_failed_source() {
     let mut reader = FakeRead::new(vec![Ok(vec![database()]), Err(ReadError::Stopped(CollectionStop::TimedOut))]);
     let mut coverage = Coverage::default();
-    let values = collect_with(&mut reader, true, Some(&options()), &mut coverage, "test grant").await;
+    let values = collect_with(&mut reader, target(), true, Some(&options()), &mut coverage, "test grant").await;
     assert_eq!(reader.calls.len(), 2, "no Query Store options reread or Azure server configuration read");
     assert_eq!(reader.closed, 1);
-    assert!(values.iter().any(|value| value.name == "compatibility_level"));
-    assert!(values.iter().any(|value| value.name == "query_store_options.actual_state"));
+    assert!(values.settings.iter().any(|value| value.name == "compatibility_level"));
+    assert!(values.settings.iter().any(|value| value.name == "query_store_options.actual_state"));
+    let properties = values.database_properties.as_ref().unwrap();
+    assert!(properties.is_valid());
+    assert_eq!(properties.observation.as_ref().unwrap().compatibility_level, Some(160));
+    assert!(
+        !properties.context.native().unwrap().has_qualified_local_owner(),
+        "a selected catalog row is not a process/member proof"
+    );
     for (kind, expected) in [
         (Kind::Database, SourceState::Collected),
         (Kind::Scoped, SourceState::Unavailable),
@@ -118,11 +128,43 @@ async fn uncertain_cancellation_blocks_further_native_reads_and_cannot_mark_the_
     let mut reader = FakeRead::new(vec![Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed))]);
     reader.shutdown = SourceShutdown::Unconfirmed;
     let mut coverage = Coverage::default();
-    assert!(collect_with(&mut reader, false, None, &mut coverage, "test grant").await.is_empty());
+    let values = collect_with(&mut reader, target(), false, None, &mut coverage, "test grant").await;
+    assert!(values.settings.is_empty());
+    assert!(values.database_properties.as_ref().unwrap().observation.is_none());
     assert_eq!(reader.calls.len(), 1);
     assert_eq!(reader.closed, 1);
     assert_eq!(
         coverage.outcomes().iter().find(|row| row.source == crate::sources::SETTINGS.name).unwrap().state,
         SourceState::Unavailable
     );
+}
+
+#[tokio::test]
+async fn terminal_settings_failures_preserve_the_actual_stop_and_do_not_dispatch_sibling_queries() {
+    for stop in
+        [CollectionStop::TimedOut, CollectionStop::Cancelled, CollectionStop::ByteLimit, CollectionStop::SourceChanged]
+    {
+        let mut reader = FakeRead::new(vec![Err(ReadError::Stopped(stop))]);
+        let mut coverage = Coverage::default();
+        let values = collect_with(&mut reader, target(), false, None, &mut coverage, "test grant").await;
+        assert_eq!(reader.calls.len(), 1);
+        assert_eq!(reader.closed, 1);
+        assert!(values.settings.is_empty());
+        let properties = values.database_properties.unwrap();
+        assert_eq!(properties.source.stopped, Some(stop));
+        assert!(properties.observation.is_none());
+        assert!(properties.context.native().is_none());
+    }
+}
+
+#[tokio::test]
+async fn a_foreign_selected_database_cannot_supply_property_values_for_the_configured_namespace() {
+    let mut reader =
+        FakeRead::new(vec![Ok(vec![replace(&database(), &[("database_name", Val::Text("foreign".into()))])])]);
+    let mut coverage = Coverage::default();
+    let values = collect_with(&mut reader, target(), false, None, &mut coverage, "test grant").await;
+    assert_eq!(reader.calls.len(), 1);
+    assert_eq!(reader.closed, 1);
+    assert!(values.database_properties.unwrap().observation.is_none());
+    assert!(values.settings.is_empty());
 }

@@ -159,7 +159,26 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         let read = subject::read_detail(&mut self.io, &self.request.subject, &self.host, self.port, detail).await?;
         let target = read.identity.target();
         self.identity = Some(read.identity);
-        let (mut observed_from, metadata_visible) = self.clock().await?;
+        let (mut observed_from, metadata_visible, properties) = if !shared && dataset == SnapshotDataset::Operational {
+            let read = crate::database_properties::read(&mut self.io).await?;
+            if target.database().is_none_or(|database| database.database != read.database) {
+                return Err(CollectionStop::SourceChanged.error());
+            }
+            let source = match read.properties {
+                Ok(point) => {
+                    if self.rows.len() >= self.request.budget.max_snapshot_rows as usize {
+                        return Err(CollectionStop::RowLimit.error());
+                    }
+                    self.rows.push(TelemetryRecord::Operational(crate::database_properties::observation(point)?));
+                    StateSourceCoverage::collected(DATABASE_PROPERTIES_SOURCE.into(), 1)
+                }
+                Err(error) => source_failure(DATABASE_PROPERTIES_SOURCE.into(), error)?,
+            };
+            (canonical_time(&read.observed_at)?, read.metadata_visible, Some(source))
+        } else {
+            let (at, visible) = self.clock().await?;
+            (at, visible, None)
+        };
         let mut sources = self.read_families(&families, metadata_visible).await?;
         if detail == crate::database_identity::log_rates::Detail::ConfiguredLogRates {
             sources.push(match read.configured_log_rates {
@@ -197,6 +216,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                 }
             }
         }
+        if let Some(source) = properties {
+            sources.push(source);
+        }
         let description = CollectionDescription {
             partition: match self.identity.as_ref().ok_or_else(invalid_data)? {
                 subject::Identity::Instance(context) => SourcePartition::InstanceLocal {
@@ -221,7 +243,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     SnapshotDataset::PlanCacheSummary => "plan-cache-state",
                     SnapshotDataset::MissingIndexes => "missing-index-state",
                     SnapshotDataset::Tuning => "tuning-state",
-                    SnapshotDataset::StatementCounters
+                    SnapshotDataset::HyperscaleLogComponents
+                    | SnapshotDataset::StatementCounters
                     | SnapshotDataset::RuntimeDistributions
                     | SnapshotDataset::StatementDefinitions
                     | SnapshotDataset::Sequences

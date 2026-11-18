@@ -20,6 +20,7 @@ mod compiler_gateways;
 mod conn;
 mod constraints;
 mod database_identity;
+mod database_properties;
 pub mod deadlocks;
 mod deployment;
 mod foreign_keys;

@@ -22,9 +22,13 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         counter_ratios: &'a Option<Box<culprit_core::CounterRatioReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        performance_counters: &'a Option<Box<culprit_core::PerformanceCounterReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         wait_counters: &'a Option<Box<culprit_core::WaitCounterReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         memory_clerks: &'a Option<Box<culprit_core::MemoryClerkReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        database_properties: &'a Option<Box<culprit_core::DatabasePropertiesReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,6 +71,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         configured_log_rates: &'a Option<Box<culprit_core::ConfiguredLogRateReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        hyperscale_log_components: &'a Option<Box<culprit_core::HyperscaleLogComponentReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
@@ -89,13 +95,16 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         query_compilation,
         compiler_admission,
         counter_ratios,
+        performance_counters,
         wait_counters,
         memory_clerks,
+        database_properties,
         maintenance_progress,
         replication,
         statement_work,
         connection_outcomes,
         configured_log_rates,
+        hyperscale_log_components,
         evidence: _,
         cleanup,
     } = report;
@@ -119,13 +128,16 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         query_compilation,
         compiler_admission,
         counter_ratios,
+        performance_counters,
         wait_counters,
         memory_clerks,
+        database_properties,
         maintenance_progress,
         replication,
         statement_work,
         connection_outcomes,
         configured_log_rates,
+        hyperscale_log_components,
         cleanup,
     }
 }

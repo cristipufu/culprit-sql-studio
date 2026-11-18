@@ -9,6 +9,11 @@ pub const SUSPECT_PAGES: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.suspect_pages"),
     delivers: &[],
 };
+pub const HYPERSCALE_LOG_COMPONENTS: Source = Source {
+    name: culprit_core::telemetry::HYPERSCALE_LOG_COMPONENTS_SOURCE,
+    reads: culprit_core::key!("view.hyperscale_log_components.source"),
+    delivers: &[],
+};
 pub const CONFIGURED_LOG_RATES: Source = Source {
     name: culprit_core::telemetry::CONFIGURED_LOG_RATES_SOURCE,
     reads: culprit_core::key!("provider.mssql.source.configured_log_rates"),
@@ -82,6 +87,11 @@ pub const INDEXES: Source = Source {
 };
 pub const COLUMNS: Source =
     Source { name: source_id::COLUMNS, reads: culprit_core::key!("provider.mssql.source.columns"), delivers: &[] };
+pub const DATABASE_PROPERTIES: Source = Source {
+    name: culprit_core::telemetry::DATABASE_PROPERTIES_SOURCE,
+    reads: culprit_core::key!("view.database_properties.source"),
+    delivers: &[],
+};
 pub const FOREIGN_KEYS: Source = Source {
     name: source_id::FOREIGN_KEYS,
     reads: culprit_core::key!("provider.mssql.source.foreign_keys"),
@@ -334,6 +344,7 @@ pub const SCHEMA: &[Source] = &[TABLES, INDEXES, COLUMNS, FOREIGN_KEYS, STATISTI
 pub const WORKLOAD: &[Source] = &[QUERY_STORE, QUERY_WAITS, PLAN_CACHE];
 pub const MISC: &[Source] = &[
     SETTINGS,
+    DATABASE_PROPERTIES,
     DATABASE_SETTINGS,
     SCOPED_SETTINGS,
     SERVER_SETTINGS,
@@ -375,6 +386,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    HYPERSCALE_LOG_COMPONENTS,
     CONFIGURED_LOG_RATES,
     MEMORY_FAILURES,
     CURRENT_REQUEST_MEMORY,
@@ -416,6 +428,7 @@ pub const ALL: &[Source] = &[
     QUERY_HINTS,
     SETTINGS,
     DATABASE_SETTINGS,
+    DATABASE_PROPERTIES,
     SCOPED_SETTINGS,
     SERVER_SETTINGS,
     QUERY_STORE_SETTINGS,

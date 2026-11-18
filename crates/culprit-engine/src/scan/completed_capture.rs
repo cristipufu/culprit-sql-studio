@@ -14,12 +14,14 @@ use culprit_core::{
 pub enum CompletedCaptureAnalysis {
     CachedRuntime,
     MemoryClerks,
+    HyperscaleLogComponents,
 }
 impl CompletedCaptureAnalysis {
     fn dataset(self) -> SnapshotDataset {
         match self {
             Self::CachedRuntime => SnapshotDataset::CachedRuntime,
             Self::MemoryClerks => SnapshotDataset::Operational,
+            Self::HyperscaleLogComponents => SnapshotDataset::HyperscaleLogComponents,
         }
     }
 }
@@ -49,6 +51,9 @@ impl CompletedCaptureScanInput<'_> {
         let read = match self.analysis {
             CompletedCaptureAnalysis::CachedRuntime => {
                 super::CapturedScanEvidence::CachedRuntime(Box::new(captured.into_cached_runtime_read()?))
+            }
+            CompletedCaptureAnalysis::HyperscaleLogComponents => {
+                super::CapturedScanEvidence::hyperscale_log_components(Box::new(captured.into_operational_read()?))?
             }
             CompletedCaptureAnalysis::MemoryClerks => {
                 super::CapturedScanEvidence::memory_clerks(Box::new(captured.into_operational_read()?))?

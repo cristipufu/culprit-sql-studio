@@ -305,8 +305,9 @@ impl Files {
         if !focus.matches_basis(&source, &row, execution) {
             return Err(integrity());
         }
-        let context = self
-            .diagnostic_input(&focus.prerequisite.observation.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)?;
+        let Some(prerequisite) = focus.prerequisite.compilation_admission() else { return Ok(()) };
+        let context =
+            self.diagnostic_input(&prerequisite.observation.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)?;
         let SourceObservation::FocusedCompilationAdmission { result, .. } = &context.source.observation else {
             return Err(integrity());
         };
@@ -319,7 +320,7 @@ impl Files {
                 _ => Err(integrity()),
             })
             .collect::<Result<Vec<_>>>()?;
-        if context.parent != focus.prerequisite.observation.capture_ref()
+        if context.parent != prerequisite.observation.capture_ref()
             || !focus.matches_prerequisite_input(&source, &row, &context.source, rows)
         {
             return Err(integrity());

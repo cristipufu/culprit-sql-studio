@@ -1,4 +1,5 @@
 //! Startup composition reaches canonical saved originals without constructing a native provider or a warehouse.
+mod hyperscale_log_components;
 use super::*;
 use clap::Parser;
 use culprit_collector::{

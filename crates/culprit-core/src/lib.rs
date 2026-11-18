@@ -19,8 +19,15 @@ pub mod counter_ratio_report;
 pub use counter_ratio_report::{CounterRatioEntry, CounterRatioReport};
 pub mod completed_spill_report;
 mod configured_log_rate_report;
+mod database_properties_report;
+mod hyperscale_log_component_report;
 mod memory_clerk_report;
+mod performance_counter_report;
+pub use database_properties_report::{DatabasePropertiesReport, DatabasePropertyField};
 pub use memory_clerk_report::{MemoryClerkEntry, MemoryClerkField, MemoryClerkReport};
+pub use performance_counter_report::{
+    PerformanceCounterAvailability, PerformanceCounterEntry, PerformanceCounterReport,
+};
 pub mod connection;
 pub mod connection_outcome_report;
 pub mod connection_outcomes;
@@ -153,6 +160,7 @@ pub use error::{Error, ErrorCode, ErrorDetail, Result};
 pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};
 pub use finding::*;
 pub use finding_facts::*;
+pub use hyperscale_log_component_report::*;
 pub use io_accounting::{FileIoContext, IoAccounting};
 pub use jobs_report::{JobEntry, JobEntryKind, JobsReport};
 pub use maintenance::*;

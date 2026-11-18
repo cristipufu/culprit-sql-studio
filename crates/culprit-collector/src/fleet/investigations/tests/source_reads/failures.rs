@@ -200,26 +200,26 @@ async fn missing_foreign_or_tampered_prerequisite_is_refused_before_reservation_
             budget: intent.budget.clone(),
         };
         let CollectionSelection::SourceRead { focus, .. } = &mut request.selection else { panic!() };
+        let SourceReadPrerequisite::CompilationAdmission { report } = &mut focus.prerequisite else { panic!() };
         match defect {
             "missing-capture" => {
                 let changed = "f".repeat(32);
-                focus.prerequisite.observation.capture.observation_id = changed.clone();
-                focus.prerequisite.observation.batch_id =
-                    batch_id(&changed, focus.prerequisite.observation.stream).unwrap();
-                for reference in &mut focus.prerequisite.gateways {
+                report.observation.capture.observation_id = changed.clone();
+                report.observation.batch_id = batch_id(&changed, report.observation.stream).unwrap();
+                for reference in &mut report.gateways {
                     reference.capture.observation_id = changed.clone();
                     reference.batch_id = batch_id(&changed, reference.stream).unwrap();
                 }
             }
             "foreign-scope" => {
                 let scope = digest(b"another-authenticated-logical-scope");
-                focus.prerequisite.observation.source_scope_id = scope.clone();
-                for reference in &mut focus.prerequisite.gateways {
+                report.observation.source_scope_id = scope.clone();
+                for reference in &mut report.gateways {
                     reference.source_scope_id = scope.clone();
                 }
             }
-            "tampered-body" => focus.prerequisite.observation.payload_sha256 = digest(b"unrelated-canonical-body"),
-            _ => focus.prerequisite.observation.row_ordinal = 99,
+            "tampered-body" => report.observation.payload_sha256 = digest(b"unrelated-canonical-body"),
+            _ => report.observation.row_ordinal = 99,
         }
         request.validate().unwrap();
         assert!(runtime.fixture.outbox.reserve("saved-source", &request).await.is_err(), "{defect}");

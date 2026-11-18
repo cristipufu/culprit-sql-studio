@@ -128,6 +128,7 @@ async fn bounded(
                         | DiagnosticSignal::LockWait { .. }
                         | DiagnosticSignal::RequestMemory { .. }
                         | DiagnosticSignal::CompilationAdmission { .. }
+                        | DiagnosticSignal::LogRateGovernance { .. }
                         | DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. }
                 )
             {

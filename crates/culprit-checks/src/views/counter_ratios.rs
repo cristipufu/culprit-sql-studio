@@ -11,6 +11,15 @@ pub fn explain(
     source: Option<&SourceOutcome>,
     read_complete: bool,
 ) -> Result<CounterRatioReport> {
+    let samples = samples.iter().collect::<Vec<_>>();
+    explain_borrowed(&samples, source, read_complete)
+}
+
+pub(super) fn explain_borrowed(
+    samples: &[&NativeCounterSet],
+    source: Option<&SourceOutcome>,
+    read_complete: bool,
+) -> Result<CounterRatioReport> {
     if samples.len() > culprit_core::telemetry::CollectionBudget::upper_limits().max_snapshot_rows as usize
         || samples.iter().any(|sample| !sample.is_valid())
         || !super::source_coverage::consistent_source(
@@ -111,6 +120,7 @@ fn entry(sample: &NativeCounterSet, ratio: &NativeCounterRatio) -> Result<Counte
     };
     let mut words = vec![match ratio.kind {
         CounterRatioKind::LocalSsdCacheHit => t!("view.counter_ratios.local_ssd.explanation"),
+        CounterRatioKind::PlanCacheHit => t!("view.performance_counters.plan_cache_ratio.explanation"),
     }];
     words.extend(issues.iter().map(|issue| issue_words(*issue)));
     Ok(CounterRatioEntry {
@@ -123,6 +133,7 @@ fn entry(sample: &NativeCounterSet, ratio: &NativeCounterRatio) -> Result<Counte
         issues,
         title: match ratio.kind {
             CounterRatioKind::LocalSsdCacheHit => t!("view.counter_ratios.local_ssd.title"),
+            CounterRatioKind::PlanCacheHit => t!("view.performance_counters.plan_cache_ratio.title"),
         },
         explanation: words.join(" "),
         metrics,

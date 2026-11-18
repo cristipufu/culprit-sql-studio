@@ -194,6 +194,14 @@ fn signals(
             statement_identity: row.statement_identity.clone(),
         });
     }
+    if row.scope == ActivityScopeBasis::RequestDatabase
+        && row.wait.as_ref().is_some_and(|wait| wait.class == Some(ActivityWaitClass::LogRateGovernance))
+    {
+        signals.push(DiagnosticSignal::LogRateGovernance {
+            key: row.key.clone(),
+            statement_identity: row.statement_identity.clone(),
+        });
+    }
     if row.waiting_on_lock == Some(true) {
         signals.push(DiagnosticSignal::LockWait { key: row.key.clone() });
     }

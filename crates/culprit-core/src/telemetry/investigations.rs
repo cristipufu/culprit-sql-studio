@@ -33,7 +33,7 @@ impl RecipeCostReceipt {
             && self.recipe_version > 0
             && match (&self.scope, self.selector) {
                 (RecipeCostScope::NativeRead(_), selector) => {
-                    selector == SourceReadQuestion::CompilationHistory.selector()
+                    SourceReadQuestion::ALL.iter().any(|question| selector == question.selector())
                 }
                 (_, selector) => matches!(
                     selector,

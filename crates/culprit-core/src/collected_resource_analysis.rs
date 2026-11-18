@@ -8,6 +8,13 @@ use ts_rs::TS;
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedDatabasePropertiesAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::DatabasePropertiesReport>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedBlockingAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: Box<crate::BlockingReport>,
@@ -208,4 +215,18 @@ pub struct CollectedWaitCounterAnalysis {
 pub struct CollectedMemoryClerkAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: Box<crate::MemoryClerkReport>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedHyperscaleLogComponentAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::HyperscaleLogComponentReport>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedPerformanceCounterAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::PerformanceCounterReport>,
 }

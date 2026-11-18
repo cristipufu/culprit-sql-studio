@@ -6,6 +6,7 @@ import type { CleanupSnapshot } from "./CleanupSnapshot";
 import type { ClusterHealth } from "./ClusterHealth";
 import type { CompilationSnapshot } from "./CompilationSnapshot";
 import type { CompilerAdmissionSnapshot } from "./CompilerAdmissionSnapshot";
+import type { DatabasePropertiesRead } from "./DatabasePropertiesRead";
 import type { FreezeAge } from "./FreezeAge";
 import type { IndexUsageScope } from "./IndexUsageScope";
 import type { LoggedFailure } from "./LoggedFailure";
@@ -28,7 +29,7 @@ export type OperationalStats = { cached_runtime?: CachedRuntimeRead,
 /**
  * An independent original capture; its shared target and receipts are never current database ownership.
  */
-memory_clerks?: CapturedOperationalRead, statement_work?: StatementCounterSnapshot, 
+memory_clerks?: CapturedOperationalRead, hyperscale_log_components?: CapturedOperationalRead, database_properties?: DatabasePropertiesRead, statement_work?: StatementCounterSnapshot, 
 /**
  * None means that the native usage population was not established.
  */

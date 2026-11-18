@@ -3,7 +3,7 @@ use crate::{
     resources::test_support::{FakeRead, replace},
     value::{Rec, Val},
 };
-use culprit_core::telemetry::OperationalFact;
+use culprit_core::telemetry::{CounterUnit, OperationalFact};
 pub(crate) fn row() -> Rec {
     Rec::of(&[
         ("counter_observed_at", Val::Text("2020-01-01T12:00:00.5Z".into())),
@@ -107,3 +107,5 @@ async fn sampled_rates_subtract_exact_values_and_skip_missing_reset_or_changed_c
 }
 
 mod rbpex;
+
+mod families;

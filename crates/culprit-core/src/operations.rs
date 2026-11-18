@@ -41,6 +41,12 @@ pub struct OperationalStats {
     pub memory_clerks: Option<Box<crate::telemetry::CapturedOperationalRead>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub hyperscale_log_components: Option<Box<crate::telemetry::CapturedOperationalRead>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub database_properties: Option<Box<crate::telemetry::DatabasePropertiesRead>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub statement_work: Option<Box<crate::telemetry::StatementCounterSnapshot>>,
     /// None means that the native usage population was not established.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -168,6 +174,8 @@ impl OperationalStats {
             statement_work: _,
             cached_runtime: _,
             memory_clerks: _,
+            hyperscale_log_components: _,
+            database_properties: _,
             index_usage_scope,
             log_failures,
             spaces,

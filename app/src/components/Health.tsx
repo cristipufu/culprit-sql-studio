@@ -25,8 +25,11 @@ import { CompletedSpills } from "./CompletedSpills";
 import { CompilerAdmission } from "./CompilerAdmission";
 import { CleanupEvidence } from "./CleanupEvidence";
 import { StatementWork } from "./StatementWork";
+import { PerformanceCounters } from "./PerformanceCounters";
 import { CounterRatios } from "./CounterRatios";
 import { MemoryClerks } from "./MemoryClerks";
+import { HyperscaleLogComponents } from "./HyperscaleLogComponents";
+import { DatabaseProperties } from "./DatabaseProperties";
 import { ConfiguredLogRates } from "./ConfiguredLogRates";
 import { WaitCounters } from "./WaitCounters";
 import { ConnectionOutcomes } from "./ConnectionOutcomes";
@@ -135,12 +138,23 @@ export function HealthTab({
   const waitCounters = report.wait_counters;
   const waitCounterRead = pressure?.wait_counters;
   const waitCounterIssue = observationReadIssue("waits", report.snapshot.sources ?? []);
+  const performanceCounters = report.performance_counters;
+  const performanceRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "performance counters");
+  const performanceIssue = observationReadIssue("performance counters", report.snapshot.sources ?? [], performanceRecorded);
   const counterRatios = report.counter_ratios;
   const counterRatioRead = pressure?.resource_counters?.some((sample) => sample.ratios.length > 0) ?? false;
   const counterRatioIssue = observationReadIssue("performance counters", report.snapshot.sources ?? []);
+  const databaseProperties = report.database_properties;
+  const databasePropertiesRead = report.snapshot.operations.database_properties;
+  const databasePropertiesRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "database-properties");
+  const databasePropertiesIssue = observationReadIssue("database-properties", report.snapshot.sources ?? [], Boolean(databasePropertiesRead || databasePropertiesRecorded));
   const memoryClerks = report.memory_clerks;
   const memoryClerkRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "memory clerks");
   const memoryClerkIssue = observationReadIssue("memory clerks", report.snapshot.sources ?? [], memoryClerkRecorded);
+  const hyperscaleLogComponents = report.hyperscale_log_components;
+  const hyperscaleLogRead = report.snapshot.operations.hyperscale_log_components;
+  const hyperscaleLogRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "hyperscale-log-components");
+  const hyperscaleLogIssue = observationReadIssue("hyperscale-log-components", report.snapshot.sources ?? [], hyperscaleLogRecorded);
   const configuredLogRates = report.configured_log_rates;
   const configuredLogRateRead = report.snapshot.pressure?.configured_log_rates;
   const configuredLogRateIssue = observationReadIssue("configured-log-rates", report.snapshot.sources ?? []);
@@ -157,8 +171,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, counterRatios, counterRatioRead, memoryClerks, memoryClerkRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, counterRatioIssue, memoryClerkIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters, performanceRecorded, counterRatios, counterRatioRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, databasePropertiesIssue, memoryClerkIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -223,15 +237,24 @@ export function HealthTab({
       {jobs && !jobsReport && jobsIssues.length === 0 && <ObservationSourceIssue source={{ source: "timescale-jobs", state: "unavailable", reason: t("view.jobs.invalid") }} title={t("view.jobs.title")} />}
       {statementWork && statementWorkReport && <StatementWork key={report.snapshot.id} evidence={statementWork} report={statementWorkReport} />}
       {statementWorkUnexplained && <ObservationExplanationIssue title={t("view.statement_work.title")} reason={t("view.statement_work.invalid")} />}
+      {hyperscaleLogComponents && <HyperscaleLogComponents key={report.snapshot.id} report={hyperscaleLogComponents} />}
+      {!hyperscaleLogComponents && hyperscaleLogIssue && <ObservationSourceIssue source={hyperscaleLogIssue} title={t("view.hyperscale_log_components.title")} />}
+      {!hyperscaleLogComponents && (hyperscaleLogRead || hyperscaleLogRecorded) && !hyperscaleLogIssue && <ObservationExplanationIssue title={t("view.hyperscale_log_components.title")} reason={t("view.hyperscale_log_components.invalid")} />}
       {configuredLogRates && <ConfiguredLogRates key={report.snapshot.id} report={configuredLogRates} />}
       {!configuredLogRates && configuredLogRateIssue && <ObservationSourceIssue source={configuredLogRateIssue} title={t("view.configured_log_rates.title")} />}
       {!configuredLogRates && configuredLogRateRead && !configuredLogRateIssue && <ObservationExplanationIssue title={t("view.configured_log_rates.title")} reason={t("view.configured_log_rates.invalid")} />}
       {waitCounters && <WaitCounters key={report.snapshot.id} report={waitCounters} />}
       {!waitCounters && waitCounterIssue && <ObservationSourceIssue source={waitCounterIssue} title={t("view.wait_counters.title")} />}
       {!waitCounters && waitCounterRead && !waitCounterIssue && <ObservationExplanationIssue title={t("view.wait_counters.title")} reason={t("view.wait_counters.invalid")} />}
-      {counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
-      {!counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
-      {!counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
+      {performanceCounters && <PerformanceCounters key={report.snapshot.id} report={performanceCounters} />}
+      {!performanceCounters && performanceIssue && <ObservationSourceIssue source={performanceIssue} title={t("view.performance_counters.title")} />}
+      {!performanceCounters && performanceRecorded && !performanceIssue && <ObservationExplanationIssue title={t("view.performance_counters.title")} reason={t("view.performance_counters.invalid")} />}
+      {!performanceCounters?.ratios && counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
+      {!performanceCounters && !counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
+      {!performanceCounters && !counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
+      {databaseProperties && <DatabaseProperties key={report.snapshot.id} report={databaseProperties} />}
+      {!databaseProperties && databasePropertiesIssue && <ObservationSourceIssue source={databasePropertiesIssue} title={t("view.database_properties.title")} />}
+      {!databaseProperties && (databasePropertiesRead || databasePropertiesRecorded) && !databasePropertiesIssue && <ObservationExplanationIssue title={t("view.database_properties.title")} reason={t("view.database_properties.invalid")} />}
       {memoryClerks && <MemoryClerks key={report.snapshot.id} report={memoryClerks} />}
       {!memoryClerks && memoryClerkIssue && <ObservationSourceIssue source={memoryClerkIssue} title={t("collected.memory_clerks.title")} />}
       {!memoryClerks && memoryClerkRecorded && !memoryClerkIssue && <ObservationExplanationIssue title={t("collected.memory_clerks.title")} reason={t("collected.memory_clerks.invalid")} />}

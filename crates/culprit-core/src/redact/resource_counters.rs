@@ -2,15 +2,25 @@
 use super::{opaque, redact_native_identity};
 use crate::{
     ResetMarker, Result,
-    telemetry::{CollectionStop, NativeCounterSet},
+    telemetry::{CollectionStop, NativeCounterSet, PERFORMANCE_COUNTER_WITHHELD_PROPERTY, PerformanceCounterProfile},
 };
 use std::collections::BTreeMap;
 
-pub(super) fn redact(mut samples: Vec<NativeCounterSet>) -> Result<Vec<NativeCounterSet>> {
+pub(super) fn redact(
+    mut samples: Vec<NativeCounterSet>,
+    profile: Option<&PerformanceCounterProfile>,
+) -> Result<Vec<NativeCounterSet>> {
     if samples.iter().any(|sample| !sample.is_valid()) {
         return Err(CollectionStop::InvalidPage.error());
     }
     for sample in &mut samples {
+        let withheld =
+            sample.properties.get(PERFORMANCE_COUNTER_WITHHELD_PROPERTY).is_some_and(|value| value == "true");
+        let performance = profile.filter(|profile| profile.matches(sample));
+        if let Some(profile) = performance {
+            profile.validate(sample)?;
+        }
+        let withheld = withheld || performance.is_some();
         redact_native_identity(&mut sample.identity);
         sample.identity.qualifiers =
             sample.identity.qualifiers.iter().map(|(key, value)| (opaque(key), value.clone())).collect();
@@ -40,9 +50,15 @@ pub(super) fn redact(mut samples: Vec<NativeCounterSet>) -> Result<Vec<NativeCou
         }
         let mut properties = BTreeMap::new();
         for (key, value) in std::mem::take(&mut sample.properties) {
+            if key == PERFORMANCE_COUNTER_WITHHELD_PROPERTY {
+                continue;
+            }
             if properties.insert(opaque(&key), opaque(&value)).is_some() {
                 return Err(CollectionStop::InvalidPage.error());
             }
+        }
+        if withheld {
+            properties.insert(PERFORMANCE_COUNTER_WITHHELD_PROPERTY.into(), "true".into());
         }
         sample.properties = properties;
     }

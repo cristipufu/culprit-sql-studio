@@ -25,7 +25,7 @@ mod matrix;
 
 const ADMISSION_TIMEOUT: Duration = Duration::from_secs(10);
 const CASE_TIMEOUT: Duration = Duration::from_secs(90);
-const SOURCE_VALUE_BYTES: u32 = 16 * 1024;
+const SOURCE_VALUE_BYTES: u32 = 64 * 1024;
 
 #[derive(Clone, Copy)]
 enum Experiment {

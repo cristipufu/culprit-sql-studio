@@ -2,75 +2,34 @@
 use crate::read::{NativeRead, ReadError, invalid_data, optional_text, signed_integer, text};
 use culprit_core::{
     MeasurementScope, ResetMarker, Result,
-    telemetry::{CollectionStop, CounterNature, CounterUnit, NativeCounterSample, OperationalObservation, digest},
+    telemetry::{
+        CollectionStop, CounterNature, MAX_NATIVE_COUNTERS, NativeCounterSample, OperationalObservation,
+        PerformanceCounterInstances, PerformanceCounterSpec, digest,
+    },
 };
 use std::collections::{BTreeSet, HashMap};
 mod ratios;
 pub(crate) use ratios::PerformanceRead;
-pub(crate) const MAX_COUNTERS: usize = 32;
-struct CounterSpec {
-    family: Option<&'static str>,
-    name: &'static str,
-    nature: CounterNature,
-    unit: CounterUnit,
+pub(crate) const MAX_COUNTERS: usize = MAX_NATIVE_COUNTERS;
+fn specs() -> &'static [PerformanceCounterSpec] {
+    culprit_core::Engine::Mssql.spec().performance_counters().map(|profile| profile.fields).unwrap_or_default()
 }
-const SPECS: &[CounterSpec] = &[
-    CounterSpec {
-        family: Some("SQL Statistics"),
-        name: "Batch Requests/sec",
-        nature: CounterNature::Cumulative,
-        unit: CounterUnit::Count,
-    },
-    CounterSpec {
-        family: Some("SQL Statistics"),
-        name: "SQL Compilations/sec",
-        nature: CounterNature::Cumulative,
-        unit: CounterUnit::Count,
-    },
-    CounterSpec {
-        family: Some("SQL Statistics"),
-        name: "SQL Re-Compilations/sec",
-        nature: CounterNature::Cumulative,
-        unit: CounterUnit::Count,
-    },
-    CounterSpec {
-        family: Some("Buffer Manager"),
-        name: "Page life expectancy",
-        nature: CounterNature::Gauge,
-        unit: CounterUnit::Seconds,
-    },
-    CounterSpec {
-        family: Some("General Statistics"),
-        name: "Logins/sec",
-        nature: CounterNature::Cumulative,
-        unit: CounterUnit::Count,
-    },
-    CounterSpec {
-        family: Some("General Statistics"),
-        name: "Connection Reset/sec",
-        nature: CounterNature::Cumulative,
-        unit: CounterUnit::Count,
-    },
-    CounterSpec {
-        family: None,
-        name: "RBPEX cache hit ratio",
-        nature: CounterNature::FractionNumerator,
-        unit: CounterUnit::Count,
-    },
-    CounterSpec {
-        family: None,
-        name: "RBPEX cache hit ratio base",
-        nature: CounterNature::FractionBase,
-        unit: CounterUnit::Count,
-    },
-];
 fn sql() -> String {
     // The selector grammar comes only from these fixed specifications, never from a database value or user input.
-    let filter = SPECS
+    let filter = specs()
         .iter()
-        .map(|spec| match spec.family {
-            Some(family) => format!("(object_name LIKE N'%{family}%' AND counter_name=N'{}')", spec.name),
-            None => format!("counter_name=N'{}'", spec.name),
+        .map(|spec| {
+            let family =
+                spec.object_family.map(|family| format!("object_name LIKE N'%{family}%' AND ")).unwrap_or_default();
+            let instance = match spec.instances {
+                PerformanceCounterInstances::Uninstanced => " AND RTRIM(instance_name)=N''".into(),
+                PerformanceCounterInstances::Named(names) => format!(
+                    " AND RTRIM(instance_name) IN ({})",
+                    names.iter().map(|name| format!("N'{name}'")).collect::<Vec<_>>().join(",")
+                ),
+                PerformanceCounterInstances::Any => String::new(),
+            };
+            format!("({family}counter_name=N'{}'{instance})", spec.native_name)
         })
         .collect::<Vec<_>>()
         .join(" OR ");
@@ -86,6 +45,9 @@ FROM sys.dm_os_performance_counters WHERE {filter} OPTION(MAXDOP 1)"
     )
 }
 pub(crate) async fn read<R: NativeRead>(reader: &mut R, limit: usize) -> Result<PerformanceRead> {
+    if specs().is_empty() {
+        return Err(CollectionStop::SourceUnavailable.error());
+    }
     let limit = limit.min(MAX_COUNTERS);
     let rows = reader.query(&sql(), vec![], limit + 1).await.map_err(ReadError::into_error)?;
     decode(&rows, limit)
@@ -103,12 +65,12 @@ fn decode(rows: &[crate::value::Rec], limit: usize) -> Result<PerformanceRead> {
     for row in rows {
         let native_object = text(row, "native_object")?;
         let native_name = text(row, "native_name")?;
-        let spec = SPECS
-            .iter()
-            .find(|spec| spec.name == native_name && spec.family.is_none_or(|family| native_object.contains(family)))
-            .ok_or_else(invalid_data)?;
         let instance = optional_text(row, "native_instance")?.ok_or_else(invalid_data)?;
         let native_instance = (!instance.is_empty()).then_some(instance);
+        let spec = specs()
+            .iter()
+            .find(|spec| spec.matches(&native_object, &native_name, native_instance.as_deref()))
+            .ok_or_else(invalid_data)?;
         let identity =
             serde_json::to_vec(&(&native_object, &native_name, &native_instance)).map_err(|_| invalid_data())?;
         if !identities.insert(identity.clone()) {
@@ -117,7 +79,7 @@ fn decode(rows: &[crate::value::Rec], limit: usize) -> Result<PerformanceRead> {
         let key = digest(&identity);
         let code = i32::try_from(signed_integer(row, "native_type")?).map_err(|_| invalid_data())?;
         let value = signed_integer(row, "value")?;
-        if value < 0 && spec.family.is_none() {
+        if value < 0 && spec.ratio.is_some() {
             rejected.push(culprit_core::telemetry::CounterRatioGap {
                 key,
                 raw_value: value.to_string(),
@@ -134,19 +96,12 @@ fn decode(rows: &[crate::value::Rec], limit: usize) -> Result<PerformanceRead> {
         // These generic Windows native types are documented by sys.dm_os_performance_counters. A name alone
         // never supplies fraction semantics: unexpected native codes remain exact, unqualified inputs.
         // https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-performance-counters-transact-sql
-        let nature = match code {
-            272_696_320 | 272_696_576 => CounterNature::Cumulative,
-            65_792 => CounterNature::Gauge,
-            537_003_264 => CounterNature::FractionNumerator,
-            1_073_939_712 => CounterNature::FractionBase,
-            _ => CounterNature::Unknown,
-        };
-        let supported = nature == spec.nature;
+        let (nature, unit) = spec.meaning(code);
         let counter = NativeCounterSample {
             key,
             value: culprit_core::telemetry::MeasurementValue::Integer(value.to_string()),
-            unit: if supported { spec.unit } else { CounterUnit::Unknown },
-            nature: if supported { nature } else { CounterNature::Unknown },
+            unit,
+            nature,
             scope: MeasurementScope::Server,
             reset: ResetMarker::Unknown,
             native_object,
@@ -163,17 +118,17 @@ fn decode(rows: &[crate::value::Rec], limit: usize) -> Result<PerformanceRead> {
 }
 pub(crate) fn application(rows: &[NativeCounterSample]) -> HashMap<String, f64> {
     let mut values = HashMap::new();
-    for spec in SPECS {
+    for spec in specs().iter().filter(|spec| spec.application) {
         if let Some(value) = global(rows, spec).and_then(|row| row.value.integer()) {
-            values.insert(spec.name.into(), value as f64);
+            values.insert(spec.native_name.into(), value as f64);
         }
     }
     values
 }
-fn global<'a>(rows: &'a [NativeCounterSample], spec: &CounterSpec) -> Option<&'a NativeCounterSample> {
+fn global<'a>(rows: &'a [NativeCounterSample], spec: &PerformanceCounterSpec) -> Option<&'a NativeCounterSample> {
     let mut matching = rows.iter().filter(|row| {
-        spec.family.is_some_and(|family| row.native_object.contains(family))
-            && row.native_name == spec.name
+        spec.object_family.is_some_and(|family| row.native_object.contains(family))
+            && row.native_name == spec.native_name
             && row.nature == spec.nature
             && row.unit == spec.unit
             && row.native_instance.is_none()
@@ -189,9 +144,9 @@ pub(crate) fn sampled_rates(
     if !elapsed_seconds.is_finite() || elapsed_seconds <= 0.0 {
         return HashMap::new();
     }
-    SPECS
+    specs()
         .iter()
-        .filter(|spec| spec.nature == CounterNature::Cumulative)
+        .filter(|spec| spec.application && spec.nature == CounterNature::Cumulative)
         .filter_map(|spec| {
             let previous = global(before, spec)?;
             let current = global(after, spec)?;
@@ -205,7 +160,7 @@ pub(crate) fn sampled_rates(
             let previous = previous.value.integer()?;
             let current = current.value.integer()?;
             let delta = current.checked_sub(previous)?;
-            Some((spec.name.into(), delta as f64 / elapsed_seconds))
+            Some((spec.native_name.into(), delta as f64 / elapsed_seconds))
         })
         .collect()
 }
