@@ -34,16 +34,39 @@ pub(crate) struct BlockingAccess<S> {
     worker_failure: fn() -> Error,
 }
 impl<S: Send + 'static> BlockingAccess<S> {
-    pub async fn run<F, T>(mut self, operation: F) -> Result<T>
+    pub async fn run<F, T>(self, operation: F) -> Result<T>
+    where
+        F: FnOnce(&mut S) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.run_owned((), operation).await
+    }
+
+    /// The guard follows the same worker through operation failure and unwinding. It is released only after
+    /// exclusive access, even when the async caller no longer receives the result.
+    pub async fn run_owned<F, T>(self, guard: impl Send + 'static, operation: F) -> Result<T>
     where
         F: FnOnce(&mut S) -> Result<T> + Send + 'static,
         T: Send + 'static,
     {
         let worker_failure = self.worker_failure;
         let language = culprit_core::i18n::current();
-        tokio::task::spawn_blocking(move || culprit_core::i18n::scope(&language.code, || operation(&mut self.state)))
+        let ownership = WorkerOwnership { access: self, _guard: guard };
+        // Consume the whole ownership value; disjoint closure capture must not strand the guard outside the worker.
+        tokio::task::spawn_blocking(move || ownership.execute(&language.code, operation))
             .await
             .map_err(|_| worker_failure())?
+    }
+}
+
+/// Fields drop in declaration order, including during panic: release exclusive state before its lifetime guard.
+struct WorkerOwnership<S, G> {
+    access: BlockingAccess<S>,
+    _guard: G,
+}
+impl<S, G> WorkerOwnership<S, G> {
+    fn execute<T>(mut self, language: &str, operation: impl FnOnce(&mut S) -> Result<T>) -> Result<T> {
+        culprit_core::i18n::scope(language, || operation(&mut self.access.state))
     }
 }
 

@@ -16,6 +16,7 @@ mod logs_cmd;
 mod outbox_cmd;
 mod output;
 mod plan_cmd;
+mod scan_capture;
 mod service_cmd;
 mod share_cmd;
 mod ssh;
@@ -245,6 +246,8 @@ enum AuthCommand {
 #[derive(Args)]
 struct ScanArgs {
     connection: String,
+    #[command(flatten)]
+    captured: scan_capture::CapturedScanArgs,
     /// Days of Query Store history to read.
     #[arg(long, default_value_t = 7)]
     window_days: u32,

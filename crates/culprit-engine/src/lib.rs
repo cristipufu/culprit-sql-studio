@@ -35,10 +35,14 @@ mod fleet;
 pub mod history;
 mod http;
 pub mod import;
+mod local_capture_actions;
 mod local_captures;
 #[cfg(feature = "collector")]
 pub use local_captures::OutboxCaptureReader;
-pub use local_captures::{LocalCaptureReader, LocalCaptureRequest, LocalCaptureTask, LocalPageServerReads};
+pub use local_captures::{
+    LocalCaptureAnalysisKind, LocalCaptureReader, LocalCaptureRequest, LocalCaptureTask, LocalCapturedAnalysis,
+    LocalMemoryClerks, LocalPageServerReads,
+};
 pub mod marks;
 #[cfg(feature = "postgres")]
 pub mod native_logs;
@@ -84,9 +88,9 @@ pub use operation::run_blocking;
 pub use plans::{PlanFormat, parse_plan};
 pub use provider_registration::{ProviderRegistration, RecipeCostVerifier};
 pub use reports::ReportSummary;
-#[cfg(feature = "collector")]
-pub use scan::CompletedRuntimeScanInput;
 pub use scan::PopulationReports;
+#[cfg(feature = "collector")]
+pub use scan::{CompletedCaptureAnalysis, CompletedCaptureScanInput};
 use secrets::SecretStore;
 pub use share::{export_diff, export_plan};
 use store::{Paths, Store};
@@ -452,7 +456,7 @@ impl Workspace {
         name: &str,
         options: &SnapshotOptions,
         query_log: Option<&std::path::Path>,
-        cached_runtime: Option<Box<culprit_core::telemetry::CachedRuntimeRead>>,
+        captured: Option<scan::CapturedScanEvidence>,
     ) -> Result<PopulationReports> {
         let saved = self.store.get(name)?.query_log.map(std::path::PathBuf::from);
         let found = if query_log.is_none() && saved.is_none() { self.discover_query_log(name) } else { None };
@@ -469,8 +473,8 @@ impl Workspace {
         }
         .await;
         let mut collected = observed.finish(result).await?;
-        if let Some(cached_runtime) = cached_runtime {
-            collected.attach_cached_runtime(cached_runtime)?;
+        if let Some(captured) = captured {
+            collected.attach_captured(captured)?;
         }
         collected.finish().await
     }

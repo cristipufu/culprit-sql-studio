@@ -5,7 +5,7 @@ use culprit_collector::{
     analytical::test_support::{LocalCaptureFixture, page_server_read_evidence_cases},
     outbox::CompletedCaptureBudget,
 };
-use culprit_core::{AuthKind, Engine, telemetry::*};
+use culprit_core::{AuthKind, Engine, SourceState, telemetry::*};
 use culprit_engine::{NewConnection, OutboxCaptureReader, ProviderRegistration};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -55,12 +55,19 @@ fn server(fixture: &LocalCaptureFixture, native_calls: Arc<AtomicUsize>) -> culp
 }
 
 async fn call(server: &culprit_mcp::CulpritMcp, id: &str) -> (bool, serde_json::Value) {
+    analyze(server, id, culprit_engine::LocalCaptureAnalysisKind::PageServerReads).await
+}
+async fn analyze(
+    server: &culprit_mcp::CulpritMcp,
+    id: &str,
+    analysis: culprit_engine::LocalCaptureAnalysisKind,
+) -> (bool, serde_json::Value) {
     let result = server
         .handle(
             "local-capture-test",
-            "captured_page_server_reads",
+            "analyze_capture",
             json!({
-                "connection":"local-evidence", "observation_id":id,
+                "connection":"local-evidence", "observation_id":id, "analysis":analysis,
             })
             .as_object()
             .unwrap()
@@ -158,4 +165,125 @@ async fn corrupted_originals_never_fall_back_to_cached_reports_or_open_a_native_
     assert!(error);
     assert!(result.get("page_server_reads").is_none());
     assert_eq!(native_calls.load(Ordering::SeqCst), 0);
+}
+
+fn clerk_originals(groups: usize, state: SourceState) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    use culprit_collector::analytical::test_support::{MemoryClerkCase, memory_clerk_evidence};
+    let (mut source, mut originals) = memory_clerk_evidence(MemoryClerkCase::SharedInstance);
+    let unrelated = originals.pop().unwrap();
+    let TelemetryRecord::Operational(original) = &originals[0] else { panic!() };
+    let OperationalFact::CounterSet(template) = &original.fact else { panic!() };
+    let mut rows = (0..groups)
+        .map(|node| {
+            let mut set = template.as_ref().clone();
+            set.identity.qualifiers.insert("memory_node_id".into(), node.to_string());
+            set.properties.insert("memory_node_id".into(), node.to_string());
+            TelemetryRecord::Operational(
+                OperationalObservation::from_counters(culprit_core::source_id::MEMORY_CLERKS, set).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    rows.push(unrelated);
+    let CollectionTarget::Shared(member) = &mut source.target else { panic!() };
+    member.native = NativeIdentity::new("private-member-canary");
+    let member = member.clone();
+    let SourcePartition::InstanceLocal { member: original, .. } = &mut source.partition else { panic!() };
+    *original = Some(member);
+    let SourceObservation::Snapshot(header) = &mut source.observation else { panic!() };
+    header.records = rows.len() as u32;
+    header.sources[0] = if state == SourceState::Unavailable {
+        StateSourceCoverage::unavailable(
+            culprit_core::source_id::MEMORY_CLERKS.into(),
+            culprit_core::ErrorCode::PermissionDenied,
+            None,
+        )
+    } else {
+        StateSourceCoverage::observed(
+            culprit_core::source_id::MEMORY_CLERKS.into(),
+            groups as u32,
+            state != SourceState::Partial,
+        )
+    };
+    (source, rows)
+}
+
+#[tokio::test]
+async fn one_local_tool_explains_real_shared_clerk_captures_with_exact_values_coverage_and_bounded_private_output() {
+    use culprit_engine::LocalCaptureAnalysisKind;
+    for (groups, state) in [(2, SourceState::Collected), (7, SourceState::Partial), (0, SourceState::Unavailable)] {
+        let (source, rows) = clerk_originals(groups, state);
+        let native = NativeReadContext::from_snapshot(&source).unwrap();
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) = culprit_core::i18n::scope_async(
+            "fr",
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::MemoryClerks),
+        )
+        .await;
+        assert!(!error, "{value}");
+        assert!(value.get("page_server_reads").is_none());
+        let view = &value["memory_clerks"];
+        assert_eq!(
+            view["title"],
+            culprit_core::i18n::scope("en", || culprit_core::t!("collected.memory_clerks.title"))
+        );
+        assert_eq!(view["native_rows"], groups);
+        assert_eq!(view["observed_rows"], groups);
+        assert_eq!(view["native_source_state"], json!(state));
+        assert_eq!(view["source_state"], json!(state));
+        assert_eq!(view["read_complete"], true, "native availability is independent of fully verified local bytes");
+        assert_eq!(view["historical_context"], true);
+        assert_eq!(view["independent_shared_scope"], true);
+        assert_eq!(view["original_read_bounds"], json!({"from":native.observed_from,"until":native.observed_until}));
+        assert_eq!(view["entries_presented"], groups.min(5));
+        assert_eq!(view["entries_limited"], groups > 5);
+        assert_eq!(value["collected_from"], fixture.manifest.started_at);
+        assert_eq!(value["collected_until"], fixture.manifest.finished_at.as_deref().unwrap());
+        assert_eq!(value["local_verification_bytes"], fixture.original_bytes());
+        if groups > 0 {
+            let fields = view["entries"][0]["fields"].as_array().unwrap();
+            let field = |name: &str| fields.iter().find(|field| field["key"] == name).unwrap();
+            assert_eq!(field("pages_kb")["value"], "9007199254740993");
+            assert_eq!(field("awe_allocated_kb")["value"], "0");
+            assert_eq!(field("shared_memory_reserved_kb")["value"], serde_json::Value::Null);
+            assert_eq!(view["entries"][0]["scope"], json!(culprit_core::MeasurementScope::Server));
+        } else {
+            assert!(view["entries"].as_array().unwrap().is_empty());
+            assert!(view["source_reason"].is_string());
+        }
+        let text = value.to_string();
+        for private in [
+            "private-member-canary",
+            "manifest_sha256",
+            "source_sha256",
+            "payload_sha256",
+            "qualifiers",
+            "native-process-a",
+            "independent-native-counters",
+        ] {
+            assert!(!text.contains(private), "{private}");
+        }
+        assert!(text.len() <= 64 * 1024);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let (error, repeated) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::MemoryClerks).await;
+        assert!(!error);
+        assert_eq!(repeated, value);
+    }
+}
+
+#[tokio::test]
+async fn selecting_the_wrong_local_family_never_returns_an_empty_success_or_constructs_a_provider() {
+    let (source, rows) = clerk_originals(2, SourceState::Collected);
+    let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+    drop(fixture.outbox.take());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let server = server(&fixture, calls.clone());
+    let (error, value) = call(&server, &fixture.manifest.capture.observation_id).await;
+    assert!(error);
+    assert!(value.get("page_server_reads").is_none());
+    assert!(value.get("memory_clerks").is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }

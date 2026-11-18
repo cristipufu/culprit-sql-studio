@@ -3,7 +3,7 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 mod origin;
-pub use origin::{CachedRuntimeCapturedPosition, CachedRuntimeReadOrigin};
+pub use origin::CachedRuntimeReadOrigin;
 
 pub const CACHED_RUNTIME_READ_SOURCE: &str = "statement-runtime-cache";
 

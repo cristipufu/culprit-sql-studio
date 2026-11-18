@@ -15,10 +15,13 @@ async fn read(fixture: &LocalCaptureFixture, budget: CompletedCaptureBudget) -> 
         .unwrap()
         .delivery()
         .with_completed_query_history(
-            "local-evidence",
-            &fixture.manifest.capture.observation_id,
+            CompletedCaptureLookup {
+                connection: "local-evidence",
+                observation_id: &fixture.manifest.capture.observation_id,
+            },
             budget,
             guard.handle(),
+            (),
             Ok,
         )
         .await
@@ -84,10 +87,13 @@ async fn journal_connection_and_settled_owner_cannot_be_substituted_by_tool_argu
         .unwrap()
         .delivery()
         .with_completed_query_history(
-            "foreign-connection",
-            &fixture.manifest.capture.observation_id,
+            CompletedCaptureLookup {
+                connection: "foreign-connection",
+                observation_id: &fixture.manifest.capture.observation_id,
+            },
             CompletedCaptureBudget::default(),
             guard.handle(),
+            (),
             Ok,
         )
         .await
@@ -113,10 +119,13 @@ async fn cancelled_lookup_and_post_verification_projection_never_publish_success
         .unwrap()
         .delivery()
         .with_completed_query_history::<()>(
-            "local-evidence",
-            &fixture.manifest.capture.observation_id,
+            CompletedCaptureLookup {
+                connection: "local-evidence",
+                observation_id: &fixture.manifest.capture.observation_id,
+            },
             CompletedCaptureBudget::default(),
             operation,
+            (),
             |_| panic!("cancelled lookup must not project"),
         )
         .await
@@ -130,10 +139,13 @@ async fn cancelled_lookup_and_post_verification_projection_never_publish_success
         .unwrap()
         .delivery()
         .with_completed_query_history(
-            "local-evidence",
-            &fixture.manifest.capture.observation_id,
+            CompletedCaptureLookup {
+                connection: "local-evidence",
+                observation_id: &fixture.manifest.capture.observation_id,
+            },
             CompletedCaptureBudget::default(),
             operation,
+            (),
             move |original| {
                 assert_eq!(original.records().len(), 1);
                 drop(guard);
@@ -160,10 +172,10 @@ async fn original_deadline_and_cancellation_include_waiting_for_the_existing_out
         let running = tokio::spawn(async move {
             delivery
                 .with_completed_query_history::<()>(
-                    "local-evidence",
-                    &id,
+                    CompletedCaptureLookup { connection: "local-evidence", observation_id: &id },
                     CompletedCaptureBudget::default(),
                     operation,
+                    (),
                     |_| panic!("a stopped queued action cannot reach projection"),
                 )
                 .await
@@ -199,10 +211,10 @@ async fn a_started_canonical_worker_is_joined_before_a_cancelled_projection_can_
     let running = tokio::spawn(async move {
         delivery
             .with_completed_query_history(
-                "local-evidence",
-                &id,
+                CompletedCaptureLookup { connection: "local-evidence", observation_id: &id },
                 CompletedCaptureBudget::default(),
                 operation,
+                (),
                 move |original| {
                     assert_eq!(original.records().len(), 1);
                     started.send(()).unwrap();

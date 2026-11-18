@@ -1,4 +1,4 @@
-//! Termination requests cancellation, then awaits the existing controller's native shutdown proof.
+//! Termination requests cancellation, then awaits the owned action without hiding unresolved native shutdown.
 use culprit_collector::capture::CollectionCancellation;
 use culprit_core::Result;
 use std::future::Future;
@@ -20,20 +20,21 @@ pub(crate) async fn run<T>(cancellation: &CollectionCancellation, work: impl Fut
     };
     with_signal(cancellation, work, signal).await
 }
-async fn with_signal<T>(
+pub(crate) async fn with_signal<T>(
     cancellation: &CollectionCancellation,
     work: impl Future<Output = Result<T>>,
     signal: impl Future<Output = Result<()>>,
 ) -> Result<T> {
     tokio::pin!(work);
     tokio::select! {
-        result=&mut work=>result,
+        biased;
         signal=signal=>{
             cancellation.cancel();
-            let result=work.await;
+            let result=work.await?;
             signal?;
-            result
+            Ok(result)
         }
+        result=&mut work=>result,
     }
 }
 fn signal_failed() -> culprit_core::Error {

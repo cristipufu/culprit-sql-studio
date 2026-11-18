@@ -5,7 +5,9 @@ use culprit_checks::{
     page_server_reads::PageServerReadEvidence,
     query_store_definitions::{QueryStoreDefinitionEvidence, QueryStoreDefinitionRecord},
 };
-use culprit_collector::outbox::{CompletedCaptureBudget, CompletedQueryHistory, Outbox, OutboxDelivery};
+use culprit_collector::outbox::{
+    CompletedCaptureBudget, CompletedCaptureLookup, CompletedQueryHistory, CompletedSnapshot, Outbox, OutboxDelivery,
+};
 use culprit_core::telemetry::*;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -15,11 +17,23 @@ enum LocalOutbox {
     Delivery(OutboxDelivery),
 }
 
+#[cfg(test)]
+type ProjectionBoundary = Arc<dyn Fn() -> Result<()> + Send + Sync>;
+
 /// Fixed startup-authorized local storage. No source configuration, credentials or warehouse adapter is opened.
 pub struct OutboxCaptureReader {
     source: LocalOutbox,
     budget: CompletedCaptureBudget,
     readers: Arc<Semaphore>,
+    #[cfg(test)]
+    projection_boundary: Option<ProjectionBoundary>,
+}
+
+/// Last async ownership releases the directory lock before its share of the reader permit.
+/// A started worker retains a second share until exclusive Files access has ended.
+struct DirectoryOwnership {
+    outbox: Outbox,
+    permit: Arc<OwnedSemaphorePermit>,
 }
 impl OutboxCaptureReader {
     /// The directory is acquired only during an action. A separate active owner returns Locked; no read bypasses it.
@@ -36,18 +50,25 @@ impl OutboxCaptureReader {
     }
 
     fn new(source: LocalOutbox, budget: CompletedCaptureBudget) -> Result<Self> {
-        Ok(Self { source, budget: budget.validate()?, readers: Arc::new(Semaphore::new(1)) })
+        Ok(Self {
+            source,
+            budget: budget.validate()?,
+            readers: Arc::new(Semaphore::new(1)),
+            #[cfg(test)]
+            projection_boundary: None,
+        })
     }
 
-    async fn read(&self, request: LocalCaptureRequest<'_>) -> Result<LocalPageServerReads> {
+    async fn read(&self, request: LocalCaptureRequest<'_>) -> Result<LocalCapturedAnalysis> {
         check(&request.operation)?;
         let permit = tokio::time::timeout(request.operation.remaining(), self.readers.clone().acquire_owned())
             .await
             .map_err(|_| stopped(&request.operation))?
             .map_err(|_| DeliveryProblem::Storage.error())?;
         check(&request.operation)?;
+        let permit = Arc::new(permit);
         match &self.source {
-            LocalOutbox::Delivery(delivery) => self.project(delivery, request, permit).await,
+            LocalOutbox::Delivery(delivery) => self.project(delivery, request, permit.clone()).await,
             LocalOutbox::Directory(directory) => {
                 let directory = directory.clone();
                 let operation = request.operation.clone();
@@ -63,7 +84,12 @@ impl OutboxCaptureReader {
                 })
                 .await
                 .map_err(|_| DeliveryProblem::Storage.error())??;
-                self.project(&outbox.delivery(), request, permit).await
+                let ownership = DirectoryOwnership { outbox, permit };
+                let delivery = ownership.outbox.delivery();
+                let result = self.project(&delivery, request, ownership.permit.clone()).await;
+                drop(delivery);
+                drop(ownership);
+                result
             }
         }
     }
@@ -72,32 +98,56 @@ impl OutboxCaptureReader {
         &self,
         delivery: &OutboxDelivery,
         request: LocalCaptureRequest<'_>,
-        permit: OwnedSemaphorePermit,
-    ) -> Result<LocalPageServerReads> {
-        delivery
-            .with_completed_query_history(
-                request.connection,
-                request.observation_id,
-                self.budget,
-                request.operation,
-                move |capture| {
-                    let _permit = permit;
-                    explain(capture)
-                },
-            )
-            .await
+        permit: Arc<OwnedSemaphorePermit>,
+    ) -> Result<LocalCapturedAnalysis> {
+        #[cfg(test)]
+        let boundary = self.projection_boundary.clone();
+        let lookup = CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
+        match request.analysis {
+            LocalCaptureAnalysisKind::PageServerReads => {
+                delivery
+                    .with_completed_query_history(lookup, self.budget, request.operation, permit, move |capture| {
+                        let result = explain_page_server_reads(capture).map(LocalCapturedAnalysis::PageServerReads);
+                        #[cfg(test)]
+                        if let Some(boundary) = boundary {
+                            boundary()?;
+                        }
+                        result
+                    })
+                    .await
+            }
+            LocalCaptureAnalysisKind::MemoryClerks => {
+                delivery
+                    .with_completed_snapshot(
+                        lookup,
+                        SnapshotDataset::Operational,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        move |capture| {
+                            let result = explain_memory_clerks(capture).map(LocalCapturedAnalysis::MemoryClerks);
+                            #[cfg(test)]
+                            if let Some(boundary) = boundary {
+                                boundary()?;
+                            }
+                            result
+                        },
+                    )
+                    .await
+            }
+        }
     }
 }
 impl LocalCaptureReader for OutboxCaptureReader {
     fn timeout(&self) -> Duration {
         self.budget.timeout
     }
-    fn page_server_reads<'a>(&'a self, request: LocalCaptureRequest<'a>) -> LocalCaptureTask<'a> {
+    fn analyze<'a>(&'a self, request: LocalCaptureRequest<'a>) -> LocalCaptureTask<'a> {
         Box::pin(self.read(request))
     }
 }
 
-fn explain(capture: CompletedQueryHistory) -> Result<LocalPageServerReads> {
+fn explain_page_server_reads(capture: CompletedQueryHistory) -> Result<LocalPageServerReads> {
     let source = capture.source().clone();
     let original = capture.capture().clone();
     let history = source.query_history().ok_or_else(invalid)?;
@@ -159,6 +209,23 @@ fn explain(capture: CompletedQueryHistory) -> Result<LocalPageServerReads> {
         history_from,
         history_until,
         population_membership,
+        collected_from,
+        collected_until,
+        bytes_read,
+    })
+}
+
+fn explain_memory_clerks(capture: CompletedSnapshot) -> Result<LocalMemoryClerks> {
+    let connection = capture.connection().into();
+    let collected_from = capture.collected_from().into();
+    let collected_until = capture.collected_until().into();
+    let bytes_read = capture.bytes_read();
+    let read = capture.into_operational_read()?;
+    let report = culprit_checks::memory_clerks::explain_captured(&read)?;
+    Ok(LocalMemoryClerks {
+        connection,
+        read: Box::new(read),
+        report: Box::new(report),
         collected_from,
         collected_until,
         bytes_read,

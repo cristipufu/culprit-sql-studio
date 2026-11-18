@@ -12,3 +12,16 @@ pub fn memory_clerk_candidate(sample: &NativeCounterSet) -> bool {
 pub fn memory_clerk_source_is_valid(source: &StateSourceCoverage) -> bool {
     source.source == crate::source_id::MEMORY_CLERKS && source.is_valid()
 }
+
+impl super::CapturedOperationalRead {
+    /// The original shared instance owns this family. A selected database or current member never replaces it.
+    pub fn memory_clerk_source(&self) -> crate::Result<&StateSourceCoverage> {
+        if !self.is_valid()
+            || !matches!(&self.description.target, super::CollectionTarget::Shared(resource)
+                if resource.kind == super::SharedResourceKind::Instance)
+        {
+            return Err(super::CollectionStop::InvalidPage.error());
+        }
+        self.source_coverage(crate::source_id::MEMORY_CLERKS).ok_or_else(|| super::CollectionStop::InvalidPage.error())
+    }
+}

@@ -1,0 +1,55 @@
+//! Independently authenticated originals attach once, after the scan's native owner has settled.
+use culprit_core::{
+    Result, Snapshot,
+    telemetry::{CapturedOperationalRead, DeliveryProblem, memory_clerk_candidate},
+};
+
+#[cfg(feature = "collector")]
+use culprit_core::telemetry::{CachedRuntimeRead, CachedRuntimeReadOrigin};
+
+pub(crate) enum CapturedScanEvidence {
+    #[cfg(feature = "collector")]
+    CachedRuntime(Box<CachedRuntimeRead>),
+    MemoryClerks(Box<CapturedOperationalRead>),
+}
+impl CapturedScanEvidence {
+    pub(crate) fn memory_clerks(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        // The pure view is the one owner of clerk-family admission; keep malformed originals out before scanning.
+        culprit_checks::memory_clerks::explain_captured(&read)?;
+        Ok(Self::MemoryClerks(read))
+    }
+
+    pub(crate) fn attach(self, snapshot: &mut Snapshot) -> Result<()> {
+        match self {
+            #[cfg(feature = "collector")]
+            Self::CachedRuntime(read) => {
+                if snapshot.operations.cached_runtime.is_some() {
+                    return Err(DeliveryProblem::Conflict.error());
+                }
+                if !matches!(read.origin, CachedRuntimeReadOrigin::Captured { .. })
+                    || !read.is_valid()
+                    || !read.matches_native_database(snapshot)
+                {
+                    return Err(DeliveryProblem::InvalidContract.error());
+                }
+                snapshot.operations.cached_runtime = Some(read);
+            }
+            Self::MemoryClerks(read) => {
+                if snapshot.operations.memory_clerks.is_some()
+                    || snapshot.pressure.as_ref().is_some_and(|pressure| {
+                        pressure
+                            .resource_counters
+                            .as_deref()
+                            .is_some_and(|sets| sets.iter().any(memory_clerk_candidate))
+                    })
+                {
+                    return Err(DeliveryProblem::Conflict.error());
+                }
+                // The original SharedInstance describes historical server allocations. A current database scan
+                // supplies no matching member proof and cannot turn this into database-local/current evidence.
+                snapshot.operations.memory_clerks = Some(read);
+            }
+        }
+        Ok(())
+    }
+}

@@ -6,6 +6,8 @@ use crate::{
 use culprit_read::admission::SourceGate;
 use std::path::PathBuf;
 
+mod operational;
+
 #[derive(Clone)]
 struct FixtureSource {
     source: CollectionDescription,

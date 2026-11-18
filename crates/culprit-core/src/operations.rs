@@ -35,6 +35,10 @@ pub struct OperationalStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cached_runtime: Option<Box<crate::telemetry::CachedRuntimeRead>>,
+    /// An independent original capture; its shared target and receipts are never current database ownership.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub memory_clerks: Option<Box<crate::telemetry::CapturedOperationalRead>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub statement_work: Option<Box<crate::telemetry::StatementCounterSnapshot>>,
@@ -163,6 +167,7 @@ impl OperationalStats {
         let Self {
             statement_work: _,
             cached_runtime: _,
+            memory_clerks: _,
             index_usage_scope,
             log_failures,
             spaces,

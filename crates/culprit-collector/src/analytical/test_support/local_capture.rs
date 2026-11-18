@@ -22,6 +22,12 @@ pub struct LocalCaptureFixture {
 }
 impl LocalCaptureFixture {
     pub async fn query_history(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
+        assert!(source.query_history().is_some());
+        Self::with_shutdown(source, records, SourceShutdown::Quiescent).await
+    }
+
+    pub async fn snapshot(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
+        assert!(source.observation.snapshot().is_some());
         Self::with_shutdown(source, records, SourceShutdown::Quiescent).await
     }
 
@@ -33,13 +39,20 @@ impl LocalCaptureFixture {
         let temporary = tempfile::tempdir().unwrap();
         let directory = temporary.path().join("outbox");
         let mut outbox = Outbox::create(&directory, OutboxLimits::default()).unwrap();
-        let history = source.query_history().unwrap();
-        let request = CollectionRequest {
-            subject: CollectionSubject::Database,
-            selection: CollectionSelection::QueryHistory {
+        let selection = match &source.observation {
+            SourceObservation::QueryHistory(history) => CollectionSelection::QueryHistory {
                 from: history.interval.from.clone(),
                 until: history.interval.until.clone(),
             },
+            SourceObservation::Snapshot(header) => CollectionSelection::Snapshot { dataset: header.dataset },
+            _ => panic!("local fixture requires an original history or snapshot read"),
+        };
+        let request = CollectionRequest {
+            subject: match &source.target {
+                CollectionTarget::Database(_) => CollectionSubject::Database,
+                CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
+            },
+            selection,
             budget: CollectionBudget::default(),
         };
         let closed = Arc::new(AtomicBool::new(false));

@@ -368,3 +368,5 @@ fn sharing_withholds_clerk_labels_but_keeps_an_explicit_repeatable_gap() {
         "private clerk name"
     );
 }
+
+mod captured;

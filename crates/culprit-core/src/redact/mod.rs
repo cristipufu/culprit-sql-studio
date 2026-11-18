@@ -267,6 +267,13 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             }
         }
     }
+    if s.operations.memory_clerks.take().is_some() {
+        // Original receipt inputs are indivisible: withholding cannot repair or re-sign a masked body.
+        s.record_unavailable_evidence(
+            crate::source_id::MEMORY_CLERKS,
+            crate::message!("collected.memory_clerks.sharing_withheld"),
+        );
+    }
     let counters = s.pressure.as_mut().and_then(|pressure| pressure.resource_counters.take());
     if let Some(counters) = counters {
         let (clerks, counters): (Vec<_>, Vec<_>) =

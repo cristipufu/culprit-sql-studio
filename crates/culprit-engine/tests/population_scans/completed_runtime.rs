@@ -6,8 +6,10 @@ use culprit_collector::{
     outbox::{CompletedCaptureBudget, Outbox, OutboxDelivery},
 };
 use culprit_core::{CompletedSpillState, DatabaseLocation, SourceState, telemetry::*};
-use culprit_engine::CompletedRuntimeScanInput;
+use culprit_engine::{CompletedCaptureAnalysis, CompletedCaptureScanInput};
 use culprit_read::admission::SourceGate;
+
+mod memory_clerks;
 
 #[derive(Clone)]
 struct CapturedRows {
@@ -56,20 +58,28 @@ impl Captured {
         Self::with_incarnation(partial, Some("controlled-native-database-guid")).await
     }
     async fn with_incarnation(partial: bool, incarnation: Option<&str>) -> Self {
-        let home = tempfile::tempdir().unwrap();
-        let mut outbox = Outbox::create(&home.path().join("outbox"), Default::default()).unwrap();
         let (mut source, rows) = cached_runtime_evidence_cases().pop().unwrap();
         let mut database = snapshots().requested.identity.unwrap();
         database.incarnation = incarnation.map(str::to_owned);
         source.target = database.into();
         let SourceObservation::Snapshot(header) = &mut source.observation else { panic!() };
         header.sources[0] = StateSourceCoverage::observed(header.sources[0].source.clone(), 1, !partial);
+        Self::from_source("shop", source, rows).await
+    }
+    async fn from_source(connection: &str, source: CollectionDescription, rows: Vec<TelemetryRecord>) -> Self {
+        let home = tempfile::tempdir().unwrap();
+        let mut outbox = Outbox::create(&home.path().join("outbox"), Default::default()).unwrap();
+        let dataset = source.observation.snapshot().unwrap().dataset;
+        let subject = match &source.target {
+            CollectionTarget::Database(_) => CollectionSubject::Database,
+            CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
+        };
         let request = CollectionRequest {
-            subject: CollectionSubject::Database,
-            selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::CachedRuntime },
+            subject,
+            selection: CollectionSelection::Snapshot { dataset },
             budget: CollectionBudget::default(),
         };
-        let mut lease = outbox.reserve("shop", &request).await.unwrap();
+        let mut lease = outbox.reserve(connection, &request).await.unwrap();
         let directory = lease.directory().to_owned();
         let identity = lease.identity().clone();
         let source = CapturedRows { source, records: rows.clone() };
@@ -93,9 +103,10 @@ impl Captured {
         &'a self,
         delivery: &'a OutboxDelivery,
         cancellation: &'a CollectionCancellation,
-    ) -> CompletedRuntimeScanInput<'a> {
-        CompletedRuntimeScanInput {
+    ) -> CompletedCaptureScanInput<'a> {
+        CompletedCaptureScanInput {
             delivery,
+            analysis: CompletedCaptureAnalysis::CachedRuntime,
             attempt: &self.attempt,
             budget: CompletedCaptureBudget::default(),
             cancellation,
@@ -142,7 +153,7 @@ async fn a_ready_original_capture_is_authenticated_before_one_normal_scan_and_su
     let captured = Captured::new(false).await;
     let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Quiescent);
     let report = workspace
-        .scan_with_completed_runtime(
+        .scan_with_completed_capture(
             "shop",
             &options(),
             captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
@@ -171,7 +182,7 @@ async fn the_population_api_attaches_a_partial_native_population_once_without_co
     let captured = Captured::new(true).await;
     let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Quiescent);
     let reports = workspace
-        .scan_populations_with_completed_runtime(
+        .scan_populations_with_completed_capture(
             "shop",
             &options(),
             captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
@@ -209,7 +220,7 @@ async fn a_proven_native_database_rename_and_endpoint_alias_preserve_the_origina
     }
     let (_home, workspace, _) = workspace(batch, SourceShutdown::Quiescent);
     let report = workspace
-        .scan_with_completed_runtime(
+        .scan_with_completed_capture(
             "shop",
             &options(),
             captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
@@ -244,7 +255,7 @@ async fn unknown_or_conflicting_native_database_authority_refuses_attachment_bef
         let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
         let selected = SnapshotOptions { workload_population: Some(NativeIdentity::new("7")), ..options() };
         let error = workspace
-            .scan_with_completed_runtime(
+            .scan_with_completed_capture(
                 "shop",
                 &selected,
                 captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
@@ -281,7 +292,7 @@ async fn an_existing_requested_read_is_never_overwritten_even_by_the_same_authen
     batch.requested.operations.cached_runtime = Some(Box::new(existing));
     let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
     let error = workspace
-        .scan_with_completed_runtime(
+        .scan_with_completed_capture(
             "shop",
             &options(),
             captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
@@ -319,11 +330,12 @@ async fn cancellation_tampering_and_local_byte_refusal_cannot_construct_a_scan_p
             CompletedCaptureBudget::default()
         };
         let error = workspace
-            .scan_with_completed_runtime(
+            .scan_with_completed_capture(
                 "shop",
                 &options(),
-                CompletedRuntimeScanInput {
+                CompletedCaptureScanInput {
                     delivery: &delivery,
+                    analysis: CompletedCaptureAnalysis::CachedRuntime,
                     attempt: &attempt,
                     budget,
                     cancellation: &cancellation,
@@ -346,7 +358,7 @@ async fn unconfirmed_scan_shutdown_withholds_the_attached_original_and_all_repor
     let captured = Captured::new(false).await;
     let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Unconfirmed);
     let error = workspace
-        .scan_with_completed_runtime(
+        .scan_with_completed_capture(
             "shop",
             &options(),
             captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
@@ -370,7 +382,7 @@ async fn dropping_a_native_scan_future_preserves_existing_ownership_debt_and_nev
     let selected_options = options();
     {
         let scanning =
-            workspace.scan_with_completed_runtime("shop", &selected_options, captured.input(&delivery, &cancellation));
+            workspace.scan_with_completed_capture("shop", &selected_options, captured.input(&delivery, &cancellation));
         tokio::pin!(scanning);
         tokio::select! {
             result = &mut scanning => panic!("blocked native fixture completed: {result:?}"),

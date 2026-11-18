@@ -4,13 +4,16 @@ use culprit_core::{ErrorDetail, limits::OperationGuard, query_store_statement_re
 
 async fn read(reader: &OutboxCaptureReader, id: &str) -> Result<LocalPageServerReads> {
     let guard = OperationGuard::new(reader.timeout()).unwrap();
-    reader
-        .page_server_reads(LocalCaptureRequest {
+    let result = reader
+        .analyze(LocalCaptureRequest {
             connection: "local-evidence",
             observation_id: id,
+            analysis: LocalCaptureAnalysisKind::PageServerReads,
             operation: guard.handle(),
         })
-        .await
+        .await?;
+    let LocalCapturedAnalysis::PageServerReads(result) = result else { panic!("requested page-server analysis") };
+    Ok(result)
 }
 
 #[tokio::test]
@@ -167,9 +170,10 @@ async fn journal_scope_and_queued_cancellation_cannot_return_another_connections
             .unwrap();
     let guard = OperationGuard::new(reader.timeout()).unwrap();
     let error = reader
-        .page_server_reads(LocalCaptureRequest {
+        .analyze(LocalCaptureRequest {
             connection: "different-connection",
             observation_id: &fixture.manifest.capture.observation_id,
+            analysis: LocalCaptureAnalysisKind::PageServerReads,
             operation: guard.handle(),
         })
         .await
@@ -179,9 +183,10 @@ async fn journal_scope_and_queued_cancellation_cannot_return_another_connections
     let operation = guard.handle();
     drop(guard);
     let error = reader
-        .page_server_reads(LocalCaptureRequest {
+        .analyze(LocalCaptureRequest {
             connection: "local-evidence",
             observation_id: &fixture.manifest.capture.observation_id,
+            analysis: LocalCaptureAnalysisKind::PageServerReads,
             operation,
         })
         .await
@@ -190,3 +195,7 @@ async fn journal_scope_and_queued_cancellation_cannot_return_another_connections
     drop(permit);
     assert!(read(&reader, &fixture.manifest.capture.observation_id).await.is_ok());
 }
+
+mod memory_clerks;
+
+mod settlement;

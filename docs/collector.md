@@ -59,11 +59,20 @@ facts and uncertainty without granting trusted query totals or diagnostic escala
 
 An explicitly configured MCP host can also read original local captures through `LocalCaptureReader` and the
 engine's optional `OutboxCaptureReader` adapter. `culprit mcp --evidence-outbox DIRECTORY` installs that capability;
-`captured_page_server_reads` accepts a delegated connection and its exact original observation ID. The existing
+`analyze_capture` accepts a delegated connection, its exact original observation ID and the closed analysis choice
+`page_server_reads` or `memory_clerks`. The existing
 Outbox owner checks the journal association, Ready state, confirmed native shutdown, manifest and every artifact
-in one canonical verification pass before projecting runtime rows and independently matched query definitions.
+in one canonical verification pass before projecting the requested analysis. Page-server reads keep runtime rows
+and independently matched query definitions. Memory clerks retain all original Operational rows and source
+coverage, including unrelated sources, in a captured raw carrier. Their shared-instance scope and native read
+bounds establish no correlation to the current database scan or any query.
 It performs no native, recovery or warehouse read. The original native window, optional population membership,
 collector clocks and actual local verification bytes remain distinct in the result.
+
+`culprit scan CONNECTION --evidence-outbox DIRECTORY --memory-clerks-capture OBSERVATION` explicitly attaches
+one verified clerk capture to the normal report after confirmed native scan shutdown. Existing captured or live
+clerk input is refused rather than overwritten. Both original capture association and raw rows survive saved-report
+reanalysis; ordinary scans neither discover an outbox nor acquire clerks.
 
 `CompletedCaptureBudget` applies to both local snapshot and query-history reads: 10,000 retained rows, 8 MiB of
 all verified artifact/manifest bytes and five seconds by default, including queueing. Limits refuse rather than

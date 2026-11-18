@@ -11,6 +11,14 @@ pub(super) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// One explicitly delegated local identity pair. The owning worker checks the original journal; this value
+/// establishes neither source ownership nor a database/member correlation by itself.
+#[derive(Clone, Copy, Debug)]
+pub struct CompletedCaptureLookup<'a> {
+    pub connection: &'a str,
+    pub observation_id: &'a str,
+}
+
 /// Independent storage-read allowance. These limits never change native collection or cost qualification.
 #[derive(Clone, Copy, Debug)]
 pub struct CompletedCaptureBudget {
@@ -75,19 +83,20 @@ impl ReadControl {
 
 pub(super) enum ReadRequest {
     Snapshot { attempt: DiagnosticAttemptReceipt, dataset: SnapshotDataset },
+    SnapshotLookup { connection: String, observation_id: String, dataset: SnapshotDataset },
     QueryHistory { connection: String, observation_id: String },
 }
 impl ReadRequest {
     fn observation_id(&self) -> &str {
         match self {
             Self::Snapshot { attempt, .. } => &attempt.capture.observation_id,
-            Self::QueryHistory { observation_id, .. } => observation_id,
+            Self::SnapshotLookup { observation_id, .. } | Self::QueryHistory { observation_id, .. } => observation_id,
         }
     }
 
     fn retains(&self, stream: TelemetryStream) -> bool {
         match self {
-            Self::Snapshot { dataset, .. } => stream == dataset.stream(),
+            Self::Snapshot { dataset, .. } | Self::SnapshotLookup { dataset, .. } => stream == dataset.stream(),
             Self::QueryHistory { .. } => {
                 matches!(stream, TelemetryStream::QueryRuntime | TelemetryStream::QueryDefinitions)
             }
@@ -101,6 +110,7 @@ pub(super) struct CompletedCaptureRead {
     pub budget: CompletedCaptureBudget,
     pub rows: artifacts::CanonicalRows,
     pub bytes_read: u64,
+    required_connection: Option<String>,
 }
 impl CompletedCaptureRead {
     pub fn snapshot(
@@ -122,27 +132,71 @@ impl CompletedCaptureRead {
     }
 
     pub fn query_history(
-        connection: &str,
-        observation_id: &str,
+        lookup: CompletedCaptureLookup<'_>,
+        budget: CompletedCaptureBudget,
+        operation: OperationHandle,
+    ) -> Result<Self> {
+        Self::lookup(
+            ReadRequest::QueryHistory {
+                connection: lookup.connection.into(),
+                observation_id: lookup.observation_id.into(),
+            },
+            lookup,
+            budget,
+            operation,
+        )
+    }
+
+    pub fn snapshot_lookup(
+        lookup: CompletedCaptureLookup<'_>,
+        dataset: SnapshotDataset,
+        budget: CompletedCaptureBudget,
+        operation: OperationHandle,
+    ) -> Result<Self> {
+        Self::lookup(
+            ReadRequest::SnapshotLookup {
+                connection: lookup.connection.into(),
+                observation_id: lookup.observation_id.into(),
+                dataset,
+            },
+            lookup,
+            budget,
+            operation,
+        )
+    }
+
+    pub fn for_connection(mut self, connection: &str) -> Result<Self> {
+        validate_connection(connection)?;
+        self.required_connection = Some(connection.into());
+        Ok(self)
+    }
+
+    fn lookup(
+        request: ReadRequest,
+        lookup: CompletedCaptureLookup<'_>,
         budget: CompletedCaptureBudget,
         operation: OperationHandle,
     ) -> Result<Self> {
         let budget = budget.validate()?;
-        if !valid_id(observation_id) || connection.is_empty() || connection.len() > 512 {
+        validate_connection(lookup.connection)?;
+        if !valid_id(lookup.observation_id) {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let deadline = Instant::now()
             .checked_add(budget.timeout.min(operation.remaining()))
             .ok_or_else(|| CollectionStop::TimedOut.error())?;
-        Ok(Self::new(
-            ReadRequest::QueryHistory { connection: connection.into(), observation_id: observation_id.into() },
-            ReadControl::Operation { operation, deadline },
-            budget,
-        ))
+        Ok(Self::new(request, ReadControl::Operation { operation, deadline }, budget))
     }
 
     fn new(request: ReadRequest, control: ReadControl, budget: CompletedCaptureBudget) -> Self {
-        Self { request, control, budget, rows: artifacts::CanonicalRows::new(budget.max_rows), bytes_read: 0 }
+        Self {
+            request,
+            control,
+            budget,
+            rows: artifacts::CanonicalRows::new(budget.max_rows),
+            bytes_read: 0,
+            required_connection: None,
+        }
     }
 }
 impl artifacts::VerificationObserver for CompletedCaptureRead {
@@ -170,7 +224,7 @@ impl artifacts::VerificationObserver for CompletedCaptureRead {
         self.check()?;
         let source = manifest.description.as_ref().ok_or_else(unsupported)?;
         let rows = match &self.request {
-            ReadRequest::Snapshot { dataset, .. } => {
+            ReadRequest::Snapshot { dataset, .. } | ReadRequest::SnapshotLookup { dataset, .. } => {
                 source
                     .observation
                     .snapshot()
@@ -203,6 +257,7 @@ use artifacts::VerificationObserver;
 /// Provisional rows leave the worker only after every file hash and the journal receipt validate.
 #[derive(Debug)]
 pub(super) struct CompletedCapture {
+    pub connection: String,
     pub source: CollectionDescription,
     pub capture: DiagnosticCaptureRef,
     pub records: Vec<ExportedRecord>,
@@ -218,6 +273,7 @@ impl OutboxDelivery {
     pub(super) async fn with_completed_capture<T: Send + 'static>(
         &self,
         mut read: CompletedCaptureRead,
+        worker_guard: impl Send + 'static,
         project: impl FnOnce(CompletedCapture) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         read.check()?;
@@ -228,7 +284,7 @@ impl OutboxDelivery {
         };
         // Do not wrap started work in timeout/abort: the same worker keeps Files until it has stopped.
         access
-            .run(move |files| {
+            .run_owned(worker_guard, move |files| {
                 let completed = files.completed_capture(&mut read)?;
                 let result = project(completed)?;
                 read.check()?;
@@ -241,11 +297,16 @@ impl Files {
     fn completed_capture(&mut self, read: &mut CompletedCaptureRead) -> Result<CompletedCapture> {
         read.check()?;
         let capture = self.journal.capture(read.request.observation_id())?;
+        if read.required_connection.as_ref().is_some_and(|connection| capture.connection != *connection) {
+            return Err(problem(OutboxProblem::MissingCapture));
+        }
         match &read.request {
             ReadRequest::Snapshot { attempt, .. } if capture.identity != attempt.capture => {
                 return Err(DeliveryProblem::Conflict.error());
             }
-            ReadRequest::QueryHistory { connection, .. } if capture.connection != *connection => {
+            ReadRequest::SnapshotLookup { connection, .. } | ReadRequest::QueryHistory { connection, .. }
+                if capture.connection != *connection =>
+            {
                 return Err(problem(OutboxProblem::MissingCapture));
             }
             _ => (),
@@ -262,6 +323,7 @@ impl Files {
         }
         let manifest = validated.manifest;
         let source = manifest.description.ok_or_else(integrity)?;
+        let connection = capture.connection;
         let capture = DiagnosticCaptureRef {
             capture: manifest.capture,
             manifest_sha256: validated.manifest_sha,
@@ -279,6 +341,7 @@ impl Files {
         let (records, row_ordinals) = read.rows.drain();
         read.check()?;
         Ok(CompletedCapture {
+            connection,
             source,
             capture,
             records,
@@ -300,4 +363,11 @@ fn unsupported() -> Error {
 }
 fn integrity() -> Error {
     problem(OutboxProblem::Integrity)
+}
+
+fn validate_connection(connection: &str) -> Result<()> {
+    if connection.is_empty() || connection.len() > 512 {
+        return Err(DeliveryProblem::InvalidContract.error());
+    }
+    Ok(())
 }

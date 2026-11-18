@@ -14,7 +14,7 @@ fn captured() -> CachedRuntimeRead {
     let exported =
         ExportedRecord::new(&read.description, &capture, TelemetryRecord::Operational(read.observations[0].clone()))
             .unwrap();
-    let positions = vec![CachedRuntimeCapturedPosition::from_export(&exported, 0).unwrap()];
+    let positions = vec![CapturedSnapshotPosition::from_export(&exported, 0).unwrap()];
     read.origin = CachedRuntimeReadOrigin::captured(&read.description, parent, positions).unwrap();
     assert!(read.is_valid());
     read
@@ -129,7 +129,7 @@ fn duplicate_positions_cannot_pool_two_native_rows_into_one_captured_ordinal() {
             let exported =
                 ExportedRecord::new(&changed.description, &capture.capture, TelemetryRecord::Operational(row.clone()))
                     .unwrap();
-            CachedRuntimeCapturedPosition::from_export(&exported, 0).unwrap()
+            CapturedSnapshotPosition::from_export(&exported, 0).unwrap()
         })
         .collect();
     changed.origin = CachedRuntimeReadOrigin::captured(&changed.description, capture.clone(), positions).unwrap();

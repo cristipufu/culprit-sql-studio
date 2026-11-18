@@ -14,10 +14,14 @@ mod blocking;
 mod cache_entry_memory;
 mod cached_definitions;
 mod cached_runtime_read;
+mod captured_operational_read;
+mod captured_snapshot;
 pub use cached_runtime_read::{
-    CACHED_RUNTIME_READ_SOURCE, CachedRuntimeCapturedPosition, CachedRuntimeRead, CachedRuntimeReadOrigin,
-    cached_statement_read_id, cached_statement_read_key,
+    CACHED_RUNTIME_READ_SOURCE, CachedRuntimeRead, CachedRuntimeReadOrigin, cached_statement_read_id,
+    cached_statement_read_key,
 };
+pub use captured_operational_read::CapturedOperationalRead;
+pub use captured_snapshot::{CapturedSnapshotOrigin, CapturedSnapshotPosition};
 mod cached_statements;
 mod captured_reference;
 pub use captured_reference::{

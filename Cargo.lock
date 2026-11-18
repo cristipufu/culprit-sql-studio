@@ -1052,6 +1052,7 @@ dependencies = [
 name = "culprit-cli"
 version = "0.5.6"
 dependencies = [
+ "async-trait",
  "clap",
  "culprit-auth",
  "culprit-auth-azure",

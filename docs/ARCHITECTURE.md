@@ -280,10 +280,13 @@ runtime evidence only by the original logical database and full query incarnatio
 withholds SQL without discarding independently valid counters.
 
 Local completed-capture attachment uses the existing Outbox owner and one canonical manifest/journal/body
-verification pass. `CompletedRuntimeScanInput` has an independent row/byte/deadline budget; cancellation joins any
+verification pass. `CompletedCaptureScanInput` has an independent row/byte/deadline budget; cancellation joins any
 started worker. The SDK authenticates the capture before creating a scan provider and attaches its unchanged
 originals after native shutdown, before analysis and persistence. This explicit action does not schedule source
-collection or grant native cost approval.
+collection or grant native cost approval. Cached runtime keeps its exact native database-incarnation guard;
+clerk allocations retain their independently captured shared-instance scope without borrowing the current
+scan's database, member or clocks. The collector-free host accepts opaque results from an explicitly injected
+`LocalCaptureReader`; ordinary scans do not discover captures or acquire clerk data.
 
 Cleanup explanations consume existing typed retention populations or native operational facts. SQL Server retains
 PVS and oldest-transaction facts through separate `CleanupSnapshot` reads, with independent acquisition bounds;

@@ -39,7 +39,7 @@ Culprit's CLI is designed to be driven by agents: JSON output, stable ids, no pr
 | `blocking` | Who blocks whom right now, as chains under each head blocker |
 | `deadlocks` | Recent deadlocks explained, with the pattern and fix |
 | `waits` | Wait categories with the queries behind each, or a live sample (`now: true`) |
-| `captured_page_server_reads` | When explicitly enabled: explain one verified local collector capture without a database connection |
+| `analyze_capture` | When explicitly enabled: explain page-server reads or memory-clerk allocations from one verified local capture |
 | `schema` | Tables; or one table's columns, indexes and which captured plans use each index |
 | `drift` | Schema, index, setting and version differences between two connections |
 | `index_advice` | The index advisor: indexes to add, indexes to clean up, and table storage guidance |
@@ -68,14 +68,25 @@ Enable local evidence at server startup:
 culprit mcp --connection shop-staging --evidence-outbox /path/to/outbox
 ```
 
-`captured_page_server_reads` takes `connection` and `observation_id`; the latter is the capture's
-`manifest.json` → `capture.observation_id`. The connection must be delegated to the agent and match the original
+`analyze_capture` takes `connection`, `observation_id` and `analysis` (`page_server_reads` or `memory_clerks`);
+`observation_id` is the capture's `manifest.json` → `capture.observation_id`. The connection must be delegated to the agent and match the original
 journal entry. The tool reanalyzes verified originals, with redacted SQL previews only when their exact original
-definitions match. It does not connect to the database or use credentials, recovery storage or a warehouse.
+definitions match. Memory clerks retain their original shared-server scope, native counts and read bounds; they
+are not allocations attributable to the selected database or its queries. It does not connect to the database or use credentials, recovery storage or a warehouse.
 
 The directory must be available for exclusive ownership; a running collector's lock is not bypassed. An embedding
 host can instead share its existing Outbox actor. Without the startup option or an injected reader, this tool is
 absent. MCP diagnostic text stays English independently of the desktop language.
+
+To attach an existing clerk capture to a normal saved scan:
+
+```sh
+culprit scan shop-staging --evidence-outbox /path/to/outbox --memory-clerks-capture OBSERVATION
+```
+
+Both flags are required together. The capture must belong to that saved connection's journal entry. This runs the
+ordinary database scan and retains the independently captured clerk originals after the native scan owner closes;
+it starts no new clerk acquisition. Reopening the report reanalyzes those originals without accessing the outbox.
 
 ## Dashboard
 

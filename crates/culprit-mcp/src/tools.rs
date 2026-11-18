@@ -568,7 +568,7 @@ impl CulpritMcp {
         operation: Option<culprit_core::limits::OperationHandle>,
     ) -> ToolTask<'a> {
         match tool {
-            LOCAL_CAPTURE_TOOL => tool_task(|| self.captured_page_server_reads(value, operation)),
+            LOCAL_CAPTURE_TOOL => tool_task(|| self.analyze_capture(value, operation)),
             "scan" => tool_task(|| async move {
                 let a: ScanArgs = args(value)?;
                 self.allowed(&a.connection)?;

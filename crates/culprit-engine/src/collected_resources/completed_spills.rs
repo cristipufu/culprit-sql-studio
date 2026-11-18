@@ -87,7 +87,7 @@ impl<'a> CapturedSpills<'a> {
                         .iter()
                         .map(|record| {
                             let ordinal = record.row_ordinal().checked_sub(1).ok_or_else(invalid)?;
-                            CachedRuntimeCapturedPosition::from_export(record.row(), ordinal)
+                            CapturedSnapshotPosition::from_export(record.row(), ordinal)
                         })
                         .collect::<Result<Vec<_>>>()?,
                 )?,

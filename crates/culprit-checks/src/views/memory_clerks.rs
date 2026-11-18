@@ -3,9 +3,9 @@ use culprit_core::{
     Error, MeasurementScope, MemoryClerkEntry, MemoryClerkField, MemoryClerkReport, Result, Snapshot, SourceOutcome,
     SourceState, format, t,
     telemetry::{
-        CollectionBudget, CounterNature, CounterUnit, MEMORY_CLERK_NATIVE_OBJECT, MeasurementValue, NativeCounterSet,
-        NativeReadContext, ObservationReadContext, OperationalFact, OperationalObservation, StateSourceCoverage,
-        digest, memory_clerk_candidate, memory_clerk_source_is_valid,
+        CapturedOperationalRead, CollectionBudget, CounterNature, CounterUnit, MEMORY_CLERK_NATIVE_OBJECT,
+        MeasurementValue, NativeCounterSet, NativeReadContext, ObservationReadContext, OperationalFact,
+        OperationalObservation, StateSourceCoverage, digest, memory_clerk_candidate, memory_clerk_source_is_valid,
     },
 };
 use std::collections::BTreeSet;
@@ -30,11 +30,30 @@ pub fn explain_snapshot(snapshot: &Snapshot) -> Result<Option<MemoryClerkReport>
     let samples =
         snapshot.pressure.as_ref().and_then(|pressure| pressure.resource_counters.as_deref()).unwrap_or_default();
     let samples = samples.iter().filter(|sample| memory_clerk_candidate(sample)).collect::<Vec<_>>();
+    if let Some(captured) = snapshot.operations.memory_clerks.as_deref() {
+        if !samples.is_empty() {
+            return Err(invalid());
+        }
+        return explain_captured(captured).map(Some);
+    }
     let source = snapshot.sources.iter().find(|source| source.source == culprit_core::source_id::MEMORY_CLERKS);
     if samples.is_empty() && source.is_none() {
         return Ok(None);
     }
     explain(MemoryClerkEvidence::Snapshot { samples: &samples, source }).map(Some)
+}
+
+/// Interpret one original shared capture. Structural binding is separate from the input owner's authentication.
+pub fn explain_captured(read: &CapturedOperationalRead) -> Result<MemoryClerkReport> {
+    let coverage = read.memory_clerk_source()?;
+    let context = read.context()?;
+    let observations = read.observations.iter().filter(|row| row.source == coverage.source).collect::<Vec<_>>();
+    explain(MemoryClerkEvidence::Captured {
+        context: &context,
+        coverage,
+        observations: &observations,
+        read_complete: read.read_complete,
+    })
 }
 
 pub fn explain(evidence: MemoryClerkEvidence<'_>) -> Result<MemoryClerkReport> {

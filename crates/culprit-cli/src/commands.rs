@@ -19,9 +19,8 @@ pub(super) async fn doctor(ws: &Workspace, connection: &str, out: &Out) -> Resul
 }
 
 pub(super) async fn scan(ws: &Workspace, args: ScanArgs, out: &Out) -> Result<u8> {
-    let options = args.snapshot_options();
     out.progress(&t!("cli.scanning", connection = &args.connection));
-    let report = ws.scan_with_log(&args.connection, &options, args.query_log.as_deref()).await?;
+    let report = crate::scan_capture::scan(ws, &args).await?;
     out.scan(&report, args.full, &ws.paths().reports_dir(&args.connection));
     Ok(fail_code(&report, args.fail_on))
 }

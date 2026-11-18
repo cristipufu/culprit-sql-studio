@@ -8,7 +8,7 @@ fn read(input: &Evidence) -> CachedRuntimeRead {
         .zip(&input.references)
         .map(|(record, reference)| {
             let exported = ExportedRecord::new(&input.source, &reference.capture, record.clone()).unwrap();
-            CachedRuntimeCapturedPosition::from_export(&exported, reference.row_ordinal).unwrap()
+            CapturedSnapshotPosition::from_export(&exported, reference.row_ordinal).unwrap()
         })
         .collect();
     read.origin =

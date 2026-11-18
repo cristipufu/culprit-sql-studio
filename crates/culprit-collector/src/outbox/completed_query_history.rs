@@ -1,7 +1,7 @@
 //! An original local history read has neither warehouse publication authority nor a live database owner.
 use super::{
     OutboxDelivery,
-    completed_capture::{CompletedCapture, CompletedCaptureBudget, CompletedCaptureRead},
+    completed_capture::{CompletedCapture, CompletedCaptureBudget, CompletedCaptureLookup, CompletedCaptureRead},
 };
 use culprit_core::{Result, limits::OperationHandle, telemetry::*};
 
@@ -62,16 +62,18 @@ impl CompletedQueryHistory {
 impl OutboxDelivery {
     /// Lookup, queue and verification share the caller's original operation deadline. The journal supplies the
     /// actual receipt; a guessed capture ID cannot change its connection, original manifest or native scope.
+    /// The lifetime guard stays with that worker until exclusive Files access has ended.
     pub async fn with_completed_query_history<T: Send + 'static>(
         &self,
-        connection: &str,
-        observation_id: &str,
+        lookup: CompletedCaptureLookup<'_>,
         budget: CompletedCaptureBudget,
         operation: OperationHandle,
+        worker_guard: impl Send + 'static,
         project: impl FnOnce(CompletedQueryHistory) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        let read = CompletedCaptureRead::query_history(connection, observation_id, budget, operation)?;
-        self.with_completed_capture(read, move |completed| project(CompletedQueryHistory { completed })).await
+        let read = CompletedCaptureRead::query_history(lookup, budget, operation)?;
+        self.with_completed_capture(read, worker_guard, move |completed| project(CompletedQueryHistory { completed }))
+            .await
     }
 }
 
