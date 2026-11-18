@@ -5,6 +5,7 @@ import type { CleanupReport } from "./CleanupReport";
 import type { CompilationReport } from "./CompilationReport";
 import type { CompilerAdmissionReport } from "./CompilerAdmissionReport";
 import type { CompletedSpillReport } from "./CompletedSpillReport";
+import type { ConfiguredLogRateReport } from "./ConfiguredLogRateReport";
 import type { ConnectionOutcomeReport } from "./ConnectionOutcomeReport";
 import type { CounterRatioReport } from "./CounterRatioReport";
 import type { Finding } from "./Finding";
@@ -22,11 +23,12 @@ import type { Snapshot } from "./Snapshot";
 import type { StatementWorkReport } from "./StatementWorkReport";
 import type { Summary } from "./Summary";
 import type { TaskSpaceReport } from "./TaskSpaceReport";
+import type { WaitCounterReport } from "./WaitCounterReport";
 
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
+export type Report = { wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */
@@ -66,4 +68,4 @@ maintenance_progress?: MaintenanceProgressReport,
 /**
  * Native replication points retain original scope, clocks and availability independently of legacy summaries.
  */
-replication?: ReplicationReport, connection_outcomes?: ConnectionOutcomeReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+replication?: ReplicationReport, connection_outcomes?: ConnectionOutcomeReport, configured_log_rates?: ConfiguredLogRateReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

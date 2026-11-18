@@ -473,6 +473,7 @@ pub enum OperationalFact {
     MssqlIndex(Box<MssqlIndexSnapshot>),
     MssqlMissingIndex(Box<MssqlMissingIndexSnapshot>),
     MssqlQueryCompilation(Box<MssqlQueryCompilation>),
+    ConfiguredLogRateLimits(Box<ConfiguredLogRateLimits>),
     MssqlCachedRuntime(Box<CachedStatementRuntime>),
     SuspectPages {
         count: String,
@@ -513,6 +514,7 @@ impl OperationalFact {
             Self::MssqlIndex(index) => index.key(),
             Self::MssqlMissingIndex(index) => index.key(),
             Self::MssqlQueryCompilation(compilation) => compilation.key(),
+            Self::ConfiguredLogRateLimits(point) => point.key(),
             Self::MssqlCachedRuntime(runtime) => runtime.context.identity.key(),
             Self::Space(_)
             | Self::Sequence(_)
@@ -528,6 +530,7 @@ impl OperationalFact {
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         match self {
             Self::CompilerWaiter(waiter) => waiter.request.redact(engine),
+            Self::ConfiguredLogRateLimits(_) => {}
             Self::MssqlIndex(index) => index.redact(engine),
             Self::CatalogCounters(counters) => counters.catalog.redact(engine),
             Self::ExecutionGrant(grant) => grant.redact(engine),
@@ -634,6 +637,7 @@ impl OperationalFact {
             Self::MssqlIndex(index) => index.is_valid(),
             Self::MssqlMissingIndex(index) => index.is_valid(),
             Self::MssqlQueryCompilation(compilation) => compilation.is_valid(),
+            Self::ConfiguredLogRateLimits(point) => point.is_valid(),
             Self::MssqlCachedRuntime(runtime) => runtime.is_valid(),
         }
     }
@@ -666,6 +670,7 @@ impl OperationalObservation {
                 OperationalFact::TimescaleJobState(_) => self.source == TIMESCALE_JOBS_SOURCE,
                 OperationalFact::TimescaleJobRun(_) => self.source == TIMESCALE_JOB_RUNS_SOURCE,
                 OperationalFact::CompilerWaiter(_) => self.source == crate::source_id::COMPILATION_GATEWAYS,
+                OperationalFact::ConfiguredLogRateLimits(_) => self.source == CONFIGURED_LOG_RATES_SOURCE,
                 OperationalFact::Retention(retainer) => retainer.source == self.source,
                 OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,
                 OperationalFact::ExecutionGrant(grant) => grant.source == self.source,
@@ -698,6 +703,19 @@ pub struct WaitCounterObservation {
     pub max_wait_time_ms: String,
 }
 impl WaitCounterObservation {
+    /// Resource waiting is the checked difference of this original row's millisecond totals. A contradictory
+    /// native point remains inspectable; neither input is clamped or replaced with a synthetic zero.
+    pub fn resource_wait_time_ms(&self) -> Option<String> {
+        if !self.is_valid() {
+            return None;
+        }
+        self.wait_time_ms
+            .parse::<u64>()
+            .ok()?
+            .checked_sub(self.signal_wait_time_ms.parse::<u64>().ok()?)
+            .map(|value| value.to_string())
+    }
+
     pub fn is_valid_for(&self, engine: crate::Engine) -> bool {
         self.is_valid() && self.mechanism == engine.spec().native_wait_mechanism(&self.wait_type)
     }

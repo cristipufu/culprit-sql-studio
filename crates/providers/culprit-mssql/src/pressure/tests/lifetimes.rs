@@ -6,7 +6,7 @@ use crate::{
 };
 use culprit_core::telemetry::{CollectionStop, SourceShutdown};
 
-fn probe(started_at: Option<&str>) -> Probe {
+pub(super) fn probe(started_at: Option<&str>) -> Probe {
     Probe {
         version: "16.0.1000.6".into(),
         major: 16,
@@ -26,7 +26,7 @@ fn probe(started_at: Option<&str>) -> Probe {
     }
 }
 
-fn native_counters(prefix: &str) -> Vec<Rec> {
+pub(super) fn native_counters(prefix: &str) -> Vec<Rec> {
     [
         ("SQL Statistics", "Batch Requests/sec", 2000, 272_696_576),
         ("SQL Statistics", "SQL Compilations/sec", 600, 272_696_576),
@@ -82,7 +82,7 @@ async fn history_terminal_stops_close_the_owner_without_dispatching_performance_
     ]);
     for error in errors {
         let mut io = FakeRead::new(vec![Err(ReadError::Source(error.clone())), Ok(native_counters("SQLServer"))]);
-        let (waits, counters) = history_from(&mut io, false).await;
+        let HistoryRead { waits, counters, .. } = history_from(&mut io, false).await;
         assert_eq!(io.calls.len(), 1, "terminal failure must not dispatch another source: {error:?}");
         assert_eq!(io.closed, 1, "the same owner must still settle its source work");
         for result in [waits.map(|_| ()), counters.map(|_| ())] {
@@ -98,7 +98,7 @@ async fn history_terminal_stop_keeps_an_unconfirmed_close_stronger_than_the_orig
     let mut io =
         FakeRead::new(vec![Err(ReadError::Stopped(CollectionStop::TimedOut)), Ok(native_counters("SQLServer"))]);
     io.shutdown = SourceShutdown::Unconfirmed;
-    let (waits, counters) = history_from(&mut io, false).await;
+    let HistoryRead { waits, counters, .. } = history_from(&mut io, false).await;
     assert_eq!(io.calls.len(), 1);
     assert_eq!(io.closed, 1);
     for result in [waits.map(|_| ()), counters.map(|_| ())] {
@@ -114,7 +114,7 @@ async fn history_independent_source_gaps_keep_performance_evidence_without_retry
         CollectionStop::RowLimit.error(),
     ] {
         let mut io = FakeRead::new(vec![Err(ReadError::Source(error.clone())), Ok(native_counters("SQLServer"))]);
-        let (waits, counters) = history_from(&mut io, false).await;
+        let HistoryRead { waits, counters, .. } = history_from(&mut io, false).await;
         assert_eq!(io.calls.len(), 2);
         assert_eq!(io.closed, 1);
         assert!(io.calls[0].sql.contains("sys.dm_os_wait_stats"));
@@ -133,9 +133,11 @@ async fn an_earlier_pooled_probe_cannot_supply_the_lifetime_of_the_current_nativ
     for prefix in ["MSSQL$other-member", "SQLServer"] {
         for started_at in [Some("2000-01-01T00:00:00Z"), Some("2026-11-15T00:00:00Z"), Some("invalid"), None] {
             let mut io = reader(prefix);
-            let (waits, counters) = history_from(&mut io, false).await;
-            assert!(waits.as_ref().unwrap().iter().all(|wait| wait.reset == culprit_core::ResetMarker::Unknown));
-            let captured = project_history(&probe(started_at), waits, counters);
+            let history = history_from(&mut io, false).await;
+            assert!(
+                history.waits.as_ref().unwrap().iter().all(|wait| wait.reset == culprit_core::ResetMarker::Unknown)
+            );
+            let captured = project_history(&probe(started_at), history);
             assert_eq!(captured.pressure.uptime_hours, None);
             assert!(captured.pressure.signals.iter().all(|signal| !matches!(
                 signal.key.as_str(),
@@ -166,10 +168,10 @@ async fn an_earlier_pooled_probe_cannot_supply_the_lifetime_of_the_current_nativ
 #[tokio::test]
 async fn unknown_wait_reset_never_becomes_a_startup_lifetime_even_with_a_matching_counter_label() {
     let mut io = reader("SQLServer");
-    let (waits, counters) = history_from(&mut io, false).await;
+    let history = history_from(&mut io, false).await;
     let mut same_label = probe(Some("2000-01-01T00:00:00Z"));
     same_label.edition = "SQLServer".into();
-    let captured = project_history(&same_label, waits, counters);
+    let captured = project_history(&same_label, history);
     assert_eq!(captured.pressure.uptime_hours, None);
     let worker = captured.pressure.signal(culprit_core::signal_id::THREADPOOL_WAIT_MS).unwrap();
     assert_eq!(worker.value, 10_000.0);
@@ -182,10 +184,16 @@ async fn unknown_wait_reset_never_becomes_a_startup_lifetime_even_with_a_matchin
 async fn unconfirmed_close_invalidates_both_histories_and_a_missing_counter_source_keeps_wait_positives() {
     let mut uncertain = reader("SQLServer");
     uncertain.shutdown = SourceShutdown::Unconfirmed;
-    let (waits, counters) = history_from(&mut uncertain, false).await;
-    assert_eq!(CollectionStop::from_error(waits.as_ref().err().unwrap()), CollectionStop::CancellationUnconfirmed);
-    assert_eq!(CollectionStop::from_error(counters.as_ref().err().unwrap()), CollectionStop::CancellationUnconfirmed);
-    let captured = project_history(&probe(None), waits, counters);
+    let history = history_from(&mut uncertain, false).await;
+    assert_eq!(
+        CollectionStop::from_error(history.waits.as_ref().err().unwrap()),
+        CollectionStop::CancellationUnconfirmed
+    );
+    assert_eq!(
+        CollectionStop::from_error(history.counters.as_ref().err().unwrap()),
+        CollectionStop::CancellationUnconfirmed
+    );
+    let captured = project_history(&probe(None), history);
     assert!(captured.pressure.signals.is_empty());
     assert!(captured.waits.is_empty());
     assert_eq!(uncertain.closed, 1);
@@ -194,8 +202,8 @@ async fn unconfirmed_close_invalidates_both_histories_and_a_missing_counter_sour
         Ok(vec![crate::waits::tests::row("THREADPOOL", 1000)]),
         Err(ReadError::Source(culprit_core::Error::new(culprit_core::ErrorCode::PermissionDenied, "fixture denied"))),
     ]);
-    let (waits, counters) = history_from(&mut partial, false).await;
-    let captured = project_history(&probe(Some("2000-01-01T00:00:00Z")), waits, counters);
+    let history = history_from(&mut partial, false).await;
+    let captured = project_history(&probe(Some("2000-01-01T00:00:00Z")), history);
     assert_eq!(captured.pressure.uptime_hours, None);
     assert_eq!(captured.pressure.signal(culprit_core::signal_id::THREADPOOL_WAIT_MS).unwrap().value, 1000.0);
     assert!(captured.pressure.signal(culprit_core::signal_id::COMPILES_PER_BATCH).is_none());

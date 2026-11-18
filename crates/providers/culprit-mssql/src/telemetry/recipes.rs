@@ -225,7 +225,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(crate::task_space::bounded_budget)
     .version(2),
-    state!("mssql.operational", Operational).baseline().version(2),
+    state!("mssql.operational", Operational).baseline().version(3),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()

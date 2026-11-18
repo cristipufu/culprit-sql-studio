@@ -488,11 +488,19 @@ impl OpenTransaction {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
 #[ts(export)]
 pub struct Pressure {
+    /// Original wait rows from the existing read, separate from lossy category summaries and short samples.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wait_counters: Option<Box<crate::telemetry::WaitCounterSnapshot>>,
     /// Original native connection/session counters, separate populations and source coverage. Client acquisition
     /// clocks or a configured database route never qualify a physical member or a counter's lifetime.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub connection_outcomes: Option<Box<crate::ConnectionOutcomeSnapshot>>,
+    /// Acquisition-time native configuration, independent of historical utilization and current throttling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub configured_log_rates: Option<Box<crate::telemetry::ConfiguredLogRateRead>>,
     /// How long the "since startup" signals cover.
     pub uptime_hours: Option<f64>,
     pub signals: Vec<Signal>,

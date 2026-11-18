@@ -26,6 +26,8 @@ import { CompilerAdmission } from "./CompilerAdmission";
 import { CleanupEvidence } from "./CleanupEvidence";
 import { StatementWork } from "./StatementWork";
 import { CounterRatios } from "./CounterRatios";
+import { ConfiguredLogRates } from "./ConfiguredLogRates";
+import { WaitCounters } from "./WaitCounters";
 import { ConnectionOutcomes } from "./ConnectionOutcomes";
 import { PageServerReads, pageServerReadIssue } from "./PageServerReads";
 import { Jobs, JOBS_SOURCES } from "./Jobs";
@@ -129,9 +131,15 @@ export function HealthTab({
   const statementWork = report.snapshot.operations.statement_work;
   const statementWorkReport = report.statement_work;
   const statementWorkUnexplained = Boolean(statementWork && !statementWorkReport);
+  const waitCounters = report.wait_counters;
+  const waitCounterRead = pressure?.wait_counters;
+  const waitCounterIssue = observationReadIssue("waits", report.snapshot.sources ?? []);
   const counterRatios = report.counter_ratios;
   const counterRatioRead = pressure?.resource_counters?.some((sample) => sample.ratios.length > 0) ?? false;
   const counterRatioIssue = observationReadIssue("performance counters", report.snapshot.sources ?? []);
+  const configuredLogRates = report.configured_log_rates;
+  const configuredLogRateRead = report.snapshot.pressure?.configured_log_rates;
+  const configuredLogRateIssue = observationReadIssue("configured-log-rates", report.snapshot.sources ?? []);
   const connectionOutcomes = report.connection_outcomes;
   const connectionOutcomesRead = report.snapshot.pressure?.connection_outcomes;
   const connectionOutcomesIssue = observationReadIssue("sessions", report.snapshot.sources ?? []);
@@ -145,8 +153,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, counterRatios, counterRatioRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, counterRatioIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, counterRatios, counterRatioRead, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, counterRatioIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -211,6 +219,12 @@ export function HealthTab({
       {jobs && !jobsReport && jobsIssues.length === 0 && <ObservationSourceIssue source={{ source: "timescale-jobs", state: "unavailable", reason: t("view.jobs.invalid") }} title={t("view.jobs.title")} />}
       {statementWork && statementWorkReport && <StatementWork key={report.snapshot.id} evidence={statementWork} report={statementWorkReport} />}
       {statementWorkUnexplained && <ObservationExplanationIssue title={t("view.statement_work.title")} reason={t("view.statement_work.invalid")} />}
+      {configuredLogRates && <ConfiguredLogRates key={report.snapshot.id} report={configuredLogRates} />}
+      {!configuredLogRates && configuredLogRateIssue && <ObservationSourceIssue source={configuredLogRateIssue} title={t("view.configured_log_rates.title")} />}
+      {!configuredLogRates && configuredLogRateRead && !configuredLogRateIssue && <ObservationExplanationIssue title={t("view.configured_log_rates.title")} reason={t("view.configured_log_rates.invalid")} />}
+      {waitCounters && <WaitCounters key={report.snapshot.id} report={waitCounters} />}
+      {!waitCounters && waitCounterIssue && <ObservationSourceIssue source={waitCounterIssue} title={t("view.wait_counters.title")} />}
+      {!waitCounters && waitCounterRead && !waitCounterIssue && <ObservationExplanationIssue title={t("view.wait_counters.title")} reason={t("view.wait_counters.invalid")} />}
       {counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
       {!counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
       {!counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}

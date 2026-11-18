@@ -333,6 +333,7 @@ mod tests {
         let start = parse_epoch_seconds("2026-10-11T10:00:15Z").unwrap();
         s.resources = (0..240)
             .map(|i| ResourceSample {
+                measurement: None,
                 data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
                 at: format::iso_from_epoch(start + i as f64 * 15.0),
                 cpu_pct: Some(cpu(i)),

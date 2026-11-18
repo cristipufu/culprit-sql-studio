@@ -7,6 +7,7 @@ import { t } from "./i18n";
 function samples(basis: ResourceSample["data_io_accounting"]): ResourceSample[] {
   return Array.from({ length: 4 }, (_, index) => ({
     at: `2020-01-01T06:00:${String(index * 15).padStart(2, "0")}Z`,
+    measurement: null,
     data_io_accounting: basis, data_io_pct: 99, cpu_pct: null, log_write_pct: null, memory_pct: null, workers_pct: null,
   }));
 }

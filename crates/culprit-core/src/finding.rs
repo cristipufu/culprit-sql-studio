@@ -378,6 +378,9 @@ pub struct SeverityCount {
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub wait_counters: Option<Box<crate::WaitCounterReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub counter_ratios: Option<Box<crate::CounterRatioReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -434,6 +437,9 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub connection_outcomes: Option<Box<crate::ConnectionOutcomeReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub configured_log_rates: Option<Box<crate::ConfiguredLogRateReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cleanup: Option<crate::CleanupReport>,

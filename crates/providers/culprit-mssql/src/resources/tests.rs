@@ -22,6 +22,13 @@ async fn snapshot_and_export_keep_the_same_native_values_precision_and_scopes() 
     assert_eq!(displayed.data_io_accounting, exported.data_io_accounting);
     assert_eq!(displayed.data_io_accounting, DataIoAccounting::DataFiles);
     assert_eq!(displayed.at, exported.at);
+    assert_eq!(displayed.measurement.as_deref(), Some(&exported));
+    assert_eq!(exported.metrics.len(), 11);
+    assert_eq!(exported.replica_id, None);
+    assert_eq!(
+        exported.replica_role,
+        Some(NativeResourceReplicaRole::MssqlDbResourceStats(MssqlResourceReplicaRole::Primary))
+    );
     assert_eq!(displayed.at, "2020-01-01T06:00:15.153333300Z");
     assert_eq!(displayed.cpu_pct, Some(0.0));
     assert_eq!(displayed.cpu_pct, metric("cpu", Database).value);
@@ -101,10 +108,15 @@ async fn malformed_pages_duplicates_and_out_of_window_rows_never_publish_a_parti
     assert!(io.calls.is_empty());
 }
 #[tokio::test]
-async fn native_secondary_samples_keep_their_replica_identity() {
+async fn native_secondary_samples_keep_their_role_without_claiming_member_identity() {
     let mut io = FakeRead::new(vec![Ok(vec![replace(&row("2020-01-01T06:00:15Z"), &[("replica_role", Val::Int(2))])])]);
     let sample = retained(&mut io).await.map_err(ReadError::into_error).unwrap().remove(0);
-    assert_eq!(sample.exported().replica_id.as_deref(), Some("2"));
+    assert_eq!(sample.exported().replica_id, None);
+    assert_eq!(
+        sample.exported().replica_role,
+        Some(NativeResourceReplicaRole::MssqlDbResourceStats(MssqlResourceReplicaRole::GeoReplicationForwarder))
+    );
+    assert_eq!(sample.snapshot().measurement.as_deref(), Some(&sample.exported()));
     assert_eq!(sample.snapshot().cpu_pct, Some(0.0));
 }
 #[tokio::test]
@@ -221,4 +233,53 @@ async fn unchanged_admission_projection_needs_no_unrequested_profile_and_cannot_
     assert_eq!(latest.sample.value(Metric::DataIo), Some(20.0));
     assert_eq!(io.calls.len(), 1);
     assert!(!io.calls[0].sql.contains("DATABASEPROPERTYEX"));
+}
+
+#[tokio::test]
+async fn historical_samples_never_borrow_the_current_profile_member_and_round_trip_all_dimensions() {
+    for role in [0, 1, 2, 3] {
+        let raw = replace(
+            &row("2020-01-01T06:00:15Z"),
+            &[
+                ("replica_role", Val::Int(role)),
+                ("replica_id", Val::Text("f0c14b54-c8bc-4e56-af8c-cf991caa9401".into())),
+            ],
+        );
+        let mut io = FakeRead::new(vec![Ok(vec![raw])]);
+        let sample = retained(&mut io).await.unwrap().remove(0);
+        let exported = sample.exported();
+        assert_eq!(exported.replica_id, None, "profile ReplicaID does not bind an earlier row");
+        assert_eq!(
+            exported.replica_role,
+            Some(NativeResourceReplicaRole::MssqlDbResourceStats(
+                MssqlResourceReplicaRole::from_native_code(role).unwrap()
+            ))
+        );
+        let scan = sample.snapshot();
+        let encoded = serde_json::to_string(&scan).unwrap();
+        assert!(!encoded.contains("f0c14b54-c8bc-4e56-af8c-cf991caa9401"));
+        let decoded: culprit_core::ResourceSample = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.measurement.as_deref(), Some(&exported));
+        assert_eq!(decoded.measurement.as_ref().unwrap().metrics.len(), 11);
+        assert_eq!(io.calls.len(), 1);
+        assert_eq!(io.calls[0].sql, sql::DATABASE.retained());
+        assert_eq!(io.closed, 0, "borrowed reader lifecycle remains with the caller");
+    }
+}
+
+#[tokio::test]
+async fn unknown_native_role_is_distinct_from_primary_and_invalid_codes_never_become_unknown() {
+    let raw = replace(&row("2020-01-01T06:00:15Z"), &[("replica_role", Val::Null)]);
+    assert!(Sample::decode_utilization(&raw).is_err());
+    let mut io = FakeRead::new(vec![Ok(vec![raw])]);
+    let sample = retained(&mut io).await.unwrap().remove(0);
+    assert_eq!(sample.exported().replica_role, None);
+    assert_eq!(sample.exported().replica_id, None);
+    assert_eq!(sample.snapshot().measurement.as_deref(), Some(&sample.exported()));
+    for value in [Val::Int(-1), Val::Int(4), Val::Text("0".into())] {
+        let raw = replace(&row("2020-01-01T06:00:15Z"), &[("replica_role", value)]);
+        let mut io = FakeRead::new(vec![Ok(vec![raw])]);
+        assert!(retained(&mut io).await.is_err());
+        assert_eq!(io.calls.len(), 1);
+    }
 }

@@ -108,6 +108,22 @@ impl<'a> CapturedState<'a> {
             .collect()
     }
 
+    pub fn wait_counters(&self) -> Result<Vec<&'a WaitCounterObservation>> {
+        if self.family != EvidenceFamily::WaitCounterSamples {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
+        self.capture
+            .records()
+            .iter()
+            .filter_map(|record| {
+                let TelemetryRecord::WaitCounter(row) = &record.row().record else {
+                    return Some(Err(invalid()));
+                };
+                (row.source == self.coverage.source).then_some(Ok(row))
+            })
+            .collect()
+    }
+
     pub fn tuning(&self) -> Result<Vec<&'a TuningObservation>> {
         if self.family != EvidenceFamily::TuningObservations {
             return Err(DeliveryProblem::UnsupportedSchema.error());
@@ -179,6 +195,11 @@ fn native_state(
                 if observation.is_valid() =>
             {
                 &observation.source
+            }
+            (TelemetryRecord::WaitCounter(row), EvidenceFamily::WaitCounterSamples)
+                if row.is_valid_for(capture.source().target.engine()) =>
+            {
+                &row.source
             }
             _ => return Err(invalid()),
         };

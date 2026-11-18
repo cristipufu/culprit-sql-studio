@@ -2,7 +2,7 @@
 //! transaction. Read-only and tagged; a read that fails leaves its signal out.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use culprit_core::{Coverage, Engine, Pressure, Signal, SignalScope, SignalUnit, WaitSample, WaitStat, format, t};
 
@@ -120,8 +120,8 @@ pub(crate) struct CollectedPressure {
 
 pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Probe) -> CollectedPressure {
     let azure = probe.is_azure_sql_database();
-    let (native_waits, native_counters) = history(pool.clone(), azure).await;
-    let mut captured = project_history(probe, native_waits, native_counters);
+    let history = history(pool.clone(), azure).await;
+    let mut captured = project_history(probe, history);
     let p = &mut captured.pressure;
     let coverage = &mut captured.coverage;
     p.signals.extend(crate::queues::application(pool.clone(), probe, coverage).await);
@@ -147,11 +147,13 @@ pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Pro
     captured
 }
 
-fn project_history(
-    probe: &Probe,
-    native_waits: culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
-    native_counters: culprit_core::Result<crate::performance::PerformanceRead>,
-) -> CollectedPressure {
+struct HistoryRead {
+    waits: culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
+    counters: culprit_core::Result<crate::performance::PerformanceRead>,
+    wait_context: Option<culprit_core::telemetry::ObservationReadContext>,
+}
+
+fn project_history(probe: &Probe, history: HistoryRead) -> CollectedPressure {
     let azure = probe.is_azure_sql_database();
     // Probe uses another pooled owner. Neither it nor these native rows establishes the counter lifetime.
     let mut p = Pressure::default();
@@ -163,8 +165,9 @@ fn project_history(
             error
         }
     };
-    let native_waits = native_waits.map_err(permission);
-    let native_counters = native_counters.map_err(permission);
+    let native_waits = history.waits.map_err(permission);
+    let native_counters = history.counters.map_err(permission);
+    p.wait_counters = Some(Box::new(wait_snapshot(native_waits.as_ref(), history.wait_context)));
     if let Some(counters) = coverage.read(&sources::LOGINS, native_counters.clone()) {
         let values = crate::performance::application(&counters.sample.counters);
         p.signals.extend(crate::signals::connection_reuse_signals(
@@ -190,35 +193,48 @@ fn project_history(
     CollectedPressure { pressure: p, waits: categories, coverage, cleanup: Vec::new(), compiler_admission: None }
 }
 
-/// Both consumers use one native wait snapshot; no second reading can silently describe a different instant.
-async fn history(
-    pool: std::sync::Arc<crate::conn::Pool>,
-    azure: bool,
-) -> (
-    culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
-    culprit_core::Result<crate::performance::PerformanceRead>,
-) {
+fn wait_snapshot(
+    rows: std::result::Result<&Vec<culprit_core::telemetry::WaitCounterObservation>, &culprit_core::Error>,
+    context: Option<culprit_core::telemetry::ObservationReadContext>,
+) -> culprit_core::telemetry::WaitCounterSnapshot {
+    use culprit_core::telemetry::{CollectionStop, StateSourceCoverage, WaitCounterSnapshot};
+    let (source, observations) = match rows {
+        Ok(rows) => {
+            (StateSourceCoverage::collected(culprit_core::source_id::WAITS.into(), rows.len() as u32), rows.clone())
+        }
+        Err(error) => (
+            StateSourceCoverage::unavailable(
+                culprit_core::source_id::WAITS.into(),
+                error.code,
+                Some(CollectionStop::from_error(error)),
+            ),
+            Vec::new(),
+        ),
+    };
+    WaitCounterSnapshot { context, sources: vec![source], observations, read_complete: true }
+}
+
+/// Every projection uses one native wait snapshot, published only after its owner confirms close.
+async fn history(pool: std::sync::Arc<crate::conn::Pool>, azure: bool) -> HistoryRead {
     let mut reader = ReadSession::new(pool, culprit_core::telemetry::CollectionBudget::default());
     history_from(&mut reader, azure).await
 }
 
-async fn history_from<R: NativeRead>(
-    reader: &mut R,
-    azure: bool,
-) -> (
-    culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
-    culprit_core::Result<crate::performance::PerformanceRead>,
-) {
+async fn history_from<R: NativeRead>(reader: &mut R, azure: bool) -> HistoryRead {
+    let from = SystemTime::now();
     let waits = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error);
+    let until = SystemTime::now();
+    // Only acquisition is timed here. No later pooled Probe supplies a native clock, reset or member.
+    let wait_context = culprit_core::telemetry::ObservationReadContext::collector(from, until).ok();
     let counters = match &waits {
         Err(error) if crate::read::stops_remaining_reads(error) => Err(error.clone()),
         _ => counters(reader).await,
     };
     if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         let error = culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error();
-        return (Err(error.clone()), Err(error));
+        return HistoryRead { waits: Err(error.clone()), counters: Err(error), wait_context };
     }
-    (waits, counters)
+    HistoryRead { waits, counters, wait_context }
 }
 
 /// Queries waiting for a memory grant at the scan's instant.
@@ -449,6 +465,7 @@ mod tests {
 
     use super::*;
     mod lifetimes;
+    mod wait_counters;
 
     fn counters(ple: f64) -> HashMap<String, f64> {
         HashMap::from([

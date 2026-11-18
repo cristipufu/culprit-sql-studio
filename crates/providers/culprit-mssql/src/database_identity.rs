@@ -5,6 +5,8 @@ use crate::{
 };
 use culprit_core::{DatabaseIdentity, Engine, Result, telemetry::CollectionStop};
 
+pub(crate) mod log_rates;
+
 const AZURE_COLUMNS: &str = "database_name,CONVERT(varchar(36),logical_database_guid) AS incarnation,CONVERT(varchar(36),physical_database_guid) AS physical_incarnation,CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(32)) AS updateability";
 const AZURE_RELATION: &str = "sys.dm_user_db_resource_governance WHERE database_id=DB_ID() AND database_name=DB_NAME()";
 
@@ -64,14 +66,43 @@ impl Context {
 }
 
 /// Existing collector identity admission stays strict even though ordinary history can retain unknown identity.
+#[derive(Debug)]
+pub(crate) struct GovernanceRead {
+    pub context: Context,
+    pub configured_log_rates: Result<Option<culprit_core::telemetry::ConfiguredLogRateLimits>>,
+}
+
 pub(crate) async fn read_azure(reader: &mut impl NativeRead) -> Result<Context> {
-    let rows = reader.query(&azure_query(), vec![], 2).await.map_err(ReadError::into_error)?;
+    Ok(read_azure_detail(reader, log_rates::Detail::Identity).await?.context)
+}
+
+pub(crate) async fn read_azure_detail(
+    reader: &mut impl NativeRead,
+    detail: log_rates::Detail,
+) -> Result<GovernanceRead> {
+    let rows = reader.query(&azure_query_detail(detail), vec![], 2).await.map_err(ReadError::into_error)?;
     let [row] = rows.as_slice() else { return Err(invalid_data()) };
     let context = Context::decode(row, crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE)?;
     if context.incarnation.is_none() {
         return Err(invalid_data());
     }
-    Ok(context)
+    let configured_log_rates = if detail == log_rates::Detail::ConfiguredLogRates {
+        log_rates::decode(row, &context, "configured_log_observed_at")
+    } else {
+        Ok(None)
+    };
+    Ok(GovernanceRead { context, configured_log_rates })
+}
+
+fn azure_query_detail(detail: log_rates::Detail) -> String {
+    match detail {
+        log_rates::Detail::Identity => azure_query(),
+        log_rates::Detail::ConfiguredLogRates => format!(
+            "SELECT /* culprit */ {AZURE_COLUMNS},{},{} FROM {AZURE_RELATION} OPTION(MAXDOP 1)",
+            log_rates::COLUMNS,
+            log_rates::CLOCK
+        ),
+    }
 }
 
 fn azure_query() -> String {
@@ -81,17 +112,28 @@ fn azure_query() -> String {
 /// The optional identity lookup stays inside the existing window batch. Azure permission gaps cannot erase an
 /// otherwise readable Query Store population. No other platform parses an Azure-only catalog reference.
 pub(crate) fn window_declaration(edition: i64) -> String {
+    window_declaration_detail(edition, log_rates::Detail::Identity)
+}
+
+pub(crate) fn window_declaration_detail(edition: i64, detail: log_rates::Detail) -> String {
     if edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
         return String::new();
     }
-    // Both native IDs are taken from the same single selected row. A second row is an ambiguity witness.
+    let (declarations, assignments, fields) = match detail {
+        log_rates::Detail::Identity => ("", "", String::new()),
+        log_rates::Detail::ConfiguredLogRates => {
+            (log_rates::declaration(), log_rates::assignment(), format!(",{}", log_rates::COLUMNS))
+        }
+    };
+    // Both native IDs and the optional configuration come from the same selected row. A second row remains
+    // an ambiguity witness; an independent limit change is not part of database-incarnation equality.
     format!(
         r#"DECLARE /* culprit */ @culprit_identity_rows bigint=0,
- @culprit_logical_database_guid varchar(36)=NULL,@culprit_physical_database_guid varchar(36)=NULL;
+ @culprit_logical_database_guid varchar(36)=NULL,@culprit_physical_database_guid varchar(36)=NULL{declarations};
 BEGIN TRY
  SELECT @culprit_identity_rows=COUNT_BIG(*),@culprit_logical_database_guid=MIN(native.incarnation),
-  @culprit_physical_database_guid=MIN(native.physical_incarnation)
- FROM (SELECT TOP(2) {AZURE_COLUMNS} FROM {AZURE_RELATION}) native OPTION(MAXDOP 1);
+  @culprit_physical_database_guid=MIN(native.physical_incarnation){assignments}
+ FROM (SELECT TOP(2) {AZURE_COLUMNS}{fields} FROM {AZURE_RELATION}) native OPTION(MAXDOP 1);
 END TRY
 BEGIN CATCH
  IF ERROR_NUMBER() NOT IN(229,297,300) THROW;
@@ -101,6 +143,14 @@ BEGIN CATCH
 END CATCH;
 "#
     )
+}
+
+pub(crate) fn window_columns_detail(edition: i64, detail: log_rates::Detail) -> String {
+    let mut columns = window_columns(edition).to_owned();
+    if edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE && detail == log_rates::Detail::ConfiguredLogRates {
+        columns.push_str(log_rates::columns());
+    }
+    columns
 }
 
 pub(crate) fn window_columns(edition: i64) -> &'static str {

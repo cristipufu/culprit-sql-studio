@@ -127,11 +127,19 @@ fn resources(values: &Map<String, Value>) -> Result<TelemetryRecord> {
         Some(Value::String(id)) => Some(id.clone()),
         _ => return Err(invalid()),
     };
+    let replica_role =
+        serde_json::from_value(values.get("ReplicaRole").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
     let metrics: Vec<ResourceMetricSample> =
         serde_json::from_value(values.get("Metrics").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
     let data_io_accounting =
         serde_json::from_value(values.get("DataIoAccounting").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
-    Ok(TelemetryRecord::ResourceSample(ResourceMeasurement { data_io_accounting, at, replica_id, metrics }))
+    Ok(TelemetryRecord::ResourceSample(ResourceMeasurement {
+        data_io_accounting,
+        at,
+        replica_id,
+        replica_role,
+        metrics,
+    }))
 }
 
 fn wait_counter(values: &Map<String, Value>) -> Result<TelemetryRecord> {

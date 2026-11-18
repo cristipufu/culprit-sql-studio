@@ -11,6 +11,7 @@ const PARTICIPANT_ENTRIES: usize = 5;
 const REPLICATION_ENTRIES: usize = 16;
 
 mod completed_spills;
+mod configured_log_rates;
 mod connection_outcomes;
 mod counter_ratios;
 mod jobs;
@@ -111,6 +112,7 @@ pub fn report(report: &Report) -> Value {
     page_server_reads::attach(&mut response, report);
     connection_outcomes::attach(&mut response, report);
     counter_ratios::attach(&mut response, report);
+    configured_log_rates::attach(&mut response, report);
     if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {
         match culprit_engine::explain_replication(native, true, REPLICATION_ENTRIES) {
             Ok(evidence) => {

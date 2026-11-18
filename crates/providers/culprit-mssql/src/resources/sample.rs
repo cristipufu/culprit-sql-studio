@@ -1,6 +1,6 @@
 //! Native units, scopes and aggregation are defined once, before either consumer renders or exports them.
 use crate::{
-    read::{integer, invalid_data},
+    read::{invalid_data, optional_integer},
     value::{Rec, Val},
 };
 use ResourceLimitBasis::{Absolute, DatabaseLimit, InstanceLimit, PoolLimit};
@@ -153,7 +153,7 @@ const FIELDS: [ResourceField; METRIC_COUNT] = [
 #[derive(Clone)]
 pub(crate) struct Sample {
     pub at: String,
-    pub replica_role: i64,
+    pub replica_role: Option<MssqlResourceReplicaRole>,
     pub data_io_accounting: DataIoAccounting,
     values: [Option<f64>; METRIC_COUNT],
 }
@@ -164,7 +164,11 @@ impl Sample {
     /// Admission intentionally acquires utilization only. A profile was not requested and remains unknown;
     /// malformed or absent profile fields in a profiled history read still fail in the native decoder.
     pub(super) fn decode_utilization(row: &Rec) -> Result<Self> {
-        Self::decode_values(row, DataIoAccounting::Unknown)
+        let sample = Self::decode_values(row, DataIoAccounting::Unknown)?;
+        // Preserve admission's existing required native role field. Interactive history can retain an unknown
+        // role as a partial fact; that does not turn a malformed admission observation into available pressure.
+        sample.replica_role.ok_or_else(invalid_data)?;
+        Ok(sample)
     }
     fn decode_values(row: &Rec, data_io_accounting: DataIoAccounting) -> Result<Self> {
         let mut values = [None; METRIC_COUNT];
@@ -173,7 +177,9 @@ impl Sample {
         }
         Ok(Self {
             at: canonical_time(&crate::read::text(row, "sample_at")?)?,
-            replica_role: integer(row, "replica_role")?,
+            replica_role: optional_integer(row, "replica_role")?
+                .map(|code| MssqlResourceReplicaRole::from_native_code(code).ok_or_else(invalid_data))
+                .transpose()?,
             data_io_accounting,
             values,
         })
@@ -183,9 +189,12 @@ impl Sample {
     }
     pub(crate) fn exported(&self) -> ResourceMeasurement {
         ResourceMeasurement {
+            replica_role: self.replica_role.map(NativeResourceReplicaRole::MssqlDbResourceStats),
             data_io_accounting: self.data_io_accounting,
             at: self.at.clone(),
-            replica_id: Some(self.replica_role.to_string()),
+            // The row reports a role, not a physical replica ID. PROFILE_COLUMNS describes the current reader
+            // and cannot bind an earlier history row to that current member.
+            replica_id: None,
             metrics: FIELDS
                 .iter()
                 .map(|field| ResourceMetricSample {
@@ -201,15 +210,7 @@ impl Sample {
         }
     }
     pub(crate) fn snapshot(&self) -> culprit_core::ResourceSample {
-        culprit_core::ResourceSample {
-            data_io_accounting: self.data_io_accounting,
-            at: self.at.clone(),
-            cpu_pct: self.value(Metric::Cpu),
-            data_io_pct: self.value(Metric::DataIo),
-            log_write_pct: self.value(Metric::LogWrite),
-            memory_pct: self.value(Metric::Memory),
-            workers_pct: self.value(Metric::Workers),
-        }
+        culprit_core::ResourceSample::from_measurement(self.exported())
     }
 }
 pub(super) fn columns() -> String {

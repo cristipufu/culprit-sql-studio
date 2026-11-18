@@ -29,12 +29,40 @@ impl Description {
     }
 }
 
+pub(super) struct DatabaseProfile {
+    pub configured_log_rates: Result<bool>,
+}
+
 pub(super) async fn ensure_supported<R: NativeRead>(session: &mut R) -> Result<()> {
-    let rows = session.query(sql::EDITION, vec![], 1).await.map_err(ReadError::into_error)?;
-    if rows.first().map(|row| integer(row, "edition")).transpose()? == Some(5) {
-        return Ok(());
+    supported_profile(session, crate::database_identity::log_rates::Detail::Identity).await.map(|_| ())
+}
+
+pub(super) async fn supported_profile<R: NativeRead>(
+    session: &mut R,
+    detail: crate::database_identity::log_rates::Detail,
+) -> Result<DatabaseProfile> {
+    let query = match detail {
+        crate::database_identity::log_rates::Detail::Identity => sql::EDITION.to_owned(),
+        crate::database_identity::log_rates::Detail::ConfiguredLogRates => format!(
+            "SELECT /* culprit */ native.edition,{} AS configured_log_rate_capability FROM ({}) native",
+            crate::database_identity::log_rates::CAPABILITY,
+            sql::EDITION
+        ),
+    };
+    let rows = session.query(&query, vec![], 1).await.map_err(ReadError::into_error)?;
+    let Some(row) = rows.first() else {
+        return Err(Error::new(ErrorCode::Unsupported, t!("collection.azure_sql_only")));
+    };
+    if integer(row, "edition")? != 5 {
+        return Err(Error::new(ErrorCode::Unsupported, t!("collection.azure_sql_only")));
     }
-    Err(Error::new(ErrorCode::Unsupported, t!("collection.azure_sql_only")))
+    let configured_log_rates = match detail {
+        crate::database_identity::log_rates::Detail::Identity => Ok(false),
+        crate::database_identity::log_rates::Detail::ConfiguredLogRates => {
+            crate::database_identity::log_rates::capability(row)
+        }
+    };
+    Ok(DatabaseProfile { configured_log_rates })
 }
 
 pub(super) async fn read<R: NativeRead>(
@@ -126,8 +154,7 @@ pub(super) async fn identity<R: NativeRead>(
     host: &str,
     port: u16,
 ) -> Result<(DatabaseIdentity, String)> {
-    let context = database_context(session, host, port).await?;
-    crate::read::require_primary(context.writable)?;
+    let context = identity_detail(session, host, port, crate::database_identity::log_rates::Detail::Identity).await?;
     Ok((context.database, context.physical_incarnation))
 }
 
@@ -142,18 +169,42 @@ pub(super) async fn query_history_identity<R: NativeRead>(
     Ok((context.database, context.physical_incarnation))
 }
 
-struct DatabaseContext {
-    database: DatabaseIdentity,
-    physical_incarnation: String,
-    writable: Option<bool>,
+pub(super) struct DatabaseContext {
+    pub database: DatabaseIdentity,
+    pub physical_incarnation: String,
+    pub configured_log_rates: Result<Option<culprit_core::telemetry::ConfiguredLogRateLimits>>,
+}
+
+pub(super) async fn identity_detail<R: NativeRead>(
+    session: &mut R,
+    host: &str,
+    port: u16,
+    detail: crate::database_identity::log_rates::Detail,
+) -> Result<DatabaseContext> {
+    let read = crate::database_identity::read_azure_detail(session, detail).await?;
+    crate::read::require_primary(read.context.writable)?;
+    resolved_database_context(read, host, port)
 }
 
 async fn database_context<R: NativeRead>(session: &mut R, host: &str, port: u16) -> Result<DatabaseContext> {
     let context = crate::database_identity::read_azure(session).await?;
+    resolved_database_context(
+        crate::database_identity::GovernanceRead { context, configured_log_rates: Ok(None) },
+        host,
+        port,
+    )
+}
+
+fn resolved_database_context(
+    read: crate::database_identity::GovernanceRead,
+    host: &str,
+    port: u16,
+) -> Result<DatabaseContext> {
+    let context = read.context;
     Ok(DatabaseContext {
         database: context.identity(host, port),
         physical_incarnation: context.physical_incarnation().ok_or_else(malformed)?.to_owned(),
-        writable: context.writable,
+        configured_log_rates: read.configured_log_rates,
     })
 }
 

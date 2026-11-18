@@ -125,6 +125,7 @@ last-actual-plans  Actual plans without re-running queries
                   SQL Server · SQL Server 2019+ can keep each query's last actual plan (LAST_QUERY_PLAN_STATS) and report live per-operator progress (LIGHTWEIGHT_QUERY_PROFILING).
 $ culprit --format text sources
 SQL Server
+  configured-log-rates      Configured transaction-log rate limits from sys.dm_user_db_resource_governance. · adds detail
   memory failures           retained database-engine out-of-memory observations · adds detail
   current request memory    current query memory requests and reservations · adds detail
   cache entry memory        selected cache objects and their native cache-key attributes · adds detail

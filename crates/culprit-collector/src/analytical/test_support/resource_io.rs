@@ -21,6 +21,50 @@ pub fn resource_io_evidence(accounting: DataIoAccounting) -> (CollectionDescript
     (manifest.source, vec![native])
 }
 
+/// Controlled transport facts, not a claim that the MSSQL provider admits secondary resource export.
+/// Its existing primary-only native policy is tested independently in the provider.
+pub fn resource_role_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
+    use MssqlResourceReplicaRole::*;
+    use ResourceLimitBasis::{Absolute, DatabaseLimit, InstanceLimit, PoolLimit};
+    use ResourceStatistic::{Maximum, Mean, Point};
+    use ResourceUnit::{Cores, DatabaseTransactionUnits, Percent};
+    use culprit_core::MeasurementScope::{Database, Server};
+    [None, Some(Primary), Some(HighAvailabilitySecondary), Some(GeoReplicationForwarder), Some(NamedReplica)]
+        .into_iter()
+        .map(|role| {
+            let (source, mut rows) = resource_io_evidence(DataIoAccounting::DataFiles);
+            let TelemetryRecord::ResourceSample(point) = &mut rows[0] else { unreachable!() };
+            point.replica_id = None;
+            point.replica_role = role.map(NativeResourceReplicaRole::MssqlDbResourceStats);
+            point.metrics = [
+                ("cpu", Database, Percent, Mean, Some(15_000), DatabaseLimit, Some(0.0)),
+                ("data-io", Database, Percent, Mean, Some(15_000), DatabaseLimit, Some(20.0)),
+                ("log-write", Database, Percent, Mean, Some(15_000), DatabaseLimit, Some(90.0)),
+                ("memory", Database, Percent, Mean, Some(15_000), DatabaseLimit, None),
+                ("workers", Database, Percent, Maximum, Some(15_000), DatabaseLimit, Some(55.0)),
+                ("sessions", Database, Percent, Maximum, Some(15_000), DatabaseLimit, Some(30.0)),
+                ("xtp-storage", Database, Percent, Point, None, PoolLimit, Some(0.0)),
+                ("cpu", Server, Percent, Mean, Some(60_000), InstanceLimit, Some(70.0)),
+                ("memory", Server, Percent, Mean, None, InstanceLimit, Some(40.0)),
+                ("dtu-limit", Database, DatabaseTransactionUnits, Point, None, Absolute, None),
+                ("cpu-limit", Database, Cores, Point, None, Absolute, Some(10.0)),
+            ]
+            .into_iter()
+            .map(|(key, scope, unit, statistic, period_ms, limit_basis, value)| ResourceMetricSample {
+                key: key.into(),
+                scope,
+                unit,
+                statistic,
+                period_ms,
+                limit_basis,
+                value,
+            })
+            .collect();
+            (source, rows)
+        })
+        .collect()
+}
+
 pub fn rbio_wait_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
     let (manifest, _) = fixture();
     let names = [

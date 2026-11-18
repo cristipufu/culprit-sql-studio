@@ -12,6 +12,7 @@ mod compilation;
 mod compilation_definitions;
 mod compiler_admission;
 mod completed_spills;
+mod configured_log_rates;
 mod connection_outcomes;
 mod counter_ratios;
 mod current_request_work;
@@ -40,6 +41,7 @@ mod task_space;
 mod temporary_space;
 mod tuning;
 mod variant_family;
+mod wait_counters;
 mod waits;
 use fixture::Fixture;
 

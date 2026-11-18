@@ -151,11 +151,40 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         let CollectionSelection::Snapshot { dataset } = self.request.selection else { return Err(invalid_data()) };
         let shared = subject::is_shared(&self.request.subject)?;
         let families = if shared { point::shared_families(dataset)? } else { point::families(dataset)? };
-        let identity = subject::read(&mut self.io, &self.request.subject, &self.host, self.port).await?;
-        let target = identity.target();
-        self.identity = Some(identity);
-        let (observed_from, metadata_visible) = self.clock().await?;
+        let detail = if !shared && dataset == SnapshotDataset::Operational {
+            crate::database_identity::log_rates::Detail::ConfiguredLogRates
+        } else {
+            crate::database_identity::log_rates::Detail::Identity
+        };
+        let read = subject::read_detail(&mut self.io, &self.request.subject, &self.host, self.port, detail).await?;
+        let target = read.identity.target();
+        self.identity = Some(read.identity);
+        let (mut observed_from, metadata_visible) = self.clock().await?;
         let mut sources = self.read_families(&families, metadata_visible).await?;
+        if detail == crate::database_identity::log_rates::Detail::ConfiguredLogRates {
+            sources.push(match read.configured_log_rates {
+                Ok(Some(point)) => {
+                    if let Some(at) = &point.observed_at
+                        && canonical_time(at)? < observed_from
+                    {
+                        observed_from = at.clone();
+                    }
+                    if self.rows.len() >= self.request.budget.max_snapshot_rows as usize {
+                        return Err(CollectionStop::RowLimit.error());
+                    }
+                    self.rows.push(TelemetryRecord::Operational(OperationalObservation {
+                        source: CONFIGURED_LOG_RATES_SOURCE.into(),
+                        key: point.key()?,
+                        fact: OperationalFact::ConfiguredLogRateLimits(Box::new(point)),
+                    }));
+                    StateSourceCoverage::observed(CONFIGURED_LOG_RATES_SOURCE.into(), 1, false)
+                }
+                Ok(None) => {
+                    StateSourceCoverage::unavailable(CONFIGURED_LOG_RATES_SOURCE.into(), ErrorCode::Unsupported, None)
+                }
+                Err(error) => source_failure(CONFIGURED_LOG_RATES_SOURCE.into(), error)?,
+            });
+        }
         let (observed_until, final_metadata_visible) = self.clock().await?;
         if !final_metadata_visible {
             for (source, family) in sources.iter_mut().zip(&families) {

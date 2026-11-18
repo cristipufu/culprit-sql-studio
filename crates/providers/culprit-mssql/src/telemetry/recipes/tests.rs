@@ -30,7 +30,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.current-request-memory", 2),
             ("mssql.focused-request-memory", 2),
             ("mssql.task-space", 2),
-            ("mssql.operational", 2),
+            ("mssql.operational", 3),
             ("mssql.shared-operational", 2),
             ("mssql.query-compilation", 3),
         ])

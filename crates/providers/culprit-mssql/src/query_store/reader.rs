@@ -23,6 +23,10 @@ pub(crate) struct Reader<R = ReadSession> {
     io: R,
     layout: Option<RuntimeLayout>,
     window: Option<super::window_sql::FrozenWindow>,
+    governance_detail: crate::database_identity::log_rates::Detail,
+    window_verified: bool,
+    governance_available: bool,
+    governance_error: Option<culprit_core::Error>,
     stopped: Option<culprit_core::Error>,
     requested_population: Option<NativeIdentity>,
     population_catalog: Option<RuntimePopulationCatalog>,
@@ -95,6 +99,10 @@ impl<R: NativeRead> Reader<R> {
             io,
             layout: None,
             window: None,
+            governance_detail: Default::default(),
+            window_verified: false,
+            governance_available: false,
+            governance_error: None,
             stopped: None,
             requested_population: None,
             population_catalog: None,
@@ -112,6 +120,50 @@ impl<R: NativeRead> Reader<R> {
         reader.native_layout = Some(NativeLayout::decode(row)?);
         Ok(reader)
     }
+    /// The scan may retain current configuration from its existing governance metadata read. Ordinary history,
+    /// compiler admission and resource-pressure templates keep their identity-only projection.
+    pub(crate) fn request_configured_log_rates(&mut self) -> Result<()> {
+        self.admit()?;
+        if self.window.is_some() || self.batch.is_some() || self.native_layout.is_some() {
+            return Err(invalid_data());
+        }
+        self.governance_detail = crate::database_identity::log_rates::Detail::ConfiguredLogRates;
+        Ok(())
+    }
+
+    pub(crate) fn configured_log_rates(
+        &self,
+        shutdown: SourceShutdown,
+        host: &str,
+        port: u16,
+    ) -> Result<Option<culprit_core::telemetry::ConfiguredLogRateRead>> {
+        if shutdown != SourceShutdown::Quiescent {
+            return Err(CollectionStop::CancellationUnconfirmed.error());
+        }
+        if self.governance_detail != crate::database_identity::log_rates::Detail::ConfiguredLogRates
+            || !self.window_verified
+            || self.stopped.is_some()
+        {
+            return Ok(None);
+        }
+        if let Some(error) = &self.governance_error {
+            return Err(error.clone());
+        }
+        let Some(window) = &self.window else { return Ok(None) };
+        let Some(context) = window.compilation_context(host, port) else { return Ok(None) };
+        let Some(point) = window.configured_log_rates.clone()? else { return Ok(None) };
+        let read = culprit_core::telemetry::ConfiguredLogRateRead {
+            context,
+            source: culprit_core::telemetry::StateSourceCoverage::observed(
+                culprit_core::telemetry::CONFIGURED_LOG_RATES_SOURCE.into(),
+                1,
+                false,
+            ),
+            observation: Some(Box::new(point)),
+        };
+        read.is_valid_read(true).then_some(Some(read)).ok_or_else(invalid_data)
+    }
+
     /// Inspect only this reader's already acquired source profile; never perform replacement discovery.
     pub(crate) fn require_compilation_profile(&self) -> Result<()> {
         self.admit()?;
@@ -210,15 +262,20 @@ impl<R: NativeRead> Reader<R> {
             return if window.matches_request(window_minutes) { Ok(window.clone()) } else { Err(invalid_data()) };
         }
         let layout = self.native_layout().await?;
+        let detail = if self.governance_available {
+            self.governance_detail
+        } else {
+            crate::database_identity::log_rates::Detail::Identity
+        };
         let rows = self
             .read(
-                &super::window_sql::metadata_sql(layout.waits, false, layout.edition),
+                &super::window_sql::metadata_sql_detail(layout.waits, false, layout.edition, detail),
                 vec![Parameter::Integer(i64::from(window_minutes))],
                 1,
             )
             .await?;
         let [row] = rows.as_slice() else { return Err(invalid_data()) };
-        let window = match super::window_sql::FrozenWindow::decode(row, window_minutes, layout.waits) {
+        let window = match super::window_sql::FrozenWindow::decode_detail(row, window_minutes, layout.waits, detail) {
             Ok(window) => window,
             Err(error) => {
                 self.observe_failure(&error);
@@ -278,9 +335,15 @@ impl<R: NativeRead> Reader<R> {
         if let Some(layout) = self.native_layout {
             return Ok(layout);
         }
-        let rows = self.read(runtime::LAYOUT, vec![], 1).await?;
+        let rows = self.read(&runtime::layout_query(self.governance_detail), vec![], 1).await?;
         let [row] = rows.as_slice() else { return Err(invalid_data()) };
         let layout = NativeLayout::decode(row)?;
+        if self.governance_detail == crate::database_identity::log_rates::Detail::ConfiguredLogRates {
+            match crate::database_identity::log_rates::capability(row) {
+                Ok(available) => self.governance_available = available,
+                Err(error) => self.governance_error = Some(error),
+            }
+        }
         self.native_layout = Some(layout);
         Ok(layout)
     }
@@ -347,6 +410,7 @@ impl<R: NativeRead> Reader<R> {
         Ok(rows)
     }
     pub(crate) async fn verify_window(&mut self) -> Result<super::window_sql::WindowVerification> {
+        self.window_verified = false;
         let mut window = self.window.as_ref().ok_or_else(invalid_data)?.clone();
         let (sql, parameters) = window.verify_query();
         let result = self.read(&sql, parameters, 1).await.and_then(|rows| {
@@ -363,6 +427,7 @@ impl<R: NativeRead> Reader<R> {
         }
         self.verify_population().await?;
         self.refresh_observed_window()?;
+        self.window_verified = result.is_ok();
         result
     }
     pub(crate) async fn verify_population(&mut self) -> Result<()> {
@@ -549,3 +614,6 @@ mod observed_tests;
 mod replica_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod configured_log_rate_tests;

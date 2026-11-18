@@ -161,6 +161,13 @@ pub struct CollectedConnectionOutcomeAnalysis {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedConfiguredLogRateAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::ConfiguredLogRateReport>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedTuningAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::TuningReport,
@@ -187,4 +194,11 @@ pub struct CollectedCompletedSpillAnalysis {
 pub struct CollectedCounterRatioAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::CounterRatioReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedWaitCounterAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::WaitCounterReport,
 }

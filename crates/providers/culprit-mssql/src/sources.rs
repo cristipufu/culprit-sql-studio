@@ -9,6 +9,11 @@ pub const SUSPECT_PAGES: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.suspect_pages"),
     delivers: &[],
 };
+pub const CONFIGURED_LOG_RATES: Source = Source {
+    name: culprit_core::telemetry::CONFIGURED_LOG_RATES_SOURCE,
+    reads: culprit_core::key!("provider.mssql.source.configured_log_rates"),
+    delivers: &[],
+};
 pub const LOG_CAPACITY: Source = Source {
     name: source_id::LOG_CAPACITY,
     reads: culprit_core::key!("provider.mssql.source.log_capacity"),
@@ -370,6 +375,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    CONFIGURED_LOG_RATES,
     MEMORY_FAILURES,
     CURRENT_REQUEST_MEMORY,
     CACHE_ENTRY_MEMORY,

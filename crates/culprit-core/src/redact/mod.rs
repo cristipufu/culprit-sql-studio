@@ -8,16 +8,19 @@ use crate::finding::Finding;
 use crate::model::{Engine, Snapshot};
 
 mod cached_runtime;
+mod configured_log_rates;
 mod connection_outcomes;
 mod jobs;
 mod page_server_reads;
 mod plan;
 mod replication;
 mod resource_counters;
+mod resources;
 mod sql;
 mod statement_work;
 #[cfg(test)]
 mod tests;
+mod wait_counters;
 
 pub use plan::{redact_native, redact_parameter_context, redact_plan};
 pub(crate) use sql::{dollar_tag, skip_quoted_smart};
@@ -197,7 +200,10 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
         && matches!(
             (source, key.as_str()),
             (crate::source_id::SESSIONS, "view.connection_outcomes.invalid")
+                | (crate::source_id::RESOURCES, "collection.invalid_source")
+                | (crate::telemetry::CONFIGURED_LOG_RATES_SOURCE, "view.configured_log_rates.invalid")
                 | (crate::source_id::PERFORMANCE_COUNTERS, "view.counter_ratios.invalid")
+                | (crate::source_id::WAITS, "view.wait_counters.invalid")
                 | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
                 | (crate::telemetry::CACHED_RUNTIME_READ_SOURCE, "view.completed_spills.invalid")
                 | (crate::source_id::QUERY_STORE, "view.page_server_reads.invalid")
@@ -231,6 +237,33 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     }
     if !s.runtime_populations.as_ref().is_some_and(|catalog| catalog.is_valid() && !catalog.partitioned) {
         s.runtime_populations = None;
+    }
+    let resources = std::mem::take(&mut s.resources);
+    s.resources = admit_shared_evidence(
+        &mut s,
+        crate::source_id::RESOURCES,
+        crate::message!("collection.invalid_source"),
+        resources::redact(resources),
+    )
+    .unwrap_or_default();
+    if let Some(read) = s.pressure.as_mut().and_then(|pressure| pressure.wait_counters.take()) {
+        // The raw carrier is validated before masking. Sharing never repairs an invalid original population.
+        let names = read.sources.iter().map(|source| source.source.clone()).collect::<Vec<_>>();
+        let result = wait_counters::redact(read, engine);
+        let redacted = admit_shared_evidence(
+            &mut s,
+            crate::source_id::WAITS,
+            crate::message!("view.wait_counters.invalid"),
+            result,
+        );
+        if let Some(pressure) = &mut s.pressure {
+            pressure.wait_counters = redacted;
+        }
+        for source in &mut s.sources {
+            if names.contains(&source.source) {
+                source.source = wait_counters::source_name(&source.source);
+            }
+        }
     }
     let counters = s.pressure.as_mut().and_then(|pressure| pressure.resource_counters.take());
     if let Some(counters) = counters {
@@ -298,6 +331,18 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             crate::message!("view.jobs.invalid"),
             jobs::redact(evidence),
         );
+    }
+    let configured = s.pressure.as_mut().and_then(|pressure| pressure.configured_log_rates.take());
+    if let Some(evidence) = configured {
+        let redacted = admit_shared_evidence(
+            &mut s,
+            crate::telemetry::CONFIGURED_LOG_RATES_SOURCE,
+            crate::message!("view.configured_log_rates.invalid"),
+            configured_log_rates::redact(evidence),
+        );
+        if let Some(pressure) = &mut s.pressure {
+            pressure.configured_log_rates = redacted;
+        }
     }
     let connections = s.pressure.as_mut().and_then(|pressure| pressure.connection_outcomes.take());
     if let Some(evidence) = connections {

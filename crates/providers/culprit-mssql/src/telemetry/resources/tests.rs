@@ -185,3 +185,23 @@ async fn retiring_resource_description_requires_explicit_native_close() {
     assert_eq!(source.query_count(), 1);
     assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
 }
+
+#[tokio::test]
+async fn archive_pages_require_positive_primary_role_and_cannot_upgrade_unknown_or_other_native_roles() {
+    for role in [Val::Null, Val::Int(1), Val::Int(2), Val::Int(3)] {
+        let mut source = source(vec![
+            Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
+            Ok(vec![identity()]),
+            Ok(vec![inventory_row()]),
+            Ok(vec![replace(&row("2020-01-01T06:00:15Z"), &[("replica_role", role)])]),
+        ]);
+        source.describe().await.unwrap();
+        let error = source.read_page(TelemetryStream::ResourceSamples, None).await.err().unwrap();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+        assert_eq!(source.query_count(), 4);
+        assert!(source.finish().await.is_err());
+        assert_eq!(source.query_count(), 4, "refused role cannot dispatch verification or a replacement read");
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert_eq!(source.session.closed, 1);
+    }
+}

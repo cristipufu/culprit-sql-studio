@@ -62,18 +62,34 @@ pub(super) fn validate_dataset(subject: &CollectionSubject, dataset: SnapshotDat
     Ok(())
 }
 
-pub(super) async fn read<R: NativeRead>(
+pub(super) struct SubjectRead {
+    pub identity: Identity,
+    pub configured_log_rates: Result<Option<ConfiguredLogRateLimits>>,
+}
+
+pub(super) async fn read_detail<R: NativeRead>(
     reader: &mut R,
     subject: &CollectionSubject,
     host: &str,
     port: u16,
-) -> Result<Identity> {
+    detail: crate::database_identity::log_rates::Detail,
+) -> Result<SubjectRead> {
     is_shared(subject)?;
+    let mut configured_log_rates = Ok(None);
     let identity = match subject {
         CollectionSubject::Database => {
-            description::ensure_supported(reader).await?;
-            let (database, physical) = description::identity(reader, host, port).await?;
-            Identity::Database { database, physical }
+            let profile = description::supported_profile(reader, detail).await?;
+            let projection = if profile.configured_log_rates.as_ref().is_ok_and(|available| *available) {
+                detail
+            } else {
+                crate::database_identity::log_rates::Detail::Identity
+            };
+            let read = description::identity_detail(reader, host, port, projection).await?;
+            configured_log_rates = match profile.configured_log_rates {
+                Ok(_) => read.configured_log_rates,
+                Err(error) => Err(error),
+            };
+            Identity::Database { database: read.database, physical: read.physical_incarnation }
         }
         CollectionSubject::Shared { resource } if resource.kind == SharedResourceKind::Instance => {
             Identity::Instance(instance::read(reader).await?.0)
@@ -87,5 +103,5 @@ pub(super) async fn read<R: NativeRead>(
     if !subject.accepts(&identity.target()) {
         return Err(CollectionStop::SourceChanged.error());
     }
-    Ok(identity)
+    Ok(SubjectRead { identity, configured_log_rates })
 }

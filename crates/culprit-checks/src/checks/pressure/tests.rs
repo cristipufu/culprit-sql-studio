@@ -376,6 +376,7 @@ fn samples(pick: impl Fn(usize) -> (f64, f64)) -> Vec<ResourceSample> {
         .map(|i| {
             let (log, workers) = pick(i);
             ResourceSample {
+                measurement: None,
                 data_io_accounting: culprit_core::telemetry::DataIoAccounting::DataFiles,
                 at: format::iso_from_epoch(format::epoch_seconds("2026-10-11T10:00:15Z").unwrap() + i as f64 * 15.0),
                 cpu_pct: Some(30.0),

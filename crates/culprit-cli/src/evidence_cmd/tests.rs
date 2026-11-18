@@ -2,6 +2,7 @@ use super::*;
 use clap::Parser;
 mod compilation_definitions;
 mod completed_spills;
+mod configured_log_rates;
 mod connection_outcomes;
 mod maintenance_blocking;
 mod page_server_reads;
@@ -748,6 +749,18 @@ fn native_counter_ratio_analysis_uses_only_operational_evidence_with_existing_cu
         args.validate_selection().unwrap();
         let request = args.common.request(args.analysis.families(), format).unwrap();
         assert_eq!(request.families, [EvidenceFamily::OperationalSamples]);
+        assert!(request.budget.recovery_payloads.is_none());
+    }
+}
+
+#[test]
+fn wait_counter_analysis_selects_only_the_existing_wait_family_without_payload_hydration() {
+    for (flags, format) in [(&["--json"][..], Format::Json), (&[][..], Format::Text)] {
+        let args = analyze_args("wait-counters", flags);
+        assert!(args.analysis == Analysis::WaitCounters);
+        args.validate_selection().unwrap();
+        let request = args.common.request(args.analysis.families(), format).unwrap();
+        assert_eq!(request.families, [EvidenceFamily::WaitCounterSamples]);
         assert!(request.budget.recovery_payloads.is_none());
     }
 }

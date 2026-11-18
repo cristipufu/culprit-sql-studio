@@ -68,9 +68,21 @@ fn request() -> CollectionRequest {
     }
 }
 fn source(metadata: bool, fail_files: bool, final_identity: Rec) -> StateSource<FakeRead> {
+    source_initial(metadata, fail_files, identity(), final_identity)
+}
+fn source_initial(
+    metadata: bool,
+    fail_files: bool,
+    initial_identity: Rec,
+    final_identity: Rec,
+) -> StateSource<FakeRead> {
+    let has_configured_log_rates = initial_identity.columns().any(|(name, _)| name == "configured_log_database_id");
     let mut replies = vec![
-        Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
-        Ok(vec![identity()]),
+        Ok(vec![Rec::of(&[
+            ("edition", Val::Int(5)),
+            ("configured_log_rate_capability", Val::Int(i64::from(has_configured_log_rates))),
+        ])]),
+        Ok(vec![initial_identity]),
         Ok(vec![clock(metadata, "2020-01-01T06:02:00Z")]),
     ];
     for kind in native::Kind::ALL {
@@ -748,3 +760,5 @@ async fn total_snapshot_row_exhaustion_stops_without_another_native_probe_or_fin
     assert_eq!(source.query_count(), 5);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
+
+mod configured_log_rates;

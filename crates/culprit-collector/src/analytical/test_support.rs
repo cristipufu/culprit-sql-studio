@@ -7,8 +7,12 @@ use culprit_core::telemetry::*;
 
 mod counter_ratios;
 mod resource_io;
+mod wait_counters;
 pub use counter_ratios::{CounterRatioCase, counter_ratio_evidence};
-pub use resource_io::{collected_resource_recovery, rbio_wait_evidence, resource_io_evidence};
+pub use resource_io::{
+    collected_resource_recovery, rbio_wait_evidence, resource_io_evidence, resource_role_evidence_cases,
+};
+pub use wait_counters::{WaitCounterCase, wait_counter_evidence};
 mod activity;
 mod compilation_definitions;
 mod compilation_intervals;
@@ -61,7 +65,9 @@ mod completed_spills;
 pub use completed_spills::{CompletedSpillCase, completed_spill_evidence_cases};
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
+mod configured_log_rates;
 mod file_io;
+pub use configured_log_rates::configured_log_rate_evidence_cases;
 pub use file_io::file_io_evidence_cases;
 mod connection_outcomes;
 pub use connection_outcomes::{assert_connection_outcome_capture, connection_outcome_evidence_cases};
@@ -264,6 +270,7 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
         revision: Some(CaptureRevision { outbox_id: "outbox".into(), owner_epoch: "1".into(), sequence: "2".into() }),
     };
     let record = TelemetryRecord::ResourceSample(ResourceMeasurement {
+        replica_role: None,
         data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
         at: "2020-01-01T06:00:15Z".into(),
         replica_id: Some("primary".into()),

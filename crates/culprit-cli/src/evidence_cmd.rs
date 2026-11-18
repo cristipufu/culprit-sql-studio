@@ -220,13 +220,16 @@ enum Analysis {
     CurrentRequestWork,
     Replication,
     ConnectionOutcomes,
+    ConfiguredLogRates,
     CounterRatios,
+    WaitCounters,
     Cleanup,
     Tuning,
 }
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
         match self {
+            Self::WaitCounters => vec![EvidenceFamily::WaitCounterSamples],
             Self::SourceOverhead => vec![], // Metadata is selected before constructing a row EvidenceRequest.
             Self::Blocking | Self::Maintenance => vec![EvidenceFamily::ActivityObservations],
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
@@ -252,6 +255,7 @@ impl Analysis {
             | Self::CompletedSpills
             | Self::CounterRatios
             | Self::ConnectionOutcomes
+            | Self::ConfiguredLogRates
             | Self::StatementGrants
             | Self::CacheEntryMemory
             | Self::RuntimeDistributions
@@ -414,9 +418,17 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             let analysis = culprit_engine::collected_resources::replication(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::replication(&analysis.report))?;
         }
+        Some(Analysis::WaitCounters) => {
+            let analysis = culprit_engine::collected_resources::wait_counters(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::wait_counters(&analysis.report))?;
+        }
         Some(Analysis::CounterRatios) => {
             let analysis = culprit_engine::collected_resources::counter_ratios(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::counter_ratios(&analysis.report))?;
+        }
+        Some(Analysis::ConfiguredLogRates) => {
+            let analysis = culprit_engine::collected_resources::configured_log_rates(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::configured_log_rates(&analysis.report))?;
         }
         Some(Analysis::ConnectionOutcomes) => {
             let analysis = culprit_engine::collected_resources::connection_outcomes(&capture)?;

@@ -13,9 +13,12 @@ pub mod collected_resource_analysis;
 pub mod compilation;
 pub mod compilation_report;
 pub mod compiler_admission_report;
+pub mod wait_counter_report;
+pub use wait_counter_report::{WaitCounterEntry, WaitCounterIssue, WaitCounterReport};
 pub mod counter_ratio_report;
 pub use counter_ratio_report::{CounterRatioEntry, CounterRatioReport};
 pub mod completed_spill_report;
+mod configured_log_rate_report;
 pub mod connection;
 pub mod connection_outcome_report;
 pub mod connection_outcomes;
@@ -116,6 +119,7 @@ pub use completed_spill_report::{
     CompletedSpillEntry, CompletedSpillReference, CompletedSpillReport, CompletedSpillState,
     CompletedSpillStatementBinding,
 };
+pub use configured_log_rate_report::*;
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
     aws_iam_host_allowed, aws_region_valid, entra_host_allowed, expand_home, is_local_host, transport_error,

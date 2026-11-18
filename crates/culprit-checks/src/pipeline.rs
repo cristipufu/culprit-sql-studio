@@ -23,6 +23,7 @@ use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot,
 mod cleanup;
 mod compiler_admission;
 mod completed_spills;
+mod configured_log_rates;
 mod connection_outcomes;
 mod counter_ratios;
 mod jobs;
@@ -31,6 +32,7 @@ mod page_server_reads;
 mod replication;
 mod runtime_populations;
 mod statement_work;
+mod wait_counters;
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
 /// contradicts itself or the database (a plan older than the table it describes), never to hide a problem.
@@ -272,9 +274,11 @@ impl Pipeline {
         let query_compilation = explained_compilation(&mut snapshot);
         let compiler_admission = compiler_admission::explain(&mut snapshot);
         let counter_ratios = counter_ratios::explain(&mut snapshot);
+        let wait_counters = wait_counters::explain(&mut snapshot);
         let maintenance_progress = maintenance_progress::explain(&mut snapshot);
         let replication = replication::explain(&mut snapshot);
         let connection_outcomes = connection_outcomes::explain(&mut snapshot);
+        let configured_log_rates = configured_log_rates::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
         let page_server_reads = page_server_reads::explain(&mut snapshot);
@@ -391,10 +395,12 @@ impl Pipeline {
             query_compilation,
             compiler_admission,
             counter_ratios,
+            wait_counters,
             maintenance_progress,
             jobs,
             replication,
             connection_outcomes,
+            configured_log_rates,
             statement_work,
             page_server_reads,
             completed_spills,

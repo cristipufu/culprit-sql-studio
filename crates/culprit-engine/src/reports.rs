@@ -22,6 +22,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         counter_ratios: &'a Option<Box<culprit_core::CounterRatioReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        wait_counters: &'a Option<Box<culprit_core::WaitCounterReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         page_server_reads: &'a Option<Box<culprit_core::page_server_read_report::PageServerReadReport>>,
@@ -61,6 +63,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         connection_outcomes: &'a Option<Box<culprit_core::ConnectionOutcomeReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        configured_log_rates: &'a Option<Box<culprit_core::ConfiguredLogRateReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
@@ -83,10 +87,12 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         query_compilation,
         compiler_admission,
         counter_ratios,
+        wait_counters,
         maintenance_progress,
         replication,
         statement_work,
         connection_outcomes,
+        configured_log_rates,
         evidence: _,
         cleanup,
     } = report;
@@ -110,10 +116,12 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         query_compilation,
         compiler_admission,
         counter_ratios,
+        wait_counters,
         maintenance_progress,
         replication,
         statement_work,
         connection_outcomes,
+        configured_log_rates,
         cleanup,
     }
 }

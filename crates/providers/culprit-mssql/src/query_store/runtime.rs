@@ -254,6 +254,16 @@ GROUP BY p.query_id,rs.plan_id,q.context_settings_id,q.object_id,q.query_hash,q.
 #[path = "runtime/tests.rs"]
 mod tests;
 
+pub(crate) fn layout_query(detail: crate::database_identity::log_rates::Detail) -> String {
+    match detail {
+        crate::database_identity::log_rates::Detail::Identity => LAYOUT.to_owned(),
+        crate::database_identity::log_rates::Detail::ConfiguredLogRates => format!(
+            "SELECT /* culprit */ native.*,{} AS configured_log_rate_capability FROM ({LAYOUT}) native",
+            crate::database_identity::log_rates::CAPABILITY
+        ),
+    }
+}
+
 pub(crate) const LAYOUT: &str = concat!(
     r#"SELECT /* culprit */ CAST(SERVERPROPERTY('EngineEdition') AS int) AS engine_edition,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'avg_tempdb_space_used') THEN 1 ELSE 0 END AS tempdb,

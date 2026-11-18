@@ -68,7 +68,7 @@ impl ResourceScope for DatabaseScope {
             .iter()
             .map(|sample| {
                 // Primary-only capture is an export policy, not a restriction on interactive native reads.
-                if sample.replica_role != 0 {
+                if sample.replica_role != Some(MssqlResourceReplicaRole::Primary) {
                     return Err(CollectionStop::SourceChanged.error());
                 }
                 Ok(sample.exported())

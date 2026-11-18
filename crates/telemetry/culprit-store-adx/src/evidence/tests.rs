@@ -16,6 +16,7 @@ mod compilation;
 mod compilation_definitions;
 mod compiler_admission;
 mod completed_spills;
+mod configured_log_rates;
 mod counter_ratios;
 mod current_request_work;
 mod diagnostics;

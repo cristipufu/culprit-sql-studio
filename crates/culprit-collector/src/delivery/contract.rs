@@ -5,7 +5,7 @@ use culprit_core::{
 };
 use serde::{Deserialize, Serialize};
 
-pub const DELIVERY_SCHEMA_VERSION: u32 = 3;
+pub const DELIVERY_SCHEMA_VERSION: u32 = 4;
 pub const MAX_MANIFEST_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_RANGE_RECORDS: usize = 100_000;
 pub const MAX_BATCHES: usize = 256;

@@ -7,6 +7,7 @@ fn observed(accounting: DataIoAccounting) -> Snapshot {
     let start = format::epoch_seconds("2026-10-11T10:00:15Z").unwrap();
     snapshot.resources = (0..240)
         .map(|index| ResourceSample {
+            measurement: None,
             data_io_accounting: accounting,
             at: format::iso_from_epoch(start + f64::from(index) * 15.0),
             data_io_pct: Some(99.0),

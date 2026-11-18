@@ -42,6 +42,41 @@ impl DataIoAccounting {
     }
 }
 
+/// A native role observation is independent from the identity of the member that supplied a historical row.
+/// The source tag establishes the native vocabulary; no role supplies physical-member continuity.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(tag = "source", content = "role", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum NativeResourceReplicaRole {
+    MssqlDbResourceStats(MssqlResourceReplicaRole),
+}
+
+/// `sys.dm_db_resource_stats.replica_role` reports the source's current role, not a native replica ID or proof of
+/// the role at an earlier sample timestamp. In particular, ReadOnly
+/// application intent reports HighAvailabilitySecondary even when the endpoint is a geo-forwarder or named
+/// replica; without that intent the native values can instead be GeoReplicationForwarder or NamedReplica.
+/// https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-resource-stats-azure-sql-database
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum MssqlResourceReplicaRole {
+    Primary,
+    HighAvailabilitySecondary,
+    GeoReplicationForwarder,
+    NamedReplica,
+}
+impl MssqlResourceReplicaRole {
+    pub fn from_native_code(code: i64) -> Option<Self> {
+        match code {
+            0 => Some(Self::Primary),
+            1 => Some(Self::HighAvailabilitySecondary),
+            2 => Some(Self::GeoReplicationForwarder),
+            3 => Some(Self::NamedReplica),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
@@ -110,8 +145,12 @@ pub struct ResourceMeasurement {
     pub data_io_accounting: DataIoAccounting,
     /// Native UTC timestamp. The collection window selects samples without prorating their values.
     pub at: String,
-    /// Native replica identity when supplied by the source. A pool sample does not invent a replica.
+    /// Native replica identity only when the source binds this historical row to that member. A role code or
+    /// the current reader's ReplicaID does not establish this relationship; a pool sample invents neither.
     pub replica_id: Option<String>,
+    /// The source-reported role observed while reading this row, not proof of the role at its historical timestamp.
+    /// Missing never supplies a primary, member identity or ownership.
+    pub replica_role: Option<NativeResourceReplicaRole>,
     pub metrics: Vec<ResourceMetricSample>,
 }
 impl ResourceMeasurement {
@@ -136,6 +175,7 @@ mod tests {
     use super::*;
     fn sample() -> ResourceMeasurement {
         ResourceMeasurement {
+            replica_role: None,
             data_io_accounting: crate::telemetry::DataIoAccounting::Unknown,
             at: "2020-01-01T06:00:15Z".into(),
             replica_id: Some("primary".into()),
@@ -232,11 +272,118 @@ mod tests {
         record.replica_id = None;
         assert!(record.is_valid());
         let absent = ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(record.clone())).unwrap();
-        record.replica_id = Some("0".into());
-        let primary = ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(record.clone())).unwrap();
-        assert_ne!(absent.record_id, primary.record_id);
+        record.replica_id = Some("native-member".into());
+        let present = ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(record.clone())).unwrap();
+        assert_ne!(absent.record_id, present.record_id);
         record.replica_id = Some(String::new());
         assert!(!record.is_valid());
+    }
+
+    #[test]
+    fn native_role_codes_preserve_source_vocabulary_without_creating_members() {
+        use MssqlResourceReplicaRole::*;
+        for (code, expected, text) in [
+            (0, Primary, "primary"),
+            (1, HighAvailabilitySecondary, "high-availability-secondary"),
+            (2, GeoReplicationForwarder, "geo-replication-forwarder"),
+            (3, NamedReplica, "named-replica"),
+        ] {
+            assert_eq!(MssqlResourceReplicaRole::from_native_code(code), Some(expected));
+            let fact = NativeResourceReplicaRole::MssqlDbResourceStats(expected);
+            let encoded = serde_json::to_value(fact).unwrap();
+            assert_eq!(encoded, serde_json::json!({"source":"mssql-db-resource-stats","role":text}));
+            assert_eq!(serde_json::from_value::<NativeResourceReplicaRole>(encoded).unwrap(), fact);
+        }
+        for code in [-1, 4, i64::MAX] {
+            assert_eq!(MssqlResourceReplicaRole::from_native_code(code), None);
+        }
+        for encoded in [
+            serde_json::json!({"source":"current-reader","role":"primary"}),
+            serde_json::json!({"source":"mssql-db-resource-stats","role":0}),
+            serde_json::json!({"source":"mssql-db-resource-stats","role":"secondary"}),
+        ] {
+            assert!(serde_json::from_value::<NativeResourceReplicaRole>(encoded).is_err());
+        }
+    }
+
+    #[test]
+    fn same_clock_role_changes_never_mint_new_member_identity_or_reuse_original_payload_proof() {
+        let source = source();
+        let capture = CaptureIdentity {
+            observation_id: "role-facts".into(),
+            revision: Some(CaptureRevision {
+                outbox_id: "role-owner".into(),
+                owner_epoch: "1".into(),
+                sequence: "1".into(),
+            }),
+        };
+        let mut native = sample();
+        native.replica_id = None;
+        native.replica_role = Some(NativeResourceReplicaRole::MssqlDbResourceStats(MssqlResourceReplicaRole::Primary));
+        let original = ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(native.clone())).unwrap();
+        let reference = DiagnosticEvidenceRef::from_export(&source, &digest(b"native manifest"), &original, 0).unwrap();
+        for role in
+            [None, Some(NativeResourceReplicaRole::MssqlDbResourceStats(MssqlResourceReplicaRole::NamedReplica))]
+        {
+            native.replica_role = role;
+            let changed =
+                ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(native.clone())).unwrap();
+            assert_eq!(changed.record_id, original.record_id, "a role is not a new native owner");
+            assert_ne!(changed.record, original.record);
+            assert!(reference.validate_canonical_record(&source, &changed.record).is_err());
+            let TelemetryRecord::ResourceSample(changed) = changed.record else { panic!() };
+            assert_eq!(changed.replica_id, None);
+            assert_eq!(changed.replica_role, role);
+        }
+    }
+
+    #[test]
+    fn scan_projection_keeps_same_row_detail_and_never_substitutes_shared_or_unknown_values() {
+        let mut native = sample();
+        native.replica_id = None;
+        native.replica_role =
+            Some(NativeResourceReplicaRole::MssqlDbResourceStats(MssqlResourceReplicaRole::HighAvailabilitySecondary));
+        let mut shared = native.metrics[0].clone();
+        shared.scope = crate::MeasurementScope::Server;
+        shared.value = Some(99.0);
+        native.metrics.push(shared);
+        native.metrics[0].value = None;
+        let scan = crate::ResourceSample::from_measurement(native.clone());
+        assert_eq!(scan.cpu_pct, None);
+        assert_eq!(scan.measurement.as_deref(), Some(&native));
+        assert!(scan.has_consistent_measurement());
+        let encoded = serde_json::to_string(&scan).unwrap();
+        let decoded: crate::ResourceSample = serde_json::from_str(&encoded).unwrap();
+        assert!(decoded.has_consistent_measurement());
+        assert_eq!(decoded.measurement.as_deref(), Some(&native));
+        for mutation in ["clock", "accounting", "chart", "invalid-detail"] {
+            let mut changed = decoded.clone();
+            match mutation {
+                "clock" => changed.at = "2020-01-01T06:00:30Z".into(),
+                "accounting" => changed.data_io_accounting = DataIoAccounting::ComputeLocalSsd,
+                "chart" => changed.cpu_pct = Some(99.0),
+                "invalid-detail" => changed.measurement.as_mut().unwrap().metrics.clear(),
+                _ => unreachable!(),
+            }
+            assert!(!changed.has_consistent_measurement(), "{mutation}");
+        }
+        let mut missing = scan;
+        missing.measurement = None;
+        assert!(missing.has_consistent_measurement());
+    }
+
+    #[test]
+    fn database_chart_percentages_never_borrow_a_different_capacity_denominator() {
+        for basis in [ResourceLimitBasis::PoolLimit, ResourceLimitBasis::InstanceLimit, ResourceLimitBasis::Absolute] {
+            let mut native = sample();
+            native.metrics[0].limit_basis = basis;
+            native.metrics[0].value = Some(90.0);
+            assert!(native.metrics[0].describes_subject(&source().target));
+            let scan = crate::ResourceSample::from_measurement(native.clone());
+            assert_eq!(scan.cpu_pct, None, "the legacy chart cannot express {basis:?}");
+            assert_eq!(scan.measurement.as_deref(), Some(&native));
+            assert!(scan.has_consistent_measurement());
+        }
     }
 
     #[test]

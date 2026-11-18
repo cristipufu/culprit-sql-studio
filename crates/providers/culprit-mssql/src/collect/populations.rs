@@ -12,10 +12,12 @@ pub(super) struct Workloads {
     stop_followup: bool,
     pending_compilation: Option<signals::PendingCompilationRead>,
     compilation: signals::CompilationRead,
+    configured_log_rates: Option<Result<Box<culprit_core::telemetry::ConfiguredLogRateRead>>>,
 }
 
 impl Workloads {
-    fn single(requested: WorkloadPart) -> Self {
+    fn single(mut requested: WorkloadPart) -> Self {
+        let configured_log_rates = requested.configured_log_rates.take();
         Self {
             catalog: requested.catalog.clone(),
             requested,
@@ -23,7 +25,14 @@ impl Workloads {
             stop_followup: false,
             pending_compilation: None,
             compilation: Default::default(),
+            configured_log_rates,
         }
+    }
+
+    pub(super) fn take_configured_log_rates(
+        &mut self,
+    ) -> Option<Result<Box<culprit_core::telemetry::ConfiguredLogRateRead>>> {
+        self.configured_log_rates.take()
     }
 
     pub(super) fn take_compilation(&mut self) -> signals::CompilationRead {
@@ -182,11 +191,18 @@ pub(super) async fn collect(
         return Ok(workloads);
     }
     let mut reader = crate::query_store::Reader::open(provider.pool.clone());
+    if probe.is_azure_sql_database() {
+        reader.request_configured_log_rates()?;
+    }
     let mut workloads = acquire(&mut reader, options).await;
     let shutdown = reader.close().await;
     if shutdown == SourceShutdown::Unconfirmed {
         return Err(CollectionStop::CancellationUnconfirmed.error());
     }
+    workloads.configured_log_rates = reader
+        .configured_log_rates(shutdown, &provider.endpoint_host, provider.endpoint_port)
+        .map(|read| read.map(Box::new))
+        .transpose();
     workloads.finish_compilation(
         options.window_in_minutes(),
         shutdown,
@@ -216,6 +232,7 @@ async fn acquire<R: NativeRead>(reader: &mut crate::query_store::Reader<R>, opti
         stop_followup: false,
         pending_compilation: None,
         compilation: Default::default(),
+        configured_log_rates: None,
     };
     let selectors = if catalog.partitioned {
         catalog.populations.iter().map(|population| Some(population.identity.clone())).collect()

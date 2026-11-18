@@ -39,6 +39,9 @@ pub mod statement_work;
 pub mod task_space;
 pub mod temporary_work;
 pub mod tuning;
+pub mod wait_counters;
 pub mod waits;
 
 pub mod query_store_definitions;
+
+pub mod configured_log_rates;

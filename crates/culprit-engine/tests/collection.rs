@@ -1208,6 +1208,7 @@ async fn dropping_journaled_native_work_requires_quiescence_after_restart() {
 fn resource_record(at: &str) -> TelemetryRecord {
     use culprit_core::telemetry::*;
     TelemetryRecord::ResourceSample(ResourceMeasurement {
+        replica_role: None,
         data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
         at: at.into(),
         replica_id: Some("primary".into()),

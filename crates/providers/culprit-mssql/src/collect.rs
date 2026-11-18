@@ -28,6 +28,7 @@ struct WorkloadPart {
     waits: Vec<WaitStat>,
     outcome: Outcome,
     catalog: Option<culprit_core::RuntimePopulationCatalog>,
+    configured_log_rates: Option<Result<Box<culprit_core::telemetry::ConfiguredLogRateRead>>>,
 }
 
 impl WorkloadPart {
@@ -184,6 +185,9 @@ async fn collect_workload(
     if probe.query_store_readable() {
         let grant = || probe.grant_hint();
         let mut reader = crate::query_store::Reader::open(provider.pool.clone());
+        if probe.is_azure_sql_database() {
+            reader.request_configured_log_rates()?;
+        }
         let result = workload::read_query_store(&mut reader, options).await;
         part.catalog = reader.population_catalog().cloned();
         let mut stop_followup = result.as_ref().err().is_some_and(crate::read::stops_remaining_reads);
@@ -215,9 +219,14 @@ async fn collect_workload(
                 }
             }
         }
-        if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+        let shutdown = reader.close().await;
+        if shutdown == culprit_core::telemetry::SourceShutdown::Unconfirmed {
             return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
         }
+        part.configured_log_rates = reader
+            .configured_log_rates(shutdown, &provider.endpoint_host, provider.endpoint_port)
+            .map(|read| read.map(Box::new))
+            .transpose();
         if let Some(pending) = pending {
             let compilation = pending.finish(
                 options.window_in_minutes(),
@@ -528,6 +537,20 @@ async fn acquire(
     outcome.merge(schema_part.outcome);
     outcome.merge(misc_part.outcome);
     outcome.merge(resource_part.outcome);
+    if probe.is_azure_sql_database() {
+        match workloads.take_configured_log_rates() {
+            Some(Ok(read)) => {
+                outcome.completed(&sources::CONFIGURED_LOG_RATES, 1);
+                misc_part.pressure.get_or_insert_with(Default::default).configured_log_rates = Some(read);
+            }
+            Some(Err(error)) => outcome.source_failed(&sources::CONFIGURED_LOG_RATES, &error),
+            None => outcome.recorded_message(
+                &sources::CONFIGURED_LOG_RATES,
+                culprit_core::SourceState::Unavailable,
+                culprit_core::message!("view.configured_log_rates.unavailable"),
+            ),
+        }
+    }
     if !resource_part.signals.is_empty() {
         misc_part.pressure.get_or_insert_with(Default::default).signals.extend(resource_part.signals);
     }

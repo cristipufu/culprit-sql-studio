@@ -29,6 +29,7 @@ struct Interval {
 #[derive(Clone)]
 pub(crate) struct FrozenWindow {
     pub database: crate::database_identity::Context,
+    pub configured_log_rates: Result<Option<culprit_core::telemetry::ConfiguredLogRateLimits>>,
     pub page_server_reads: super::page_server::Availability,
     minutes: u32,
     clock: String,
@@ -44,7 +45,20 @@ pub(crate) struct FrozenWindow {
 }
 impl FrozenWindow {
     pub(crate) fn decode(row: &Rec, minutes: u32, waits_supported: bool) -> Result<Self> {
+        Self::decode_detail(row, minutes, waits_supported, crate::database_identity::log_rates::Detail::Identity)
+    }
+    pub(crate) fn decode_detail(
+        row: &Rec,
+        minutes: u32,
+        waits_supported: bool,
+        detail: crate::database_identity::log_rates::Detail,
+    ) -> Result<Self> {
         let database = crate::database_identity::Context::from_window(row)?;
+        let configured_log_rates = if detail == crate::database_identity::log_rates::Detail::ConfiguredLogRates {
+            crate::database_identity::log_rates::decode(row, &database, "window_clock")
+        } else {
+            Ok(None)
+        };
         let page_server_reads = super::page_server::decode_availability(row)?;
         let clock = text(row, "window_clock")?;
         parse_time(&clock)?;
@@ -120,6 +134,7 @@ impl FrozenWindow {
         };
         Ok(Self {
             database,
+            configured_log_rates,
             page_server_reads,
             minutes,
             initial_clock: clock.clone(),
@@ -204,6 +219,15 @@ fn parse_time(value: &str) -> Result<chrono::DateTime<chrono::FixedOffset>> {
 }
 
 pub(crate) fn metadata_sql(waits_supported: bool, verifying: bool, edition: i64) -> String {
+    metadata_sql_detail(waits_supported, verifying, edition, crate::database_identity::log_rates::Detail::Identity)
+}
+
+pub(crate) fn metadata_sql_detail(
+    waits_supported: bool,
+    verifying: bool,
+    edition: i64,
+    detail: crate::database_identity::log_rates::Detail,
+) -> String {
     let (declaration, selection, bounds) = if verifying {
         (
             DECLARATION,
@@ -213,8 +237,11 @@ pub(crate) fn metadata_sql(waits_supported: bool, verifying: bool, edition: i64)
     } else {
         ("", "i.end_time>=DATEADD(minute,-@P1,@at) AND i.start_time<=@at".to_owned(), "@selected")
     };
-    let identity_declaration = crate::database_identity::window_declaration(edition);
-    let identity_columns = crate::database_identity::window_columns(edition);
+    let identity_declaration = match detail {
+        crate::database_identity::log_rates::Detail::Identity => crate::database_identity::window_declaration(edition),
+        _ => crate::database_identity::window_declaration_detail(edition, detail),
+    };
+    let identity_columns = crate::database_identity::window_columns_detail(edition, detail);
     let capture = if waits_supported { "o.wait_stats_capture_mode_desc" } else { "CAST(NULL AS nvarchar(60))" };
     let start = utc_offset_precise_iso("b.starts");
     let end = utc_offset_precise_iso(CAPPED_END);

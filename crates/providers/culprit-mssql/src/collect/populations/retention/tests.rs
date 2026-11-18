@@ -31,6 +31,7 @@ fn workloads(catalog: &RuntimePopulationCatalog) -> Workloads {
         stop_followup: false,
         pending_compilation: None,
         compilation: Default::default(),
+        configured_log_rates: None,
     }
 }
 

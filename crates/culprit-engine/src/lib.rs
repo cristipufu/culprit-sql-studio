@@ -803,6 +803,13 @@ pub fn explain_connection_outcomes(
     culprit_checks::connection_outcomes::explain_snapshot(snapshot)
 }
 
+/// Reword retained configuration points under the same namespace policy without source or archive I/O.
+pub fn explain_configured_log_rates(
+    snapshot: &culprit_core::Snapshot,
+) -> Result<Option<culprit_core::ConfiguredLogRateReport>> {
+    culprit_checks::configured_log_rates::explain_snapshot(snapshot)
+}
+
 /// Reword retained page-server runtime facts without provider, credential, archive or definition reads.
 pub fn explain_page_server_reads(
     snapshot: &culprit_core::Snapshot,

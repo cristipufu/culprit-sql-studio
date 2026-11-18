@@ -29,6 +29,7 @@ mod cleanup;
 mod columns;
 mod compilation;
 mod compiler_admission;
+mod configured_log_rates;
 mod counters;
 mod current_request_work;
 mod definitions;
@@ -99,6 +100,8 @@ mod temporary_work;
 mod transactions;
 mod triggers;
 mod tuning;
+mod wait_counter_snapshot;
+pub use wait_counter_snapshot::{MAX_WAIT_COUNTER_OBSERVATIONS, WaitCounterSnapshot};
 mod wait_semantics;
 pub use activity::*;
 pub use activity_frame::*;
@@ -113,6 +116,7 @@ pub use cleanup::*;
 pub use columns::*;
 pub use compilation::*;
 pub use compiler_admission::*;
+pub use configured_log_rates::*;
 pub use counters::*;
 pub use current_request_work::*;
 pub use definitions::*;
@@ -663,6 +667,7 @@ impl TelemetryRecord {
                     }
                     (SourceObservation::MaintenanceProgress { .. }, _)
                     | (_, OperationalFact::MaintenanceProgress(_)) => false,
+                    (_, OperationalFact::ConfiguredLogRateLimits(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::PageWait(page)) => {
                         accepted
                             && page.fits_source_scope(source)

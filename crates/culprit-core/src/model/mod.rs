@@ -22,7 +22,7 @@ pub use workload::{
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
 /// or mean something else.
-pub const SNAPSHOT_FORMAT: u32 = 11;
+pub const SNAPSHOT_FORMAT: u32 = 12;
 
 /// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
 mod current_format {
@@ -671,6 +671,9 @@ pub struct Setting {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct ResourceSample {
+    /// Complete source-declared measurement from the same native row, including independently scoped metrics.
+    /// None means this producer did not retain native detail; chart projections cannot reconstruct it.
+    pub measurement: Option<Box<crate::telemetry::ResourceMeasurement>>,
     pub data_io_accounting: crate::telemetry::DataIoAccounting,
     pub at: String,
     pub cpu_pct: Option<f64>,
@@ -680,6 +683,58 @@ pub struct ResourceSample {
     pub workers_pct: Option<f64>,
 }
 impl ResourceSample {
+    /// Chart dimensions use the canonical metric contract, not native names or a provider identity. Other native
+    /// scopes and dimensions remain in the original measurement and cannot replace database utilization.
+    pub fn from_measurement(measurement: crate::telemetry::ResourceMeasurement) -> Self {
+        let [cpu_pct, data_io_pct, log_write_pct, memory_pct, workers_pct] = Self::chart_values(&measurement);
+        Self {
+            at: measurement.at.clone(),
+            data_io_accounting: measurement.data_io_accounting,
+            measurement: Some(Box::new(measurement)),
+            cpu_pct,
+            data_io_pct,
+            log_write_pct,
+            memory_pct,
+            workers_pct,
+        }
+    }
+
+    /// A retained native detail must be valid and describe the same original chart point. A producer that did not
+    /// retain detail remains explicit; this predicate never reconstructs missing native evidence from the chart.
+    pub fn has_consistent_measurement(&self) -> bool {
+        self.measurement.as_ref().is_none_or(|measurement| {
+            measurement.is_valid()
+                && self.at == measurement.at
+                && self.data_io_accounting == measurement.data_io_accounting
+                && [self.cpu_pct, self.data_io_pct, self.log_write_pct, self.memory_pct, self.workers_pct]
+                    == Self::chart_values(measurement)
+        })
+    }
+
+    fn chart_values(measurement: &crate::telemetry::ResourceMeasurement) -> [Option<f64>; 5] {
+        use crate::telemetry::{ResourceLimitBasis, ResourceStatistic, ResourceUnit};
+        [
+            ("cpu", ResourceStatistic::Mean),
+            ("data-io", ResourceStatistic::Mean),
+            ("log-write", ResourceStatistic::Mean),
+            ("memory", ResourceStatistic::Mean),
+            ("workers", ResourceStatistic::Maximum),
+        ]
+        .map(|(key, statistic)| {
+            measurement
+                .metrics
+                .iter()
+                .find(|metric| {
+                    metric.key == key
+                        && metric.scope == crate::MeasurementScope::Database
+                        && metric.unit == ResourceUnit::Percent
+                        && metric.statistic == statistic
+                        && metric.limit_basis == ResourceLimitBasis::DatabaseLimit
+                })
+                .and_then(|metric| metric.value)
+        })
+    }
+
     /// Only measured data-I/O values participate in the accounting population. Unknown is explicit; different
     /// known bases cannot be pooled into one utilization verdict.
     pub fn common_data_io_accounting(samples: &[Self]) -> Option<crate::telemetry::DataIoAccounting> {
