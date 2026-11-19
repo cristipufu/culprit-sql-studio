@@ -13,6 +13,49 @@ use crate::plan::{NodeKind, Plan, PlanKind, PlanNode, PlanWarning};
 use crate::plan_diff::PlanDiff;
 use crate::redact::redact_sql;
 use crate::t;
+mod scalar_reuse;
+
+/// A native parser compares complete runtime tuples while their original attributes are in memory.
+/// This relation contains neither input values nor value hashes and is never accepted from serialized facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeRuntimeInputRelation {
+    Same,
+    Different,
+    Unavailable,
+}
+
+/// Ephemeral native-parser evidence belongs to exactly these immutable plans. This is deliberately not a DTO.
+pub struct NativeRuntimeInputPair<'a> {
+    a: &'a Plan,
+    b: &'a Plan,
+    relation: NativeRuntimeInputRelation,
+}
+
+impl<'a> NativeRuntimeInputPair<'a> {
+    /// The native adapter must rebind both supplied trees to their original selected native payloads before
+    /// supplying a relation. Detached JSON parameter flags are not a native comparison.
+    pub fn from_native(a: &'a Plan, b: &'a Plan, relation: NativeRuntimeInputRelation) -> Self {
+        Self { a, b, relation }
+    }
+    pub fn relation(&self) -> NativeRuntimeInputRelation {
+        self.relation
+    }
+}
+
+/// Keep the proof and compared plans together; a relation cannot be applied to a different plan pair.
+pub fn compare_native_pair(
+    pair: NativeRuntimeInputPair<'_>,
+    name_a: &str,
+    name_b: &str,
+    context: &CompareContext,
+) -> PlanDiff {
+    let (a, b) = (crate::redact::redact_plan(pair.a), crate::redact::redact_plan(pair.b));
+    let mut diff = crate::plan_diff::plan_diff_in(&a, name_a, &b, name_b, context);
+    if let Some(scenario) = scalar_reuse::scenario(&pair, name_a, name_b) {
+        diff.scenarios.push(scenario);
+    }
+    diff
+}
 
 /// Estimates must differ by this factor, and the larger reach this many rows, to be a scenario.
 const ESTIMATE_FACTOR: f64 = 10.0;
@@ -34,7 +77,7 @@ pub enum ScenarioKind {
     PlanKind,
     /// SQL Server's cardinality estimator version differs (compatibility level or hint).
     Estimator,
-    /// The plans were compiled for different parameter values.
+    /// Native parameter context differs or qualifies a comparison of measured runtime work.
     Parameters,
     /// Row estimates differ between the plans, or from what actually happened.
     Estimates,

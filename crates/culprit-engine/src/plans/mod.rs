@@ -12,7 +12,20 @@ use ts_rs::TS;
 
 #[cfg(test)]
 mod availability_tests;
+mod compare;
+pub(crate) use compare::compare_redacted;
 mod pg_text;
+
+/// Compare already supplied plans. Native runtime inputs are re-read only from their existing native payloads.
+pub fn compare_plans(
+    a: &Plan,
+    name_a: &str,
+    b: &Plan,
+    name_b: &str,
+    context: &culprit_core::CompareContext,
+) -> culprit_core::PlanDiff {
+    compare::compare(a, name_a, b, name_b, context)
+}
 
 /// The largest SQL Server plans run to a few megabytes; anything far beyond that is not a plan.
 pub const MAX_PLAN_BYTES: usize = 32 * 1024 * 1024;

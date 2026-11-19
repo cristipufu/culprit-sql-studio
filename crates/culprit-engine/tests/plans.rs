@@ -2,6 +2,8 @@
 
 use culprit_core::{ChangeKind, Engine, ErrorCode, NodeKind, Plan, PlanKind, PlanNode, plan_diff, plan_diff_named};
 use culprit_engine::plans::{PlanFormat, decode, detect, parse_plan};
+#[cfg(feature = "mssql")]
+mod native_inputs;
 
 #[test]
 fn native_docdb_plans_are_imported_as_yugabyte_with_total_rows_and_native_metrics() {

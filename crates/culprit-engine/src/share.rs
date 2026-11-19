@@ -1,9 +1,7 @@
 //! Sharing and the verify loop on top of the workspace: compare plans with what the latest scan knows, export findings,
 //! reports, plans and comparisons, and check whether fixes worked.
 
-use culprit_core::{
-    CompareContext, Error, Plan, PlanDiff, Result, SnapshotOptions, Verification, compare_reports, plan_diff_in, t,
-};
+use culprit_core::{CompareContext, Error, Plan, PlanDiff, Result, SnapshotOptions, Verification, compare_reports, t};
 
 use crate::Workspace;
 use crate::export::{self, ExportFile, ExportFormat, ExportOptions};
@@ -21,7 +19,7 @@ impl Workspace {
     /// Compare two plans; with `connection`, scenarios can name stale statistics from its latest scan.
     pub fn diff_plans(&self, a: &Plan, name_a: &str, b: &Plan, name_b: &str, connection: Option<&str>) -> PlanDiff {
         let context = connection.map(|c| self.compare_context(c)).unwrap_or_default();
-        plan_diff_in(a, name_a, b, name_b, &context)
+        crate::plans::compare_plans(a, name_a, b, name_b, &context)
     }
 
     /// A finding from the latest scan as Markdown (for a PR) or a self-contained HTML page.

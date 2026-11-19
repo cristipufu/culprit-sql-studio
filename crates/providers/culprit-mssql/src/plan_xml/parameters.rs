@@ -6,6 +6,7 @@ use culprit_core::plan_facts::{
 };
 use roxmltree::Node;
 use std::collections::BTreeSet;
+pub(super) mod comparison;
 mod integers;
 mod uses;
 

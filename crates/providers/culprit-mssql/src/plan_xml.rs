@@ -126,6 +126,11 @@ pub fn parse(xml: &str) -> Result<Plan> {
     parse_statement(xml, None)
 }
 
+/// Recompare original selected runtime attributes transiently; detached JSON flags never assert equal inputs.
+pub fn runtime_input_pair<'a>(a: &'a Plan, b: &'a Plan) -> culprit_core::plan_compare::NativeRuntimeInputPair<'a> {
+    parameters::comparison::compare(a, b)
+}
+
 /// Query Store also keeps valid empty showplans for maintenance such as UPDATE STATISTICS. They provide no
 /// operator tree; that is absent plan data, not a parser failure. Malformed or nonempty unsupported XML is not empty.
 pub(crate) fn is_empty(xml: &str) -> bool {

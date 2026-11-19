@@ -168,7 +168,7 @@ async fn owned_healthy_scalar_same_plan_different_values_input_volume_and_call_c
 async fn counted_lookup(fixture: &OwnedSourceFixture, database: &str) {
     let mut probe = Probe::counted(fixture, database, IndexCoverage::LookupRequired).await;
     let original = probe.record(2, CacheExpectation::New).await;
-    let affected = probe.record(1, CacheExpectation::Reused(&original.context)).await;
+    let affected = probe.record_native(1, CacheExpectation::Reused(&original.context)).await;
     assert_context(&affected, ParameterValues::Different);
     let seek = affected.operator("Index Seek");
     let lookup = affected.operator("Key Lookup");
@@ -229,15 +229,62 @@ async fn counted_lookup(fixture: &OwnedSourceFixture, database: &str) {
 
     let mut retained = retained::Original::capture(&probe, &affected).await;
     batch(&mut probe.application, "EXEC sys.sp_recompile N'dbo.scalar_probe'").await;
-    let fresh = probe.record(1, CacheExpectation::New).await;
-    assert_ne!(affected.context.identity.key().unwrap(), fresh.context.identity.key().unwrap());
-    assert_eq!(affected.result, fresh.result);
-    assert_context(&fresh, ParameterValues::Same);
-    assert!(fresh.plan.nodes().iter().all(|node| node.kind != culprit_core::NodeKind::Lookup));
-    let fresh_reads = fresh.logical_reads("Clustered Index Scan");
-    assert!(fresh_reads < reads, "the same-input native intervention must actually reduce this access work");
+    let scan_run = probe.record_native(1, CacheExpectation::New).await;
+    assert_ne!(affected.context.identity.key().unwrap(), scan_run.context.identity.key().unwrap());
+    assert_eq!(affected.result, scan_run.result);
+    assert_context(&scan_run, ParameterValues::Same);
+    assert!(scan_run.plan.nodes().iter().all(|node| node.kind != culprit_core::NodeKind::Lookup));
+    let scan_reads = scan_run.logical_reads("Clustered Index Scan");
+    assert!(scan_reads < reads, "the same-input native intervention must actually reduce this access work");
+    let pair = crate::plan_xml::runtime_input_pair(&affected.plan, &scan_run.plan);
+    assert_eq!(pair.relation(), culprit_core::plan_compare::NativeRuntimeInputRelation::Same);
+    let comparison = culprit_core::plan_compare::compare_native_pair(pair, "Reused", "Scan", &Default::default());
+    let observed = comparison
+        .scenarios
+        .iter()
+        .find(|scenario| {
+            scenario
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(&culprit_core::t!("core.plan_compare.scalar_reuse.limit")))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "same original native integer input and measured cached-lookup to counterpart-scan comparison; lookup rows={rows} reads={reads}; same_statement={} cached={:?}/{:?}; scan scope={:?}",
+                affected.plan.statement == scan_run.plan.statement,
+                parameter_context.retrieved_from_cache,
+                scan_run.plan.facts().parameter_context.as_ref().and_then(|context| context.retrieved_from_cache),
+                scan_run
+                    .plan
+                    .nodes()
+                    .into_iter()
+                    .take(16)
+                    .map(|node| (
+                        node.id,
+                        node.kind,
+                        node.children.len(),
+                        node.object == lookup.object,
+                        node.facts().table_alias == lookup.facts().table_alias,
+                        node.act_rows,
+                        node.act_executions,
+                        node.facts().serial_execution_count.as_deref(),
+                        node.facts().parallel_operator,
+                        node.facts().estimated_rows_without_goal,
+                        node.runtime.as_ref().and_then(|runtime| runtime.logical_reads),
+                    ))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(observed.a, Some(lookup.id));
+    assert_eq!(observed.b, Some(scan_run.operator("Clustered Index Scan").id));
+    let withdrawn = culprit_core::redact::redact_plan(&affected.plan);
+    assert_eq!(
+        crate::plan_xml::runtime_input_pair(&withdrawn, &scan_run.plan).relation(),
+        culprit_core::plan_compare::NativeRuntimeInputRelation::Unavailable,
+        "retained/redacted evidence cannot borrow original runtime literals from the other plan"
+    );
     eprintln!(
-        "owned counted scalar: lookup node={} executions={rows} logical_reads={reads}; fresh scan reads={fresh_reads}; identical result={}",
+        "owned counted scalar: lookup node={} executions={rows} logical_reads={reads}; counterpart scan reads={scan_reads}; identical result={}",
         lookup.id, affected.result
     );
     let actor = probe.actor();
@@ -247,7 +294,7 @@ async fn counted_lookup(fixture: &OwnedSourceFixture, database: &str) {
 }
 
 #[tokio::test]
-#[ignore = "requires SQL2022 nonce-owned loopback fixture; exact cached lookup and same-input fresh/retained controls"]
+#[ignore = "requires SQL2022 nonce-owned loopback fixture; exact cached lookup and same-input scan/retained controls"]
 async fn owned_parameterized_lookup_work_uses_exact_native_counts_and_preserves_original_retained_history() {
     super::fixture::run("scalar_lookup", counted_lookup).await;
 }

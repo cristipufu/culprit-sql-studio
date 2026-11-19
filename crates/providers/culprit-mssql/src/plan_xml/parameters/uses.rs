@@ -93,7 +93,7 @@ fn direct_seek_parameter<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 
     only_element(identifier, "ColumnReference")
 }
 
-fn parameter_index(reference: Node<'_, '_>, parameters: &[PlanParameter]) -> Option<u16> {
+pub(super) fn parameter_index(reference: Node<'_, '_>, parameters: &[PlanParameter]) -> Option<u16> {
     if ["Server", "Database", "Schema", "Table", "Alias"].iter().any(|name| reference.attribute(*name).is_some()) {
         return None;
     }

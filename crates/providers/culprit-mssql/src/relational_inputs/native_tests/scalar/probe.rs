@@ -136,6 +136,14 @@ impl Probe {
         self.actor.clone()
     }
     pub async fn record(&mut self, bucket: i32, expected: CacheExpectation<'_>) -> RecordedRun {
+        let mut run = self.record_native(bucket, expected).await;
+        run.plan = culprit_core::redact::redact_plan(&run.plan);
+        run
+    }
+
+    /// This private fixture may borrow already captured original XML for an immediate pairwise comparison.
+    /// Ordinary fixture capture still returns the same redacted plan; no value/hash field is introduced.
+    pub async fn record_native(&mut self, bucket: i32, expected: CacheExpectation<'_>) -> RecordedRun {
         assert!(matches!(bucket, 1..=3));
         let mut reader = ReadSession::new(self.pool.clone(), super::super::expressions::reader_budget());
         if let CacheExpectation::Reused(original) = expected {
@@ -173,7 +181,6 @@ impl Probe {
         let rows = if bucket == 1 { COMMON_ROWS } else { 1 };
         assert_eq!(result, rows * self.projection.result_per_row());
         assert_eq!(reader.close().await, SourceShutdown::Quiescent);
-        let plan = culprit_core::redact::redact_plan(&plan);
         RecordedRun { plan, context: current.context, result }
     }
 }

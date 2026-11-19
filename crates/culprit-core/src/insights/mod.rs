@@ -48,6 +48,7 @@ pub use conversions::{ConversionEffect, ConversionEvidence, conversion_evidence}
 use index::*;
 use memory::*;
 use parallelism::*;
+pub(crate) use parameters::{LookupReadComparison, lookup_read_comparison};
 use predicates::*;
 pub use predicates::{
     MismatchAdvice, condition_count, converts_column, current_conversions, mismatch_fix, mysql_guessed_filtered,

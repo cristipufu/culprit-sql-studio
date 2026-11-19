@@ -5,6 +5,7 @@ use crate::plan_facts::{PlanParameter, PlanParameterComparison};
 
 mod lookup;
 pub(super) use lookup::LookupWork;
+pub(crate) use lookup::{LookupReadComparison, lookup_read_comparison};
 
 const MAX_PARAMETER_EXAMPLES: usize = 4;
 

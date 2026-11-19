@@ -237,8 +237,8 @@ pub fn diff_markdown(
     name_b: &str,
     options: &ExportOptions,
 ) -> String {
+    let redacted_diff = options.redact.then(|| crate::plans::compare_redacted(a, name_a, b, name_b));
     let (a, b) = (prepared(a, options), prepared(b, options));
-    let redacted_diff = options.redact.then(|| culprit_core::plan_diff_named(&a, name_a, &b, name_b));
     let diff = redacted_diff.as_ref().unwrap_or(diff);
     let mut out = String::new();
     let _ = writeln!(out, "## {}\n", t!("engine.export.plan_comparison", a = name_a, b = name_b));

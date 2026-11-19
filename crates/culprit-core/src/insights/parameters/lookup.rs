@@ -2,6 +2,59 @@
 use super::*;
 
 const MIN_LOOKUP_LOGICAL_READS: f64 = MANY_RUNS;
+const MIN_READ_REDUCTION: f64 = MANY_RUNS;
+const MIN_READ_FACTOR: f64 = 2.0;
+
+pub(crate) struct LookupReadComparison {
+    pub reused_node: u32,
+    pub scan_node: u32,
+    pub executions: f64,
+    pub lookup_reads: f64,
+    pub scan_reads: f64,
+}
+
+/// Compare independent operator counters without adding inclusive plan reads or inferring equal elapsed cost.
+pub(crate) fn lookup_read_comparison(reused: &Plan, counterpart: &Plan) -> Option<LookupReadComparison> {
+    if counterpart.kind != PlanKind::Actual {
+        return None;
+    }
+    let reused_context = Cx::new(reused);
+    let mut lookups = reused_context.nodes.iter().filter_map(|node| LookupWork::from_plan(&reused_context, node));
+    let lookup = lookups.next()?;
+    if lookups.next().is_some() {
+        return None;
+    }
+    let counterpart_context = Cx::new(counterpart);
+    let mut accesses = counterpart_context
+        .nodes
+        .iter()
+        .filter(|node| matches!(node.kind, NodeKind::Scan | NodeKind::Seek | NodeKind::Lookup));
+    let scan = accesses.next()?;
+    if accesses.next().is_some()
+        || scan.kind != NodeKind::Scan
+        || !scan.children.is_empty()
+        || scan.object != lookup.lookup.object
+        || scan.facts().table_alias != lookup.lookup.facts().table_alias
+        || scan.facts().parallel_operator != Some(false)
+        || scan.facts().estimated_rows_without_goal.is_some()
+        || serial_executions(scan) != Some(1.0)
+        || scan.act_rows != Some(lookup.actual)
+        || !non_repeating_ancestors(&counterpart_context, scan)
+    {
+        return None;
+    }
+    let scan_reads = scan.runtime.as_ref()?.logical_reads.filter(|reads| exact_count(*reads))?;
+    if lookup.logical_reads - scan_reads < MIN_READ_REDUCTION || lookup.logical_reads < MIN_READ_FACTOR * scan_reads {
+        return None;
+    }
+    Some(LookupReadComparison {
+        reused_node: lookup.lookup.id,
+        scan_node: scan.id,
+        executions: lookup.executions,
+        lookup_reads: lookup.logical_reads,
+        scan_reads,
+    })
+}
 
 pub(in crate::insights) struct LookupWork<'a> {
     parameter: &'a PlanParameter,
@@ -83,12 +136,16 @@ fn qualified_pair(cx: &Cx<'_>, join: &PlanNode, seek: &PlanNode, lookup: &PlanNo
         && [join, seek, lookup].into_iter().all(|node| {
             node.facts().parallel_operator == Some(false) && node.facts().estimated_rows_without_goal.is_none()
         })
-        && cx.ancestors(join).all(|node| {
-            matches!(node.kind, NodeKind::Aggregate | NodeKind::Sort | NodeKind::Compute)
-                && node.facts().parallel_operator == Some(false)
-                && node.facts().estimated_rows_without_goal.is_none()
-                && serial_executions(node) == Some(1.0)
-        })
+        && non_repeating_ancestors(cx, join)
+}
+
+fn non_repeating_ancestors(cx: &Cx<'_>, node: &PlanNode) -> bool {
+    cx.ancestors(node).all(|node| {
+        matches!(node.kind, NodeKind::Aggregate | NodeKind::Sort | NodeKind::Compute)
+            && node.facts().parallel_operator == Some(false)
+            && node.facts().estimated_rows_without_goal.is_none()
+            && serial_executions(node) == Some(1.0)
+    })
 }
 
 fn same_native_relation(cx: &Cx<'_>, seek: &PlanNode, lookup: &PlanNode) -> bool {
