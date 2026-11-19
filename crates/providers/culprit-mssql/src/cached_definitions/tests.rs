@@ -27,12 +27,12 @@ pub(crate) fn row() -> Rec {
 pub(crate) fn module_row(sql: &str, xml: &str) -> Rec {
     let base = row();
     let context = crate::cached_statements::context(&base).unwrap();
-    let header = format!("CREATE PROCEDURE dbo.consume @Rows dbo.RowsType READONLY AS {sql}");
-    let start = header.find("SELECT").unwrap();
+    let prefix = "CREATE PROCEDURE dbo.consume @Rows dbo.RowsType READONLY AS ";
+    let header = format!("{prefix}{sql}");
     replace(
         &base,
         &[
-            ("statement_start_offset", Val::Int((header[..start].encode_utf16().count() * 2) as i64)),
+            ("statement_start_offset", Val::Int((prefix.encode_utf16().count() * 2) as i64)),
             ("statement_end_offset", Val::Int(-1)),
             ("source_text_bytes", Val::Int((header.encode_utf16().count() * 2) as i64)),
             ("text_prefix", Val::Text(header)),

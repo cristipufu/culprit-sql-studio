@@ -15,6 +15,8 @@ enum Probe {
     Healthy,
     DerivedCounted,
     DerivedHealthy,
+    CteCounted,
+    CteHealthy,
 }
 impl Probe {
     fn name(self) -> &'static str {
@@ -24,6 +26,8 @@ impl Probe {
             Self::Healthy => "healthy_probe",
             Self::DerivedCounted => "derived_count_probe",
             Self::DerivedHealthy => "derived_healthy_probe",
+            Self::CteCounted => "cte_count_probe",
+            Self::CteHealthy => "cte_healthy_probe",
         }
     }
     fn statement(self) -> &'static str {
@@ -37,10 +41,16 @@ impl Probe {
             Self::DerivedHealthy => {
                 "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM (SELECT * FROM @Rows AS r) AS d"
             }
+            Self::CteCounted => {
+                "WITH input AS (SELECT * FROM @Rows AS r) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d WHERE (d.id > 10000)"
+            }
+            Self::CteHealthy => {
+                "WITH input AS (SELECT * FROM @Rows AS r) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d"
+            }
         }
     }
     fn is_healthy(self) -> bool {
-        matches!(self, Self::Healthy | Self::DerivedHealthy)
+        matches!(self, Self::Healthy | Self::DerivedHealthy | Self::CteHealthy)
     }
     fn execution(self, rows: usize) -> String {
         assert!(matches!(rows, 1 | LARGE_INPUT));
@@ -90,11 +100,11 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
         input.facts().table_alias,
         input.facts().relational_input
     );
-    if matches!(case, Probe::DerivedCounted | Probe::DerivedHealthy) {
+    if matches!(case, Probe::DerivedCounted | Probe::DerivedHealthy | Probe::CteCounted | Probe::CteHealthy) {
         assert_eq!(
             input.facts().table_alias.as_deref(),
             Some("r"),
-            "native derived input must preserve the original inner alias; the outer alias cannot substitute"
+            "native passthrough input must preserve the original inner alias; the outer alias cannot substitute"
         );
     }
     assert_eq!(
@@ -139,7 +149,7 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
             .expect("measured native input estimate discrepancy");
         assert!(concern.fix_sql.is_none());
         assert!(concern.fix.contains("table-valued parameter"));
-        if matches!(case, Probe::Counted | Probe::DerivedCounted) {
+        if matches!(case, Probe::Counted | Probe::DerivedCounted | Probe::CteCounted) {
             assert_eq!(input.act_rows, Some(FILTERED_ROWS));
             let counts = culprit_core::t!(
                 "insight.relational_input.completed_input_counts",
@@ -241,6 +251,10 @@ async fn capture_derived_probes(fixture: &OwnedSourceFixture, database: &str) {
     capture_cases(fixture, database, &[Probe::DerivedCounted, Probe::DerivedHealthy]).await;
 }
 
+async fn capture_cte_probes(fixture: &OwnedSourceFixture, database: &str) {
+    capture_cases(fixture, database, &[Probe::CteCounted, Probe::CteHealthy]).await;
+}
+
 #[tokio::test]
 #[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
 async fn owned_count_and_abs_actual_plans_bind_tvp_input_and_preserve_a_healthy_large_control() {
@@ -251,4 +265,10 @@ async fn owned_count_and_abs_actual_plans_bind_tvp_input_and_preserve_a_healthy_
 #[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
 async fn owned_derived_count_actual_plans_preserve_the_original_inner_alias_and_a_healthy_large_control() {
     super::fixture::run("derived", capture_derived_probes).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
+async fn owned_cte_count_actual_plans_preserve_the_original_inner_alias_and_a_healthy_large_control() {
+    super::fixture::run("cte", capture_cte_probes).await;
 }

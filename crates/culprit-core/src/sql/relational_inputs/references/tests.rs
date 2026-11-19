@@ -1,5 +1,6 @@
 use super::*;
 
+mod cte;
 mod derived;
 
 fn parameter(name: &str, alias: Option<&str>) -> MssqlRelationReference {
