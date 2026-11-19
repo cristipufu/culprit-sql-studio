@@ -114,7 +114,7 @@ fn partial_native_reads_preserve_positive_requests_as_a_lower_bound_without_coun
         let case = decide(&snapshot).expect("partial visibility does not erase independently qualified requests");
         assert_eq!(case.source_state, SourceState::Partial);
         assert_eq!(case.waiting.len(), count);
-        assert_eq!(case.output_reservations.len(), 1);
+        assert_eq!(case.reservations.len(), 1);
         let finding = render(case);
         assert_eq!(finding.id, collected.id, "source completeness cannot invent a different native point");
         let expected_summary = match count {
@@ -294,7 +294,8 @@ fn healthy_and_ordinary_blocking_reservations_do_not_get_output_delivery_advice(
     holder.request.as_mut().unwrap().wait.as_mut().unwrap().native_type = Some("LCK_M_S".into());
     let finding = finding_at_point(&snapshot(vec![grant("41", ExecutionGrantState::Waiting), holder])).unwrap();
     assert_eq!(finding.fix.as_ref().unwrap().summary, t!("view.request_memory.waiting.investigation"));
-    assert!(!observed_text(&finding).contains("output_marker"));
+    assert!(observed_text(&finding).contains("output_marker"), "the observed statement stays participant context");
+    assert!(!finding.summary.contains(&t!("check.memory_queue.recorded.output_context")));
 }
 
 #[test]
@@ -453,7 +454,7 @@ fn request_count_and_unicode_statement_previews_are_bounded_and_order_independen
     let finding = finding_at_point(&snapshot).unwrap();
     assert_eq!(
         finding.metrics.iter().filter(|metric| metric.key.starts_with("request-context:")).count(),
-        MAX_AFFECTED_REQUESTS + MAX_OUTPUT_RESERVATIONS
+        MAX_DISPLAYED_CONTEXTS
     );
     for metric in finding.metrics.iter().filter(|metric| metric.key.starts_with("request-context:")) {
         assert!(metric.text.as_ref().unwrap().chars().count() <= MAX_STATEMENT_CHARACTERS + 1);
@@ -480,4 +481,191 @@ fn display_redaction_removes_private_literals_without_rewriting_original_native_
     assert!(!display.contains("private-native-literal-canary"));
     assert_eq!(serde_json::to_value(&snapshot).unwrap(), original);
     assert!(original.to_string().contains("private-native-literal-canary"));
+}
+
+fn ordinary_reservation(id: &str, granted: Option<&str>) -> ExecutionGrantObservation {
+    let mut row = grant(id, ExecutionGrantState::Granted);
+    row.granted_kibibytes = granted.map(str::to_owned);
+    let request = row.request.as_mut().unwrap();
+    request.wait = None;
+    request.statement =
+        DefinitionPayload::sql(&format!("SELECT reservation_{id} FROM dbo.inputs"), culprit_core::Engine::Mssql);
+    assert!(row.is_valid());
+    row
+}
+
+#[test]
+fn concurrent_reservations_identify_original_same_resource_participants_in_both_orders() {
+    let rows = vec![
+        grant("41", ExecutionGrantState::Waiting),
+        ordinary_reservation("42", Some("1024")),
+        ordinary_reservation("43", Some("2048")),
+    ];
+    let mut snapshot = snapshot(rows);
+    let original = serde_json::to_value(&snapshot).unwrap();
+    let case = decide(&snapshot).unwrap();
+    assert!(matches!(case.investigation, QueueInvestigation::Concurrency));
+    assert_eq!(case.reservations.len(), 2);
+    let finding = render(case);
+    assert!(finding.summary.contains(&t!("check.memory_queue.recorded.concurrency")));
+    assert!(finding.summary.contains(&t!("check.memory_queue.recorded.reservations", n = 2, count = "2")));
+    assert_eq!(finding.fix.as_ref().unwrap().summary, t!("check.memory_queue.recorded.concurrency_investigation"));
+    assert_eq!(finding.verify, vec![t!("view.request_memory.verify")]);
+    assert_eq!(finding.actionability, Actionability::Information);
+    assert_eq!(finding.severity, Severity::Low);
+    assert!(finding.queries.is_empty() && finding.fix.as_ref().unwrap().sql.is_none());
+    let text = observed_text(&finding);
+    assert!(text.contains("waiting_marker") && text.contains("reservation_42") && text.contains("reservation_43"));
+    assert_eq!(serde_json::to_value(&snapshot).unwrap(), original);
+    captured(&mut snapshot).observations.reverse();
+    let reversed = finding_at_point(&snapshot).unwrap();
+    assert_eq!(finding.id, reversed.id);
+    assert_eq!(finding.summary, reversed.summary);
+    assert_eq!(observed_text(&finding), observed_text(&reversed));
+    assert_eq!(finding.fix.as_ref().unwrap().summary, reversed.fix.as_ref().unwrap().summary);
+}
+
+#[test]
+fn concurrency_requires_distinct_granted_requests_on_one_waiting_resource_without_a_size_verdict() {
+    for grant_size in ["1024", "1073741824"] {
+        let one =
+            snapshot(vec![grant("41", ExecutionGrantState::Waiting), ordinary_reservation("42", Some(grant_size))]);
+        let case = decide(&one).unwrap();
+        assert!(matches!(case.investigation, QueueInvestigation::Waiting));
+        let finding = render(case);
+        assert!(observed_text(&finding).contains("reservation_42"));
+        assert_eq!(finding.fix.as_ref().unwrap().summary, t!("view.request_memory.waiting.investigation"));
+    }
+    let mut other_waiter = grant("51", ExecutionGrantState::Waiting);
+    let mut other_grant = ordinary_reservation("52", Some("2048"));
+    let other_resource = Some(NativeIdentity::new("pool-2").qualified("resource_semaphore_id", "1"));
+    other_waiter.resource = other_resource.clone();
+    other_grant.resource = other_resource;
+    let snapshot = snapshot(vec![
+        grant("41", ExecutionGrantState::Waiting),
+        ordinary_reservation("42", Some("1024")),
+        other_waiter,
+        other_grant,
+    ]);
+    let case = decide(&snapshot).unwrap();
+    assert_eq!(case.reservations.len(), 2);
+    assert!(matches!(case.investigation, QueueInvestigation::Waiting), "different semaphores cannot be pooled");
+    let finding = render(case);
+    assert!(!finding.summary.contains(&t!("check.memory_queue.recorded.concurrency")));
+    assert!(observed_text(&finding).contains("reservation_42") && observed_text(&finding).contains("reservation_52"));
+}
+
+#[test]
+fn ordinary_reservations_require_positive_current_grants_without_borrowing_waiting_or_peak_values() {
+    for missing in [None, Some("0")] {
+        let mut unknown = ordinary_reservation("43", missing);
+        unknown.maximum_used_kibibytes = Some(u64::MAX.to_string());
+        let snapshot = snapshot(vec![
+            grant("41", ExecutionGrantState::Waiting),
+            grant("44", ExecutionGrantState::Waiting),
+            ordinary_reservation("42", Some("1024")),
+            unknown,
+        ]);
+        let case = decide(&snapshot).unwrap();
+        assert_eq!(case.reservations.len(), 1);
+        assert!(matches!(case.investigation, QueueInvestigation::Waiting));
+        let finding = render(case);
+        assert!(observed_text(&finding).contains("reservation_42"));
+        assert!(!observed_text(&finding).contains("reservation_43"));
+        assert!(!observed_text(&finding).contains(&u64::MAX.to_string()));
+    }
+}
+
+#[test]
+fn ordinary_and_output_wait_reservations_share_one_display_budget_without_duplicate_contexts() {
+    let mut rows = vec![grant("41", ExecutionGrantState::Waiting), grant("42", ExecutionGrantState::Waiting)];
+    rows.push(grant("51", ExecutionGrantState::Granted));
+    rows.extend((52..57).map(|id| ordinary_reservation(&id.to_string(), Some("1024"))));
+    let mut snapshot = snapshot(rows);
+    let finding = finding_at_point(&snapshot).unwrap();
+    let contexts =
+        finding.metrics.iter().filter(|metric| metric.key.starts_with("request-context:")).collect::<Vec<_>>();
+    assert_eq!(contexts.len(), MAX_DISPLAYED_CONTEXTS);
+    let keys = contexts.iter().map(|metric| &metric.key).collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(keys.len(), contexts.len());
+    assert_eq!(contexts.iter().filter(|metric| metric.text.as_ref().unwrap().contains("output_marker")).count(), 1);
+    assert!(finding.summary.contains(&t!("check.memory_queue.recorded.concurrency")));
+    assert!(finding.summary.contains(&t!("check.memory_queue.recorded.output_context")));
+    assert!(
+        finding.fix.as_ref().unwrap().summary.contains(&t!("check.memory_queue.recorded.concurrency_investigation"))
+    );
+    assert!(finding.fix.as_ref().unwrap().summary.contains(&t!("view.request_memory.output_wait.investigation")));
+    assert_eq!(finding.verify, vec![t!("view.request_memory.verify"), t!("view.request_memory.output_wait.verify")]);
+    assert!(finding.caveats.contains(&t!("check.memory_queue.recorded.omitted", count = "3")));
+    captured(&mut snapshot).observations.reverse();
+    let reversed = finding_at_point(&snapshot).unwrap();
+    assert_eq!(observed_text(&finding), observed_text(&reversed));
+}
+
+#[test]
+fn ordinary_reservation_context_keeps_existing_clock_scope_generation_and_duplicate_request_fences() {
+    for change in ["clock", "unknown-epoch", "foreign-database", "duplicate-request", "different-semaphore"] {
+        let mut snapshot = snapshot(vec![
+            grant("41", ExecutionGrantState::Waiting),
+            ordinary_reservation("42", Some("1024")),
+            ordinary_reservation("43", Some("2048")),
+        ]);
+        let read = captured(&mut snapshot);
+        match change {
+            "clock" => read.observations[2].observed_at = "2020-01-01T08:01:01Z".into(),
+            "unknown-epoch" => {
+                let SourcePartition::InstanceLocal { epoch, .. } = &mut read.context.partition else { unreachable!() };
+                *epoch = None;
+            }
+            "foreign-database" => read.observations[2].request.as_mut().unwrap().database = Some("foreign".into()),
+            "duplicate-request" => {
+                let key = read.observations[1].request.as_ref().unwrap().key.clone();
+                read.observations[2].request.as_mut().unwrap().key = key;
+            }
+            "different-semaphore" => {
+                read.observations[2].resource =
+                    Some(NativeIdentity::new("pool-2").qualified("resource_semaphore_id", "1"))
+            }
+            _ => unreachable!(),
+        }
+        if change == "different-semaphore" {
+            let case = decide(&snapshot).unwrap();
+            assert_eq!(case.reservations.len(), 1);
+            assert!(matches!(case.investigation, QueueInvestigation::Waiting));
+            assert!(!observed_text(&render(case)).contains("reservation_43"));
+        } else {
+            assert!(finding_at_point(&snapshot).is_none(), "{change}");
+        }
+    }
+}
+
+#[test]
+fn partial_concurrent_reservations_preserve_positive_context_with_bounded_redaction_and_no_sql_fallback() {
+    let mut first = ordinary_reservation("42", Some("1024"));
+    let raw = format!(
+        "SELECT N'reservation-secret-canary' AS token,reservation_private_marker,{} FROM dbo.inputs",
+        "列".repeat(1000)
+    );
+    first.request.as_mut().unwrap().statement = serde_json::from_value(json!({
+        "state":"available","text":raw,"sha256":digest(raw.as_bytes()),"redaction_version":1
+    }))
+    .unwrap();
+    let mut later_sql = ordinary_reservation("43", Some("2048"));
+    later_sql.statement_relationship = GrantStatementRelationship::Unresolved;
+    later_sql.request.as_mut().unwrap().statement =
+        DefinitionPayload::sql("SELECT later_statement_must_not_be_borrowed", culprit_core::Engine::Mssql);
+    let snapshot = partial_snapshot(vec![grant("41", ExecutionGrantState::Waiting), first, later_sql]);
+    let original = serde_json::to_value(&snapshot).unwrap();
+    let finding = finding_at_point(&snapshot).unwrap();
+    assert!(finding.summary.contains("At least 1 request was waiting"));
+    assert!(finding.summary.contains(&t!("check.memory_queue.recorded.concurrency")));
+    assert!(finding.caveats.contains(&t!("view.memory_participants.limit.source_partial")));
+    let text = observed_text(&finding);
+    assert!(text.contains("reservation_private_marker"));
+    assert!(!text.contains("reservation-secret-canary") && !text.contains("later_statement_must_not_be_borrowed"));
+    assert!(text.contains(&t!("check.memory_queue.recorded.statement_unavailable")));
+    for metric in finding.metrics.iter().filter(|metric| metric.key.starts_with("request-context:")) {
+        assert!(metric.text.as_ref().unwrap().chars().count() <= MAX_STATEMENT_CHARACTERS + 1);
+    }
+    assert_eq!(serde_json::to_value(&snapshot).unwrap(), original);
 }
