@@ -6,6 +6,7 @@
 
 mod init;
 mod locks;
+mod statement_context;
 mod tools;
 mod view;
 mod waits_view;

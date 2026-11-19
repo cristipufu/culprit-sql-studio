@@ -1,4 +1,5 @@
 //! Bounded historical report values and proven redacted statement previews, without private receipt internals.
+use crate::statement_context::statement as statement_context;
 use culprit_core::{
     Result,
     telemetry::{
@@ -277,7 +278,7 @@ fn current_request_work(
         Ok(json!({
             "reference":reference(analysis,&entry.observation_key),"actor":entry.actor,"observed_at":entry.observed_at,"scope":entry.scope,
             "title":entry.title,"explanation":entry.explanation,"metrics":entry.metrics,
-            "statement":super::context::statement(&point.statement),
+            "statement":statement_context(&point.statement),
             "investigation":entry.investigation,"verify":entry.verify,
         }))
     }).collect::<Result<Vec<_>>>()?;

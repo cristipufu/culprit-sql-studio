@@ -1,5 +1,5 @@
 //! Render the shared writer report without acquiring SQL or revising its original native relationships.
-use super::{blocking::line, statement, *};
+use super::{blocking::line, request_labels, request_labels::optional as label, statement, *};
 use culprit_core::{PageWaitWriterExplanation, PageWaitWriterReport, telemetry::MappedPageTarget};
 
 const MAX_WRITER_LIMITATIONS: usize = 8;
@@ -60,22 +60,9 @@ fn candidate(text: &mut String, entry: &PageWaitWriterExplanation) {
         ),
     );
     line(text, &statement::sql(entry.sql.as_ref()));
-    let client = entry.client.as_ref();
-    line(
-        text,
-        &t!(
-            "evidence.cli.page_writers.client",
-            application = label(client.and_then(|client| client.application.as_deref())),
-            user = label(client.and_then(|client| client.user.as_deref())),
-            host = label(client.and_then(|client| client.host.as_deref()))
-        ),
-    );
+    line(text, &request_labels::client(entry.client.as_ref()));
     line(text, &entry.investigation);
     line(text, &entry.verify);
-}
-
-fn label(value: Option<&str>) -> String {
-    value.map_or_else(|| t!("evidence.cli.page_holders.not_recorded"), statement::preview)
 }
 
 #[cfg(test)]

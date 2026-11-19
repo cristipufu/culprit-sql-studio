@@ -1,6 +1,6 @@
 use culprit_core::{
-    CachedPlanEntry, CachedPlanReport, CompilationReport, MemoryParticipantsReport, PageWaitReport,
-    RetainedFailureReport, RuntimeDistributionReport, SourceOutcome, SourceState, StatementWorkReport, TaskSpaceReport,
+    CachedPlanEntry, CachedPlanReport, CompilationReport, MemoryParticipantsReport, RetainedFailureReport,
+    RuntimeDistributionReport, SourceOutcome, SourceState, StatementWorkReport, TaskSpaceReport,
     collected_analysis::{CollectedQueryAnalysis, CollectedQueryAnalysisResult, CollectedQueryPopulation},
     format, t,
 };
@@ -38,8 +38,11 @@ pub(crate) use counter_ratios::counter_ratios;
 pub(crate) use wait_counters::wait_counters;
 mod maintenance_blocking;
 pub(crate) use maintenance_blocking::maintenance_blocking;
+mod page_waits;
 mod page_writers;
+mod request_labels;
 mod statement;
+pub(crate) use page_waits::page_waits;
 pub(crate) use page_writers::page_wait_writers;
 mod page_task_holders;
 pub(crate) use page_task_holders::page_task_holders;
@@ -537,31 +540,6 @@ pub(crate) fn task_space(report: &TaskSpaceReport) -> String {
     )
 }
 
-pub(crate) fn page_waits(report: &PageWaitReport) -> String {
-    let titles = report
-        .entries
-        .iter()
-        .take(super::BRIEF_FINDING_LIMIT)
-        .map(|entry| {
-            t!(
-                "evidence.cli.page_wait_entry",
-                title = entry.title.as_str(),
-                session = entry.request_key.session.id.as_str(),
-                resource = entry.resource.native.id.as_str()
-            )
-        })
-        .collect::<Vec<_>>();
-    render(
-        Summary {
-            title: &report.title,
-            summary: &report.summary,
-            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
-            limitations: &report.limitations,
-        },
-        titles.iter().map(String::as_str),
-    )
-}
-
 pub(crate) fn statement_work(report: &StatementWorkReport) -> String {
     let titles = report
         .entries
@@ -702,6 +680,7 @@ fn append_native_sources(text: &mut String, sources: &[SourceOutcome]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use culprit_core::PageWaitReport;
 
     #[test]
     fn compilation_changes_show_exact_native_bounds_and_all_coverage_qualifications_without_implied_cost() {
@@ -1189,6 +1168,7 @@ mod tests {
             source_reason: Some("page metadata visibility was partial".into()),
             title: "observed page waits".into(),
             summary: "one original waiter".into(),
+            recorded_incident: None,
             limitations: vec!["an observed waiter is not a transient latch owner".into()],
             entries: vec![culprit_core::PageWaitExplanation {
                 task: None,

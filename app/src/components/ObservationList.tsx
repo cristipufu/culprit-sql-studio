@@ -15,7 +15,7 @@ type ObservationReport<Entry> = {
 } & ({ source_state: SourceOutcome["state"] | null; source_reason: string | null } | { sources: SourceOutcome[] });
 
 /** Shared presentation owns read qualification and paging; each native format owns its evidence renderer. */
-export function ObservationList<Entry>({ source, time, report, scope, renderEntry, collapseEntries = false, entriesLabel }: {
+export function ObservationList<Entry>({ source, time, report, scope, renderEntry, collapseEntries = false, entriesLabel, children }: {
   source: string;
   time?: ReactNode;
   report: ObservationReport<Entry>;
@@ -23,6 +23,7 @@ export function ObservationList<Entry>({ source, time, report, scope, renderEntr
   renderEntry: (entry: Entry) => ReactNode;
   collapseEntries?: boolean;
   entriesLabel?: string;
+  children?: ReactNode;
 }) {
   const [page, setPage] = useState(0);
   const lastPage = Math.max(0, Math.ceil(report.entries.length / PAGE_SIZE) - 1);
@@ -45,6 +46,7 @@ export function ObservationList<Entry>({ source, time, report, scope, renderEntr
     <p className="muted">{source} · {scope}</p>
     {time != null && <p className="muted">{time}</p>}
     <ReadQualifications sources={sources} />
+    {children}
     <details>
       <summary>{t("ui.memory_failures.limitations")}</summary>
       <ReadReasons sources={sources} />

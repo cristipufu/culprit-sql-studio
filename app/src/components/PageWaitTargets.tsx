@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ActivityScopeBasis } from "../gen/ActivityScopeBasis";
 import type { MappedPageTarget } from "../gen/MappedPageTarget";
 import type { PageWaitExplanation } from "../gen/PageWaitExplanation";
@@ -28,7 +29,48 @@ export function PageWaitTargets({ evidence, report }: { evidence: PageWaitSnapsh
       const row = rows.get(pageWaitReferenceKey(entry.request_key, entry.resource, entry.task));
       return row ? <PageWaitCard key={entry.observation_key} row={row} entry={entry} />
         : <div className="operational-card" key={entry.observation_key}><p>{t("ui.memory_failures.missing_row")}</p></div>;
-    }} />;
+    }}>
+    {report.recorded_incident && <RecordedIncident
+      key={`${report.recorded_incident.original.capture.observation_id}:${report.recorded_incident.original.record_id}:${report.recorded_incident.original.manifest_sha256}:${report.recorded_incident.original.payload_sha256}`}
+      incident={report.recorded_incident} />}
+  </ObservationList>;
+}
+
+const RECORDED_SQL_PREVIEW_CHARACTERS = 512;
+
+function RecordedIncident({ incident }: { incident: NonNullable<PageWaitReport["recorded_incident"]> }) {
+  const [showStatement, setShowStatement] = useState(false);
+  const sql = incident.sql;
+  const excerpt = sql.state === "available" ? recordedSqlPreview(sql.text) : null;
+  return <article className="operational-card recorded-page-wait">
+    <h4>{t("view.page_waits.recorded.title")}</h4>
+    <p className="muted">{t("view.page_waits.recorded.context", {
+      at: incident.observed_at, session: incident.request.session.id,
+      request: incident.request.request?.id ?? t("ui.memory_failures.not_reported"), resource: incident.resource.native.id,
+    })}</p>
+    <p className="muted">{t("view.page_waits.recorded.qualification")}</p>
+    {sql.state === "available" && excerpt ? <>
+      <pre className="observation-statement">{excerpt.text}</pre>
+      {excerpt.truncated && <details onToggle={(event) => setShowStatement(event.currentTarget.open)}>
+        <summary>{t("ui.page_waits.recorded.full_statement")}</summary>
+        {showStatement && <pre className="observation-statement">{sql.text}</pre>}
+      </details>}
+    </> : sql.state === "unavailable" && <p className="muted">{t("ui.statement_grants.unavailable", { reason: sql.reason })}</p>}
+    {incident.client?.application && <dl>
+      <NativeValue label={t("ui.memory_participants.application")} value={incident.client.application} />
+    </dl>}
+  </article>;
+}
+
+function recordedSqlPreview(text: string): { text: string; truncated: boolean } {
+  let preview = "";
+  let characters = 0;
+  for (const character of text) {
+    if (characters === RECORDED_SQL_PREVIEW_CHARACTERS) return { text: `${preview}…`, truncated: true };
+    preview += character;
+    characters++;
+  }
+  return { text: preview, truncated: false };
 }
 
 function PageWaitCard({ row, entry }: { row: PageWaitObservation; entry: PageWaitExplanation }) {

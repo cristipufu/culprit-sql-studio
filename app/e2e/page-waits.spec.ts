@@ -4,7 +4,7 @@ import type { PageWaitReport } from "../src/gen/PageWaitReport";
 import type { PageWaitSnapshot } from "../src/gen/PageWaitSnapshot";
 import type { SourceOutcome } from "../src/gen/SourceOutcome";
 import type { State } from "../src/lib/store";
-import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_SOURCE, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait } from "../src/test/page-waits";
+import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_SOURCE, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait, recordedPageIncident } from "../src/test/page-waits";
 import { openConnection, waitForReport } from "./demo";
 
 const TITLE = english["view.page_waits.title"];
@@ -54,6 +54,55 @@ async function inject(page: Page, evidence: PageWaitSnapshot | null, view: PageW
     setState({ report: { ...state.report, report } });
   }, { path: "/src/lib/store.ts", evidence, view, source });
 }
+
+test("recorded waits survive an empty current read with bounded lazy SQL and a fresh disclosure per payload", async ({ page }, info) => {
+  await page.setViewportSize({ width: 900, height: 900 });
+  await openConnection(page, "mssql-demo");
+  const report = pageReport([]);
+  report.title = TITLE;
+  report.source_state = "empty";
+  const original = recordedPageIncident();
+  const sql = `SELECT ${"😀".repeat(600)} FROM recorded_tail WHERE label=N'<script>canary</script>'`;
+  original.sql = { state: "available", text: sql, sha256: "c".repeat(64), redaction_version: 1 };
+  report.recorded_incident = original;
+  const source = { source: PAGE_SOURCE, state: "empty", reason: null } as const;
+  await inject(page, pageEvidence([]), report, source);
+  await page.locator('[data-tile="health"]').click();
+  const region = page.getByRole("region", { name: TITLE, exact: true });
+  const recorded = region.locator(".recorded-page-wait");
+  await expect(recorded).toBeVisible();
+  await expect(recorded).toContainText(english["view.page_waits.recorded.qualification"]);
+  await expect(recorded).toContainText("observed-label");
+  await expect(recorded.locator("pre")).toHaveCount(1);
+  await expect(recorded).not.toContainText("recorded_tail");
+  await expect(recorded).not.toContainText("private-original");
+  const toggle = recorded.getByText(english["ui.page_waits.recorded.full_statement"], { exact: true });
+  await toggle.click();
+  await expect(recorded.locator("pre")).toHaveCount(2);
+  await expect(recorded.locator("pre").last()).toHaveText(sql);
+  await expect(recorded.locator("script")).toHaveCount(0);
+  await toggle.click();
+  await expect(recorded.locator("pre")).toHaveCount(1);
+  await toggle.click();
+  await expect(recorded.locator("pre")).toHaveCount(2);
+  report.recorded_incident.original.payload_sha256 = "d".repeat(64);
+  await inject(page, pageEvidence([]), report, source);
+  await expect(recorded.locator("pre")).toHaveCount(1);
+  await expect(recorded.locator("details[open]")).toHaveCount(0);
+  await page.setViewportSize({ width: 520, height: 900 });
+  const bounds = await region.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+  expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
+  await recorded.screenshot({ path: info.outputPath("recorded-page-wait-empty-current.png") });
+  report.recorded_incident.sql = { state: "unavailable", reason: "not-collected" };
+  report.recorded_incident.original.payload_sha256 = "e".repeat(64);
+  await inject(page, pageEvidence([]), report, source);
+  await expect(recorded.locator("pre")).toHaveCount(0);
+  report.recorded_incident.sql = { state: "available", text: sql, sha256: "c".repeat(64), redaction_version: 1 };
+  report.recorded_incident.original.payload_sha256 = "f".repeat(64);
+  await inject(page, pageEvidence([]), report, source);
+  await expect(recorded.locator("pre")).toHaveCount(1);
+  await expect(recorded.locator("details[open]")).toHaveCount(0);
+});
 
 test("parallel workers retain separate task waits and unverified owner fields behind disclosure", async ({ page }, info) => {
   await page.setViewportSize({ width: 900, height: 900 });

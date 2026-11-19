@@ -23,13 +23,17 @@ impl Investigation {
     }
 
     async fn with_owner(owner: ActivityWaitOwner) -> Self {
+        Self::with_statement(owner, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }).await
+    }
+
+    async fn with_statement(owner: ActivityWaitOwner, statement: DefinitionPayload) -> Self {
         let (mut page_source, records) = page_wait_evidence_cases().remove(0);
         let mut page = observations(&records)[0].clone();
         page.request.statement_identity = page.statement_identity.clone();
         page.request.blocking_status = ActivityBlockingStatus::Known;
         page.request.wait.as_mut().unwrap().owners = vec![owner];
         let mut waiter = page.request.clone();
-        waiter.statement = DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
+        waiter.statement = statement;
         let parent_rows =
             std::iter::once(waiter).chain((0..2).map(owner_context)).map(TelemetryRecord::from).collect::<Vec<_>>();
         let (mut parent_source, _) = activity_evidence_cases().remove(0);
@@ -200,10 +204,13 @@ async fn authentic_original_parent_exposes_every_mars_context_and_exact_receipt_
     )
     .unwrap();
     assert_eq!(analysis.report, pure);
+    let recorded = analysis.report.recorded_incident.as_ref().unwrap();
+    assert_eq!(recorded.original, reference(&investigation.parent, &investigation.parent.records()[0]));
+    assert_eq!(recorded.sql, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected });
+    let TelemetryRecord::Activity(waiter) = &investigation.parent_rows[0] else { unreachable!() };
+    assert_eq!(recorded.client, waiter.client);
     let encoded = serde_json::to_string(&analysis.report).unwrap();
-    for native_body in
-        ["original_owner_context_canary", "later_waiter_current_sql_canary", "\"request_counters\"", "collector-name"]
-    {
+    for native_body in ["original_owner_context_canary", "later_waiter_current_sql_canary", "\"request_counters\""] {
         assert!(!encoded.contains(native_body), "{native_body}");
     }
     assert_eq!(page_fixture.recovery_object_reads(), page_reads);
@@ -226,6 +233,7 @@ async fn owner_only_or_empty_original_warehouse_reads_keep_native_page_evidence_
         assert_eq!(partial.records().len(), expected_rows);
         let analysis = collected_resources::page_waits(&page, Some(&partial)).unwrap();
         assert_eq!(analysis.report.entries.len(), 1);
+        assert!(analysis.report.recorded_incident.is_none());
         assert_eq!(analysis.context.records.len(), 1);
         let activity = analysis.activity_context.as_ref().unwrap();
         assert_eq!(activity.records.len(), expected_rows);
@@ -301,6 +309,7 @@ async fn a_later_native_frame_with_the_same_ids_and_new_sql_cannot_substitute_fo
     assert!(collected_resources::page_waits(&page, Some(&later)).is_err());
     let page_only = collected_resources::page_waits(&page, None).unwrap();
     assert!(page_only.activity_context.is_none());
+    assert!(page_only.report.recorded_incident.is_none());
     assert!(page_only.report.entries[0].blocking.contexts.is_empty());
     assert_eq!(page_only.report.entries[0].blocking.issues, [PageWaitBlockingIssue::FrameUnavailable]);
 }
@@ -347,6 +356,10 @@ async fn empty_focused_page_results_still_require_the_exact_original_activity_ro
     assert!(analyzed.report.entries.is_empty());
     assert_eq!(analyzed.report.source_state, Some(SourceState::Partial));
     assert_eq!(analyzed.activity_context.as_ref().unwrap().records.len(), 3);
+    assert_eq!(
+        analyzed.report.recorded_incident.as_ref().unwrap().sql,
+        DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+    );
     for field in ["role", "clock", "original-body"] {
         let mut changed = empty.clone();
         let SourceObservation::FocusedPageWait { result, .. } = &mut changed.observation else { unreachable!() };
@@ -363,6 +376,72 @@ async fn empty_focused_page_results_still_require_the_exact_original_activity_ro
             "{field}"
         );
     }
+}
+
+#[tokio::test]
+async fn recorded_waiter_sql_survives_missing_changed_and_ended_lookup_without_another_archive_read() {
+    let sql = DefinitionPayload::sql(
+        "SELECT recorded_waiter_payload FROM dbo.orders WHERE customer_id=9264",
+        culprit_core::Engine::Mssql,
+    );
+    let investigation = Investigation::with_statement(
+        ActivityWaitOwner::Unknown { native_id: "-5".into(), reason: UnknownWaitOwner::UntrackedLatch },
+        sql.clone(),
+    )
+    .await;
+    let original_rows = serde_json::to_value(investigation.parent.records()).unwrap();
+    let parent_reads = investigation.parent_fixture.recovery_object_reads();
+    for (request, wait) in [
+        (PageWaitRequestState::Missing, PageWaitRelation::Unqualified),
+        (PageWaitRequestState::Changed, PageWaitRelation::Unqualified),
+        (PageWaitRequestState::SameStatement, PageWaitRelation::NoLongerObserved),
+    ] {
+        let mut source = investigation.page_source.clone();
+        let SourceObservation::FocusedPageWait { snapshot, result } = &mut source.observation else { unreachable!() };
+        snapshot.records = 0;
+        snapshot.sources[0] = StateSourceCoverage::observed(snapshot.sources[0].source.clone(), 0, false);
+        result.request = request;
+        result.wait = wait;
+        let focus = result.focus.clone();
+        let (fixture, primary) = page_capture(source, vec![]).await;
+        let page_reads = fixture.recovery_object_reads();
+        let analysis = collected_resources::page_waits(&primary, Some(&investigation.parent)).unwrap();
+        let incident = analysis.report.recorded_incident.as_ref().unwrap();
+        assert!(analysis.report.entries.is_empty());
+        assert_eq!(incident.original, reference(&investigation.parent, &investigation.parent.records()[0]));
+        assert_eq!(incident.observed_at, investigation.parent.source().observation.activity().unwrap().at);
+        assert_eq!(incident.request, focus.participant().original.key);
+        assert_eq!(incident.resource, focus.resource);
+        assert_eq!(incident.sql, sql);
+        assert_eq!(incident.client, focus.participant().original.client);
+        assert!(analysis.context.records.is_empty());
+        assert_eq!(analysis.activity_context.as_ref().unwrap().records.len(), 3);
+        assert!(!serde_json::to_string(&analysis.report).unwrap().contains("later_waiter_current_sql_canary"));
+        assert_eq!(fixture.recovery_object_reads(), page_reads);
+        assert_eq!(investigation.parent_fixture.recovery_object_reads(), parent_reads);
+    }
+    assert_eq!(serde_json::to_value(investigation.parent.records()).unwrap(), original_rows);
+}
+
+#[tokio::test]
+async fn a_present_original_sql_row_in_an_incomplete_frame_cannot_be_promoted_from_its_positive_prefix() {
+    let investigation = Investigation::with_statement(
+        ActivityWaitOwner::Unknown { native_id: "-5".into(), reason: UnknownWaitOwner::UntrackedLatch },
+        DefinitionPayload::sql("SELECT recorded_waiter_payload FROM dbo.orders", culprit_core::Engine::Mssql),
+    )
+    .await;
+    let (_, page) = investigation.page_capture().await;
+    investigation.parent_fixture.remove_row(TelemetryStream::ActivityObservations, 1);
+    let partial = investigation.parent_fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+    assert!(!partial.is_read_complete());
+    assert_eq!(partial.records().len(), 2);
+    assert_eq!(partial.records()[0].row(), investigation.parent.records()[0].row());
+    let reads = investigation.parent_fixture.recovery_object_reads();
+    let analysis = collected_resources::page_waits(&page, Some(&partial)).unwrap();
+    assert_eq!(analysis.report.entries.len(), 1);
+    assert!(analysis.report.recorded_incident.is_none());
+    assert_eq!(analysis.activity_context.as_ref().unwrap().records.len(), 2);
+    assert_eq!(investigation.parent_fixture.recovery_object_reads(), reads);
 }
 
 #[tokio::test]

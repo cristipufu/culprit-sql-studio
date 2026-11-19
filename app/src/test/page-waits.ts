@@ -1,5 +1,6 @@
 import type { PageWaitObservation } from "../gen/PageWaitObservation";
 import type { PageWaitReport } from "../gen/PageWaitReport";
+import type { PageWaitRecordedIncident } from "../gen/PageWaitRecordedIncident";
 import type { PageWaitSnapshot } from "../gen/PageWaitSnapshot";
 
 export const PAGE_SOURCE = "page wait targets";
@@ -44,6 +45,20 @@ export function pageEvidence(observations = [pageWait()]): PageWaitSnapshot {
   return { source: PAGE_SOURCE, observed_from: "2026-11-13T10:00:00.100000Z", observed_until: "2026-11-13T10:00:00.900000Z", observations };
 }
 
+/** Presentation receives the backend's authenticated original, independently of any current rows. */
+export function recordedPageIncident(row = pageWait()): PageWaitRecordedIncident {
+  return {
+    original: {
+      capture: { observation_id: "private-original-capture", revision: null },
+      manifest_sha256: "a".repeat(64), source_scope_id: "private-source-scope", stream: "activity-observations",
+      native_key: { kind: "activity", data: structuredClone(row.request.key) }, batch_id: "private-original-batch",
+      record_id: "private-original-record", payload_sha256: "b".repeat(64), representation_version: 2, row_ordinal: 0,
+    },
+    observed_at: PAGE_FROM, request: structuredClone(row.request.key), resource: structuredClone(row.resource),
+    sql: structuredClone(row.request.statement), client: structuredClone(row.request.client),
+  };
+}
+
 /** Parallel tasks retain their own wait even when the coordinator reports an unrelated native wait. */
 export function pageTaskWait(context = 1): PageWaitObservation {
   const row = pageWait();
@@ -64,6 +79,7 @@ export function pageReport(observations = [pageWait()]): PageWaitReport {
   return {
     source_state: "partial", source_reason: "Only bounded coordinator waits were retained.",
     title: "Observed page waits", summary: `${observations.length} affected requests; no transient holder identified.`,
+    recorded_incident: null,
     limitations: ["Matching metadata at two bounds does not establish continuous page identity or a latch owner."],
     entries: observations.map((row, index) => ({
       observation_key: `opaque-backend-page-reference-${index}`, request_key: structuredClone(row.request.key), resource: structuredClone(row.resource),

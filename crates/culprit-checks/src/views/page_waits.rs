@@ -2,11 +2,13 @@
 use culprit_core::{
     Error, PageWaitActivityEvidence, PageWaitBlockingIssue, PageWaitBlockingParticipation, PageWaitExplanation,
     PageWaitReport, Result, SourceOutcome, SourceState, WaitResourceKind, format, key,
-    page_wait_blocking_participation, t,
+    page_wait_blocking_participation,
+    page_wait_report::PageWaitRecordedIncident,
+    t,
     telemetry::{
-        MAX_PAGE_WAIT_OBSERVATIONS, MssqlIndexCounter, PageIndexOperationRelation, PageIndexOperations,
-        PageWaitObservation, PageWaitRecheck, PageWaitRelation, PageWaitRequestState, PageWaitResolution,
-        PageWaitTargetKind,
+        DefinitionPayload, MAX_PAGE_WAIT_OBSERVATIONS, MssqlIndexCounter, PageIndexOperationRelation,
+        PageIndexOperations, PageWaitObservation, PageWaitRecheck, PageWaitRelation, PageWaitRequestState,
+        PageWaitResolution, PageWaitTargetKind, SourceObservation,
     },
 };
 use std::collections::BTreeSet;
@@ -26,6 +28,7 @@ pub fn explain(
         activity.validate()?;
     }
     let cases = validate(observations, source)?;
+    let recorded_incident = activity.map(recorded_incident).transpose()?.flatten();
     let entries = cases.into_iter().map(|case| render(case, activity)).collect::<Result<Vec<_>>>()?;
     Ok(PageWaitReport {
         source_state: source.map(|source| source.state),
@@ -40,9 +43,37 @@ pub fn explain(
                 count = format::count(observations.len() as f64)
             )
         },
+        recorded_incident,
         limitations: limitations(source, observations.iter().any(|row| row.index_operations.is_some())),
         entries,
     })
+}
+
+fn recorded_incident(activity: PageWaitActivityEvidence<'_>) -> Result<Option<PageWaitRecordedIncident>> {
+    let SourceObservation::FocusedPageWait { result, .. } = &activity.source.observation else { return Ok(None) };
+    let frame = activity.frame;
+    if !frame.read_complete()
+        || !frame.native().coverage.complete_scope
+        || !frame.context().has_qualified_local_owner()
+        || !frame.has_session_generation_authority(&activity.original.original.key.session)
+    {
+        return Ok(None);
+    }
+    let Some(row) = frame.row(&activity.original.original.key) else { return Ok(None) };
+    // explain validated this actual row against the original parent. A focus copy never supplies its body.
+    let original = row.reference.ok_or_else(invalid)?.clone();
+    let sql = match &row.observation.statement {
+        DefinitionPayload::Available { text, .. } => DefinitionPayload::sql(text, frame.source().target.engine()),
+        unavailable @ DefinitionPayload::Unavailable { .. } => unavailable.clone(),
+    };
+    Ok(Some(PageWaitRecordedIncident {
+        original,
+        observed_at: frame.native().at.clone(),
+        request: row.observation.key.clone(),
+        resource: result.focus.resource.clone(),
+        sql,
+        client: row.observation.client.clone(),
+    }))
 }
 
 struct ObservedPage<'a> {

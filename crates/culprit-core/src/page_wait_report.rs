@@ -1,5 +1,8 @@
 //! Page-target explanations reference observed waiters and metadata. They never assert transient latch ownership.
-use crate::{ObservedWaitResource, SourceState, telemetry::ActivityKey};
+use crate::{
+    ObservedWaitResource, SourceState,
+    telemetry::{ActivityClient, ActivityKey, DefinitionPayload, DiagnosticEvidenceRef},
+};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -17,8 +20,22 @@ pub struct PageWaitReport {
     pub source_reason: Option<String>,
     pub title: String,
     pub summary: String,
+    /// Authenticated original waiter context, independent of a later changed or missing request/page lookup.
+    /// This records an incident; it establishes no current statement, physical target or latch ownership.
+    pub recorded_incident: Option<PageWaitRecordedIncident>,
     pub limitations: Vec<String>,
     pub entries: Vec<PageWaitExplanation>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct PageWaitRecordedIncident {
+    pub original: DiagnosticEvidenceRef,
+    pub observed_at: String,
+    pub request: ActivityKey,
+    pub resource: ObservedWaitResource,
+    pub sql: DefinitionPayload,
+    pub client: Option<ActivityClient>,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]

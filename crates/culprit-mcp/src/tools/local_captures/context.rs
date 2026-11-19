@@ -1,4 +1,5 @@
 //! Compact database-reported context. Callers supply the existing typed relationship; names never establish owners.
+use crate::statement_context::statement;
 use culprit_core::{
     Result, SessionStatementContext,
     telemetry::{
@@ -9,31 +10,6 @@ use culprit_core::{
 };
 use culprit_engine::LocalSnapshotAnalysis;
 use serde_json::{Value, json};
-
-const SQL_PREVIEW_CHARS: usize = 512;
-
-pub(super) struct SqlPreview {
-    pub text: String,
-    pub truncated: bool,
-}
-impl SqlPreview {
-    pub fn new(text: &str) -> Self {
-        Self {
-            text: text.chars().take(SQL_PREVIEW_CHARS).collect(),
-            truncated: text.chars().count() > SQL_PREVIEW_CHARS,
-        }
-    }
-}
-
-pub(super) fn statement(payload: &DefinitionPayload) -> Value {
-    match payload {
-        DefinitionPayload::Available { text, .. } => {
-            let preview = SqlPreview::new(text);
-            json!({"availability":"available", "preview":preview.text, "preview_truncated":preview.truncated})
-        }
-        DefinitionPayload::Unavailable { reason } => json!({"availability":"unavailable", "reason":reason}),
-    }
-}
 
 /// This is one observed request's context, never an allocator, business service or source-code ownership claim.
 /// A withheld statement stays absent even if the surrounding observation retains a native SQL payload.

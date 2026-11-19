@@ -17,6 +17,7 @@ mod counter_ratios;
 pub(crate) mod instance_resources;
 mod jobs;
 pub(crate) mod page_server_reads;
+mod page_waits;
 pub(crate) mod performance_counters;
 mod statement_work;
 
@@ -184,6 +185,7 @@ pub fn report(report: &Report) -> Value {
             "summary": pages.summary,
             "source_state": pages.source_state,
             "source_reason": pages.source_reason,
+            "recorded_incident": pages.recorded_incident.as_ref().map(page_waits::recorded_incident),
             "entries_retained": pages.entries.len(),
             "entries": pages.entries.iter().take(PARTICIPANT_ENTRIES).collect::<Vec<_>>(),
             "limitations": pages.limitations,
@@ -283,6 +285,7 @@ mod tests {
             source_reason: Some("Native task visibility is partial.".into()),
             title: "Page waits".into(),
             summary: "Distinct task waits on one request.".into(),
+            recorded_incident: None,
             limitations: vec!["Task addresses do not establish an owner.".into()],
             entries: (0..PARTICIPANT_ENTRIES + 2)
                 .map(|index| PageWaitExplanation {
@@ -370,6 +373,7 @@ mod tests {
                 source_reason: Some("Native scope qualification.".into()),
                 title: "Page waits".into(),
                 summary: "No retained page rows.".into(),
+                recorded_incident: None,
                 limitations: vec!["Missing task visibility is not zero.".into()],
                 entries: vec![],
             });

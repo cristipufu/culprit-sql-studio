@@ -187,8 +187,8 @@ pub use operations::{
 pub use page_wait_report::{
     PageTaskHolderBound, PageTaskHolderExplanation, PageTaskHolderReport, PageWaitActivityEvidence,
     PageWaitActivityReference, PageWaitBlockingBasis, PageWaitBlockingContext, PageWaitBlockingIssue,
-    PageWaitBlockingParticipation, PageWaitExplanation, PageWaitReport, PageWaitTaskReference,
-    PageWaitWriterExplanation, PageWaitWriterReport, page_wait_blocking_participation,
+    PageWaitBlockingParticipation, PageWaitExplanation, PageWaitRecordedIncident, PageWaitReport,
+    PageWaitTaskReference, PageWaitWriterExplanation, PageWaitWriterReport, page_wait_blocking_participation,
 };
 pub use plan::*;
 pub use plan_compare::{CompareContext, Scenario, ScenarioKind};

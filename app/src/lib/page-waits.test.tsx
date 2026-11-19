@@ -4,7 +4,7 @@ import { HealthTab } from "../components/Health";
 import { PageWaitTargets } from "../components/PageWaitTargets";
 import type { Report } from "../gen/Report";
 import { partial } from "../test/fixtures";
-import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait } from "../test/page-waits";
+import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait, recordedPageIncident } from "../test/page-waits";
 import { t } from "./i18n";
 import { pageWaitReferenceKey } from "./page-wait-reference";
 
@@ -195,4 +195,53 @@ test("a requested page profile with missing source coverage stays visible in Hea
   expect(html).toContain(t("view.page_waits.title"));
   expect(html).toContain(t("ui.observation_list.source_unknown"));
   expect(html).not.toContain(t("ui.health.empty"));
+});
+
+test("an empty current page read preserves the original recorded wait without inventing current metadata", () => {
+  const view = pageReport([]);
+  view.source_state = "empty";
+  view.recorded_incident = recordedPageIncident();
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([])} report={view} />);
+  expect(html).toContain(t("view.page_waits.recorded.title"));
+  expect(html).toContain(t("view.page_waits.recorded.qualification"));
+  expect(html).toContain(PAGE_FROM);
+  expect(html).toContain("5:1:42");
+  expect(html).toContain("observed-label");
+  expect(html).toContain("&lt;script&gt;canary&lt;/script&gt;");
+  expect(html).not.toContain("<script>");
+  expect(html).not.toContain("orders_id");
+  expect(html).not.toContain("private-original");
+  expect(html).not.toContain("a".repeat(64));
+  expect(html).not.toContain(t("ui.page_waits.inspect"));
+});
+
+test("every recorded statement unavailability is explicit instead of borrowing a current statement", () => {
+  for (const reason of ["missing", "restricted", "encrypted", "oversized", "redaction-failed", "not-collected", "source-unavailable"] as const) {
+    const view = pageReport([]);
+    view.recorded_incident = recordedPageIncident();
+    view.recorded_incident.sql = { state: "unavailable", reason };
+    const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence()} report={view} />);
+    expect(html).toContain(t("ui.statement_grants.unavailable", { reason }));
+    expect(html).not.toContain("SELECT");
+    expect(html).not.toContain("<pre");
+  }
+});
+
+test("recorded statement previews bound Unicode and leave the complete statement out of the initial DOM", () => {
+  const view = pageReport([]);
+  view.recorded_incident = recordedPageIncident();
+  view.recorded_incident.sql = { state: "available", text: `SELECT ${"😀".repeat(600)} FROM hidden_original_tail`, sha256: "c".repeat(64), redaction_version: 1 };
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([])} report={view} />);
+  expect(html).toContain(`SELECT ${"😀".repeat(505)}…`);
+  expect(html).not.toContain("😀".repeat(506));
+  expect(html).not.toContain("hidden_original_tail");
+  expect(html).toContain(t("ui.page_waits.recorded.full_statement"));
+  expect(html.match(/<pre\b/g)).toHaveLength(1);
+});
+
+test("a report without an authenticated original does not render recorded context", () => {
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([])} report={pageReport([])} />);
+  expect(html).not.toContain(t("view.page_waits.recorded.title"));
+  expect(html).not.toContain("observed-label");
+  expect(html).not.toContain("<pre");
 });
