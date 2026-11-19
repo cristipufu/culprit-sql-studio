@@ -70,6 +70,7 @@
                 "output_columns": [
                   "id"
                 ],
+                "parallel_operator": false,
                 "possible_index_names": [],
                 "storage": "RowStore",
                 "user_functions": []
@@ -132,6 +133,7 @@
                   "name",
                   "segment"
                 ],
+                "parallel_operator": false,
                 "possible_index_names": [],
                 "storage": "RowStore",
                 "user_functions": []
@@ -191,6 +193,7 @@
               "name",
               "segment"
             ],
+            "parallel_operator": false,
             "possible_index_names": [],
             "user_functions": []
           },
@@ -408,6 +411,7 @@
                 "output_columns": [
                   "id"
                 ],
+                "parallel_operator": false,
                 "possible_index_names": [],
                 "storage": "RowStore",
                 "user_functions": []
@@ -471,6 +475,7 @@
                   "name",
                   "segment"
                 ],
+                "parallel_operator": false,
                 "possible_index_names": [],
                 "storage": "RowStore",
                 "user_functions": []
@@ -530,6 +535,7 @@
               "name",
               "segment"
             ],
+            "parallel_operator": false,
             "possible_index_names": [],
             "user_functions": []
           },

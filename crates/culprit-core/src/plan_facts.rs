@@ -213,6 +213,11 @@ pub struct PlanNodeFacts {
     #[serde(default, skip_serializing_if = "is_false")]
     #[ts(as = "Option<bool>", optional)]
     pub estimated_rows_unavailable: bool,
+    /// The native operator's declared parallel execution context. This does not count observed workers or
+    /// establish an actual serial execution population. Missing or malformed native declarations stay unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parallel_operator: Option<bool>,
     // Number of threads whose execution counts contribute to this operator's total, not requested parallelism.
     #[serde(default, skip_serializing_if = "Option::is_none", with = "count_number")]
     #[ts(as = "Option<u32>")]

@@ -102,6 +102,25 @@ fn the_shared_plan_insight_check_preserves_exact_tvp_loop_evidence_and_nonexecut
 }
 
 #[test]
+fn a_cardinality_preserving_native_wrapper_retains_the_actionable_tvp_finding_and_original_query_link() {
+    let mut snapshot = snapshot();
+    let original = plan_insights(&snapshot).into_iter().find(|finding| finding.id.contains("nested-loops:")).unwrap();
+    let plan = snapshot.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap();
+    let input = plan.root.children.remove(0);
+    let mut wrapper = operator(3, NodeKind::Compute, "Compute Scalar", input.est_rows, input.act_rows.unwrap(), 1);
+    wrapper.children.push(input);
+    plan.root.children.insert(0, wrapper);
+    let observed = plan_insights(&snapshot).into_iter().find(|finding| finding.id.contains("nested-loops:")).unwrap();
+    assert_eq!(observed.id, original.id);
+    assert_eq!(observed.summary, original.summary);
+    assert_eq!(observed.queries[0].id, original.queries[0].id);
+    assert_eq!(observed.queries[0].plan_node, Some(0));
+    assert_eq!(observed.fix.as_ref().unwrap().summary, original.fix.as_ref().unwrap().summary);
+    assert!(observed.fix.as_ref().unwrap().sql.is_none());
+    assert_eq!(observed.verify, original.verify);
+}
+
+#[test]
 fn an_important_query_does_not_supply_missing_native_inner_access_or_serial_execution_proof() {
     for missing in ["access", "serial"] {
         let mut snapshot = snapshot();

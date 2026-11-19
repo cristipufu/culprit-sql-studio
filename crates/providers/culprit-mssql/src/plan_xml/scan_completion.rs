@@ -24,10 +24,8 @@ pub(super) fn serial_execution_count(relop: Node<'_, '_>, population: &PlanScanC
 
 pub(super) fn read(relop: Node<'_, '_>) -> Option<PlanScanCompletion> {
     let parallel = match relop.attribute("Parallel") {
-        Some("0" | "false") => Some(false),
-        Some("1" | "true") => Some(true),
+        Some(value) => Some(super::native_boolean(value)?),
         None => None,
-        _ => return None,
     };
     let mut populations = children(relop, "RunTimeInformation");
     let population = populations.next()?;

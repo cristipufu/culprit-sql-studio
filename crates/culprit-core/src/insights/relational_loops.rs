@@ -30,9 +30,10 @@ struct ObservedTvpLoop<'a> {
 impl<'a> ObservedTvpLoop<'a> {
     fn from_plan(cx: &Cx<'a>, join: &'a PlanNode) -> Option<Self> {
         let [outer, inner] = join.children.as_slice() else { return None };
-        if !qualified_tvp_scan(outer) || !direct_inner_access(inner) || !single_serial_path(cx, join, outer) {
+        if !direct_inner_access(inner) || !single_serial_path(cx, join) {
             return None;
         }
+        let outer = cardinality_preserving_tvp_input(outer)?;
         let access = AccessComparison::from_node(cx, outer)?;
         let (estimated_output, actual_output) = access.output_counts()?;
         let inner_executions = serial_executions(inner)?;
@@ -89,6 +90,58 @@ impl<'a> ObservedTvpLoop<'a> {
     }
 }
 
+/// A sort needs its own native population. A scalar with no runtime counters remains unknown: the exact
+/// TVP/loop endpoints establish repeated work without assigning rows or executions to the deferred expression.
+fn cardinality_preserving_tvp_input(mut node: &PlanNode) -> Option<&PlanNode> {
+    let estimate = node.est_rows;
+    let mut observed_output = None;
+    loop {
+        if node.facts().parallel_operator == Some(true)
+            || node.facts().estimated_rows_unavailable
+            || node.facts().estimated_rows_without_goal.is_some()
+            || node.est_rows != estimate
+        {
+            return None;
+        }
+        if serial_executions(node) == Some(1.0) {
+            let actual = node.act_rows?;
+            if observed_output.is_some_and(|previous| previous != actual) {
+                return None;
+            }
+            observed_output = Some(actual);
+        } else if !scalar_without_runtime(node) {
+            return None;
+        }
+        if qualified_tvp_scan(node) {
+            return Some(node);
+        }
+        let [child] = node.children.as_slice() else { return None };
+        if !matches!(node.kind, NodeKind::Compute | NodeKind::Sort)
+            || node.predicate.is_some()
+            || node.seek_predicate.is_some()
+            || node.object.is_some()
+            || node.index.is_some()
+        {
+            return None;
+        }
+        node = child;
+    }
+}
+
+fn scalar_without_runtime(node: &PlanNode) -> bool {
+    node.kind == NodeKind::Compute
+        && node.facts().parallel_operator == Some(false)
+        && node.act_rows.is_none()
+        && node.act_executions.is_none()
+        && node.facts().serial_execution_count.is_none()
+        && node.facts().parallel_threads.is_none()
+        && node.facts().access_rows.is_none()
+        && node.facts().scan_completion.is_none()
+        && node.runtime.is_none()
+        && node.act_time_ms.is_none()
+        && node.rows_read.is_none()
+}
+
 fn qualified_tvp_scan(node: &PlanNode) -> bool {
     node.kind == NodeKind::Scan
         && node.children.is_empty()
@@ -108,17 +161,19 @@ fn direct_inner_access(node: &PlanNode) -> bool {
         && !has_relational_input(node)
 }
 
-fn single_serial_path(cx: &Cx, join: &PlanNode, outer: &PlanNode) -> bool {
+fn single_serial_path(cx: &Cx, join: &PlanNode) -> bool {
     let mut ids = std::collections::BTreeSet::new();
     cx.plan.kind == PlanKind::Actual
         && cx.engine() == Engine::Mssql
         && join.facts().inner_join == Some(true)
         && serial_executions(join) == Some(1.0)
-        && serial_executions(outer) == Some(1.0)
         && cx.nodes.iter().all(|node| ids.insert(node.id))
-        && std::iter::once(join).chain(&join.children).all(|node| node.facts().estimated_rows_without_goal.is_none())
+        && std::iter::once(join).chain(&join.children).all(|node| {
+            node.facts().parallel_operator != Some(true) && node.facts().estimated_rows_without_goal.is_none()
+        })
         && cx.ancestors(join).all(|parent| {
             matches!(parent.kind, NodeKind::Sort | NodeKind::Aggregate | NodeKind::Compute)
+                && parent.facts().parallel_operator != Some(true)
                 && parent.facts().estimated_rows_without_goal.is_none()
                 && serial_executions(parent) == Some(1.0)
         })

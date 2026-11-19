@@ -644,6 +644,7 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
 
     let execution_population = scan_completion::read(relop);
     let mut facts = culprit_core::PlanNodeFacts {
+        parallel_operator: relop.attribute("Parallel").and_then(native_boolean),
         relational_input: operator.and_then(relational_inputs::from_operator),
         serial_execution_count: execution_population
             .as_ref()
@@ -1116,6 +1117,14 @@ fn copy_attrs(node: Node, names: &[&str], props: &mut Properties) {
 
 fn is_true(v: &str) -> bool {
     v == "1" || v.eq_ignore_ascii_case("true")
+}
+
+fn native_boolean(value: &str) -> Option<bool> {
+    match value {
+        "0" | "false" => Some(false),
+        "1" | "true" => Some(true),
+        _ => None,
+    }
 }
 
 fn unbracket(s: &str) -> String {

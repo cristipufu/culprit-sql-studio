@@ -45,6 +45,275 @@ fn assert_no_loop(plan: &Plan, case: &str) {
     assert!(loop_insight(plan).is_none(), "{case}");
 }
 
+fn wrap_outer(plan: &mut Plan, id: u32, kind: NodeKind) {
+    let input = plan.root.children.remove(0);
+    let mut wrapper = measured(id, "native wrapper", kind, input.est_rows, input.act_rows.unwrap(), 1.0);
+    wrapper.facts_mut().serial_execution_count = Some("1".into());
+    wrapper.children.push(input);
+    plan.root.children.insert(0, wrapper);
+}
+
+#[test]
+fn serial_cardinality_preserving_wrappers_retain_the_original_tvp_and_repeated_work_diagnosis() {
+    let original = loop_insight(&tvp_loop()).unwrap();
+    for kinds in [vec![NodeKind::Compute], vec![NodeKind::Sort], vec![NodeKind::Compute, NodeKind::Sort]] {
+        let mut plan = tvp_loop();
+        for (at, kind) in kinds.into_iter().enumerate() {
+            wrap_outer(&mut plan, 3 + at as u32, kind);
+        }
+        let observed = loop_insight(&plan).expect("the same TVP feeds the same measured repeated work");
+        assert_eq!(observed.nodes, original.nodes);
+        assert_eq!(observed.title, original.title);
+        assert_eq!(observed.detail, original.detail);
+        assert_eq!(observed.fix, original.fix);
+        assert_eq!(observed.verify, original.verify);
+        assert!(observed.fix_sql.is_none());
+    }
+}
+
+fn omit_runtime(node: &mut PlanNode) {
+    node.act_rows = None;
+    node.act_executions = None;
+    node.facts_mut().serial_execution_count = None;
+    node.runtime = None;
+    node.facts_mut().parallel_operator = Some(false);
+}
+
+#[test]
+fn a_deferred_scalar_uses_measured_endpoints_without_filling_its_unknown_runtime() {
+    let original = loop_insight(&tvp_loop()).unwrap();
+    for kinds in
+        [vec![NodeKind::Compute], vec![NodeKind::Compute, NodeKind::Sort], vec![NodeKind::Sort, NodeKind::Compute]]
+    {
+        let mut plan = tvp_loop();
+        for (at, kind) in kinds.into_iter().enumerate() {
+            wrap_outer(&mut plan, 3 + at as u32, kind);
+        }
+        let mut node = &mut plan.root.children[0];
+        while !node.children.is_empty() {
+            if node.kind == NodeKind::Compute {
+                omit_runtime(node);
+            }
+            node = &mut node.children[0];
+        }
+        let observed = loop_insight(&plan).expect("observed TVP output and inner invocations agree");
+        assert_eq!(observed.nodes, original.nodes);
+        assert_eq!(observed.detail, original.detail);
+        assert_eq!(observed.fix, original.fix);
+        for scalar in plan.nodes().into_iter().filter(|node| node.kind == NodeKind::Compute) {
+            assert!(scalar.act_rows.is_none());
+            assert!(scalar.act_executions.is_none());
+            assert!(scalar.facts().serial_execution_count.is_none());
+        }
+    }
+}
+
+#[test]
+fn deferred_scalar_endpoints_and_every_supplied_population_must_remain_qualified() {
+    for case in [
+        "scalar-rows",
+        "scalar-executions",
+        "scalar-serial",
+        "scalar-parallel",
+        "scalar-runtime",
+        "scalar-time",
+        "scalar-access",
+        "scalar-typed-access",
+        "scalar-completion",
+        "scalar-planned-parallel",
+        "scalar-unknown-parallel",
+        "scalar-object",
+        "scalar-index",
+        "scalar-estimate",
+        "scalar-goal",
+        "scalar-predicate",
+        "scalar-seek",
+        "sort-without-runtime",
+        "filter",
+        "aggregate",
+        "spool",
+        "join",
+        "leaf-rows",
+        "leaf-executions",
+        "leaf-serial",
+        "leaf-parallel",
+        "leaf-estimate",
+        "leaf-goal",
+        "leaf-completion",
+        "leaf-access",
+        "leaf-local",
+        "leaf-unresolved",
+        "scalar-input",
+        "join-serial",
+        "join-parallel",
+        "inner-executions",
+        "inner-serial",
+        "inner-parallel",
+        "inner-access",
+        "efficient-inner",
+        "healthy-input",
+    ] {
+        let mut plan = tvp_loop();
+        wrap_outer(&mut plan, 3, NodeKind::Compute);
+        omit_runtime(&mut plan.root.children[0]);
+        let scalar = &mut plan.root.children[0];
+        match case {
+            "scalar-rows" => scalar.act_rows = Some(10_000.0),
+            "scalar-executions" => scalar.act_executions = Some(1.0),
+            "scalar-serial" => scalar.facts_mut().serial_execution_count = Some("1".into()),
+            "scalar-parallel" => scalar.facts_mut().parallel_threads = Some(1),
+            "scalar-runtime" => {
+                scalar.runtime = Some(crate::actual::NodeRuntime { cpu_ms: Some(1.0), ..Default::default() })
+            }
+            "scalar-time" => scalar.act_time_ms = Some(1.0),
+            "scalar-access" => scalar.rows_read = Some(10_000.0),
+            "scalar-typed-access" => scalar.facts_mut().access_rows = PlanAccessRows::new(None, Some(10_000.0)),
+            "scalar-completion" => {
+                scalar.facts_mut().scan_completion = scalar.children[0].facts().scan_completion.clone()
+            }
+            "scalar-planned-parallel" => scalar.facts_mut().parallel_operator = Some(true),
+            "scalar-unknown-parallel" => scalar.facts_mut().parallel_operator = None,
+            "scalar-object" => scalar.object = Some("dbo.Items".into()),
+            "scalar-index" => scalar.index = Some("IX_Items_id".into()),
+            "scalar-estimate" => scalar.facts_mut().estimated_rows_unavailable = true,
+            "scalar-goal" => scalar.facts_mut().estimated_rows_without_goal = Some(200.0),
+            "scalar-predicate" => scalar.predicate = Some("r.id=1".into()),
+            "scalar-seek" => scalar.seek_predicate = Some("r.id=1".into()),
+            "sort-without-runtime" => scalar.kind = NodeKind::Sort,
+            "filter" => scalar.kind = NodeKind::Other,
+            "aggregate" => scalar.kind = NodeKind::Aggregate,
+            "spool" => scalar.kind = NodeKind::Spool,
+            "join" => scalar.kind = NodeKind::Join,
+            "leaf-rows" => scalar.children[0].act_rows = None,
+            "leaf-executions" => scalar.children[0].act_executions = Some(2.0),
+            "leaf-serial" => scalar.children[0].facts_mut().serial_execution_count = None,
+            "leaf-parallel" => scalar.children[0].facts_mut().parallel_threads = Some(1),
+            "leaf-estimate" => scalar.children[0].facts_mut().estimated_rows_unavailable = true,
+            "leaf-goal" => scalar.children[0].facts_mut().estimated_rows_without_goal = Some(200.0),
+            "leaf-completion" => scalar.children[0].facts_mut().scan_completion = None,
+            "leaf-access" => scalar.children[0].facts_mut().access_rows = None,
+            "leaf-local" => {
+                scalar.children[0].facts_mut().relational_input = Some(RelationalInput {
+                    kind: RelationalInputKind::LocalTableVariable,
+                    provenance: RelationalInputProvenance::NativeDeclaration,
+                })
+            }
+            "leaf-unresolved" => {
+                scalar.children[0].facts_mut().relational_input = Some(RelationalInput {
+                    kind: RelationalInputKind::Unknown,
+                    provenance: RelationalInputProvenance::Unresolved,
+                })
+            }
+            "scalar-input" => scalar.children[0].facts_mut().relational_input = None,
+            "join-serial" => plan.root.facts_mut().serial_execution_count = None,
+            "join-parallel" => plan.root.facts_mut().parallel_threads = Some(1),
+            "inner-executions" => {
+                plan.root.children[1].act_executions = Some(9_999.0);
+                plan.root.children[1].facts_mut().serial_execution_count = Some("9999".into());
+            }
+            "inner-serial" => plan.root.children[1].facts_mut().serial_execution_count = None,
+            "inner-parallel" => plan.root.children[1].facts_mut().parallel_threads = Some(1),
+            "inner-access" => plan.root.children[1].facts_mut().access_rows = None,
+            "efficient-inner" => {
+                plan.root.children[1].facts_mut().access_rows = PlanAccessRows::new(None, Some(10_000.0))
+            }
+            "healthy-input" => {
+                scalar.est_rows = 10_000.0;
+                scalar.children[0].est_rows = 10_000.0;
+                scalar.children[0].facts_mut().access_rows = PlanAccessRows::new(Some(20_000.0), Some(20_000.0));
+            }
+            _ => unreachable!(),
+        }
+        assert_no_loop(&plan, case);
+    }
+}
+
+#[test]
+fn observed_wrappers_require_one_native_serial_population_and_unchanged_rows() {
+    for case in [
+        "unknown-executions",
+        "repeated",
+        "parallel",
+        "unknown-estimate",
+        "changed-estimate",
+        "changed-output",
+        "unknown-output",
+        "row-goal",
+        "child-row-goal",
+        "child-serial",
+        "child-estimate",
+        "duplicate-node",
+        "extra-child",
+        "filter",
+        "aggregate",
+        "spool",
+        "join",
+    ] {
+        let mut plan = tvp_loop();
+        wrap_outer(&mut plan, 3, NodeKind::Compute);
+        let wrapper = &mut plan.root.children[0];
+        match case {
+            "unknown-executions" => wrapper.facts_mut().serial_execution_count = None,
+            "repeated" => {
+                wrapper.facts_mut().serial_execution_count = Some("2".into());
+                wrapper.act_executions = Some(2.0);
+            }
+            "parallel" => wrapper.facts_mut().parallel_threads = Some(1),
+            "unknown-estimate" => wrapper.facts_mut().estimated_rows_unavailable = true,
+            "changed-estimate" => wrapper.est_rows = 200.0,
+            "changed-output" => wrapper.act_rows = Some(9999.0),
+            "unknown-output" => wrapper.act_rows = None,
+            "row-goal" => wrapper.facts_mut().estimated_rows_without_goal = Some(200.0),
+            "child-row-goal" => wrapper.children[0].facts_mut().estimated_rows_without_goal = Some(200.0),
+            "child-serial" => wrapper.children[0].facts_mut().serial_execution_count = None,
+            "child-estimate" => wrapper.children[0].facts_mut().estimated_rows_unavailable = true,
+            "duplicate-node" => wrapper.id = wrapper.children[0].id,
+            "extra-child" => wrapper.children.push(wrapper.children[0].clone()),
+            "filter" => wrapper.kind = NodeKind::Other,
+            "aggregate" => wrapper.kind = NodeKind::Aggregate,
+            "spool" => wrapper.kind = NodeKind::Spool,
+            "join" => wrapper.kind = NodeKind::Join,
+            _ => unreachable!(),
+        }
+        assert_no_loop(&plan, case);
+    }
+}
+
+#[test]
+fn wrapped_healthy_or_unqualified_inputs_and_efficient_inner_access_do_not_become_tvp_faults() {
+    for case in ["healthy", "scalar", "local", "unresolved", "efficient", "missing-inner-work", "unfinished"] {
+        let mut plan = tvp_loop();
+        match case {
+            "healthy" => {
+                plan.root.children[0].est_rows = 10_000.0;
+                plan.root.children[0].facts_mut().access_rows = PlanAccessRows::new(Some(20_000.0), Some(20_000.0));
+            }
+            "scalar" => plan.root.children[0].facts_mut().relational_input = None,
+            "local" => {
+                plan.root.children[0].facts_mut().relational_input = Some(RelationalInput {
+                    kind: RelationalInputKind::LocalTableVariable,
+                    provenance: RelationalInputProvenance::NativeDeclaration,
+                })
+            }
+            "unresolved" => {
+                plan.root.children[0].facts_mut().relational_input = Some(RelationalInput {
+                    kind: RelationalInputKind::Unknown,
+                    provenance: RelationalInputProvenance::Unresolved,
+                })
+            }
+            "efficient" => plan.root.children[1].facts_mut().access_rows = PlanAccessRows::new(None, Some(10_000.0)),
+            "missing-inner-work" => plan.root.children[1].facts_mut().access_rows = None,
+            "unfinished" => {
+                plan.root.children[0].facts_mut().scan_completion.as_mut().unwrap().threads[0].end_of_scans =
+                    Some("0".into())
+            }
+            _ => unreachable!(),
+        }
+        wrap_outer(&mut plan, 3, NodeKind::Compute);
+        assert_no_loop(&plan, case);
+    }
+}
+
 #[test]
 fn actual_tvp_output_and_material_repeated_inner_access_are_reported_without_a_reuse_or_join_verdict() {
     let plan = tvp_loop();

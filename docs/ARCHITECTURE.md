@@ -1244,6 +1244,11 @@ selected memory-consuming operator. This retains the input and grant as separate
 query and does not establish grant sizing or concurrent pressure. Other branches and incomplete input evidence
 keep the ordinary grant explanation. Nonfinite and negative memory measurements never authorize a warning.
 
+A TVP loop diagnosis can cross a deferred scalar computation whose native plan omits runtime counters only with
+explicit serial operator metadata, unchanged estimates and independently qualified input, loop and inner-access
+populations. The scalar's missing rows and executions remain unknown. Sorts require their own matching measured
+population; conflicting counts, parallel metadata, filters and row goals cannot authorize this traversal.
+
 Every plan and plan step carries its facts: the engine's parser records them from the native plan, and a provider that
 plugs in either fills them in or hands its native text to the built-in parser (`culprit_engine::plans::parse_plan`).
 A fact the parser doesn't know is unknown; a display property never stands in for one, and a saved plan without facts
