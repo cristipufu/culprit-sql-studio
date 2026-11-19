@@ -1,4 +1,5 @@
 use super::*;
+mod pvs_investigation;
 use culprit_core::{
     CleanupHolder, CleanupMechanism, MeasurementScope, TransactionActivity, telemetry::PayloadUnavailable,
 };
