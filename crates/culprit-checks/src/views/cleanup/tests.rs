@@ -312,3 +312,195 @@ fn duplicates_incompatible_sources_and_unsupported_native_facts_fail_without_hid
     };
     assert!(explain(CleanupEvidence { retention: None, native: &[&wrong] }, &[]).is_err());
 }
+
+fn confirmed_transaction(
+    snapshot: Option<bool>,
+    log_records: Option<&str>,
+    versioning: bool,
+) -> OperationalObservation {
+    let mut transaction = transaction(true);
+    transaction.snapshot_isolation = snapshot;
+    transaction.log_record_count = log_records.map(str::to_owned);
+    transaction.row_version_participant = versioning;
+    if !versioning {
+        transaction.transaction_sequence_number = None;
+        transaction.versioning_age_seconds = None;
+    }
+    let mut row = horizon();
+    let OperationalFact::MssqlCleanupHorizon(native) = &mut row.fact else { panic!() };
+    native.oldest_confirmed = Some(Box::new(transaction));
+    assert!(row.is_valid());
+    row
+}
+
+#[test]
+fn the_same_native_transaction_distinguishes_snapshot_lifetime_from_logged_work() {
+    for (snapshot, logs, versioning, detail, investigation) in [
+        (
+            Some(true),
+            Some("0"),
+            true,
+            t!("view.cleanup.transaction.context.snapshot_zero_log"),
+            t!("view.cleanup.transaction.investigate_snapshot"),
+        ),
+        (
+            Some(true),
+            Some("3"),
+            true,
+            t!("view.cleanup.transaction.context.snapshot_logged"),
+            t!("view.cleanup.transaction.investigate_snapshot_logged"),
+        ),
+        (
+            Some(true),
+            None,
+            true,
+            t!("view.cleanup.transaction.context.snapshot_unknown_log"),
+            t!("view.cleanup.transaction.investigate_snapshot"),
+        ),
+        (
+            Some(false),
+            Some("3"),
+            true,
+            t!("view.cleanup.transaction.context.logged_versioning"),
+            t!("view.cleanup.transaction.investigate_logged"),
+        ),
+        (
+            None,
+            Some("3"),
+            true,
+            t!("view.cleanup.transaction.context.logged_versioning"),
+            t!("view.cleanup.transaction.investigate_logged"),
+        ),
+        (
+            None,
+            Some("3"),
+            false,
+            t!("view.cleanup.transaction.context.logged"),
+            t!("view.cleanup.transaction.investigate_logged"),
+        ),
+    ] {
+        let row = confirmed_transaction(snapshot, logs, versioning);
+        let original = serde_json::to_value(&row).unwrap();
+        let report = native_report(&[&row], &[source(&row.source, SourceState::Collected)]);
+        let [entry] = report.entries.as_slice() else { panic!("one original horizon") };
+        assert_eq!(entry.mechanisms, [CleanupMechanism::ConfirmedDatabaseTransaction]);
+        assert_eq!(entry.reference, native_reference(&row));
+        assert_eq!(entry.explanation, format!("{} {detail}", t!("view.cleanup.transaction.confirmed")));
+        assert_eq!(entry.investigation, format!("{} {investigation}", t!("view.cleanup.transaction.investigate")));
+        assert!(report.boundaries.is_empty());
+        assert_eq!(serde_json::to_value(&row).unwrap(), original);
+    }
+}
+
+#[test]
+fn zero_logged_work_and_unavailable_logged_work_remain_different_native_facts() {
+    let zero = confirmed_transaction(Some(true), Some("0"), true);
+    let unknown = confirmed_transaction(Some(true), None, true);
+    let zero = native_report(&[&zero], &[source(&zero.source, SourceState::Collected)]);
+    let unknown = native_report(&[&unknown], &[source(&unknown.source, SourceState::Collected)]);
+    assert!(zero.entries[0].explanation.contains(&t!("view.cleanup.transaction.context.snapshot_zero_log")));
+    assert!(unknown.entries[0].explanation.contains(&t!("view.cleanup.transaction.context.snapshot_unknown_log")));
+    assert!(
+        zero.entries[0]
+            .metrics
+            .iter()
+            .any(|metric| { metric.key == "confirmed:log_record_count" && metric.text.as_deref() == Some("0") })
+    );
+    assert!(!unknown.entries[0].metrics.iter().any(|metric| metric.key == "confirmed:log_record_count"));
+    assert_eq!(zero.entries[0].reference, unknown.entries[0].reference);
+}
+
+#[test]
+fn unattributed_versioning_cannot_borrow_database_qualification_from_a_matching_pvs_number() {
+    let mut row = horizon();
+    let OperationalFact::MssqlCleanupHorizon(native) = &mut row.fact else { panic!() };
+    native.oldest_unattributed_versioning = Some(Box::new(transaction(false)));
+    let mut store = persistent();
+    pvs(&mut store).pages_skipped_for_oldest_active_transaction = Some("9007199254740993".into());
+    let report = native_report(
+        &[&row, &store],
+        &[source(&row.source, SourceState::Partial), source(&store.source, SourceState::Collected)],
+    );
+    let entry = report.entries.iter().find(|entry| entry.reference == native_reference(&row)).unwrap();
+    assert_eq!(entry.mechanisms, [CleanupMechanism::UnattributedVersioning]);
+    assert_eq!(entry.explanation, t!("view.cleanup.transaction.unattributed"));
+    assert_eq!(entry.investigation, t!("view.cleanup.transaction.investigate"));
+    assert!(report.limitations.contains(&t!("view.cleanup.limit.independent_reads")));
+}
+
+#[test]
+fn independent_pvs_causes_and_capture_order_cannot_change_a_transactions_recorded_mechanism() {
+    let row = confirmed_transaction(None, Some("3"), false);
+    let baseline = native_report(&[&row], &[source(&row.source, SourceState::Collected)]);
+    let mut store = persistent();
+    pvs(&mut store).pages_skipped_for_oldest_active_transaction = Some("9007199254740993".into());
+    for rows in [[&row, &store], [&store, &row]] {
+        let report = native_report(
+            &rows,
+            &[source(&row.source, SourceState::Collected), source(&store.source, SourceState::Collected)],
+        );
+        let entry = report.entries.iter().find(|entry| entry.reference == native_reference(&row)).unwrap();
+        assert_eq!(serde_json::to_value(entry).unwrap(), serde_json::to_value(&baseline.entries[0]).unwrap());
+    }
+    let ended = horizon();
+    let report = native_report(
+        &[&ended, &store],
+        &[source(&ended.source, SourceState::Empty), source(&store.source, SourceState::Collected)],
+    );
+    let entry = report.entries.iter().find(|entry| entry.reference == native_reference(&ended)).unwrap();
+    assert!(entry.mechanisms.is_empty());
+    assert_eq!(entry.explanation, t!("view.cleanup.transaction.empty"));
+}
+
+#[test]
+fn positive_native_transaction_context_survives_partial_or_unknown_coverage_without_completeness() {
+    let mut row = confirmed_transaction(Some(true), Some("3"), true);
+    let OperationalFact::MssqlCleanupHorizon(native) = &mut row.fact else { panic!() };
+    native.oldest_confirmed.as_mut().unwrap().program = Some("private-program-and-query-canary".into());
+    for sources in [vec![source(&row.source, SourceState::Partial)], vec![]] {
+        let report = native_report(&[&row], &sources);
+        assert!(report.entries[0].explanation.contains(&t!("view.cleanup.transaction.context.snapshot_logged")));
+        assert_eq!(report.entries[0].reference, native_reference(&row));
+        assert!(report.boundaries.is_empty());
+        assert!(report.limitations.contains(&if sources.is_empty() {
+            t!("view.cleanup.limit.source_unknown")
+        } else {
+            t!("view.cleanup.limit.source_partial")
+        }));
+        let encoded = serde_json::to_value(&report).unwrap();
+        assert!(encoded.get("severity").is_none());
+        assert!(encoded["entries"][0].get("owner").is_none());
+        assert!(encoded["entries"][0].get("fix_sql").is_none());
+        assert!(!encoded.to_string().contains("private-program-and-query-canary"));
+    }
+}
+
+#[test]
+fn unavailable_sources_and_invalid_generations_cannot_supply_a_transaction_mechanism() {
+    let mut row = confirmed_transaction(Some(true), Some("0"), true);
+    for state in [SourceState::Empty, SourceState::Unavailable, SourceState::NotApplicable] {
+        assert!(explain(CleanupEvidence { retention: None, native: &[&row] }, &[source(&row.source, state)]).is_err());
+    }
+    for logs in [None, Some("0")] {
+        let mut unqualified = row.clone();
+        let OperationalFact::MssqlCleanupHorizon(native) = &mut unqualified.fact else { panic!() };
+        let transaction = native.oldest_confirmed.as_mut().unwrap();
+        transaction.snapshot_isolation = Some(false);
+        transaction.log_record_count = logs.map(str::to_owned);
+        assert!(!unqualified.is_valid(), "versioning membership alone cannot qualify this database");
+        assert!(
+            explain(
+                CleanupEvidence { retention: None, native: &[&unqualified] },
+                &[source(&unqualified.source, SourceState::Collected)]
+            )
+            .is_err()
+        );
+    }
+    let OperationalFact::MssqlCleanupHorizon(native) = &mut row.fact else { panic!() };
+    native.oldest_confirmed.as_mut().unwrap().session.generation.clear();
+    assert!(!row.is_valid());
+    assert!(
+        explain(CleanupEvidence { retention: None, native: &[&row] }, &[source(&row.source, SourceState::Collected)])
+            .is_err()
+    );
+}
