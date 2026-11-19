@@ -80,7 +80,7 @@ use culprit_core::{
 pub use agent::{AgentAccess, ApprovalOutcome, ApprovalRequest, AuditEntry, AuditOutcome};
 /// The extensions a SQLite database file usually has (the app's file picker filters on them).
 pub use connection::DATABASE_FILE_EXTENSIONS;
-pub use culprit_checks::{agent_brief, index_advice};
+pub use culprit_checks::{agent_brief, index_advice, plan_type_schema};
 pub use culprit_core::SshConfig;
 pub use discover::{Cloud, DiscoveredDatabase, DiscoveryResult};
 pub use import::{ImportCandidate, ImportSource};

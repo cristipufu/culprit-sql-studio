@@ -96,6 +96,13 @@ impl Out {
             println!("{}", self.paint(DIM, &format!("   —  {note}")));
         }
         self.plan_insights(&found, plan);
+        if let Some(schema) = culprit_engine::plan_type_schema(plan) {
+            println!("\n{}", self.paint(BOLD, &schema.title));
+            println!("{}", schema.summary);
+            for limitation in schema.limitations {
+                println!("{}", self.paint(DIM, &limitation));
+            }
+        }
     }
 
     /// Insights under the tree: what's wrong, how to fix it, how to check, most important first.

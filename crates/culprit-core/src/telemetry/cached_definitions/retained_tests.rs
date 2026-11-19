@@ -14,6 +14,7 @@ fn payload(text: &str) -> MssqlCachedPayload {
 
 pub(super) fn retained() -> MssqlRetainedPlanDefinition {
     MssqlRetainedPlanDefinition {
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         context: CachedStatementContext {

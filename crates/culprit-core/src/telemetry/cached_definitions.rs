@@ -5,6 +5,8 @@ mod parameter_context;
 pub use parameter_context::{MAX_MSSQL_PARAMETER_CONTEXT_BYTES, MssqlParameterContextProof};
 mod module_parameters;
 pub use module_parameters::MssqlModuleParameters;
+mod type_schema;
+pub use type_schema::*;
 const MAX_CACHED_TEXT_BYTES: usize = 4 * 1024 * 1024;
 
 #[cfg(test)]
@@ -56,6 +58,10 @@ pub struct MssqlCachedDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub module_parameters: Option<MssqlModuleParameters>,
+    /// Independently observed current catalog context; never the retained plan's original compilation schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current_type_schema: Option<MssqlCurrentTypeSchema>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub relational_input_proof: Option<MssqlRelationalInputProof>,
@@ -67,6 +73,10 @@ impl MssqlCachedDefinition {
             && self.statement.is_valid()
             && self.estimated_plan.is_valid()
             && self.module_parameters.as_ref().is_none_or(|parameters| parameters.is_valid_for(&self.context))
+            && self
+                .current_type_schema
+                .as_ref()
+                .is_none_or(|schema| schema.is_valid_for(&self.context, self.module_parameters.as_ref()))
             && self.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_cached_contents(self))
     }
     pub(super) fn redact(&mut self, engine: crate::Engine) {
@@ -85,6 +95,10 @@ pub struct MssqlRetainedPlanDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub module_parameters: Option<MssqlModuleParameters>,
+    /// Current catalog context with its own native point clock, not historical compilation evidence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current_type_schema: Option<MssqlCurrentTypeSchema>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub relational_input_proof: Option<MssqlRelationalInputProof>,
@@ -105,6 +119,10 @@ impl MssqlRetainedPlanDefinition {
         self.context.is_valid()
             && self.statement.is_valid()
             && self.module_parameters.as_ref().is_none_or(|parameters| parameters.is_valid_for(&self.context))
+            && self
+                .current_type_schema
+                .as_ref()
+                .is_none_or(|schema| schema.is_valid_for(&self.context, self.module_parameters.as_ref()))
             && self.statement_executions.as_deref().is_none_or(valid_counter)
             && self.statement_executions.is_some() == self.context.identity.has_plan_handle()
             && self.last_start_without_offset.as_deref().is_none_or(super::catalog::local_time)

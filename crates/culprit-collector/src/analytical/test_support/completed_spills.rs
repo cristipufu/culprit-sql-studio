@@ -61,6 +61,7 @@ pub fn completed_spill_evidence_cases() -> Vec<CompletedSpillCase> {
                     context: native.context.clone(),
                     statement: native.statement.clone(),
                     module_parameters: None,
+                    current_type_schema: None,
                     relational_input_proof: None,
                     parameter_context_proof: None,
                     statement_executions: Some("17".into()),
@@ -237,6 +238,7 @@ fn definition(
             payload: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
         },
         module_parameters: None,
+        current_type_schema: None,
         relational_input_proof: None,
     };
     let source_id = "native-cache-definitions";

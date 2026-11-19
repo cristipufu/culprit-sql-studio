@@ -94,7 +94,7 @@ async fn native_cache_grants_share_exact_rows_with_app_observations_and_preserve
     assert_eq!(native.close().await, SourceShutdown::Quiescent);
     let options = culprit_core::SnapshotOptions { top_queries: 50, plans: 2, ..Default::default() };
     let mut workload_reader = ReadSession::application(pool.clone());
-    let workload = crate::workload::from_plan_cache(&mut workload_reader, &options).await;
+    let workload = crate::workload::from_plan_cache(&mut workload_reader, &options, true).await;
     // Settle this original owner before inspecting a native error, result or accounting assertion.
     let workload_shutdown = workload_reader.close().await;
     let workload_metrics = workload_reader.read_metrics();

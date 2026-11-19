@@ -12,8 +12,8 @@ pub(super) struct ExpectedRead {
 fn templates() -> [(&'static str, String); 4] {
     [
         ("summary", crate::cached_runtime::summary_sql()),
-        ("planned-payload", cached_statements::detail_sql(true)),
-        ("text-only-payload", cached_statements::detail_sql(false)),
+        ("planned-payload", cached_statements::detail_sql(true, true)),
+        ("text-only-payload", cached_statements::detail_sql(false, true)),
         ("independent-binding", crate::relational_inputs::binding_check_sql().into()),
     ]
 }
@@ -53,8 +53,8 @@ fn validate_payload_shapes(selected_queries: usize, options: &SnapshotOptions) -
     if selected_queries > options.top_queries as usize
         || planned == 0
         || text_only == 0
-        || planned > cached_statements::detail_selectors_per_read(&budget, true)?
-        || text_only > cached_statements::detail_selectors_per_read(&budget, false)?
+        || planned > cached_statements::detail_selectors_per_read(&budget, true, true)?
+        || text_only > cached_statements::detail_selectors_per_read(&budget, false, true)?
     {
         return Err(invalid());
     }
@@ -117,8 +117,8 @@ mod tests {
         assert!(validate_payload_shapes(2, &options()).is_err(), "the literal-marker control needs a text-only member");
         assert!(validate_payload_shapes(51, &options()).is_err());
         let budget = ReadSession::application_budget();
-        let planned_limit = cached_statements::detail_selectors_per_read(&budget, true).unwrap();
-        let text_limit = cached_statements::detail_selectors_per_read(&budget, false).unwrap();
+        let planned_limit = cached_statements::detail_selectors_per_read(&budget, true, true).unwrap();
+        let text_limit = cached_statements::detail_selectors_per_read(&budget, false, true).unwrap();
         let planned =
             SnapshotOptions { plans: (planned_limit + 1) as u32, top_queries: (planned_limit + 2) as u32, ..options() };
         assert!(validate_payload_shapes(planned_limit + 2, &planned).is_err());

@@ -81,6 +81,7 @@ pub fn tvp_loop_evidence(case: TvpLoopCase) -> (CollectionDescription, Vec<Telem
         context: cached.context,
         statement: cached.statement,
         module_parameters: cached.module_parameters,
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         statement_executions: Some("9007199254740993".into()),

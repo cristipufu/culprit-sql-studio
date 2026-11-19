@@ -2,7 +2,9 @@
 use culprit_core::{NodeKind, Plan, PlanInsightShare, PlanKind, PlanNode, PlanOperatorView, PlanView, QueryStat};
 use std::collections::BTreeMap;
 
+mod current_type_schema;
 mod page_server_io;
+pub use current_type_schema::explain as plan_type_schema;
 
 pub fn plan_view(plan: &Plan, query: Option<&QueryStat>) -> PlanView {
     with_insights(plan, query, plan.insights.as_ref())
@@ -89,6 +91,7 @@ pub(super) fn with_insights(
         })
         .collect();
     PlanView {
+        current_type_schema: plan_type_schema(plan),
         kind: plan.kind,
         query: query.map(|q| culprit_core::plan_view::PlanMeasurementRef {
             query_id: q.id.clone(),

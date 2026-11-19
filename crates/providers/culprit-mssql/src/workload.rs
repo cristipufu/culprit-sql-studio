@@ -725,6 +725,7 @@ fn note_unknown_waits(coverage: &mut Coverage, categories: &std::collections::BT
 pub(crate) async fn from_plan_cache(
     client: &mut impl NativeRead,
     options: &SnapshotOptions,
+    current_types: bool,
 ) -> culprit_core::Result<WorkloadResult> {
     let rows = crate::cached_runtime::summary(client).await?;
     let mut coverage = Coverage::default();
@@ -759,6 +760,7 @@ pub(crate) async fn from_plan_cache(
         &hashes,
         options.plans as usize,
         &crate::read::ReadSession::application_budget(),
+        current_types,
     )
     .await?;
 
@@ -788,7 +790,8 @@ pub(crate) async fn from_plan_cache(
                             origin: plan_xml::PlanInputOrigin::OriginalNative { read: None },
                         },
                     ) {
-                        Ok(p) => {
+                        Ok(mut p) => {
+                            p.facts_mut().current_type_schema = detail.current_type_schema.clone().map(Box::new);
                             plans_parsed += 1;
                             Some(p)
                         }

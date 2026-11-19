@@ -387,6 +387,11 @@ execution counters remain separate. Yugabyte node-cache counters retain node sco
 Stored SQL Server plans mask database names, so named relations in JOINs remain unclassified without retained proof
 of their original bindings. Direct and all-variable module proofs remain available. A TVP classification does not
 suppress an independent native Cartesian-join warning.
+When supported, the same bounded payload read also retains current table-type columns, native byte lengths,
+collations and index keys. This catalog context has its own collection clock and current object/type identifiers;
+it is separate from the original parameter declaration and does not establish the schema used at compilation.
+Missing visibility, changed associations and collection limits remain explicit. Culprit reads no live parameter
+contents, defaults or application rows. The plan details and collected SDK/CLI/MCP output preserve this distinction.
 Bounded built-in aggregate/scalar expressions and grouping preserve this binding, including `COUNT_BIG` over a
 filtered input. Unknown or qualified functions, nested queries and ambiguous lexical modes remain unresolved.
 For a qualified TVP, a complete serial native table scan can distinguish consumed input, rows kept by its filter and
@@ -1329,7 +1334,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **41** (delivery schema **2**, preparation **19**). New contracts require new collector/recovery state; there is no migration of
+The current export format is **50** (delivery schema **4**, preparation **25**). New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 [pvs-fields]: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-persistent-version-store-stats

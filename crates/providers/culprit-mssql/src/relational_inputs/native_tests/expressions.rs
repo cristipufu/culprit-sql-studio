@@ -153,7 +153,7 @@ async fn capture_probe(application: &mut MsClient, pool: &Arc<Pool>, case: Probe
     let original = definition(&mut reader, object).await;
     let hash = original.context.query_hash.clone().unwrap();
     let details =
-        crate::cached_statements::details(&mut reader, std::slice::from_ref(&hash), 1, &budget).await.unwrap();
+        crate::cached_statements::details(&mut reader, std::slice::from_ref(&hash), 1, &budget, true).await.unwrap();
     let detail = &details[&hash];
     assert_eq!(detail.context.identity, original.context.identity);
     assert!(detail.module_parameters.as_ref().unwrap().input(&detail.context, "@Rows").is_some());

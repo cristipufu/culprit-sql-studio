@@ -6,8 +6,10 @@ use crate::{
     value::Rec,
 };
 use culprit_core::{Result, telemetry::*};
-const RECORD_METADATA_BYTES: usize =
-    16 * 1024 + MAX_MSSQL_RELATIONAL_INPUT_PROOF_BYTES + MAX_MSSQL_PARAMETER_CONTEXT_BYTES;
+const RECORD_METADATA_BYTES: usize = 16 * 1024
+    + MAX_MSSQL_RELATIONAL_INPUT_PROOF_BYTES
+    + MAX_MSSQL_PARAMETER_CONTEXT_BYTES
+    + MAX_MSSQL_CURRENT_TYPE_SCHEMA_BYTES;
 const JSON_BYTES_PER_UTF16_BYTE: usize = 3;
 pub(crate) struct Layout {
     pub maximum_bytes: usize,
@@ -37,8 +39,9 @@ pub(crate) fn select_sql(layout: &Layout) -> String {
     let selected = cached_statements::selected_statements();
     let context = cached_statements::context_columns_from("qs", "qs", "qs.compilation_database_id");
     let projection = retained::projection(context, "qs", "qs.encrypted", &layout.maximum_bytes.to_string());
+    let current_types_relation = crate::relational_inputs::type_schema::relation("qs");
     format!(
-        "WITH selected AS ({selected}) SELECT {projection} FROM selected qs OUTER APPLY sys.dm_exec_query_plan_stats(qs.plan_handle) ps OPTION(MAXDOP 1)"
+        "WITH selected AS ({selected}) SELECT {projection} FROM selected qs OUTER APPLY sys.dm_exec_query_plan_stats(qs.plan_handle) ps {current_types_relation} OPTION(MAXDOP 1)"
     )
 }
 pub(crate) fn decode(
@@ -82,6 +85,7 @@ pub(crate) fn decode(
             diagnostics::report("statement-payload", row, source, None, _error);
         })?,
         module_parameters: native.module_parameters,
+        current_type_schema: native.current_type_schema,
         relational_input_proof: None,
         parameter_context_proof: None,
         batch_plan: cached_payload::from_raw(

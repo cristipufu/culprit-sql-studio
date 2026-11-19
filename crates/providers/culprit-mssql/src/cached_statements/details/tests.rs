@@ -21,6 +21,10 @@ fn row(hash: &str) -> Rec {
         ("module_database_id".into(), Val::Null),
         ("module_object_id".into(), Val::Null),
         ("module_number".into(), Val::Null),
+        ("current_type_observed_at".into(), Val::Null),
+        ("current_type_visibility".into(), Val::Null),
+        ("current_type_bytes".into(), Val::Null),
+        ("current_type_schema".into(), Val::Null),
     ]);
     Rec::of(&fields.iter().map(|(name, value)| (name.as_str(), value.clone())).collect::<Vec<_>>())
 }
@@ -33,7 +37,7 @@ async fn only_requested_plans_are_read_and_hashes_never_change_native_sql_templa
     let mut reader =
         FakeRead::new(vec![Ok(vec![row(&hashes[0])]), Ok(vec![row(&hashes[1])]), Ok(vec![binding(&row(&hashes[0]))])]);
     let budget = crate::read::ReadSession::application_budget();
-    let values = read(&mut reader, &hashes, 1, &budget).await.unwrap();
+    let values = read(&mut reader, &hashes, 1, &budget, true).await.unwrap();
     assert!(values[&hashes[0]].plan.text().is_some());
     assert!(matches!(values[&hashes[1]].plan, Payload::Unavailable(PayloadUnavailable::NotCollected)));
     assert_eq!(reader.calls.len(), 3);
@@ -53,9 +57,11 @@ async fn only_requested_plans_are_read_and_hashes_never_change_native_sql_templa
 async fn malformed_or_duplicate_selectors_and_empty_requests_send_no_sql() {
     let mut reader = FakeRead::new(vec![]);
     let budget = crate::read::ReadSession::application_budget();
-    assert!(read(&mut reader, &[], 0, &budget).await.unwrap().is_empty());
-    assert!(read(&mut reader, &["0x0123456789ABCDEF".into(), "bad".into()], 1, &budget).await.is_err());
-    assert!(read(&mut reader, &["0x0123456789ABCDEF".into(), "0x0123456789abcdef".into()], 1, &budget).await.is_err());
+    assert!(read(&mut reader, &[], 0, &budget, true).await.unwrap().is_empty());
+    assert!(read(&mut reader, &["0x0123456789ABCDEF".into(), "bad".into()], 1, &budget, true).await.is_err());
+    assert!(
+        read(&mut reader, &["0x0123456789ABCDEF".into(), "0x0123456789abcdef".into()], 1, &budget, true).await.is_err()
+    );
     assert!(reader.calls.is_empty());
 }
 #[tokio::test]
@@ -67,12 +73,12 @@ async fn oversized_or_evicted_payloads_are_explicit_and_late_errors_never_return
         &[("plan_bytes", Val::Int(i64::from(budget.max_plan_bytes) + 2)), ("query_plan", Val::Null)],
     );
     let mut reader = FakeRead::new(vec![Ok(vec![oversized])]);
-    let details = read(&mut reader, std::slice::from_ref(&hash), 1, &budget).await.unwrap();
+    let details = read(&mut reader, std::slice::from_ref(&hash), 1, &budget, true).await.unwrap();
     assert!(matches!(details[&hash].plan, Payload::Unavailable(PayloadUnavailable::Oversized)));
     let mut reader = FakeRead::new(vec![Ok(vec![])]);
-    assert!(read(&mut reader, std::slice::from_ref(&hash), 1, &budget).await.unwrap().is_empty());
+    assert!(read(&mut reader, std::slice::from_ref(&hash), 1, &budget, true).await.unwrap().is_empty());
     let mut reader = FakeRead::new(vec![Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed))]);
-    let error = read(&mut reader, &[hash], 1, &budget).await.err().unwrap();
+    let error = read(&mut reader, &[hash], 1, &budget, true).await.err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
     assert_eq!(reader.calls.len(), 1);
 }
@@ -82,10 +88,70 @@ async fn many_small_plans_share_one_native_cache_read() {
     let hashes = (1..=25).map(|value| format!("0x{value:016X}")).collect::<Vec<_>>();
     let rows: Vec<_> = hashes.iter().map(|hash| row(hash)).collect();
     let mut reader = FakeRead::new(vec![Ok(rows.clone()), Ok(rows.iter().map(binding).collect())]);
-    let result = read(&mut reader, &hashes, 25, &crate::read::ReadSession::application_budget()).await.unwrap();
+    let budget = CollectionBudget {
+        max_sql_bytes: 16 * 1024,
+        max_plan_bytes: 16 * 1024,
+        ..crate::read::ReadSession::application_budget()
+    };
+    let result = read(&mut reader, &hashes, 25, &budget, true).await.unwrap();
     assert_eq!(result.len(), 25);
     assert_eq!(reader.calls.len(), 2, "one payload cache read and one batched independent binding check");
     assert_eq!(reader.calls.iter().filter(|call| call.sql.contains("sys.dm_exec_query_stats")).count(), 1);
+}
+
+#[tokio::test]
+async fn current_type_context_shares_the_payload_dispatch_and_follows_original_binding_withdrawal() {
+    let hash = "0x0123456789ABCDEF".to_string();
+    let native = crate::relational_inputs::type_schema::tests::with_schema(&procedure_row(&hash));
+    for verified in [true, false] {
+        let mut proof = binding(&native);
+        if !verified {
+            proof = replace(&proof, &[("sql_handle", Val::Text("0x9999".into()))]);
+        }
+        let mut reader = FakeRead::new(vec![Ok(vec![native.clone()]), Ok(vec![proof])]);
+        let details =
+            read(&mut reader, std::slice::from_ref(&hash), 1, &crate::read::ReadSession::application_budget(), true)
+                .await
+                .unwrap();
+        let detail = &details[&hash];
+        assert_eq!(detail.current_type_schema.is_some(), verified);
+        assert_eq!(detail.module_parameters.is_some(), verified);
+        assert_eq!(detail.plan.text().is_some(), verified);
+        assert_eq!(detail.statement.text(), Some("SELECT id FROM @rows"));
+        assert_eq!(reader.calls.len(), 2, "one payload and the existing original-binding verification");
+        assert!(reader.calls[0].sql.contains("sys.table_types"));
+        assert!(!reader.calls[1].sql.contains("sys.table_types"));
+    }
+}
+
+#[tokio::test]
+async fn unsupported_native_grammar_keeps_original_plan_and_explicitly_uncollected_tvp_context() {
+    let hash = "0x0123456789ABCDEF".to_string();
+    let native = replace(
+        &procedure_row(&hash),
+        &[
+            ("current_type_observed_at", Val::Text("2026-11-19T12:00:00.1234567Z".into())),
+            ("current_type_visibility", Val::Null),
+            ("current_type_bytes", Val::Null),
+            ("current_type_schema", Val::Null),
+        ],
+    );
+    let mut reader = FakeRead::new(vec![Ok(vec![native.clone()]), Ok(vec![binding(&native)])]);
+    let details =
+        read(&mut reader, std::slice::from_ref(&hash), 1, &crate::read::ReadSession::application_budget(), false)
+            .await
+            .unwrap();
+    let detail = &details[&hash];
+    assert!(detail.plan.text().is_some());
+    assert!(detail.module_parameters.is_some());
+    assert_eq!(
+        detail.current_type_schema.as_ref().unwrap().status,
+        culprit_core::telemetry::MssqlCurrentTypeSchemaStatus::NotCollected
+    );
+    for unsupported in ["FOR JSON", "JSON_QUERY", "is_memory_optimized", "sys.table_types"] {
+        assert!(!reader.calls[0].sql.contains(unsupported), "{unsupported}");
+    }
+    assert_eq!(reader.calls.len(), 2);
 }
 #[tokio::test]
 async fn payload_deferral_reselects_only_the_remaining_members_and_must_make_progress() {
@@ -99,14 +165,14 @@ async fn payload_deferral_reselects_only_the_remaining_members_and_must_make_pro
         Ok(vec![row(&hashes[1])]),
         Ok(hashes.iter().map(|hash| binding(&row(hash))).collect()),
     ]);
-    let result = read(&mut reader, &hashes, 2, &crate::read::ReadSession::application_budget()).await.unwrap();
+    let result = read(&mut reader, &hashes, 2, &crate::read::ReadSession::application_budget(), true).await.unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(reader.calls.len(), 3);
     let Parameter::Text(second) = &reader.calls[1].parameters[0] else { panic!("bound selectors") };
     assert!(!second.contains(&hashes[0]));
     let mut reader = FakeRead::new(vec![Ok(vec![deferred])]);
     let error =
-        read(&mut reader, &hashes[1..], 1, &crate::read::ReadSession::application_budget()).await.err().unwrap();
+        read(&mut reader, &hashes[1..], 1, &crate::read::ReadSession::application_budget(), true).await.err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::ByteLimit);
     assert_eq!(reader.calls.len(), 1);
 }
@@ -134,9 +200,10 @@ async fn original_header_metadata_is_admitted_only_after_an_independent_native_b
     let hash = "0x0123456789ABCDEF".to_string();
     let native = procedure_row(&hash);
     let mut reader = FakeRead::new(vec![Ok(vec![native.clone()]), Ok(vec![binding(&native)])]);
-    let details = read(&mut reader, std::slice::from_ref(&hash), 1, &crate::read::ReadSession::application_budget())
-        .await
-        .unwrap();
+    let details =
+        read(&mut reader, std::slice::from_ref(&hash), 1, &crate::read::ReadSession::application_budget(), true)
+            .await
+            .unwrap();
     let detail = &details[&hash];
     assert!(detail.module_parameters.as_ref().unwrap().input(&detail.context, "@rows").is_some());
     assert_eq!(detail.statement.text(), Some("SELECT id FROM @rows"));
@@ -160,7 +227,7 @@ async fn changed_missing_or_denied_binding_withholds_enrichment_but_preserves_th
     ] {
         let mut reader = FakeRead::new(vec![Ok(vec![native.clone()]), reply]);
         let details =
-            read(&mut reader, std::slice::from_ref(&hash), 1, &crate::read::ReadSession::application_budget())
+            read(&mut reader, std::slice::from_ref(&hash), 1, &crate::read::ReadSession::application_budget(), true)
                 .await
                 .unwrap();
         let detail = &details[&hash];
@@ -179,7 +246,8 @@ async fn unconfirmed_binding_cancellation_cannot_publish_a_successful_detail_or_
         Ok(vec![procedure_row(&hash)]),
         Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed)),
     ]);
-    let error = read(&mut reader, &[hash], 1, &crate::read::ReadSession::application_budget()).await.err().unwrap();
+    let error =
+        read(&mut reader, &[hash], 1, &crate::read::ReadSession::application_budget(), true).await.err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
     assert_eq!(reader.calls.len(), 2);
 }
@@ -190,7 +258,7 @@ async fn unsupported_system_modules_and_zero_native_tokens_preserve_sql_without_
     let system = replace(&procedure_row(&hash), &[("module_object_id", Val::Int(-1001))]);
     let mut reader = FakeRead::new(vec![Ok(vec![system.clone()]), Ok(vec![binding(&system)])]);
     let budget = crate::read::ReadSession::application_budget();
-    let details = read(&mut reader, std::slice::from_ref(&hash), 1, &budget).await.unwrap();
+    let details = read(&mut reader, std::slice::from_ref(&hash), 1, &budget, true).await.unwrap();
     assert_eq!(details[&hash].statement.text(), Some("SELECT id FROM @rows"));
     assert!(details[&hash].module_parameters.is_none());
     assert!(
@@ -200,7 +268,7 @@ async fn unsupported_system_modules_and_zero_native_tokens_preserve_sql_without_
     for (column, zero) in [("plan_handle", "0x0000"), ("sql_handle", "0x0000")] {
         let native = replace(&procedure_row(&hash), &[(column, Val::Text(zero.into()))]);
         let mut reader = FakeRead::new(vec![Ok(vec![native])]);
-        let details = read(&mut reader, std::slice::from_ref(&hash), 1, &budget).await.unwrap();
+        let details = read(&mut reader, std::slice::from_ref(&hash), 1, &budget, true).await.unwrap();
         assert_eq!(details[&hash].statement.text(), Some("SELECT id FROM @rows"));
         assert!(matches!(details[&hash].plan, Payload::Unavailable(PayloadUnavailable::NotCollected)));
         assert!(details[&hash].module_parameters.is_none());
@@ -218,7 +286,7 @@ async fn conflicting_payload_versions_keep_all_statements_but_withdraw_enrichmen
         &[("plan_handle", Val::Text("0x0200".into())), ("sql_handle", Val::Text("0x0301".into()))],
     );
     let mut reader = FakeRead::new(vec![Ok(vec![first, second]), Ok(vec![procedure_row(&hashes[2])])]);
-    let details = read(&mut reader, &hashes, 2, &crate::read::ReadSession::application_budget()).await.unwrap();
+    let details = read(&mut reader, &hashes, 2, &crate::read::ReadSession::application_budget(), true).await.unwrap();
     for hash in &hashes {
         let detail = &details[hash];
         assert_eq!(detail.statement.text(), Some("SELECT id FROM @rows"));

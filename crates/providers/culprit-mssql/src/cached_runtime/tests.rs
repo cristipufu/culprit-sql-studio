@@ -146,7 +146,7 @@ async fn unknown_native_counters_cannot_become_zero_cost_workload_or_trigger_det
     assert!(Summary::decode(&row).unwrap().counts.is_none());
     let mut reader = crate::resources::test_support::FakeRead::new(vec![Ok(vec![row])]);
     let result =
-        crate::workload::from_plan_cache(&mut reader, &culprit_core::SnapshotOptions::default()).await.unwrap();
+        crate::workload::from_plan_cache(&mut reader, &culprit_core::SnapshotOptions::default(), true).await.unwrap();
     assert!(result.workload.queries.is_empty());
     assert_eq!(reader.calls.len(), 1);
     assert!(

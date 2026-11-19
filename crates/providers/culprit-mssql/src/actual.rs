@@ -137,6 +137,13 @@ fn plan_from_retained(read: retained::Read, context: &culprit_core::telemetry::N
     if plan.kind != PlanKind::Actual {
         return Err(not_kept());
     }
+    if row.current_type_schema.as_ref().is_some_and(|schema| {
+        !culprit_core::telemetry::ObservationBounds::new(&context.observed_from, &context.observed_until)
+            .is_some_and(|bounds| bounds.contains(&schema.observed_at))
+    }) {
+        return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+    }
+    plan.facts_mut().current_type_schema = row.current_type_schema.map(Box::new);
     plan.raw = None;
     clear_unrecorded_times(&mut plan);
     Ok(plan)
@@ -287,6 +294,7 @@ mod tests {
             ),
             statement_utf16_bytes: None,
             module_parameters: None,
+            current_type_schema: None,
             source_utf16_bytes: Some(xml.encode_utf16().count() * 2),
             payload: crate::query_store::payload::Payload::Text(xml.into()),
             executions: "9007199254740993".into(),
@@ -325,6 +333,25 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::NotFound);
         assert!(!error.hint.unwrap_or_default().contains(TURN_ON));
+    }
+
+    #[test]
+    fn retained_type_metadata_keeps_its_point_inside_the_original_native_read() {
+        use culprit_core::telemetry::{CollectionStop, MssqlCurrentTypeSchema, MssqlCurrentTypeSchemaStatus};
+        let context = crate::plan_xml::test_read_context("app");
+        for (clock, accepted) in
+            [("2026-11-14T11:59:59Z", false), ("2026-11-14T12:00:00.5Z", true), ("2026-11-14T12:00:02Z", false)]
+        {
+            let mut row = retained_row();
+            row.current_type_schema =
+                Some(MssqlCurrentTypeSchema::unavailable(clock.into(), MssqlCurrentTypeSchemaStatus::Restricted));
+            let result = plan_from_retained(retained::Read { setting_on: Some(true), plan: Some(row) }, &context);
+            if accepted {
+                assert_eq!(result.unwrap().facts().current_type_schema.as_ref().unwrap().observed_at, clock);
+            } else {
+                assert_eq!(CollectionStop::from_error(&result.unwrap_err()), CollectionStop::SourceChanged);
+            }
+        }
     }
 
     #[test]

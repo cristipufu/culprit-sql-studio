@@ -274,9 +274,9 @@ const REGISTRATIONS: &[Registration] = &[
     streamed!("mssql.objects", Objects, objects::Objects),
     streamed!("mssql.triggers", Triggers, triggers::Triggers),
     streamed!("mssql.partitions", Partitions, partitions::Partitions),
-    streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions),
+    streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions).version(2),
     streamed!("mssql.retained-plans", RetainedPlans, retained_definitions::RetainedPlans)
-        .version(2)
+        .version(3)
         .bounded(retained_definitions::bounded_budget),
 ];
 

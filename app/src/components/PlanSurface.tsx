@@ -11,6 +11,7 @@ import { PlanDiagram } from "./PlanDiagram";
 import { PlanInsights } from "./PlanInsights";
 import { PlanAssessmentNotes } from "./PlanAssessmentNotes";
 import { PlanOperations } from "./PlanOperations";
+import { PlanTypeSchema } from "./PlanTypeSchema";
 import { PlanView, planKindLabel } from "./PlanView";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
@@ -69,6 +70,7 @@ export function PlanSurface({ plan, query, focus, look, badge }: { plan: Plan; q
       )}
       <PlanInsights plan={plan} selectedNode={selected} onSelectNode={setSelected} />
       <DocdbWork metrics={plan.facts.docdb} basis="execution" />
+      <PlanTypeSchema plan={plan} />
       {look === "diagram" && <PlanDiagram plan={plan} query={query} focus={focus} selectedId={selected} onSelect={setSelected} badge={badge} />}
       {look === "tree" && <PlanView plan={plan} query={query} focus={focus} selectedId={selected} onSelect={setSelected} />}
       {look === "operations" && <OperationsPanel plan={plan} query={query} focus={focus} selected={selected ?? focus ?? null} onSelect={setSelected} />}

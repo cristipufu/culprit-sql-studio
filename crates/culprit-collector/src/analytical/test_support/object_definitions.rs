@@ -45,6 +45,7 @@ pub fn object_definition_evidence_cases() -> Vec<(CollectionDescription, Vec<Tel
         SourceState::Collected,
     )];
     let retained = MssqlRetainedPlanDefinition {
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         context: cached.context.clone(),
@@ -213,6 +214,7 @@ pub fn object_definition_retained_input_evidence() -> (CollectionDescription, Ve
         </Statements></Batch></BatchSequence></ShowPlanXML>"#
     );
     let retained = MssqlRetainedPlanDefinition {
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         context,
@@ -256,6 +258,7 @@ fn cached_definition() -> MssqlCachedDefinition {
         table_parameters: [("@Rows".into(), vec!["dbo".into(), "RowsType".into()])].into(),
     };
     MssqlCachedDefinition {
+        current_type_schema: None,
         relational_input_proof: None,
         context,
         query_plan_hash: Some("0xFEDCBA9876543210".into()),

@@ -49,6 +49,7 @@ impl Evidence {
                 payload: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
             },
             module_parameters: None,
+            current_type_schema: None,
             relational_input_proof: None,
         };
         Self::new(

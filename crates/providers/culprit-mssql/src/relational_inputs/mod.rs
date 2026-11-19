@@ -6,6 +6,7 @@ mod native_tests;
 mod sql;
 #[cfg(test)]
 pub(crate) mod tests;
+pub(crate) mod type_schema;
 
 use crate::{
     read::{NativeRead, Parameter, ReadError, invalid_data, optional_signed_integer, optional_text, text},

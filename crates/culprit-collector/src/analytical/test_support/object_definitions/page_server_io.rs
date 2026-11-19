@@ -69,6 +69,7 @@ pub fn page_server_io_evidence(case: PageServerIoCase) -> (CollectionDescription
         context,
         statement: cached_payload(&sql, DefinitionPayload::sql),
         module_parameters: None,
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         // This is independent cache history, deliberately different from ActualExecutions in the XML.

@@ -56,6 +56,7 @@ fn payload(raw: &str, redact: fn(&str, Engine) -> DefinitionPayload) -> MssqlCac
 fn cached(xml: &str) -> MssqlCachedDefinition {
     let context = context();
     MssqlCachedDefinition {
+        current_type_schema: None,
         relational_input_proof: None,
         query_plan_hash: None,
         statement: payload(SQL, DefinitionPayload::sql),
@@ -169,6 +170,7 @@ fn cached_module_classification_does_not_manufacture_actual_rows_or_a_tvp_proble
 #[test]
 fn retained_actual_rows_have_no_borrowed_module_kind_cache_population_or_placeholder_time() {
     let definition = MssqlRetainedPlanDefinition {
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         context: context(),
@@ -218,6 +220,7 @@ fn unavailable_and_malformed_native_plans_remain_unusable() {
         .is_err()
     );
     let retained = MssqlRetainedPlanDefinition {
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         context: context(),

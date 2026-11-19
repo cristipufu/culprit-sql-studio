@@ -26,6 +26,7 @@ pub(crate) struct RetainedPlan {
     pub statement: Payload,
     pub statement_utf16_bytes: Option<usize>,
     pub module_parameters: Option<culprit_core::telemetry::MssqlModuleParameters>,
+    pub current_type_schema: Option<culprit_core::telemetry::MssqlCurrentTypeSchema>,
     pub payload: Payload,
     pub source_utf16_bytes: Option<usize>,
     pub executions: String,
@@ -107,6 +108,7 @@ pub(crate) async fn read<R: NativeRead>(
         if let Some(reason) = unavailable {
             plan.payload = Payload::Unavailable(reason);
             plan.module_parameters = None;
+            plan.current_type_schema = None;
         }
     }
     Ok(Read { setting_on, plan })
@@ -147,6 +149,11 @@ pub(crate) fn decode(
     let payload = Payload::read_column(row, "query_plan", bytes, maximum_bytes)?;
     let module_parameters =
         if payload.text().is_some() { crate::relational_inputs::parameters(row, &context)? } else { None };
+    let current_type_schema = if payload.text().is_some() {
+        crate::relational_inputs::type_schema::decode(row, &context, module_parameters.as_ref())?
+    } else {
+        None
+    };
     let plan = RetainedPlan {
         context,
         query: None,
@@ -154,6 +161,7 @@ pub(crate) fn decode(
         statement,
         statement_utf16_bytes,
         module_parameters,
+        current_type_schema,
         payload,
         source_utf16_bytes: bytes,
         executions: integer(row, "execution_count")?.to_string(),
@@ -172,20 +180,23 @@ JOIN sys.query_store_query q ON q.query_hash=qs.query_hash AND q.context_setting
 JOIN sys.query_store_query_text qt ON qt.query_text_id=q.query_text_id AND qt.statement_sql_handle=qs.statement_sql_handle
 JOIN sys.query_store_plan p ON p.query_id=q.query_id AND p.query_plan_hash=qs.query_plan_hash
 OUTER APPLY sys.dm_exec_query_plan_stats(qs.plan_handle) ps
+{current_types_relation}
 WHERE {database} AND q.object_id=COALESCE(st.objectid,0) AND q.query_id=@P1 AND (@P2=-1 OR p.plan_id=@P2)
 ORDER BY qs.last_execution_time DESC,qs.creation_time DESC,qs.statement_start_offset OPTION(MAXDOP 1)"#,
         query_identity = crate::query_store::catalog_sql::query_identity_columns!("q.query_id", "q", "query_store_"),
         plan_identity = crate::query_store::catalog_sql::plan_identity_columns!("p", "query_store_"),
         relation = cached_statements::relation(),
         database = cached_statements::DATABASE_PREDICATE,
+        current_types_relation = crate::relational_inputs::type_schema::relation("st"),
     )
 }
 pub(crate) fn projection(context: String, text_alias: &str, encrypted: &str, maximum: &str) -> String {
     let payload =
         crate::cached_payload::columns("CONVERT(nvarchar(max),ps.query_plan)", "plan_bytes", "query_plan", maximum);
     let module = crate::relational_inputs::module_columns(text_alias);
+    let current_types = crate::relational_inputs::type_schema::columns();
     format!(
-        "{context},{module},{encrypted} AS encrypted,{payload},qs.execution_count,CONVERT(varchar(40),qs.last_execution_time,126) AS last_start_without_offset"
+        "{context},{module},{current_types},{encrypted} AS encrypted,{payload},qs.execution_count,CONVERT(varchar(40),qs.last_execution_time,126) AS last_start_without_offset"
     )
 }
 

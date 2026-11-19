@@ -118,6 +118,14 @@ impl Probe {
         self.can_view_database_state || self.can_view_server_state
     }
 
+    /// Current table-type projection uses JSON grammar introduced by SQL Server 2016. Managed Azure variants
+    /// expose that grammar independently of the boxed product major version. This says nothing about permissions.
+    pub(crate) fn supports_current_type_schema(&self) -> bool {
+        const FIRST_JSON_MAJOR: u32 = 13;
+        self.major >= FIRST_JSON_MAJOR
+            || matches!(self.engine_edition, ENGINE_EDITION_AZURE_SQL_DATABASE | ENGINE_EDITION_MANAGED_INSTANCE)
+    }
+
     /// The exact statement an administrator should run to unlock the monitoring views.
     pub(crate) fn grant_hint(&self) -> String {
         monitoring_grant(self.engine_edition, self.major, &self.login, &self.user)
@@ -273,6 +281,20 @@ pub(crate) mod tests {
             started_at: None,
             query_store: None,
             rds,
+        }
+    }
+
+    #[test]
+    fn table_type_catalog_grammar_follows_observed_native_support() {
+        for major in [0, 11, 12, 13, 16, 17] {
+            let mut boxed = probe(2, false);
+            boxed.major = major;
+            assert_eq!(boxed.supports_current_type_schema(), major >= 13);
+            for edition in [ENGINE_EDITION_AZURE_SQL_DATABASE, ENGINE_EDITION_MANAGED_INSTANCE] {
+                let mut managed = probe(edition, false);
+                managed.major = major;
+                assert!(managed.supports_current_type_schema());
+            }
         }
     }
 

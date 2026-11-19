@@ -6,6 +6,9 @@ use ts_rs::TS;
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct PlanView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current_type_schema: Option<PlanCurrentTypeSchemaView>,
     pub kind: PlanKind,
     pub query: Option<PlanMeasurementRef>,
     pub focus_checks: Vec<String>,
@@ -21,6 +24,15 @@ pub struct PlanView {
     pub actual: Option<ActualSummary>,
     pub nodes: Vec<PlanOperatorView>,
     pub insights: Vec<PlanInsightShare>,
+}
+
+/// Words for the separately timed catalog context; the native bounded metadata stays on PlanFacts once.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct PlanCurrentTypeSchemaView {
+    pub title: String,
+    pub summary: String,
+    pub limitations: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

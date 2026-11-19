@@ -80,6 +80,7 @@ pub fn memory_feedback_evidence(case: MemoryFeedbackCase) -> (CollectionDescript
         context: cached.context,
         statement: cached_payload(STATEMENT, DefinitionPayload::sql),
         module_parameters: None,
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         statement_executions: Some("7".into()),

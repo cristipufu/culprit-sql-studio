@@ -10,6 +10,7 @@ use culprit_core::{
 use serde_json::{Value, json};
 
 use crate::tools::TopBy;
+mod type_schema;
 
 const TEXT_SHORT: usize = 300;
 const TEXT_FULL: usize = 8_000;
@@ -487,6 +488,7 @@ fn plan_value(plan: &Plan) -> Value {
         "total_cost": round(plan.total_cost, 4),
         "operators": plan.nodes().len(),
         "virtual_indexes": (!plan.facts().virtual_indexes.is_empty()).then(|| plan.facts().virtual_indexes.join(", ")),
+        "current_type_schema": type_schema::value(plan),
         "warnings": warnings(plan),
         "index_hints": plan.index_hints.iter().map(|h| json!({
             "table": h.table,

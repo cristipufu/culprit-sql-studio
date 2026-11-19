@@ -124,16 +124,53 @@ impl MssqlRelationalInputProof {
 impl ObjectDefinitionFact {
     pub fn native_plan_proofs_match(&self, source: &CollectionDescription) -> bool {
         match self {
-            Self::MssqlCachedDefinition(value) => {
-                value.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_cached(source, value))
-            }
-            Self::MssqlRetainedPlan(value) => {
-                value.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_retained(source, value))
-                    && value.parameter_context_proof.as_ref().is_none_or(|proof| proof.matches_retained(source, value))
-            }
+            Self::MssqlCachedDefinition(value) => value.native_plan_proofs_match(source),
+            Self::MssqlRetainedPlan(value) => value.native_plan_proofs_match(source),
             _ => true,
         }
     }
+}
+
+impl MssqlCachedDefinition {
+    pub fn native_plan_proofs_match(&self, source: &CollectionDescription) -> bool {
+        self.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_cached(source, self))
+            && current_schema_matches_source(
+                source,
+                self.current_type_schema.as_ref(),
+                SnapshotDataset::CachedDefinitions,
+            )
+    }
+}
+
+impl MssqlRetainedPlanDefinition {
+    pub fn native_plan_proofs_match(&self, source: &CollectionDescription) -> bool {
+        self.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_retained(source, self))
+            && self.parameter_context_proof.as_ref().is_none_or(|proof| proof.matches_retained(source, self))
+            && current_schema_matches_source(source, self.current_type_schema.as_ref(), SnapshotDataset::RetainedPlans)
+    }
+}
+
+fn current_schema_matches_source(
+    source: &CollectionDescription,
+    schema: Option<&MssqlCurrentTypeSchema>,
+    dataset: SnapshotDataset,
+) -> bool {
+    schema.is_none_or(|schema| {
+        schema.is_valid()
+            && definition_dataset(source) == Some(dataset)
+            && MssqlRelationalInputProof::supports_source(source)
+            && match &source.observation {
+                SourceObservation::Snapshot(snapshot) => {
+                    ObservationBounds::new(&snapshot.observed_from, &snapshot.observed_until)
+                        .is_some_and(|bounds| bounds.contains(&schema.observed_at))
+                }
+                SourceObservation::PagedSnapshot(snapshot) => {
+                    // The stream has no final clock yet. Final capture replay checks the completion bounds again.
+                    ObservationBounds::new(&snapshot.observed_from, &schema.observed_at).is_some()
+                }
+                _ => false,
+            }
+    })
 }
 
 fn scope(source: &CollectionDescription) -> Result<String> {

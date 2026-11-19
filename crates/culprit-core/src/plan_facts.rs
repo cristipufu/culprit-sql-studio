@@ -22,6 +22,11 @@ pub use scan_completion::{MAX_PLAN_SCAN_THREADS, PlanScanCompletion, PlanScanThr
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct PlanFacts {
+    /// Bounded type metadata observed when this plan was read. It describes the current catalog at its own clock,
+    /// never the schema used at compilation, live input contents, parameter cardinality or a cause of the plan.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "current_type_schema")]
+    #[ts(optional)]
+    pub current_type_schema: Option<Box<crate::telemetry::MssqlCurrentTypeSchema>>,
     /// Retained native cache evidence. Read ownership is separate from the earlier execution's unknown population.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -573,6 +578,13 @@ pub struct PlanChangedColumn {
     pub column: String,
     pub data_type: String,
 }
+fn current_type_schema<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Box<crate::telemetry::MssqlCurrentTypeSchema>>, D::Error> {
+    Ok(Option::<Box<crate::telemetry::MssqlCurrentTypeSchema>>::deserialize(deserializer)?
+        .filter(|schema| schema.is_valid()))
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }

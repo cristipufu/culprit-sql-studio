@@ -14,6 +14,10 @@ pub(crate) fn row() -> Rec {
         ("module_database_id".into(), Val::Null),
         ("module_object_id".into(), Val::Null),
         ("module_number".into(), Val::Null),
+        ("current_type_observed_at".into(), Val::Null),
+        ("current_type_visibility".into(), Val::Null),
+        ("current_type_bytes".into(), Val::Null),
+        ("current_type_schema".into(), Val::Null),
         ("query_plan_hash".into(), Val::Text("0x0000000000000009".into())),
         ("last_start_without_offset".into(), Val::Text("2020-01-01T08:00:00.003".into())),
     ]);

@@ -2,7 +2,7 @@
 use culprit_core::{Plan, Result, telemetry::*};
 
 pub fn parse_cached_definition(definition: &MssqlCachedDefinition, source: &CollectionDescription) -> Result<Plan> {
-    if definition.relational_input_proof.as_ref().is_some_and(|proof| !proof.matches_cached(source, definition)) {
+    if !definition.native_plan_proofs_match(source) {
         return Err(DeliveryProblem::Integrity.error());
     }
     require_source(source, SnapshotDataset::CachedDefinitions)?;
@@ -16,7 +16,7 @@ pub fn parse_cached_definition(definition: &MssqlCachedDefinition, source: &Coll
         DefinitionPayload::Available { text, .. } => Some(text.as_str()),
         DefinitionPayload::Unavailable { .. } => None,
     };
-    super::parse_cached_statement(
+    let mut plan = super::parse_cached_statement(
         xml,
         super::CachedInputContext {
             statement: &definition.context,
@@ -24,17 +24,16 @@ pub fn parse_cached_definition(definition: &MssqlCachedDefinition, source: &Coll
             text: statement,
             origin: super::PlanInputOrigin::StoredRedacted { proof: definition.relational_input_proof.as_ref() },
         },
-    )
+    )?;
+    plan.facts_mut().current_type_schema = definition.current_type_schema.clone().map(Box::new);
+    Ok(plan)
 }
 
 pub fn parse_retained_definition(
     definition: &MssqlRetainedPlanDefinition,
     source: &CollectionDescription,
 ) -> Result<Plan> {
-    if definition.relational_input_proof.as_ref().is_some_and(|proof| !proof.matches_retained(source, definition)) {
-        return Err(DeliveryProblem::Integrity.error());
-    }
-    if definition.parameter_context_proof.as_ref().is_some_and(|proof| !proof.matches_retained(source, definition)) {
+    if !definition.native_plan_proofs_match(source) {
         return Err(DeliveryProblem::Integrity.error());
     }
     require_source(source, SnapshotDataset::RetainedPlans)?;
@@ -60,6 +59,7 @@ pub fn parse_retained_definition(
     if let Some(proof) = &definition.parameter_context_proof {
         super::parameters::restore(&mut plan, &proof.context)?;
     }
+    plan.facts_mut().current_type_schema = definition.current_type_schema.clone().map(Box::new);
     crate::actual::clear_unrecorded_times(&mut plan);
     Ok(plan)
 }

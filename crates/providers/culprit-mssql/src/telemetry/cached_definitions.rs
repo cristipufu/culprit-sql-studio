@@ -27,6 +27,7 @@ impl SnapshotRecipe for CachedDefinitions {
             definition.estimated_plan.payload =
                 DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
             definition.module_parameters = None;
+            definition.current_type_schema = None;
             definition.relational_input_proof = None;
         }
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(

@@ -81,6 +81,7 @@ pub fn parameter_evidence(case: ParameterEvidenceCase) -> (CollectionDescription
             cached_payload(&sql, DefinitionPayload::sql)
         },
         module_parameters: None,
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         statement_executions: Some("9007199254740993".into()),

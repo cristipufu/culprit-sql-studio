@@ -195,5 +195,5 @@ async fn statement_retention_intersects_the_existing_budget_and_never_adds_a_nat
     );
     let sql = select_sql(&layout);
     assert_eq!(sql.matches("sys.dm_exec_query_plan_stats(").count(), 1);
-    assert!(!sql.contains("sys.parameters") && !sql.contains("sys.table_types"));
+    assert!(sql.contains("sys.parameters") && sql.contains("sys.table_types"));
 }

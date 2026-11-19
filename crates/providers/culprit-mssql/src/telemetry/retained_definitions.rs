@@ -52,6 +52,7 @@ impl SnapshotRecipe for RetainedPlans {
         if !admitted {
             definition.batch_plan.payload = DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
             definition.module_parameters = None;
+            definition.current_type_schema = None;
             definition.relational_input_proof = None;
             definition.parameter_context_proof = None;
         }

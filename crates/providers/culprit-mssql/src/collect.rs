@@ -259,7 +259,7 @@ async fn collect_plan_cache(
         return Ok(part);
     }
     let mut client = ReadSession::application(provider.pool.clone());
-    let plan_cache = workload::from_plan_cache(&mut client, options).await;
+    let plan_cache = workload::from_plan_cache(&mut client, options, probe.supports_current_type_schema()).await;
     let plan_cache = client.finish(plan_cache).await;
     if plan_cache.as_ref().err().is_some_and(|error| {
         culprit_core::telemetry::CollectionStop::from_error(error)

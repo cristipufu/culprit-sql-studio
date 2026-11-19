@@ -16,6 +16,7 @@ fn bound_join(sql: &str, raw_xml: &str, retained: bool) -> (CollectionDescriptio
     definition.context.source_text_bytes = definition.statement.source_utf16_bytes.clone();
     let xml = if retained { retained_xml(raw_xml) } else { raw_xml.into() };
     definition.estimated_plan = cached_payload(&xml, DefinitionPayload::plan);
+    let current_schema = current_type_schema(&definition);
     let bindings = vec![MssqlRelationalInputBinding {
         node_id: 1,
         input: RelationalInput {
@@ -28,6 +29,7 @@ fn bound_join(sql: &str, raw_xml: &str, retained: bool) -> (CollectionDescriptio
             context: definition.context,
             statement: definition.statement,
             module_parameters: definition.module_parameters,
+            current_type_schema: None,
             relational_input_proof: None,
             parameter_context_proof: None,
             statement_executions: Some("9007199254740993".into()),
@@ -37,16 +39,128 @@ fn bound_join(sql: &str, raw_xml: &str, retained: bool) -> (CollectionDescriptio
         };
         retained.relational_input_proof =
             Some(MssqlRelationalInputProof::for_retained(&source, &retained, bindings).unwrap());
+        retained.current_type_schema = Some(current_schema);
         ObjectDefinitionFact::MssqlRetainedPlan(Box::new(retained))
     } else {
         definition.relational_input_proof =
             Some(MssqlRelationalInputProof::for_cached(&source, &definition, bindings).unwrap());
+        definition.current_type_schema = Some(current_schema);
         ObjectDefinitionFact::MssqlCachedDefinition(Box::new(definition))
     };
     let record = TelemetryRecord::ObjectDefinition(
         ObjectDefinitionRecord::new("native-object-definitions".into(), fact).unwrap(),
     );
     (source, vec![record])
+}
+
+fn current_type_schema(definition: &MssqlCachedDefinition) -> MssqlCurrentTypeSchema {
+    let module = definition.module_parameters.as_ref().unwrap();
+    let (parameter, declared_type) = module.table_parameters.iter().next().unwrap();
+    let [schema, name] = declared_type.as_slice() else { panic!("qualified native table type") };
+    MssqlCurrentTypeSchema {
+        observed_at: "2020-01-01T12:00:00.7500000Z".into(),
+        status: MssqlCurrentTypeSchemaStatus::Available,
+        module: Some(MssqlCurrentTypeModule {
+            identity: MssqlObjectIdentity {
+                database_id: module.database_id,
+                object_id: module.object_id.try_into().unwrap(),
+                created_without_offset: "2020-01-01T10:00:00.003".into(),
+            },
+            schema: "dbo".into(),
+            name: "read_rows".into(),
+            modified_without_offset: "2020-01-01T11:30:00.007".into(),
+        }),
+        parameters: vec![MssqlCurrentTypeParameter { parameter_id: 1, name: parameter.clone(), user_type_id: 257 }],
+        types: vec![MssqlCurrentTableType {
+            schema_id: 1,
+            user_type_id: 257,
+            schema: schema.clone(),
+            name: name.clone(),
+            backing_object: MssqlObjectIdentity {
+                database_id: module.database_id,
+                object_id: 2001,
+                created_without_offset: "2020-01-01T09:00:00.003".into(),
+            },
+            modified_without_offset: "2020-01-01T09:00:00.003".into(),
+            memory_optimized: false,
+            columns: vec![
+                MssqlCurrentTypeColumn {
+                    column_id: 1,
+                    name: "value".into(),
+                    user_type_id: 231,
+                    system_type_id: 231,
+                    type_schema: "sys".into(),
+                    type_name: "nvarchar".into(),
+                    max_length: 128,
+                    precision: 0,
+                    scale: 0,
+                    nullable: false,
+                    identity: false,
+                    computed: false,
+                    collation: Some("Latin1_General_100_BIN2".into()),
+                },
+                MssqlCurrentTypeColumn {
+                    column_id: 2,
+                    name: "payload".into(),
+                    user_type_id: 165,
+                    system_type_id: 165,
+                    type_schema: "sys".into(),
+                    type_name: "varbinary".into(),
+                    max_length: -1,
+                    precision: 0,
+                    scale: 0,
+                    nullable: true,
+                    identity: false,
+                    computed: false,
+                    collation: None,
+                },
+                MssqlCurrentTypeColumn {
+                    column_id: 3,
+                    name: "amount".into(),
+                    user_type_id: 106,
+                    system_type_id: 106,
+                    type_schema: "sys".into(),
+                    type_name: "decimal".into(),
+                    max_length: 9,
+                    precision: 18,
+                    scale: 3,
+                    nullable: true,
+                    identity: false,
+                    computed: false,
+                    collation: None,
+                },
+            ],
+            indexes: vec![MssqlCurrentTypeIndex {
+                index_id: 2,
+                name: "ix_rows_value".into(),
+                type_code: 2,
+                native_type: "NONCLUSTERED".into(),
+                unique: true,
+                primary_key: false,
+                unique_constraint: false,
+                disabled: false,
+                hypothetical: false,
+                columns: vec![
+                    MssqlCatalogIndexColumn {
+                        index_column_id: 1,
+                        column_id: 1,
+                        name: "value".into(),
+                        key_ordinal: 1,
+                        descending: true,
+                        included: false,
+                    },
+                    MssqlCatalogIndexColumn {
+                        index_column_id: 2,
+                        column_id: 2,
+                        name: "payload".into(),
+                        key_ordinal: 0,
+                        descending: false,
+                        included: true,
+                    },
+                ],
+            }],
+        }],
+    }
 }
 
 fn retained_xml(raw: &str) -> String {

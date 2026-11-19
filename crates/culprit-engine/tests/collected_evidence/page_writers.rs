@@ -75,7 +75,7 @@ async fn authenticated_writer_rosters_replay_the_same_native_access_relationship
             assert!(result.report.entries.iter().all(|entry| entry.sql.is_none() && entry.client.is_none()));
         }
         assert_eq!(result.report.source_state, Some(coverage.state));
-        let encoded = serde_json::to_string(&result.report).unwrap();
+        let encoded = writer_content(&result.report);
         for body in [
             "<ShowPlanXML",
             "9264",
@@ -88,6 +88,44 @@ async fn authenticated_writer_rosters_replay_the_same_native_access_relationship
             assert!(!encoded.contains(body), "{case:?}: {body}");
         }
     }
+}
+
+fn writer_content(report: &culprit_core::PageWaitWriterReport) -> String {
+    let mut value = serde_json::to_value(report).unwrap();
+    // The replay test verifies this exact authenticated identity separately. Its SHA can contain a short
+    // numeric canary by coincidence; every other field remains part of the private-content scan.
+    value.as_object_mut().unwrap().remove("focus_key").unwrap();
+    serde_json::to_string(&value).unwrap()
+}
+
+#[test]
+fn privacy_guard_excludes_only_focus_identity_and_still_catches_literal_content() {
+    let (source, records) = page_writer_evidence(PageWriterCase::ReadOnly);
+    let (focus, native) = native(&source, &records);
+    let context = NativeReadContext::from_snapshot(&source).unwrap();
+    let mut report = culprit_checks::page_waits::explain_writers(focus, &context, Some(native), None).unwrap();
+    assert_eq!(report.focus_key, focus.key().unwrap());
+
+    // A real export50 focus digest contains the four-digit SQL canary without carrying its literal value.
+    let focus_digest = "c6ecbd98509cd2e9197827494451bd4f11e1852fc6ed4417d9264101787e032d";
+    assert_eq!(focus_digest.len(), 64);
+    assert!(focus_digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    report.focus_key = focus_digest.into();
+    assert!(!writer_content(&report).contains("9264"));
+
+    let summary = report.summary.clone();
+    for content in ["9264", focus_digest] {
+        report.summary = content.into();
+        assert!(writer_content(&report).contains("9264"), "content fields receive no arbitrary hash exemption");
+    }
+    report.summary = summary;
+    let sql = "SELECT customer_id FROM dbo.orders WHERE customer_id = 9264";
+    report.entries[0].sql = Some(DefinitionPayload::Available {
+        text: sql.into(),
+        sha256: digest(sql.as_bytes()),
+        redaction_version: REDACTION_VERSION,
+    });
+    assert!(writer_content(&report).contains("9264"), "an actual unredacted SQL literal must fail the guard");
 }
 
 #[tokio::test]

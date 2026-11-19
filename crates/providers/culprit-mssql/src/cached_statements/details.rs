@@ -14,12 +14,18 @@ use std::collections::BTreeMap;
 const ENCODING_ALLOWANCE: usize = 3;
 const ROW_ALLOWANCE: usize = 16 * 1024;
 
+fn row_allowance(with_plan: bool, current_types: bool) -> usize {
+    ROW_ALLOWANCE
+        + if with_plan && current_types { culprit_core::telemetry::MAX_MSSQL_CURRENT_TYPE_SCHEMA_BYTES } else { 0 }
+}
+
 pub(crate) struct Detail {
     pub context: culprit_core::telemetry::CachedStatementContext,
     pub statement: Payload,
     pub plan: Payload,
     pub object_name: Option<String>,
     pub module_parameters: Option<culprit_core::telemetry::MssqlModuleParameters>,
+    pub current_type_schema: Option<culprit_core::telemetry::MssqlCurrentTypeSchema>,
 }
 impl Detail {
     fn withhold_enrichment(&mut self, reason: PayloadUnavailable) {
@@ -27,6 +33,7 @@ impl Detail {
             self.plan = Payload::Unavailable(reason);
         }
         self.module_parameters = None;
+        self.current_type_schema = None;
         self.object_name = None;
     }
 }
@@ -35,6 +42,7 @@ pub(crate) async fn read<R: NativeRead>(
     hashes: &[String],
     plans: usize,
     budget: &CollectionBudget,
+    current_types: bool,
 ) -> Result<BTreeMap<String, Detail>> {
     budget.validate()?;
     let mut unique = std::collections::BTreeSet::new();
@@ -47,8 +55,8 @@ pub(crate) async fn read<R: NativeRead>(
         if selected.is_empty() {
             continue;
         }
-        for batch in selected.chunks(selectors_per_read(budget, with_plan)?) {
-            read_batch(reader, batch, with_plan, budget, &mut details).await?;
+        for batch in selected.chunks(selectors_per_read(budget, with_plan, current_types)?) {
+            read_batch(reader, batch, with_plan, current_types, budget, &mut details).await?;
         }
     }
     verify_plans(reader, &mut details).await?;
@@ -94,14 +102,15 @@ async fn read_batch<R: NativeRead>(
     reader: &mut R,
     batch: &[String],
     with_plan: bool,
+    current_types: bool,
     budget: &CollectionBudget,
     details: &mut BTreeMap<String, Detail>,
 ) -> Result<()> {
-    let sql = sql(with_plan);
+    let sql = sql(with_plan, current_types);
     let mut pending = batch.to_vec();
     while !pending.is_empty() {
         // Reserve every row's metadata first; deferred rows still return their identity and length facts.
-        let payload_budget = budget.page_bytes as usize - pending.len() * ROW_ALLOWANCE;
+        let payload_budget = budget.page_bytes as usize - pending.len() * row_allowance(with_plan, current_types);
         let parameters = vec![
             hashes_parameter(&pending)?,
             Parameter::Integer(i64::from(budget.max_sql_bytes)),
@@ -146,11 +155,11 @@ fn accept_rows(
     }
     Ok(deferred)
 }
-pub(crate) fn selectors_per_read(budget: &CollectionBudget, with_plan: bool) -> Result<usize> {
+pub(crate) fn selectors_per_read(budget: &CollectionBudget, with_plan: bool, current_types: bool) -> Result<usize> {
     let bytes = budget.max_sql_bytes as usize + if with_plan { budget.max_plan_bytes as usize } else { 0 };
     let maximum_payload = bytes.saturating_mul(ENCODING_ALLOWANCE);
     let metadata_budget = (budget.page_bytes as usize).saturating_sub(maximum_payload);
-    let rows = (metadata_budget / ROW_ALLOWANCE).min(MAX_HASH_SELECTORS);
+    let rows = (metadata_budget / row_allowance(with_plan, current_types)).min(MAX_HASH_SELECTORS);
     if rows == 0 {
         return Err(CollectionStop::ByteLimit.error());
     }
@@ -162,6 +171,11 @@ fn decode(row: &Rec, with_plan: bool, budget: &CollectionBudget) -> Result<Detai
         |column| optional_integer(row, column)?.map(|value| value.try_into().map_err(|_| invalid_data())).transpose();
     let context = super::context(row)?;
     let module_parameters = if with_plan { crate::relational_inputs::parameters(row, &context)? } else { None };
+    let current_type_schema = if with_plan {
+        crate::relational_inputs::type_schema::decode(row, &context, module_parameters.as_ref())?
+    } else {
+        None
+    };
     Ok(Detail {
         context,
         statement: Payload::read_column(
@@ -177,9 +191,10 @@ fn decode(row: &Rec, with_plan: bool, budget: &CollectionBudget) -> Result<Detai
         },
         object_name: optional_text(row, "object_name")?,
         module_parameters,
+        current_type_schema,
     })
 }
-pub(crate) fn sql(with_plan: bool) -> String {
+pub(crate) fn sql(with_plan: bool, current_types: bool) -> String {
     let (plan, plan_read) = if with_plan {
         (
             "CAST(DATALENGTH(qp.query_plan) AS bigint) AS plan_bytes,qp.query_plan AS plan_value,",
@@ -187,6 +202,16 @@ pub(crate) fn sql(with_plan: bool) -> String {
         )
     } else {
         ("CAST(NULL AS bigint) AS plan_bytes,CAST(NULL AS nvarchar(max)) AS plan_value,", String::new())
+    };
+    let (current_types, current_types_relation) = if with_plan && current_types {
+        (crate::relational_inputs::type_schema::columns(), crate::relational_inputs::type_schema::relation("st"))
+    } else if with_plan {
+        (crate::relational_inputs::type_schema::uncollected_columns().into(), String::new())
+    } else {
+        (
+            "CAST(NULL AS varchar(40)) AS current_type_observed_at,CAST(NULL AS int) AS current_type_visibility,CAST(NULL AS bigint) AS current_type_bytes,CAST(NULL AS nvarchar(max)) AS current_type_schema".into(),
+            String::new(),
+        )
     };
     format!(
         r#"DECLARE @hashes xml=CONVERT(xml,@P1);
@@ -197,18 +222,18 @@ WITH ranked AS (
  {relation} WHERE {database} AND qs.query_hash IN (
  SELECT CONVERT(binary(8),n.h.value('@v[1]','varchar(18)'),1) FROM @hashes.nodes('/hashes/h') n(h)) AND {application}
 ), culprit_payloads AS (
- SELECT r.query_hash,{context},{module},CAST(DATALENGTH(body.statement_text) AS bigint) AS statement_bytes,
+ SELECT r.query_hash,{context},{module},{current_types},CAST(DATALENGTH(body.statement_text) AS bigint) AS statement_bytes,
  body.statement_text AS statement_value,{plan} st.encrypted,
  OBJECT_SCHEMA_NAME(st.objectid,st.dbid)+'.'+OBJECT_NAME(st.objectid,st.dbid) AS object_name
  FROM ranked r OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
  OUTER APPLY (SELECT {statement} AS statement_text) body
- {plan_read} WHERE r.rn=1
+ {plan_read} {current_types_relation} WHERE r.rn=1
 ), culprit_packed AS (
  SELECT *,SUM(CASE WHEN statement_bytes<=@P2 THEN statement_bytes*{encoding} ELSE 0 END+
  CASE WHEN plan_bytes<=@P3 THEN plan_bytes*{encoding} ELSE 0 END)
  OVER(ORDER BY query_hash ROWS UNBOUNDED PRECEDING) AS packed_bytes FROM culprit_payloads
 )
-SELECT {output_context},{output_module},statement_bytes,plan_bytes,encrypted,object_name,
+SELECT {output_context},{output_module},{output_types},statement_bytes,plan_bytes,encrypted,object_name,
  CAST(CASE WHEN packed_bytes<=@P4 THEN 1 ELSE 0 END AS bit) AS payload_included,
  CASE WHEN packed_bytes<=@P4 AND statement_bytes<=@P2 THEN statement_value ELSE NULL END AS statement_text,
  CASE WHEN packed_bytes<=@P4 AND plan_bytes<=@P3 THEN plan_value ELSE NULL END AS query_plan
@@ -222,6 +247,7 @@ FROM culprit_packed OPTION(MAXDOP 1)"#,
         module = crate::relational_inputs::module_columns("st"),
         output_context = "plan_handle,sql_handle,statement_start_offset,statement_end_offset,creation_time,plan_generation_num,database_id,CONVERT(varchar(18),query_hash,1) AS query_hash,source_text_bytes,text_complete,text_prefix,engine_internal,cloud_internal",
         output_module = "module_database_id,module_object_id,module_number",
+        output_types = crate::relational_inputs::type_schema::OUTPUT_COLUMNS,
     )
 }
 

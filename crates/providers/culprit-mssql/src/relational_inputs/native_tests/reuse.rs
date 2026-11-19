@@ -68,7 +68,8 @@ async fn record_run(
     let originals = named_definitions(&mut reader, object, "tvp_original_header_probe").await;
     let [original] = originals.as_slice() else { panic!("one original statement in {procedure}") };
     let hash = original.fact.context.query_hash.as_ref().unwrap();
-    let details = crate::cached_statements::details(&mut reader, std::slice::from_ref(hash), 1, &budget).await.unwrap();
+    let details =
+        crate::cached_statements::details(&mut reader, std::slice::from_ref(hash), 1, &budget, true).await.unwrap();
     let detail = &details[hash];
     assert_eq!(detail.context.identity, original.fact.context.identity);
     let plans = actual_plans(application, sql, vec![]).await;

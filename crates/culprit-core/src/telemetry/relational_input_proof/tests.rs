@@ -63,6 +63,7 @@ fn cached() -> MssqlCachedDefinition {
             sql_handle: "0x0304".into(),
             table_parameters: [("@Rows".into(), vec!["dbo".into(), "RowsType".into()])].into(),
         }),
+        current_type_schema: None,
         relational_input_proof: None,
     }
 }
@@ -74,6 +75,49 @@ fn binding(id: u32) -> MssqlRelationalInputBinding {
             provenance: RelationalInputProvenance::NativeParameterMetadata,
         },
     }
+}
+
+#[test]
+fn current_catalog_clock_is_checked_independently_without_changing_original_kind_proof() {
+    let source = source(SnapshotDataset::CachedDefinitions);
+    let mut definition = cached();
+    let proof = MssqlRelationalInputProof::for_cached(&source, &definition, vec![binding(1)]).unwrap();
+    definition.relational_input_proof = Some(proof.clone());
+    definition.current_type_schema = Some(MssqlCurrentTypeSchema::unavailable(
+        "2026-11-14T12:00:00.500Z".into(),
+        MssqlCurrentTypeSchemaStatus::Restricted,
+    ));
+    assert!(definition.is_valid());
+    assert!(proof.matches_cached(&source, &definition), "current context cannot replace original inputs");
+    assert!(definition.native_plan_proofs_match(&source));
+    for clock in ["2026-11-14T11:59:59Z", "2026-11-14T12:00:02Z"] {
+        definition.current_type_schema.as_mut().unwrap().observed_at = clock.into();
+        assert!(proof.matches_cached(&source, &definition));
+        assert!(!definition.native_plan_proofs_match(&source), "outside collection: {clock}");
+    }
+}
+
+#[test]
+fn paged_current_metadata_requires_its_initial_clock_then_the_completed_capture_upper_bound() {
+    let original = source(SnapshotDataset::CachedDefinitions);
+    let mut definition = cached();
+    definition.current_type_schema = Some(MssqlCurrentTypeSchema::unavailable(
+        "2026-11-14T12:00:02Z".into(),
+        MssqlCurrentTypeSchemaStatus::NotCollected,
+    ));
+    let mut paged = original.clone();
+    paged.observation = SourceObservation::PagedSnapshot(PagedSnapshotDescription {
+        dataset: SnapshotDataset::CachedDefinitions,
+        observed_from: "2026-11-14T12:00:00Z".into(),
+        sources: vec!["native-cache".into()],
+    });
+    assert!(definition.native_plan_proofs_match(&paged));
+    assert!(!definition.native_plan_proofs_match(&original), "final replay has a tighter upper bound");
+    definition.current_type_schema.as_mut().unwrap().observed_at = "2026-11-14T11:59:59Z".into();
+    assert!(!definition.native_plan_proofs_match(&paged));
+    definition.current_type_schema.as_mut().unwrap().observed_at = "2026-11-14T12:00:00Z".into();
+    paged.partition = SourcePartition::InstanceLocal { member: None, epoch: None };
+    assert!(!definition.native_plan_proofs_match(&paged));
 }
 
 #[test]
@@ -208,6 +252,7 @@ fn retained_and_cached_proofs_are_distinct_and_missing_payloads_never_reuse_posi
         context: cached.context.clone(),
         statement: cached.statement.clone(),
         module_parameters: cached.module_parameters.clone(),
+        current_type_schema: None,
         relational_input_proof: None,
         parameter_context_proof: None,
         statement_executions: Some("9007199254740993".into()),
