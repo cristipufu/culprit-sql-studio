@@ -33,27 +33,16 @@ pub struct RecordedRecompilation<'s> {
 }
 
 fn recorded_recompilations(snapshot: &Snapshot) -> Vec<RecordedRecompilation<'_>> {
-    let Some(read) = snapshot
-        .operations
-        .query_compilation
-        .as_ref()
-        .filter(|read| read.is_valid() && read.fits_database(&snapshot.database_identity()))
+    let Some(compilation::CapturedCompilations { read, source, cases }) =
+        compilation::CapturedCompilations::from_snapshot(snapshot)
     else {
         return Vec::new();
     };
-    let rows = read.observations.iter().collect::<Vec<_>>();
-    let source = snapshot.source_outcome(&read.source);
-    let query_namespace_matches = read.matches_database_namespace(&snapshot.database_identity());
-    let Ok(cases) = compilation::cases(&rows, source) else { return Vec::new() };
     let mut cases = cases
         .into_iter()
         .filter_map(|compilation| {
             let total_milliseconds = compilation.recompile?.total_milliseconds;
-            let mut matches = snapshot.workload.iter().flat_map(|workload| &workload.queries).filter(|query| {
-                query_namespace_matches && query.native_identity.as_ref() == Some(&compilation.native.identity)
-            });
-            let first = matches.next();
-            let query = if matches.next().is_none() { first } else { None };
+            let query = compilation::workload_query(snapshot, read, compilation.native);
             if query.is_some_and(|query| crate::signals::comparable_planning_time(query).is_some()) {
                 return None;
             }

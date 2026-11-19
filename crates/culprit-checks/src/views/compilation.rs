@@ -11,8 +11,10 @@ pub(crate) use policy::{RepeatedRecompile, repeated_recompile};
 mod comparison;
 pub use comparison::compare;
 mod definitions;
+mod snapshot;
 mod timings;
 pub use super::query_store_definitions::{QueryStoreDefinitionEvidence, QueryStoreDefinitionRecord};
+pub(crate) use snapshot::{CapturedCompilations, workload_query};
 
 /// Native compiler history and an optional independently authenticated definition selection. Definition intervals
 /// remain runtime history; only the original compiler context supplies native compiler read bounds.

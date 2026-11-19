@@ -324,6 +324,11 @@ impl ObservationBounds {
     pub fn has_positive_duration(&self) -> bool {
         self.from < self.until
     }
+
+    /// Compare the already validated interval without rounding native instants to a floating-point epoch.
+    pub fn duration_at_most(&self, maximum: std::time::Duration) -> bool {
+        self.until.signed_duration_since(self.from).to_std().is_ok_and(|duration| duration <= maximum)
+    }
 }
 
 pub(super) fn valid_utc_instant(value: &str) -> bool {
@@ -359,6 +364,19 @@ mod tests {
         let span = ObservationBounds::new("2026-11-17T06:00:00.000000001Z", "2026-11-17T06:00:00.000000002Z").unwrap();
         assert!(span.has_positive_duration());
         assert!(ObservationBounds::new("2026-11-17T06:00:00.0000000001Z", "2026-11-17T06:00:01Z").is_none());
+    }
+
+    #[test]
+    fn interval_duration_preserves_exact_limits_offsets_and_point_observations() {
+        let point = ObservationBounds::new("2026-11-17T08:00:00+02:00", "2026-11-17T06:00:00Z").unwrap();
+        assert!(point.duration_at_most(std::time::Duration::ZERO));
+        let exact =
+            ObservationBounds::new("2026-11-17T08:00:00.000000001+02:00", "2026-11-17T06:00:01.000000001Z").unwrap();
+        assert!(exact.duration_at_most(std::time::Duration::from_secs(1)));
+        assert!(!exact.duration_at_most(std::time::Duration::from_nanos(999_999_999)));
+        let over = ObservationBounds::new("2026-11-17T06:00:00Z", "2026-11-17T06:00:01.000000001Z").unwrap();
+        assert!(!over.duration_at_most(std::time::Duration::from_secs(1)));
+        assert!(ObservationBounds::new("2026-11-17T06:00:01.000000001Z", "2026-11-17T06:00:01Z").is_none());
     }
 
     #[test]
