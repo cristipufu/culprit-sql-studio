@@ -1830,7 +1830,11 @@ fn operational_description(scenario: Scenario) -> CollectionDescription {
     }
     description.source = "operational-fixture".into();
     description.observation = SourceObservation::Snapshot(StateSnapshotDescription {
-        dataset: SnapshotDataset::Operational,
+        dataset: if matches!(scenario, Scenario::CumulativeStatements) {
+            SnapshotDataset::StatementCounters
+        } else {
+            SnapshotDataset::Operational
+        },
         observed_from: "2020-01-01T06:00:00Z".into(),
         observed_until: "2020-01-01T06:00:01Z".into(),
         records: if mismatch { 2 } else { 1 },
@@ -2037,14 +2041,17 @@ async fn native_query_counters_without_plans_or_replica_dimensions_complete() {
 #[tokio::test]
 async fn cumulative_statement_counters_survive_durable_outbox_restart_and_replay() {
     use culprit_collector::outbox::Outbox;
+    use culprit_core::telemetry::{CollectionSelection, SnapshotDataset};
     let dir = TestDirectory::new();
     let workspace = dir.workspace(State::new(Scenario::CumulativeStatements));
     let path = dir.0.path().join("outbox");
     let mut outbox = Outbox::create(&path, Default::default()).unwrap();
-    let manifest = workspace
-        .collect_into_outbox("pilot", operational_request(), &mut outbox, &CollectionCancellation::default())
-        .await
-        .unwrap();
+    let request = CollectionRequest {
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::StatementCounters },
+        ..operational_request()
+    };
+    let manifest =
+        workspace.collect_into_outbox("pilot", request, &mut outbox, &CollectionCancellation::default()).await.unwrap();
     assert_eq!(manifest.status, CollectionStatus::Complete);
     assert!(matches!(
         manifest.description.as_ref().unwrap().observation.range(),

@@ -279,14 +279,15 @@ impl ObservationFiles {
         }
         // This blocking finalizer runs only after the original native owner has closed. Provisional pages
         // retain their original bytes; only a final-header proof can promote all of them to a complete capture.
-        if self.source_rechecked && self.manifest.files.iter().all(|file| file.status == CollectionStatus::Complete) {
-            if let Err(error) = self.verify_source_records() {
-                if CollectionStop::from_error(&error) != CollectionStop::InvalidPage {
-                    return Err(error);
-                }
-                self.source_rechecked = false;
-                self.invalidate(CollectionStop::InvalidPage);
+        if self.source_rechecked
+            && self.manifest.files.iter().all(|file| file.status == CollectionStatus::Complete)
+            && let Err(error) = self.verify_source_records()
+        {
+            if CollectionStop::from_error(&error) != CollectionStop::InvalidPage {
+                return Err(error);
             }
+            self.source_rechecked = false;
+            self.invalidate(CollectionStop::InvalidPage);
         }
         self.manifest.source_queries = queries;
         self.manifest.finished_at = Some(Utc::now().to_rfc3339());

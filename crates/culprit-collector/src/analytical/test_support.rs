@@ -670,7 +670,7 @@ pub fn cumulative_queries(destination: &str, schema: &str) -> Recovery {
     database.engine = culprit_core::Engine::Postgres;
     manifest.source.source = "statement-counters-fixture".into();
     manifest.source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
-        dataset: SnapshotDataset::Operational,
+        dataset: SnapshotDataset::StatementCounters,
         observed_from: "2020-01-01T12:00:00Z".into(),
         observed_until: "2020-01-01T12:00:01Z".into(),
         records: 1,

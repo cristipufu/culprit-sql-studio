@@ -142,7 +142,7 @@ async fn conflicting_subject_scope_clock_family_or_dataset_is_rejected_before_ex
             "wrong-family" => {}
             _ => unreachable!(),
         }
-        if matches!(shape, "shared-target" | "scope" | "clock") {
+        if matches!(shape, "shared-target" | "scope" | "clock" | "dataset") {
             // Invalid native facts never receive a receipt and cannot become an authenticated SDK fixture.
             let error = ExportedRecord::new(&source, &receipt, rows.remove(0)).unwrap_err();
             assert_eq!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::InvalidPage)), "{shape}");
