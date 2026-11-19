@@ -11,6 +11,12 @@ pub enum CacheEntryMemoryCase {
     Empty,
     UnavailableSource,
     EightStatements,
+    SetOptions,
+    SameOptionsVariant,
+    UnsupportedSetOptions,
+    OtherContext,
+    MissingPairSql,
+    LiteralFragmentation,
 }
 
 pub fn cache_entry_memory_evidence_cases() -> Vec<(CacheEntryMemoryCase, CollectionDescription, Vec<TelemetryRecord>)> {
@@ -21,6 +27,12 @@ pub fn cache_entry_memory_evidence_cases() -> Vec<(CacheEntryMemoryCase, Collect
         CacheEntryMemoryCase::MissingSql,
         CacheEntryMemoryCase::Empty,
         CacheEntryMemoryCase::UnavailableSource,
+        CacheEntryMemoryCase::SetOptions,
+        CacheEntryMemoryCase::SameOptionsVariant,
+        CacheEntryMemoryCase::UnsupportedSetOptions,
+        CacheEntryMemoryCase::OtherContext,
+        CacheEntryMemoryCase::MissingPairSql,
+        CacheEntryMemoryCase::LiteralFragmentation,
     ]
     .into_iter()
     .map(|case| {
@@ -36,10 +48,6 @@ pub fn cache_entry_memory_evidence(case: CacheEntryMemoryCase) -> (CollectionDes
     let OperationalFact::MssqlStatementGrants(grant) = &grant.fact else { unreachable!() };
     let context = NativeReadContext::from_snapshot(&source).unwrap();
     let statements = statements(&grant.context, case);
-    let focus = CacheEntryMemoryFocus {
-        context,
-        statements: statements.iter().map(|statement| statement.context.clone()).collect(),
-    };
     let entry = MssqlCacheEntryMemory {
         observed_at: "2020-01-01T06:00:02Z".into(),
         plan_handle: grant.context.identity.plan_handle.clone(),
@@ -60,15 +68,34 @@ pub fn cache_entry_memory_evidence(case: CacheEntryMemoryCase) -> (CollectionDes
         },
         statements,
     };
-    assert!(entry.is_valid() && focus.accepts_entry(&entry));
+    let mut entries = vec![entry];
+    if let Some(other) = paired_entry(&entries[0], case) {
+        if case == CacheEntryMemoryCase::OtherContext {
+            entries[0].cache_keys.push(user_key("1"));
+        }
+        entries.push(other);
+    }
+    let focus = CacheEntryMemoryFocus {
+        context,
+        statements: entries
+            .iter()
+            .flat_map(|entry| entry.statements.iter().map(|statement| statement.context.clone()))
+            .collect(),
+    };
+    assert!(entries.iter().all(|entry| entry.is_valid() && focus.accepts_entry(entry)));
     let records = if matches!(case, CacheEntryMemoryCase::Empty | CacheEntryMemoryCase::UnavailableSource) {
         vec![]
     } else {
-        vec![TelemetryRecord::Operational(OperationalObservation {
-            source: source_id::CACHE_ENTRY_MEMORY.into(),
-            key: entry.key().unwrap(),
-            fact: OperationalFact::MssqlCacheEntryMemory(Box::new(entry)),
-        })]
+        entries
+            .into_iter()
+            .map(|entry| {
+                TelemetryRecord::Operational(OperationalObservation {
+                    source: source_id::CACHE_ENTRY_MEMORY.into(),
+                    key: entry.key().unwrap(),
+                    fact: OperationalFact::MssqlCacheEntryMemory(Box::new(entry)),
+                })
+            })
+            .collect()
     };
     let coverage = if case == CacheEntryMemoryCase::UnavailableSource {
         StateSourceCoverage::unavailable(source_id::CACHE_ENTRY_MEMORY.into(), ErrorCode::PermissionDenied, None)
@@ -92,6 +119,49 @@ pub fn cache_entry_memory_evidence(case: CacheEntryMemoryCase) -> (CollectionDes
     };
     assert!(source.observation.covers_request() && source.partition_is_consistent());
     (source, records)
+}
+
+fn paired_entry(original: &MssqlCacheEntryMemory, case: CacheEntryMemoryCase) -> Option<MssqlCacheEntryMemory> {
+    if !matches!(
+        case,
+        CacheEntryMemoryCase::SetOptions
+            | CacheEntryMemoryCase::SameOptionsVariant
+            | CacheEntryMemoryCase::UnsupportedSetOptions
+            | CacheEntryMemoryCase::OtherContext
+            | CacheEntryMemoryCase::MissingPairSql
+            | CacheEntryMemoryCase::LiteralFragmentation
+    ) {
+        return None;
+    }
+    let mut entry = original.clone();
+    entry.plan_handle = "0x0506".into();
+    entry.size_bytes = "131072".into();
+    entry.cache_keys[0].value = Some(
+        match case {
+            CacheEntryMemoryCase::SameOptionsVariant => "1",
+            CacheEntryMemoryCase::UnsupportedSetOptions => "4099",
+            _ => "4097",
+        }
+        .into(),
+    );
+    if case == CacheEntryMemoryCase::OtherContext {
+        entry.cache_keys.push(user_key("2"));
+    }
+    if case == CacheEntryMemoryCase::LiteralFragmentation {
+        entry.sql_handle = "0x0708".into();
+    }
+    for statement in &mut entry.statements {
+        statement.context.identity.plan_handle = entry.plan_handle.clone();
+        statement.context.identity.sql_handle = entry.sql_handle.clone();
+        if case == CacheEntryMemoryCase::MissingPairSql {
+            statement.statement = DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted };
+        }
+    }
+    Some(entry)
+}
+
+fn user_key(value: &str) -> CacheKeyAttribute {
+    CacheKeyAttribute { name: "user_id".into(), native_type: Some("int".into()), value: Some(value.into()) }
 }
 
 fn statements(original: &CachedStatementContext, case: CacheEntryMemoryCase) -> Vec<CacheEntryStatement> {

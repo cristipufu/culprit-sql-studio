@@ -16,6 +16,8 @@ mod page_server_reads;
 pub(crate) use page_server_reads::collected_page_server_reads;
 mod source_overhead;
 pub(crate) use source_overhead::{collected_source_overhead, source_overhead};
+mod cache_entry_memory;
+pub(crate) use cache_entry_memory::cache_entry_memory;
 mod blocking;
 pub(crate) use blocking::blocking;
 mod configured_log_rates;
@@ -436,32 +438,22 @@ fn native_metrics(metrics: &[culprit_core::Metric]) -> impl Iterator<Item = Stri
 }
 
 fn native_work_summary<'a>(summary: Summary<'a>, entries: impl Iterator<Item = (&'a str, Vec<String>)>) -> String {
-    render_summary(summary, |text| {
-        // Bound observations and each field independently; an earlier timing field must not hide later memory,
-        // statement-binding or verification evidence in the same structured observation.
-        let details = entries.map(|(title, fields)| {
-            let fields =
-                fields.iter().map(|field| super::brief_detail(field, OBSERVATION_DETAIL_CHARS)).collect::<Vec<_>>();
-            t!(
-                "evidence.cli.observation_entry",
-                title = super::brief_detail(title, OBSERVATION_DETAIL_CHARS),
-                explanation = fields.join("\n")
-            )
-        });
-        super::append_brief_items(text, details)
-    })
+    render_summary(summary, |text| append_native_work_entries(text, entries))
 }
 
-pub(crate) fn cache_entry_memory(report: &culprit_core::CacheEntryMemoryReport) -> String {
-    render(
-        Summary {
-            title: &report.title,
-            summary: &report.summary,
-            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
-            limitations: &report.limitations,
-        },
-        report.entries.iter().map(|entry| entry.title.as_str()),
-    )
+fn append_native_work_entries<'a>(text: &mut String, entries: impl Iterator<Item = (&'a str, Vec<String>)>) {
+    // Bound observations and each field independently; an earlier timing field must not hide later memory,
+    // statement-binding or verification evidence in the same structured observation.
+    let details = entries.map(|(title, fields)| {
+        let fields =
+            fields.iter().map(|field| super::brief_detail(field, OBSERVATION_DETAIL_CHARS)).collect::<Vec<_>>();
+        t!(
+            "evidence.cli.observation_entry",
+            title = super::brief_detail(title, OBSERVATION_DETAIL_CHARS),
+            explanation = fields.join("\n")
+        )
+    });
+    super::append_brief_items(text, details)
 }
 
 pub(crate) fn cached_plans(report: &CachedPlanReport) -> String {

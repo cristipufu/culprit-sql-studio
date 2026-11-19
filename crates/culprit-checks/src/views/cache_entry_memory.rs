@@ -1,11 +1,13 @@
 //! Whole-entry footprint and exact native cache-key differences establish context, not harmful churn or reuse.
+mod set_options;
+
 use super::source_coverage;
 use culprit_core::{
     CacheEntryContextDifference, CacheEntryMemoryExplanation, CacheEntryMemoryReport, Error, Metric, Result,
     SourceOutcome, SourceState, format, key, t,
     telemetry::{
-        CollectionTarget, MAX_CACHE_ENTRY_STATEMENTS, MssqlCacheEntryMemory, NativeReadContext, ObservationBounds,
-        OperationalFact, OperationalObservation, SourcePartition, canonical_time,
+        CacheEntryStatement, CollectionTarget, MAX_CACHE_ENTRY_STATEMENTS, MssqlCacheEntryMemory, NativeReadContext,
+        ObservationBounds, OperationalFact, OperationalObservation, SourcePartition, canonical_time,
     },
 };
 use std::collections::BTreeSet;
@@ -161,11 +163,20 @@ fn differences(entries: &[Entry<'_>]) -> Vec<CacheEntryContextDifference> {
             if attributes.is_empty() {
                 continue;
             }
+            let (explanation, investigation) = set_options::select(left, right).map_or_else(
+                || {
+                    (
+                        t!("view.cache_entry_memory.context.difference", attributes = attributes.join(", ")),
+                        t!("view.cache_entry_memory.context.investigation"),
+                    )
+                },
+                |difference| difference.render(),
+            );
             differences.push(CacheEntryContextDifference {
                 left_observation_key: left_ref.key.clone(),
                 right_observation_key: right_ref.key.clone(),
-                explanation: t!("view.cache_entry_memory.context.difference", attributes = attributes.join(", ")),
-                investigation: t!("view.cache_entry_memory.context.investigation"),
+                explanation,
+                investigation,
                 attributes,
             });
         }
@@ -175,13 +186,13 @@ fn differences(entries: &[Entry<'_>]) -> Vec<CacheEntryContextDifference> {
 
 fn same_native_statement(left: &MssqlCacheEntryMemory, right: &MssqlCacheEntryMemory) -> bool {
     left.sql_handle.eq_ignore_ascii_case(&right.sql_handle)
-        && left.statements.iter().any(|left| {
-            right.statements.iter().any(|right| {
-                left.context.database_id == right.context.database_id
-                    && left.context.identity.statement_start_bytes == right.context.identity.statement_start_bytes
-                    && left.context.identity.statement_end_bytes == right.context.identity.statement_end_bytes
-            })
-        })
+        && left.statements.iter().any(|left| right.statements.iter().any(|right| same_native_range(left, right)))
+}
+
+fn same_native_range(left: &CacheEntryStatement, right: &CacheEntryStatement) -> bool {
+    left.context.database_id == right.context.database_id
+        && left.context.identity.statement_start_bytes == right.context.identity.statement_start_bytes
+        && left.context.identity.statement_end_bytes == right.context.identity.statement_end_bytes
 }
 
 fn invalid() -> Error {

@@ -9,11 +9,12 @@ use serde_json::{Map, Value, json};
 fn project(
     catalog: &LogicalCatalog,
     range: &CommittedRange,
+    ordinal: usize,
     record: TelemetryRecord,
 ) -> (ExportedRecord, Map<String, Value>) {
     let batch = &range.manifest().batches[0];
     let row = ExportedRecord::new(&range.manifest().source, &range.manifest().capture, record).unwrap();
-    let input = Envelope::committed(range, &batch.batch_id).unwrap().input(1, &row).unwrap();
+    let input = Envelope::committed(range, &batch.batch_id).unwrap().input(ordinal, &row).unwrap();
     let schema = catalog.get(batch.stream).unwrap();
     let values = schema
         .fields()
@@ -31,16 +32,18 @@ async fn whole_entries_keep_all_selected_statements_exact_counts_unknowns_and_na
         let recovery =
             test_support::Recovery::capture("fixture:test", catalog.digest(), source, records.clone(), 270_000);
         let range = reopen(&recovery, &recovery.manifest.range_id).await.unwrap();
-        for record in records {
-            let (row, values) = project(&catalog, &range, record);
+        for (index, record) in records.into_iter().enumerate() {
+            let (row, values) = project(&catalog, &range, index + 1, record);
             let batch = &range.manifest().batches[0];
             let decode::Decoded::Record(decoded) =
-                decode::record(&range, batch.stream, &values, &batch.rows[0]).unwrap()
+                decode::record(&range, batch.stream, &values, &batch.rows[index]).unwrap()
             else {
                 panic!("complete native cache object")
             };
             assert_eq!(*decoded, row);
-            assert_eq!(values["Details"]["size_bytes"], "9007199254740993");
+            let TelemetryRecord::Operational(observation) = &row.record else { panic!() };
+            let OperationalFact::MssqlCacheEntryMemory(entry) = &observation.fact else { panic!() };
+            assert_eq!(values["Details"]["size_bytes"], entry.size_bytes);
             assert_eq!(values["Details"]["reference_count"], "0");
             assert_eq!(values["DefinitionPayloads"].as_array().unwrap().len(), 2);
             assert!(values["Details"]["statements"][0]["statement"].get("text").is_none());
@@ -65,7 +68,7 @@ async fn every_one_of_eight_statements_is_redacted_and_has_an_exact_indexed_payl
     }
     let recovery = test_support::Recovery::capture("fixture:test", catalog.digest(), source, records.clone(), 270_001);
     let range = reopen(&recovery, &recovery.manifest.range_id).await.unwrap();
-    let (row, values) = project(&catalog, &range, records[0].clone());
+    let (row, values) = project(&catalog, &range, 1, records[0].clone());
     assert!(!serde_json::to_string(&row).unwrap().contains("9264"));
     let definitions = values["DefinitionPayloads"].as_array().unwrap();
     assert_eq!(definitions.len(), MAX_CACHE_ENTRY_STATEMENTS);
@@ -90,7 +93,7 @@ async fn eight_long_sql_payloads_require_recovery_and_copied_or_missing_indexed_
         test_support::cache_entry_memory_evidence(test_support::CacheEntryMemoryCase::EightStatements);
     let recovery = test_support::Recovery::capture("fixture:test", catalog.digest(), source, records.clone(), 270_002);
     let range = reopen(&recovery, &recovery.manifest.range_id).await.unwrap();
-    let (_, values) = project(&catalog, &range, records[0].clone());
+    let (_, values) = project(&catalog, &range, 1, records[0].clone());
     let batch = &range.manifest().batches[0];
     assert_eq!(values["DefinitionPayloads"].as_array().unwrap().len(), MAX_CACHE_ENTRY_STATEMENTS);
     for definition in values["DefinitionPayloads"].as_array().unwrap() {

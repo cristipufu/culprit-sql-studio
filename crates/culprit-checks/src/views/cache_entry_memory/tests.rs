@@ -1,6 +1,8 @@
 use super::*;
 use culprit_core::{Engine, telemetry::*};
 
+mod set_options;
+
 fn context() -> NativeReadContext {
     let read = crate::statement_grant_fixture::read(&crate::waits::snapshot_with(Engine::Mssql));
     NativeReadContext::from_snapshot(&read.description).unwrap()

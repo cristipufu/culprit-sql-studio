@@ -3,7 +3,7 @@ use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason, RecoveryPayloadBudget},
     test_support::{self, CacheEntryMemoryCase},
 };
-use culprit_core::{ErrorDetail, SourceOutcome, SourceState};
+use culprit_core::{ErrorDetail, SourceOutcome, SourceState, t};
 use culprit_engine::collected_resources;
 
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
@@ -75,6 +75,85 @@ async fn a_multi_statement_object_reports_one_whole_footprint_without_charging_e
     }
     assert!(analysis.report.context_differences.is_empty());
     assert!(!analysis.report.limitations.is_empty());
+}
+
+#[tokio::test]
+async fn authenticated_set_options_keep_native_pair_roles_exact_bytes_and_safe_variant_fallbacks() {
+    for case in [
+        CacheEntryMemoryCase::SetOptions,
+        CacheEntryMemoryCase::SameOptionsVariant,
+        CacheEntryMemoryCase::UnsupportedSetOptions,
+        CacheEntryMemoryCase::OtherContext,
+        CacheEntryMemoryCase::MissingPairSql,
+        CacheEntryMemoryCase::LiteralFragmentation,
+    ] {
+        let (source, records) = test_support::cache_entry_memory_evidence(case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let before = fixture.recovery_object_reads();
+        let capture = fixture.read_families(FAMILY).await;
+        test_support::assert_cache_entry_memory_capture(&capture, &source, &records);
+        let analysis = collected_resources::cache_entry_memory(&capture).unwrap();
+        assert_eq!(analysis.report.entries.len(), 2);
+        assert_eq!(analysis.context.records.len(), 2);
+        assert_eq!(fixture.recovery_object_reads(), before);
+        if matches!(case, CacheEntryMemoryCase::SameOptionsVariant | CacheEntryMemoryCase::LiteralFragmentation) {
+            assert!(analysis.report.context_differences.is_empty(), "{case:?}");
+            continue;
+        }
+        assert_eq!(analysis.report.context_differences.len(), 1);
+        let difference = &analysis.report.context_differences[0];
+        if case == CacheEntryMemoryCase::SetOptions {
+            let entries = observations(&records);
+            let left = entries.iter().find(|row| row.key == difference.left_observation_key).unwrap();
+            let right = entries.iter().find(|row| row.key == difference.right_observation_key).unwrap();
+            let OperationalFact::MssqlCacheEntryMemory(left) = &left.fact else { panic!() };
+            let OperationalFact::MssqlCacheEntryMemory(right) = &right.fact else { panic!() };
+            let options = if left.plan_handle == "0x0506" {
+                t!("view.cache_entry_memory.context.set_option_on_off", option = "ARITH_ABORT")
+            } else {
+                t!("view.cache_entry_memory.context.set_option_off_on", option = "ARITH_ABORT")
+            };
+            assert_eq!(
+                difference.explanation,
+                t!(
+                    "view.cache_entry_memory.context.set_options",
+                    options = options,
+                    left_handle = &left.plan_handle,
+                    right_handle = &right.plan_handle,
+                    left_bytes = &left.size_bytes,
+                    right_bytes = &right.size_bytes
+                )
+            );
+            assert_eq!(difference.investigation, t!("view.cache_entry_memory.context.set_options_investigation"));
+            assert_eq!(difference.attributes, ["set_options"]);
+            for row in entries {
+                let OperationalFact::MssqlCacheEntryMemory(entry) = &row.fact else { panic!() };
+                let rendered = analysis.report.entries.iter().find(|entry| entry.observation_key == row.key).unwrap();
+                assert_eq!(
+                    rendered.metrics.iter().filter(|metric| metric.is("view.cache_entry_memory.metric.bytes")).count(),
+                    1
+                );
+                assert_eq!(
+                    rendered
+                        .metrics
+                        .iter()
+                        .find(|metric| metric.is("view.cache_entry_memory.metric.bytes"))
+                        .unwrap()
+                        .text
+                        .as_deref(),
+                    Some(entry.size_bytes.as_str())
+                );
+            }
+        } else {
+            assert_eq!(
+                difference.explanation,
+                t!("view.cache_entry_memory.context.difference", attributes = difference.attributes.join(", "))
+            );
+            assert_eq!(difference.investigation, t!("view.cache_entry_memory.context.investigation"));
+        }
+        assert!(analysis.report.limitations.contains(&t!("view.cache_entry_memory.limit.lookups")));
+        assert!(analysis.report.limitations.contains(&t!("view.cache_entry_memory.limit.continuity")));
+    }
 }
 
 #[tokio::test]
