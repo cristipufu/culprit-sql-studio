@@ -57,6 +57,9 @@ impl<'a> Participant<'a> {
     pub(crate) fn qualified_request(&self) -> Option<&'a ActivityKey> {
         self.qualified_request
     }
+    pub(crate) fn has_shared_admission_scope(&self) -> bool {
+        self.shared_admission_scope
+    }
     pub(crate) fn admission_relation(&self) -> Option<AdmissionRelation<'a>> {
         self.qualified_request?;
         self.resource?;
@@ -129,6 +132,7 @@ pub(crate) fn qualified_participants<'a>(
         .map(|observation| {
             let at = canonical_time(&observation.observed_at).map_err(|_| invalid())?;
             if !observation.is_valid()
+                || !observation.fits_context(context)
                 || !observation.fits_database_capture(&database.database)
                 || !bounds.contains(&observation.observed_at)
                 || point.as_ref().is_some_and(|previous| previous != &at)

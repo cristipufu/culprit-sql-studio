@@ -5,6 +5,7 @@ import type { ExecutionGrantResourceObservation } from "./ExecutionGrantResource
 import type { ExecutionGrantState } from "./ExecutionGrantState";
 import type { GrantStatementRelationship } from "./GrantStatementRelationship";
 import type { MeasurementScope } from "./MeasurementScope";
+import type { MssqlWorkloadGroupTempdbObservation } from "./MssqlWorkloadGroupTempdbObservation";
 import type { NativeIdentity } from "./NativeIdentity";
 import type { RequestGrantAssociation } from "./RequestGrantAssociation";
 
@@ -28,7 +29,11 @@ resource: NativeIdentity | null,
 /**
  * Nullable but required in the serialized contract. A missing acquisition never becomes zero capacity.
  */
-resource_observation: ExecutionGrantResourceObservation | null, workload_group: NativeIdentity | null, queue: ExecutionGrantQueue, 
+resource_observation: ExecutionGrantResourceObservation | null, workload_group: NativeIdentity | null, 
+/**
+ * Same-acquisition shared group totals, never a request allocation or attribution of historical rejections.
+ */
+workload_group_tempdb: MssqlWorkloadGroupTempdbObservation | null, queue: ExecutionGrantQueue, 
 /**
  * Exact native identifiers and other properties can remain useful when they are insufficient to prove a shared
  * resource link. These source-owned properties do not establish portable units or causal relationships.

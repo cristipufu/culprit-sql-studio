@@ -2,4 +2,8 @@
 import type { NativeQueryIdentity } from "./NativeQueryIdentity";
 import type { ResetMarker } from "./ResetMarker";
 
-export type CompilationCounterPoint = { observation_key: string, identity: NativeQueryIdentity, compilations: string, last_compile_at: string, reset: ResetMarker, };
+export type CompilationCounterPoint = { observation_key: string, identity: NativeQueryIdentity, compilations: string, 
+/**
+ * Native lifetime mean elapsed microseconds; never CPU, execution time or compilation memory.
+ */
+average_duration_us: number, last_compile_at: string, reset: ResetMarker, };

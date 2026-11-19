@@ -737,7 +737,10 @@ impl TelemetryRecord {
                             && focus.accepts_entry(entry)
                     }
                     (SourceObservation::FocusedRequestMemory { result, .. }, OperationalFact::ExecutionGrant(row)) => {
-                        accepted && result.focus.matches_capture_scope(source) && result.accepts_observation(row)
+                        accepted
+                            && result.focus.matches_capture_scope(source)
+                            && result.accepts_observation(row)
+                            && row.fits_source(source)
                     }
                     (SourceObservation::FocusedRequestMemory { .. }, _) => false,
                     (SourceObservation::FocusedCompilationAdmission { result, .. }, _) => {
@@ -754,6 +757,7 @@ impl TelemetryRecord {
                     }
                     (SourceObservation::Diagnostics(_), _) | (_, OperationalFact::DiagnosticRevision(_)) => false,
                     (_, OperationalFact::StatementCounters(point)) => accepted && point.fits_source_scope(source),
+                    (_, OperationalFact::ExecutionGrant(point)) => accepted && point.fits_source(source),
                     _ => accepted,
                 }
             }

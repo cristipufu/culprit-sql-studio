@@ -19,6 +19,8 @@ pub struct CompilationCounterPoint {
     pub observation_key: String,
     pub identity: NativeQueryIdentity,
     pub compilations: String,
+    /// Native lifetime mean elapsed microseconds; never CPU, execution time or compilation memory.
+    pub average_duration_us: f64,
     pub last_compile_at: String,
     pub reset: crate::ResetMarker,
 }
@@ -35,6 +37,7 @@ impl CompilationCounterPoint {
             observation_key: row.key.clone(),
             identity: native.identity.clone(),
             compilations: native.compilations.clone(),
+            average_duration_us: native.average_duration_us,
             last_compile_at: native.last_compile_at.clone(),
             reset: native.reset.clone(),
         })
@@ -43,10 +46,15 @@ impl CompilationCounterPoint {
     pub fn is_valid(&self) -> bool {
         MssqlQueryCompilation::identity_key(&self.identity).is_ok_and(|key| key == self.observation_key)
             && valid_counter(&self.compilations)
+            && self.average_duration_us.is_finite()
+            && self.average_duration_us >= 0.0
             && canonical_time(&self.last_compile_at).is_ok()
             && valid_reset(&self.reset)
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 impl CompilationBaseline {
     pub fn from_observations(

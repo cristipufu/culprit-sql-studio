@@ -290,6 +290,7 @@ fn decode(
         resource_observation: None,
         workload_group: optional_counter(row, "grant_group_id")?
             .map(|group| NativeIdentity::new(group).qualified("kind", "sql-server-resource-governor-group")),
+        workload_group_tempdb: None,
         queue: ExecutionGrantQueue::default(),
         native_properties: Default::default(),
         available_columns: vec!["session_id".into(), "request_id".into(), "request_time".into()],

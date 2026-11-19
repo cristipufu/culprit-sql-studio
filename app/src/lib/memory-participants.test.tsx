@@ -28,7 +28,7 @@ function grant(): ExecutionGrantObservation {
     used_kibibytes: "0", maximum_used_kibibytes: "16", ideal_kibibytes: null,
     wait_ms: "18446744073709551615", timeout_seconds: "25", degree_of_parallelism: "1",
     reserved_workers: "4", used_workers: "0", maximum_used_workers: "3",
-    resource: { id: "2", qualifiers: { resource_semaphore_id: "0" } }, resource_observation: null, workload_group: null, native_properties: {},
+    resource: { id: "2", qualifiers: { resource_semaphore_id: "0" } }, resource_observation: null, workload_group: null, workload_group_tempdb: null, native_properties: {},
     queue: { identity: null, position: null, next_candidate: null, small: null },
     request: {
       key: { session: { id: "42", generation: "native-login-1" }, request: { id: "0", generation: "native-request-1" } },

@@ -72,6 +72,7 @@ fn grant(focus: &ActivityRequestFocus) -> ExecutionGrantObservation {
         resource: None,
         resource_observation: None,
         workload_group: None,
+        workload_group_tempdb: None,
         queue: ExecutionGrantQueue::default(),
         native_properties: Default::default(),
         available_columns: vec![],

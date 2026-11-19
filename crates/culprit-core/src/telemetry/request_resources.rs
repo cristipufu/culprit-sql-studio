@@ -4,6 +4,8 @@
 use super::*;
 use crate::MeasurementScope;
 use std::collections::BTreeSet;
+mod workload_group_tempdb;
+pub use workload_group_tempdb::{MssqlStoredTempdbDataLimits, MssqlWorkloadGroupTempdbObservation};
 
 pub const MAX_REQUEST_MEMORY_OBSERVATIONS: usize = 4096;
 
@@ -30,6 +32,7 @@ impl RequestMemorySnapshot {
             && self.observations.len() <= MAX_REQUEST_MEMORY_OBSERVATIONS
             && self.observations.iter().all(|row| {
                 row.is_valid()
+                    && row.fits_context(&self.context)
                     && row.source == self.source
                     && row.fits_database_capture(&database.database)
                     && canonical_time(&row.observed_at).is_ok_and(|observed| observed == at)
@@ -143,6 +146,9 @@ pub struct ExecutionGrantObservation {
     #[serde(deserialize_with = "Option::deserialize")]
     pub resource_observation: Option<ExecutionGrantResourceObservation>,
     pub workload_group: Option<NativeIdentity>,
+    /// Same-acquisition shared group totals, never a request allocation or attribution of historical rejections.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub workload_group_tempdb: Option<MssqlWorkloadGroupTempdbObservation>,
     pub queue: ExecutionGrantQueue,
     /// Exact native identifiers and other properties can remain useful when they are insufficient to prove a shared
     /// resource link. These source-owned properties do not establish portable units or causal relationships.
@@ -202,6 +208,7 @@ impl ExecutionGrantObservation {
             && self.resource.as_ref().is_none_or(NativeIdentity::is_valid)
             && self.resource_observation.as_ref().is_none_or(|resource| self.resource.is_some() && resource.is_valid())
             && self.workload_group.as_ref().is_none_or(NativeIdentity::is_valid)
+            && self.workload_group_tempdb.as_ref().is_none_or(|group| group.is_valid() && group.matches_grant(self))
             && self.queue.is_valid()
             && native_properties_valid(&self.native_properties)
             && self.observed_at.len() <= 64
@@ -245,6 +252,24 @@ impl ExecutionGrantObservation {
         if let Some(request) = &mut self.request {
             request.redact(engine);
         }
+    }
+
+    pub fn fits_context(&self, context: &NativeReadContext) -> bool {
+        self.workload_group_tempdb.as_ref().is_none_or(|group| {
+            group.matches_context(context)
+                && context.target.database().is_some_and(|database| self.fits_database_capture(&database.database))
+                && ObservationBounds::new(&context.observed_from, &context.observed_until)
+                    .is_some_and(|bounds| bounds.contains(&self.observed_at))
+        })
+    }
+
+    pub fn fits_source(&self, source: &CollectionDescription) -> bool {
+        self.workload_group_tempdb.is_none()
+            || source
+                .observation
+                .snapshot()
+                .is_some_and(|header| header.dataset == SnapshotDataset::CurrentRequestMemory)
+                && NativeReadContext::from_snapshot(source).is_ok_and(|context| self.fits_context(&context))
     }
 }
 

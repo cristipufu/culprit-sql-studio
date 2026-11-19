@@ -7,7 +7,7 @@ fn original_grant() -> ExecutionGrantObservation {
         "observed_at":"2020-01-01T12:00:00Z", "state":"granted", "request_association":"generation-checked",
         "statement_relationship":"observed-current-statement", "scope":"database",
         "requested_without_offset":"2020-01-01T10:00:00.003", "granted_without_offset":"2020-01-01T10:00:00.006",
-        "resource_observation":null, "queue":ExecutionGrantQueue::default(),"native_properties":{},"available_columns":[],"native_null_columns":[],
+        "resource_observation":null, "workload_group_tempdb":null, "queue":ExecutionGrantQueue::default(),"native_properties":{},"available_columns":[],"native_null_columns":[],
         "request":{
             "key":{"session":{"id":"42","generation":"native-login"},"request":{"id":"0","generation":"native-request"}},
             "blocking_status":"known","idle":false,"scope":"request-database","state":"running","database":"db",

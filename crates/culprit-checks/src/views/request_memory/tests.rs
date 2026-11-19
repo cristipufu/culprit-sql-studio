@@ -13,7 +13,7 @@ pub(crate) fn observation(id: &str, state: ExecutionGrantState) -> ExecutionGran
         "requested_without_offset":"2020-01-01T10:00:00.003",
         "granted_without_offset":(state==ExecutionGrantState::Granted).then_some("2020-01-01T10:00:00.006"),
         "requested_kibibytes":"9007199254740993", "granted_kibibytes":"1024", "used_kibibytes":"0",
-        "resource_observation":null, "queue":ExecutionGrantQueue::default(), "native_properties":{}, "available_columns":[], "native_null_columns":[]
+        "resource_observation":null, "workload_group_tempdb":null, "queue":ExecutionGrantQueue::default(), "native_properties":{}, "available_columns":[], "native_null_columns":[]
     }))
     .unwrap();
     assert!(ExecutionGrantObservation::is_valid(&row));

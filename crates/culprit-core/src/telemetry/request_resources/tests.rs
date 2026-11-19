@@ -1,6 +1,6 @@
 use super::*;
 
-fn context(at: &str) -> NativeReadContext {
+pub(super) fn context(at: &str) -> NativeReadContext {
     NativeReadContext {
         target: DatabaseIdentity::server(crate::Engine::Mssql, "sample", "fixture.invalid", 1433, None).into(),
         partition: SourcePartition::InstanceLocal {
@@ -45,6 +45,7 @@ pub(crate) fn grant() -> ExecutionGrantObservation {
         resource: Some(NativeIdentity::new("2").qualified("resource_semaphore_id", "0")),
         resource_observation: None,
         workload_group: None,
+        workload_group_tempdb: None,
         queue: ExecutionGrantQueue::default(),
         native_properties: Default::default(),
         available_columns: vec!["requested_memory_kb".into(), "ideal_memory_kb".into()],

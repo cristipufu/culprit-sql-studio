@@ -164,7 +164,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -299,7 +300,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": "42000",
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         }
       ],
       "observed_at": "2020-01-01T12:00:00Z",
@@ -569,7 +571,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -704,7 +707,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": "42000",
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         }
       ],
       "observed_at": "2020-01-01T12:00:00Z",
@@ -966,7 +970,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -1101,7 +1106,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": "42000",
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -1231,7 +1237,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         }
       ],
       "observed_at": "2020-01-01T12:00:00Z",
@@ -1510,7 +1517,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -1645,7 +1653,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": "42000",
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         }
       ],
       "observed_at": "2020-01-01T12:00:00Z",
@@ -1933,7 +1942,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -2068,7 +2078,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": "42000",
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -2198,7 +2209,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         }
       ],
       "observed_at": "2020-01-01T12:00:00Z",
@@ -2510,7 +2522,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -2645,7 +2658,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": "42000",
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         }
       ],
       "observed_at": "2020-01-01T12:00:00Z",
@@ -2922,7 +2936,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": null,
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         },
         {
           "available_columns": [
@@ -3057,7 +3072,8 @@
           "used_kibibytes": "0",
           "used_workers": null,
           "wait_ms": "42000",
-          "workload_group": null
+          "workload_group": null,
+          "workload_group_tempdb": null
         }
       ],
       "observed_at": "2020-01-01T12:00:00Z",
