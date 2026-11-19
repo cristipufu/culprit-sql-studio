@@ -37,6 +37,7 @@ DIAGNOSTIC_OPERATION_BUDGET = 5
 PEER_PROBE_BUDGET = 3
 VALUE_PREFIX = "culprit_fixture_value:"
 CERTIFICATE_PREFIX = "culprit_fixture_certificate:"
+JOIN_PHASE_PREFIX = "culprit_fixture_ag_join:"
 CERTIFICATE_LINE_WIDTH = len(CERTIFICATE_PREFIX) + CERTIFICATE_CHUNK_HEX
 
 
@@ -336,8 +337,11 @@ FROM chunks WHERE n*{CERTIFICATE_CHUNK_HEX}<DATALENGTH(@encoded) ORDER BY n;
         self.sql(self.primary, f"CREATE AVAILABILITY GROUP [{self.name}] WITH (CLUSTER_TYPE=NONE) "
                  "FOR REPLICA ON " + ",".join(replicas) + ";")
         print("Joining owned AG on the secondary", flush=True)
-        self.sql(self.secondary, f"ALTER AVAILABILITY GROUP [{self.name}] JOIN WITH (CLUSTER_TYPE=NONE); "
-                 f"ALTER AVAILABILITY GROUP [{self.name}] GRANT CREATE ANY DATABASE;")
+        self.sql(self.secondary, f"RAISERROR({sql_string(JOIN_PHASE_PREFIX + 'entered')},0,1) WITH NOWAIT; "
+                 f"ALTER AVAILABILITY GROUP [{self.name}] JOIN WITH (CLUSTER_TYPE=NONE); "
+                 f"RAISERROR({sql_string(JOIN_PHASE_PREFIX + 'joined')},0,1) WITH NOWAIT; "
+                 f"ALTER AVAILABILITY GROUP [{self.name}] GRANT CREATE ANY DATABASE; "
+                 f"RAISERROR({sql_string(JOIN_PHASE_PREFIX + 'granted')},0,1) WITH NOWAIT;")
         print("Adding the owned database to the AG", flush=True)
         self.sql(self.primary, f"ALTER AVAILABILITY GROUP [{self.name}] ADD DATABASE [{self.database_name}];")
 

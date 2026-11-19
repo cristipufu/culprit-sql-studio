@@ -550,6 +550,37 @@ class MssqlFailureDiagnostics(unittest.TestCase):
             self.assertEqual(database.sql.call_count, 2, "one precreation sample and independent failure diagnostics")
             database.close.assert_called_once()
 
+    def test_join_phase_markers_share_the_original_batch_and_preserve_ddl_order_and_deadline(self):
+        topology = self.topology()
+        topology.native_names = {role: database.hostname for role, database, _ in topology.members}
+        topology.sql = Mock(return_value=(0, ""))
+        with redirect_stdout(io.StringIO()):
+            topology.create_group()
+        calls = topology.sql.call_args_list
+        self.assertEqual([call.args[0] for call in calls], [topology.primary, topology.secondary, topology.primary])
+        self.assertTrue(all(not call.kwargs for call in calls), "the existing default deadline and database stay intact")
+        self.assertIn("CREATE AVAILABILITY GROUP", calls[0].args[1])
+        self.assertIn("ADD DATABASE", calls[2].args[1])
+        statements = [statement.strip() for statement in calls[1].args[1].split(";") if statement.strip()]
+        self.assertEqual(statements, [
+            "RAISERROR(N'culprit_fixture_ag_join:entered',0,1) WITH NOWAIT",
+            f"ALTER AVAILABILITY GROUP [{topology.name}] JOIN WITH (CLUSTER_TYPE=NONE)",
+            "RAISERROR(N'culprit_fixture_ag_join:joined',0,1) WITH NOWAIT",
+            f"ALTER AVAILABILITY GROUP [{topology.name}] GRANT CREATE ANY DATABASE",
+            "RAISERROR(N'culprit_fixture_ag_join:granted',0,1) WITH NOWAIT",
+        ])
+
+    def test_the_host_join_stage_label_never_fabricates_a_returned_native_phase(self):
+        topology = self.topology()
+        topology.native_names = {role: database.hostname for role, database, _ in topology.members}
+        topology.sql = Mock(side_effect=[(0, ""), TimeoutError("original native command deadline")])
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaisesRegex(TimeoutError, "original native command deadline"):
+            topology.create_group()
+        self.assertEqual(topology.sql.call_count, 2)
+        self.assertIn("Joining owned AG on the secondary", output.getvalue())
+        self.assertNotIn("culprit_fixture_ag_join:", output.getvalue())
+
 
 class NativeSelection(unittest.TestCase):
     def test_agent_launch_is_explicit_and_its_tests_are_excluded_from_plain_mssql(self):
@@ -719,6 +750,24 @@ class NativeSelection(unittest.TestCase):
 
 
 class ChildProcesses(unittest.TestCase):
+    def ready_process(self, ready):
+        launch = smoke.subprocess.Popen
+
+        def start(*args, **kwargs):
+            process = launch(*args, **kwargs)
+            deadline = time.monotonic() + 30
+            while not ready.exists():
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    smoke.Commands.stop(process)
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        if stream is not None:
+                            stream.close()
+                    self.fail("the child fixture did not start")
+                time.sleep(0.02)
+            return process
+
+        return start
+
     def test_sql_diagnostics_remain_visible_without_corrupting_native_rows(self):
         diagnostics = io.StringIO()
         with redirect_stderr(diagnostics):
@@ -752,37 +801,106 @@ class ChildProcesses(unittest.TestCase):
         self.assertNotIn(password, output.getvalue())
         self.assertIn("[redacted]", output.getvalue())
 
+    def test_timeout_retains_latest_cumulative_streams_and_redacts_heartbeat_names_before_cleanup(self):
+        password = "known_secret"
+        process = Mock(returncode=0, stdin=io.StringIO(), stdout=io.StringIO(), stderr=io.StringIO())
+        process.communicate.side_effect = [
+            smoke.subprocess.TimeoutExpired("fixture", 2, output=f"test suite::{password} ...\nentered\n".encode(), stderr=b"warning\n"),
+            smoke.subprocess.TimeoutExpired("fixture", 1, output=f"test suite::{password} ...\nentered\njoined {password}\n", stderr=f"warning {password}\n"),
+        ]
+        output, diagnostics = io.StringIO(), io.StringIO()
+        with patch.object(smoke.subprocess, "Popen", return_value=process), \
+                patch.object(smoke.Commands, "stop") as stop, \
+                patch.object(smoke.time, "monotonic", side_effect=[0, 0, 1, 1, 2, 2]), \
+                redirect_stdout(output), redirect_stderr(diagnostics), self.assertRaises(TimeoutError) as raised:
+            smoke.Commands([password]).run(["fixture"], input="one original input", timeout=2, check=False)
+        self.assertEqual(str(raised.exception), "fixture exceeded its 2s budget")
+        self.assertEqual(raised.exception.stdout, "test suite::[redacted] ...\nentered\njoined [redacted]\n")
+        self.assertEqual(raised.exception.stderr, "warning [redacted]\n")
+        self.assertEqual(output.getvalue().count("entered"), 1, "cumulative snapshots are not appended twice")
+        self.assertNotIn(password, output.getvalue() + diagnostics.getvalue() + repr(raised.exception))
+        self.assertEqual(diagnostics.getvalue(), "warning [redacted]\n")
+        self.assertEqual([call.args[0] for call in process.communicate.call_args_list], ["one original input", None])
+        self.assertEqual([call.kwargs["timeout"] for call in process.communicate.call_args_list], [2, 1])
+        stop.assert_called_once_with(process)
+        self.assertTrue(all(stream.closed for stream in (process.stdin, process.stdout, process.stderr)))
+
+    def test_timeout_output_is_utf8_bounded_after_redaction_including_a_secret_across_the_cut(self):
+        password = "known-timeout-password-canary"
+        for data in [
+            "x" * (smoke.TIMEOUT_OUTPUT_BYTES - 4) + password + " trailing",
+            "前" * smoke.TIMEOUT_OUTPUT_BYTES + password,
+        ]:
+            process = Mock(returncode=-15, stdin=io.StringIO(), stdout=io.StringIO(), stderr=io.StringIO())
+            process.communicate.side_effect = smoke.subprocess.TimeoutExpired("fixture", 1, output=data.encode(), stderr=data)
+            output, diagnostics = io.StringIO(), io.StringIO()
+            with patch.object(smoke.subprocess, "Popen", return_value=process), patch.object(smoke.Commands, "stop"), \
+                    patch.object(smoke.time, "monotonic", side_effect=[0, 0, 1, 1]), \
+                    redirect_stdout(output), redirect_stderr(diagnostics), self.assertRaises(TimeoutError) as raised:
+                smoke.Commands([password]).run(["fixture"], timeout=1)
+            for stream in [raised.exception.stdout, raised.exception.stderr]:
+                self.assertLessEqual(len(stream.encode("utf-8")), smoke.TIMEOUT_OUTPUT_BYTES)
+                self.assertTrue(stream.endswith(smoke.TIMEOUT_OUTPUT_TRUNCATED))
+                self.assertNotIn(password[:8], stream)
+                self.assertNotIn("\ufffd", stream)
+            self.assertNotIn(password, output.getvalue() + diagnostics.getvalue())
+
+    def test_a_deadline_before_communication_reports_no_invented_native_output(self):
+        process = Mock(returncode=0, stdin=io.StringIO(), stdout=io.StringIO(), stderr=io.StringIO())
+        output, diagnostics = io.StringIO(), io.StringIO()
+        with patch.object(smoke.subprocess, "Popen", return_value=process), patch.object(smoke.Commands, "stop") as stop, \
+                patch.object(smoke.time, "monotonic", return_value=0), redirect_stdout(output), redirect_stderr(diagnostics), \
+                self.assertRaises(TimeoutError) as raised:
+            smoke.Commands([]).run(["fixture"], timeout=0)
+        self.assertEqual(raised.exception.stdout, "")
+        self.assertEqual(raised.exception.stderr, "")
+        self.assertEqual(output.getvalue() + diagnostics.getvalue(), "")
+        process.communicate.assert_not_called()
+        stop.assert_called_once_with(process)
+
     @unittest.skipUnless(os.name == "posix", "the Docker runner uses POSIX process groups")
-    def test_deadline_terminates_and_reaps_its_process_and_child(self):
+    def test_real_timeout_keeps_sanitized_stdout_and_stderr_after_native_progress(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready = Path(directory) / "ready"
+            password = "real-timeout-password-canary"
+            program = "import os,sys,time; from pathlib import Path; print('entered '+os.environ['FIXTURE_SECRET'],flush=True); print('native warning '+os.environ['FIXTURE_SECRET'],file=sys.stderr,flush=True); Path(sys.argv[1]).touch(); time.sleep(60)"
+            output, diagnostics = io.StringIO(), io.StringIO()
+            with patch.object(smoke.subprocess, "Popen", side_effect=self.ready_process(ready)), \
+                    redirect_stdout(output), redirect_stderr(diagnostics), self.assertRaises(TimeoutError) as raised:
+                smoke.Commands([password]).run([sys.executable, "-c", program, str(ready)],
+                                              env={"FIXTURE_SECRET": password}, separate_stderr=True, timeout=0.1)
+            self.assertEqual(raised.exception.stdout, "entered [redacted]\n")
+            self.assertEqual(raised.exception.stderr, "native warning [redacted]\n")
+            self.assertEqual(output.getvalue(), raised.exception.stdout)
+            self.assertEqual(diagnostics.getvalue(), raised.exception.stderr)
+            self.assertNotIn(password, output.getvalue() + diagnostics.getvalue() + str(raised.exception))
+
+    @unittest.skipUnless(os.name == "posix", "the Docker runner uses POSIX process groups")
+    def test_deadline_terminates_and_reaps_its_process_and_delayed_child_before_raising(self):
         with tempfile.TemporaryDirectory() as directory:
             pids = Path(directory) / "pids"
             program = """
 import os, signal, subprocess, sys, time
-child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+from pathlib import Path
+child_program = "import signal,sys,time; from pathlib import Path; signal.signal(signal.SIGTERM, lambda *_: (time.sleep(.1),Path(sys.argv[1]).touch(),sys.exit(0))); Path(sys.argv[2]).touch(); time.sleep(60)"
+child = subprocess.Popen([sys.executable, '-c', child_program, sys.argv[1]+'.settled', sys.argv[1]+'.child-ready'])
 def stopped(*_):
     child.wait(timeout=2)
     raise SystemExit(0)
 signal.signal(signal.SIGTERM, stopped)
+while not Path(sys.argv[1]+'.child-ready').exists():
+    time.sleep(.01)
+print('before delayed child settlement',flush=True)
 with open(sys.argv[1], 'w') as output:
     output.write(f'{os.getpid()} {child.pid}')
 time.sleep(60)
 """
-            launch = smoke.subprocess.Popen
-
-            def ready_process(*args, **kwargs):
-                process = launch(*args, **kwargs)
-                deadline = time.monotonic() + 30
-                while not pids.exists():
-                    if process.poll() is not None or time.monotonic() >= deadline:
-                        smoke.Commands.stop(process)
-                        self.fail("the child fixture did not start")
-                    time.sleep(0.02)
-                return process
-
             # The assertion exercises cancellation after child ownership is established, independently of OS startup.
-            with patch.object(smoke.subprocess, "Popen", side_effect=ready_process):
-                with redirect_stdout(io.StringIO()), self.assertRaises(TimeoutError):
+            with patch.object(smoke.subprocess, "Popen", side_effect=self.ready_process(pids)):
+                with redirect_stdout(io.StringIO()), self.assertRaises(TimeoutError) as raised:
                     smoke.Commands([]).run([sys.executable, "-c", program, str(pids)], timeout=0.1)
+            self.assertTrue(Path(str(pids) + ".settled").exists(), "timeout reporting waits for the late child")
+            self.assertEqual(raised.exception.stdout, "before delayed child settlement\n")
             for pid in map(int, pids.read_text().split()):
                 with self.assertRaises(ProcessLookupError):
                     os.kill(pid, 0)

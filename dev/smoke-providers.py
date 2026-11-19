@@ -27,6 +27,8 @@ COMMAND_BUDGET = 120
 CONNECT_BUDGET = 3
 TEST_BUDGET = 1200
 HEARTBEAT = 30
+TIMEOUT_OUTPUT_BYTES = 64 * 1024  # Per stream, after secret redaction; completed output remains unchanged.
+TIMEOUT_OUTPUT_TRUNCATED = "\n[partial subprocess output truncated]\n"
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,18 @@ class Commands:
         return text
 
     @staticmethod
+    def output_text(output):
+        return output.decode(errors="replace") if isinstance(output, bytes) else (output or "")
+
+    def timeout_output(self, output):
+        sanitized = self.sanitized(self.output_text(output))
+        encoded = sanitized.encode("utf-8")
+        if len(encoded) <= TIMEOUT_OUTPUT_BYTES:
+            return sanitized
+        prefix = encoded[:TIMEOUT_OUTPUT_BYTES - len(TIMEOUT_OUTPUT_TRUNCATED.encode("utf-8"))]
+        return prefix.decode("utf-8", errors="ignore") + TIMEOUT_OUTPUT_TRUNCATED
+
+    @staticmethod
     def stop(process):
         if process.poll() is not None:
             return
@@ -112,28 +126,39 @@ class Commands:
                                    text=True, start_new_session=True)
         started = time.monotonic()
         pending_input = input
+        output = diagnostics = ""
+        timed_out = False
         try:
             while True:
                 remaining = timeout - (time.monotonic() - started)
                 if remaining <= 0:
-                    raise TimeoutError(f"{args[0]} exceeded its {timeout}s budget")
+                    timed_out = True
+                    break
                 try:
                     output, diagnostics = process.communicate(pending_input, timeout=min(HEARTBEAT, remaining))
                     break
                 except subprocess.TimeoutExpired as progress:
                     pending_input = None
-                    if time.monotonic() - started < timeout:
-                        partial = progress.output or b""
-                        if isinstance(partial, bytes):
-                            partial = partial.decode(errors="replace")
+                    # communicate's timeout snapshots are cumulative; appending would duplicate earlier native phases.
+                    output, diagnostics = progress.output, progress.stderr
+                    elapsed = time.monotonic() - started
+                    if elapsed < timeout:
+                        partial = self.sanitized(self.output_text(output))
                         tests = re.findall(r"^test ([A-Za-z0-9_:]+) \.\.\.", partial, re.MULTILINE)
                         current = f"; {tests[-1]}" if tests else ""
-                        print(f"  {args[0]} is still running ({int(time.monotonic() - started)}s{current})", flush=True)
+                        print(self.sanitized(f"  {args[0]} is still running ({int(elapsed)}s{current})"), flush=True)
         finally:
             self.stop(process)
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
                     stream.close()
+        if timed_out:
+            error = TimeoutError(self.sanitized(f"{args[0]} exceeded its {timeout}s budget"))
+            error.stdout, error.stderr = self.timeout_output(output), self.timeout_output(diagnostics)
+            for text, stream in ((error.stdout, sys.stdout), (error.stderr, sys.stderr)):
+                if text:
+                    print(text, file=stream, end="" if text.endswith("\n") else "\n", flush=True)
+            raise error
         output = self.sanitized(output)
         diagnostics = self.sanitized(diagnostics or "")
         if diagnostics:
