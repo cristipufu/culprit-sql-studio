@@ -50,6 +50,14 @@ pub(crate) fn source(
     recipes::open(pool, request, host, port)
 }
 
+#[cfg(test)]
+pub(crate) fn page_wait_source_from_reader<R: crate::read::NativeRead + 'static>(
+    reader: crate::activity::ActivityReader<R>,
+    request: &CollectionRequest,
+) -> Result<Box<dyn TelemetrySource>> {
+    Ok(Box::new(page_waits::PageWaitSource::from_reader(reader, request)?))
+}
+
 pub(crate) fn qualification_source(
     pool: Arc<Pool>,
     request: &CollectionRequest,

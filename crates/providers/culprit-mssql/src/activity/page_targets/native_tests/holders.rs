@@ -3,7 +3,7 @@
 use super::{
     durable_capture::{Captured, OwnedCaptures},
     fixture::{self, Fixture, invalid},
-    workload::{HOLDER_ROWS_PER_WORKER, WRITER_APPLICATIONS, WRITERS_PER_PATTERN},
+    workload::{HOLDER_INSERTS_PER_WORKER, WRITER_APPLICATIONS, WRITERS_PER_PATTERN},
 };
 use culprit_collector::capture::CollectionCancellation;
 use culprit_core::{Result, telemetry::*};
@@ -47,23 +47,27 @@ async fn observe_owned_holder(fixture: &mut Fixture) -> Result<NativeHolderEvide
     let original_context = Box::new(original.activity_context()?);
     let original_requests = original.with_activity_frame(|frame| frame.page_wait_task_requests())?;
     captures.verify_retained(&original).await?;
-    fixture.release_holder_gate().await?;
-    let released_at = std::time::Instant::now();
-    let gate_held_client_ms = work.elapsed().as_secs_f64() * 1000.0;
+    let selection = CollectionSelection::PageWaitTasks {
+        activity: activity.clone(),
+        original_context,
+        original_requests: original_requests.clone(),
+    };
+    let (first_pages, released_at) =
+        super::durable_capture::capture_at_gate_release(&mut captures, fixture, selection.clone()).await?;
+    let gate_held_client_ms = released_at.duration_since(work).as_secs_f64() * 1000.0;
+    let mut first_pages = Some(first_pages);
     let mut outcomes = BTreeMap::new();
     let mut planning_outcomes = BTreeMap::new();
     let mut evidence = NativeHolderEvidence::default();
     for attempt in 0..MAX_CAPTURE_ATTEMPTS {
-        if fixture.workers_finished() {
-            break;
-        }
-        let pages = captures
-            .capture(CollectionSelection::PageWaitTasks {
-                activity: activity.clone(),
-                original_context: original_context.clone(),
-                original_requests: original_requests.clone(),
-            })
-            .await?;
+        let pages = if let Some(first) = first_pages.take() {
+            first
+        } else {
+            if fixture.workers_finished() {
+                break;
+            }
+            captures.capture(selection.clone()).await?
+        };
         query_count += pages.manifest.source_queries;
         require_readable_capture(&pages)?;
         if !matches!(&pages.source()?.observation,
@@ -94,9 +98,12 @@ async fn observe_owned_holder(fixture: &mut Fixture) -> Result<NativeHolderEvide
     }
     let completed = fixture.finish_workload().await?;
     if completed.len() != WRITERS_PER_PATTERN * 2
-        || completed.iter().any(|worker| worker.inserts != HOLDER_ROWS_PER_WORKER as u64)
+        || completed.iter().any(|worker| worker.inserts != HOLDER_INSERTS_PER_WORKER as u64)
     {
-        return Err(invalid("owned single-INSERT workers did not complete their exact bounded row population"));
+        eprintln!(
+            "owned repeated-INSERT completion: expected_per_worker={HOLDER_INSERTS_PER_WORKER}, completed={completed:?}"
+        );
+        return Err(invalid("owned repeated-INSERT workers did not complete their exact bounded insert quota"));
     }
     eprintln!(
         "{}",
@@ -104,6 +111,7 @@ async fn observe_owned_holder(fixture: &mut Fixture) -> Result<NativeHolderEvide
             "phase": "owned-holder-qualification-summary", "native_queries": query_count,
             "native_holder_relations": outcomes, "native_positive": evidence.has_qualified_holder(),
             "native_task_waits": evidence.native_task_waits(),
+            "original_request_selectors": original_requests.len(),
             "native_compatibility_evidence": evidence.require_compatibility().is_ok(),
             "holder_qualification_open": !evidence.has_qualified_holder(),
             "contention_cause_proven": false, "continuous_owner_proven": false,
@@ -111,10 +119,13 @@ async fn observe_owned_holder(fixture: &mut Fixture) -> Result<NativeHolderEvide
             "fixture_work_client_ms": work.elapsed().as_secs_f64() * 1000.0,
             "fixture_gate_held_client_ms": gate_held_client_ms,
             "fixture_after_gate_client_ms": released_at.elapsed().as_secs_f64() * 1000.0,
+            "fixture_gate_release_at_original_task_dispatch": true,
             "original_activity_reused": activity,
             "completed_fixture_inserts": completed.iter().map(|worker| worker.inserts).sum::<u64>(),
-            "fixture_rows_per_worker": HOLDER_ROWS_PER_WORKER,
-            "fixture_single_insert_per_worker": true,
+            "fixture_rows_per_worker": HOLDER_INSERTS_PER_WORKER,
+            "fixture_single_insert_per_worker": false,
+            "fixture_insert_statement_repeated": true,
+            "fixture_rows_per_insert": 1,
             "native_cost_qualified": false,
         })
     );
@@ -177,6 +188,7 @@ fn contains_all_gated_inserts(original: &Captured) -> Result<bool> {
     if !context.has_qualified_local_owner() || context.database_writable.is_none() {
         return Err(invalid("owned original Activity did not qualify its actual member/process/role"));
     }
+    let selected = original.with_activity_frame(|frame| frame.page_wait_task_requests())?;
     let mut counts = [0; WRITER_APPLICATIONS.len()];
     let mut identities = BTreeSet::new();
     for row in &original.records {
@@ -206,6 +218,11 @@ fn contains_all_gated_inserts(original: &Captured) -> Result<bool> {
         }
         if !identities.insert(row.key.clone()) {
             return Err(invalid("owned original INSERT had ambiguous native request generations"));
+        }
+        if !selected.iter().any(|request| {
+            request.key == row.key && Some(&request.statement_identity) == row.statement_identity.as_ref()
+        }) {
+            return Err(invalid("owned original INSERT lacked authenticated selector-roster authority"));
         }
         counts[index] += 1;
     }

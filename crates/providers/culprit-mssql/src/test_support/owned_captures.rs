@@ -67,6 +67,24 @@ impl OwnedCaptures {
         selection: CollectionSelection,
         cancellation: &CollectionCancellation,
     ) -> Result<Captured> {
+        self.capture_owned(selection, cancellation, None).await
+    }
+
+    pub async fn capture_with_factory(
+        &mut self,
+        selection: CollectionSelection,
+        cancellation: &CollectionCancellation,
+        factory: &dyn SourceFactory,
+    ) -> Result<Captured> {
+        self.capture_owned(selection, cancellation, Some(factory)).await
+    }
+
+    async fn capture_owned(
+        &mut self,
+        selection: CollectionSelection,
+        cancellation: &CollectionCancellation,
+        factory: Option<&dyn SourceFactory>,
+    ) -> Result<Captured> {
         // The same heap-owned phase retains its lease, collector, final verification and cleanup.
         Box::pin(async {
             let provisional = CollectionRequest {
@@ -83,9 +101,10 @@ impl OwnedCaptures {
             let mut lease = self.outbox.reserve("owned-native-capture-fixture", &request).await?;
             let identity = lease.identity().clone();
             let output = lease.directory().to_owned();
-            let factory = Factory { pool: self.pool.clone(), port: self.port, capture: identity.clone() };
+            let default_factory = Factory { pool: self.pool.clone(), port: self.port, capture: identity.clone() };
+            let factory = factory.unwrap_or(&default_factory);
             let manifest =
-                collect(&self.gate, &factory, request, &output, identity.clone(), cancellation, Some(&mut lease))
+                collect(&self.gate, factory, request, &output, identity.clone(), cancellation, Some(&mut lease))
                     .await
                     .inspect_err(|error| diagnostics::failed("capture", error))?;
             if manifest.capture != identity || identity.revision.is_none() {

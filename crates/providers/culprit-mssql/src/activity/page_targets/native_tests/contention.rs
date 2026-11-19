@@ -145,8 +145,9 @@ async fn local_controlled_write_routing_changes_target_contention_under_comparab
 async fn measure(fixture: &mut Fixture, round: usize, separated: bool) -> Result<f64> {
     fixture.reset().await?;
     let before = fixture.indexes().await?;
-    let started = fixture.start_workload(separated, false).await?;
+    let started = fixture.start_abba_workload(separated).await?;
     let completed = fixture.finish_workload().await?;
+    super::workload::require_abba_completions(&completed)?;
     let elapsed = started.elapsed().as_secs_f64();
     let after = fixture.indexes().await?;
     let hot = delta(&before, &after, "page_fixture_hot")?;
@@ -160,7 +161,8 @@ async fn measure(fixture: &mut Fixture, round: usize, separated: bool) -> Result
     println!(
         "{}",
         serde_json::json!({"round":round,"pattern_b_separate_index":separated,"writers_per_pattern":WRITERS_PER_PATTERN,
-        "completed_a":a,"completed_b":b,"elapsed_seconds":elapsed,"completed_inserts_per_second":writes as f64/elapsed,
+        "completed_a":a,"completed_b":b,"expected_inserts_per_worker":super::workload::ABBA_INSERTS_PER_WORKER,
+        "elapsed_seconds":elapsed,"completed_inserts_per_second":writes as f64/elapsed,
         "hot_native_latch_waits":hot.latch_waits,"hot_native_accumulated_latch_ms":hot.latch_ms,"hot_native_inserts":hot.inserts,
         "split_native_latch_waits":split.latch_waits,"split_native_accumulated_latch_ms":split.latch_ms,"split_native_inserts":split.inserts})
     );
