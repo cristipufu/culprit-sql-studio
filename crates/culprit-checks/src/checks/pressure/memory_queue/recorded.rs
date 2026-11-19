@@ -9,6 +9,7 @@ const MAX_STATEMENT_CHARACTERS: usize = 512;
 
 pub(super) struct RecordedQueue<'s> {
     captured: &'s RequestMemorySnapshot,
+    source_state: SourceState,
     participants: Vec<Participant<'s>>,
     waiting: Vec<usize>,
     output_reservations: Vec<usize>,
@@ -26,7 +27,7 @@ pub(super) fn decide(snapshot: &Snapshot) -> Option<RecordedQueue<'_>> {
     }
     let mut sources = snapshot.sources.iter().filter(|source| source.source == captured.source);
     let source = sources.next()?;
-    if sources.next().is_some() || source.state != SourceState::Collected {
+    if sources.next().is_some() || !matches!(source.state, SourceState::Collected | SourceState::Partial) {
         return None;
     }
     let observations: Vec<_> = captured.observations.iter().collect();
@@ -57,6 +58,7 @@ pub(super) fn decide(snapshot: &Snapshot) -> Option<RecordedQueue<'_>> {
     let identity = serde_json::to_vec(&(&captured.context, &captured.source, &captured.observed_at)).ok()?;
     Some(RecordedQueue {
         captured,
+        source_state: source.state,
         participants,
         waiting,
         output_reservations,
@@ -69,11 +71,20 @@ pub(super) fn render(case: RecordedQueue<'_>) -> Finding {
     let mut finding =
         finding("memory-queue", &case.key, Category::Configuration, subject(SubjectKind::Database, &database.database));
     finding.title = t!("check.memory_queue.recorded.title");
-    finding.summary = t!(
-        "check.memory_queue.recorded.summary",
-        at = &case.captured.observed_at,
-        count = format::count(case.waiting.len() as f64)
-    );
+    finding.summary = if case.source_state == SourceState::Partial {
+        t!(
+            "check.memory_queue.recorded.summary.partial",
+            at = &case.captured.observed_at,
+            n = case.waiting.len(),
+            count = format::count(case.waiting.len() as f64)
+        )
+    } else {
+        t!(
+            "check.memory_queue.recorded.summary",
+            at = &case.captured.observed_at,
+            count = format::count(case.waiting.len() as f64)
+        )
+    };
     if !case.output_reservations.is_empty() {
         finding.summary.push(' ');
         finding.summary.push_str(&t!("check.memory_queue.recorded.output_context"));
@@ -112,6 +123,9 @@ pub(super) fn render(case: RecordedQueue<'_>) -> Finding {
         t!("view.request_memory.limit.population"),
         t!("view.request_memory.limit.measurements"),
     ]);
+    if case.source_state == SourceState::Partial {
+        finding.caveats.push(t!("view.memory_participants.limit.source_partial"));
+    }
     let output_observed = !case.output_reservations.is_empty();
     finding.fix = Some(Fix {
         summary: if output_observed {

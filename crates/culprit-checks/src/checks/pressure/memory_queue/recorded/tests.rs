@@ -59,6 +59,19 @@ fn snapshot(rows: Vec<ExecutionGrantObservation>) -> Snapshot {
     });
     snapshot
 }
+fn partial_snapshot(rows: Vec<ExecutionGrantObservation>) -> Snapshot {
+    let mut snapshot = snapshot(rows);
+    snapshot.sources.last_mut().unwrap().state = SourceState::Partial;
+    snapshot
+}
+fn unassociated(mut row: ExecutionGrantObservation) -> ExecutionGrantObservation {
+    row.request = None;
+    row.scope = None;
+    row.request_association = RequestGrantAssociation::MissingRequest;
+    row.statement_relationship = GrantStatementRelationship::Unresolved;
+    assert!(row.is_valid());
+    row
+}
 fn captured(snapshot: &mut Snapshot) -> &mut RequestMemorySnapshot {
     snapshot.pressure.as_mut().unwrap().request_memory.as_mut().unwrap()
 }
@@ -86,17 +99,165 @@ fn native_waiting_sql_and_output_reservation_have_an_independent_informational_d
 }
 
 #[test]
+fn partial_native_reads_preserve_positive_requests_as_a_lower_bound_without_counting_unowned_rows() {
+    for count in [1_usize, 2] {
+        let mut rows: Vec<_> =
+            (41..41 + count).map(|id| grant(&id.to_string(), ExecutionGrantState::Waiting)).collect();
+        rows.push(grant("51", ExecutionGrantState::Granted));
+        for id in 81..85 {
+            let mut unknown = unassociated(grant(&id.to_string(), ExecutionGrantState::Waiting));
+            unknown.queue.position = Some("9007199254740997".into());
+            rows.push(unknown);
+        }
+        let collected = finding_at_point(&snapshot(rows.clone())).unwrap();
+        let snapshot = partial_snapshot(rows);
+        let case = decide(&snapshot).expect("partial visibility does not erase independently qualified requests");
+        assert_eq!(case.source_state, SourceState::Partial);
+        assert_eq!(case.waiting.len(), count);
+        assert_eq!(case.output_reservations.len(), 1);
+        let finding = render(case);
+        assert_eq!(finding.id, collected.id, "source completeness cannot invent a different native point");
+        let expected_summary = match count {
+            1 => "Recorded at 2020-01-01T08:01:00Z. At least 1 request was waiting for query memory.",
+            2 => "Recorded at 2020-01-01T08:01:00Z. At least 2 requests were waiting for query memory.",
+            _ => unreachable!(),
+        };
+        assert_eq!(finding.summary, format!("{expected_summary} {}", t!("check.memory_queue.recorded.output_context")));
+        assert_eq!(
+            collected.summary,
+            format!(
+                "Recorded at 2020-01-01T08:01:00Z. Requests waiting for query memory: {count}. {}",
+                t!("check.memory_queue.recorded.output_context")
+            ),
+            "the collected source's words stay unchanged"
+        );
+        assert!(finding.caveats.contains(&t!("view.memory_participants.limit.source_partial")));
+        assert!(!collected.caveats.contains(&t!("view.memory_participants.limit.source_partial")));
+        assert_eq!(finding.actionability, Actionability::Information);
+        assert_eq!(finding.severity, Severity::Low);
+        assert_eq!(
+            finding.metrics.iter().filter(|metric| metric.key.starts_with("request-context:")).count(),
+            count + 1
+        );
+        let context = observed_text(&finding);
+        assert!(context.contains("waiting_marker") && context.contains("output_marker"));
+        assert!(!context.contains("9007199254740997"), "a queue position cannot inflate the observed request count");
+        assert_eq!(finding.fix.as_ref().unwrap().summary, t!("view.request_memory.output_wait.investigation"));
+        assert!(finding.fix.as_ref().unwrap().sql.is_none() && finding.queries.is_empty());
+    }
+}
+
+#[test]
+fn partial_native_reads_never_establish_a_healthy_queue_from_missing_or_unowned_requests() {
+    for rows in [
+        vec![],
+        vec![grant("42", ExecutionGrantState::Granted)],
+        vec![unassociated(grant("41", ExecutionGrantState::Waiting))],
+    ] {
+        let snapshot = partial_snapshot(rows);
+        assert!(finding_at_point(&snapshot).is_none());
+        assert!(matches!(
+            super::super::MemoryQueueCheck.evidence(&snapshot),
+            culprit_core::CheckEvidence::Insufficient(_)
+        ));
+        let report = crate::analyze(snapshot);
+        assert!(!report.findings.iter().any(|finding| finding.check == "memory-queue"));
+        assert_eq!(
+            report.assessments.iter().find(|assessment| assessment.check == "memory-queue").unwrap().status,
+            CheckStatus::InsufficientEvidence
+        );
+    }
+}
+
+#[test]
+fn partial_native_reads_require_the_original_request_roster_and_generation_proof() {
+    for change in [
+        "missing-request",
+        "insufficient-request",
+        "changed-request",
+        "missing-statement-identity",
+        "missing-session-generation",
+        "missing-request-generation",
+        "duplicate-request",
+    ] {
+        let mut row = grant("41", ExecutionGrantState::Waiting);
+        match change {
+            "missing-request" | "insufficient-request" | "changed-request" => {
+                row = unassociated(row);
+                row.request_association = match change {
+                    "missing-request" => RequestGrantAssociation::MissingRequest,
+                    "insufficient-request" => RequestGrantAssociation::InsufficientEvidence,
+                    _ => RequestGrantAssociation::ChangedRequest,
+                };
+            }
+            "missing-statement-identity" => row.request.as_mut().unwrap().statement_identity = None,
+            "missing-session-generation" => row.request.as_mut().unwrap().key.session.generation.clear(),
+            "missing-request-generation" => {
+                row.request.as_mut().unwrap().key.request.as_mut().unwrap().generation.clear()
+            }
+            "duplicate-request" => {}
+            _ => unreachable!(),
+        }
+        let mut rows = vec![row];
+        if change == "duplicate-request" {
+            let mut duplicate = grant("42", ExecutionGrantState::Granted);
+            duplicate.request.as_mut().unwrap().key = rows[0].request.as_ref().unwrap().key.clone();
+            rows.push(duplicate);
+        }
+        assert!(finding_at_point(&partial_snapshot(rows)).is_none(), "{change}");
+    }
+}
+
+#[test]
+fn partial_mars_context_never_borrows_sql_from_a_peer_or_negative_session_generation() {
+    let waiter = grant("41", ExecutionGrantState::Waiting);
+    let mut peer = grant("42", ExecutionGrantState::Granted);
+    peer.request.as_mut().unwrap().key.session = waiter.request.as_ref().unwrap().key.session.clone();
+    peer.request.as_mut().unwrap().key.request =
+        Some(NativeActivityIdentity { id: "1".into(), generation: "request-2".into() });
+    peer.request.as_mut().unwrap().statement =
+        DefinitionPayload::sql("SELECT mars_peer_canary FROM dbo.other_rows", Engine::Mssql);
+    peer.statement_relationship = GrantStatementRelationship::Unresolved;
+    let peer_key = peer.key().unwrap();
+    let mut snapshot = partial_snapshot(vec![waiter, peer]);
+    let finding = finding_at_point(&snapshot).unwrap();
+    let text = observed_text(&finding);
+    assert!(text.contains("waiting_marker"));
+    assert!(!text.contains("mars_peer_canary"));
+    let peer_context =
+        finding.metrics.iter().find(|metric| metric.key == format!("request-context:{peer_key}")).unwrap();
+    assert_eq!(peer_context.text.as_deref(), Some(t!("check.memory_queue.recorded.statement_unavailable").as_str()));
+    captured(&mut snapshot).observations[1].request.as_mut().unwrap().session_context =
+        Some(Box::new(ActivitySessionContext {
+            lifecycle: SessionLifecycle::PoolResetPrelogin,
+            login_age_ms: None,
+            last_request_end_age_ms: None,
+            client_library: None,
+            client_process_id: None,
+            native: None,
+        }));
+    assert!(captured(&mut snapshot).is_valid(), "negative generation context remains valid retained evidence");
+    assert!(finding_at_point(&snapshot).is_none(), "a negative MARS peer withdraws the shared session generation");
+}
+
+#[test]
 fn the_pipeline_keeps_native_positive_evidence_without_an_unrelated_aggregate_signal() {
-    let snapshot = snapshot(vec![grant("41", ExecutionGrantState::Waiting)]);
-    assert!(matches!(super::super::MemoryQueueCheck.evidence(&snapshot), culprit_core::CheckEvidence::Insufficient(_)));
-    let report = crate::analyze(snapshot);
-    let finding = report.findings.iter().find(|finding| finding.check == "memory-queue").unwrap();
-    assert_eq!(finding.actionability, Actionability::Information);
-    assert!(observed_text(finding).contains("waiting_marker"));
-    assert_eq!(
-        report.assessments.iter().find(|assessment| assessment.check == "memory-queue").unwrap().status,
-        CheckStatus::Findings
-    );
+    for state in [SourceState::Collected, SourceState::Partial] {
+        let mut snapshot = snapshot(vec![grant("41", ExecutionGrantState::Waiting)]);
+        snapshot.sources.last_mut().unwrap().state = state;
+        assert!(matches!(
+            super::super::MemoryQueueCheck.evidence(&snapshot),
+            culprit_core::CheckEvidence::Insufficient(_)
+        ));
+        let report = crate::analyze(snapshot);
+        let finding = report.findings.iter().find(|finding| finding.check == "memory-queue").unwrap();
+        assert_eq!(finding.actionability, Actionability::Information);
+        assert!(observed_text(finding).contains("waiting_marker"));
+        assert_eq!(
+            report.assessments.iter().find(|assessment| assessment.check == "memory-queue").unwrap().status,
+            CheckStatus::Findings
+        );
+    }
 }
 
 #[test]
@@ -138,60 +299,65 @@ fn healthy_and_ordinary_blocking_reservations_do_not_get_output_delivery_advice(
 
 #[test]
 fn missing_foreign_recycled_or_unknown_scope_and_native_clocks_cannot_authorize_context() {
-    for change in [
-        "identity",
-        "foreign-db",
-        "foreign-endpoint",
-        "native-engine",
-        "scan-database",
-        "native-epoch",
-        "outside-clock",
-        "mixed-clock",
-        "missing-clock",
-        "source-missing",
-        "source-partial",
-        "source-denied",
-        "source-duplicate",
-        "recycled-session",
-    ] {
-        let mut snapshot =
-            snapshot(vec![grant("41", ExecutionGrantState::Waiting), grant("42", ExecutionGrantState::Granted)]);
-        match change {
-            "identity" => snapshot.identity = None,
-            "foreign-db" => {
-                let CollectionTarget::Database(database) = &mut captured(&mut snapshot).context.target else {
-                    panic!()
-                };
-                database.database = "foreign".into();
+    for state in [SourceState::Collected, SourceState::Partial] {
+        for change in [
+            "identity",
+            "foreign-db",
+            "foreign-endpoint",
+            "native-engine",
+            "scan-database",
+            "native-epoch",
+            "outside-clock",
+            "mixed-clock",
+            "missing-clock",
+            "source-missing",
+            "source-denied",
+            "source-empty",
+            "source-inapplicable",
+            "source-duplicate",
+            "recycled-session",
+        ] {
+            let mut snapshot =
+                snapshot(vec![grant("41", ExecutionGrantState::Waiting), grant("42", ExecutionGrantState::Granted)]);
+            snapshot.sources.last_mut().unwrap().state = state;
+            match change {
+                "identity" => snapshot.identity = None,
+                "foreign-db" => {
+                    let CollectionTarget::Database(database) = &mut captured(&mut snapshot).context.target else {
+                        panic!()
+                    };
+                    database.database = "foreign".into();
+                }
+                "foreign-endpoint" => {
+                    snapshot.identity.as_mut().unwrap().location = culprit_core::DatabaseLocation::Unknown
+                }
+                "native-engine" => snapshot.server.engine = culprit_core::Engine::Postgres,
+                "scan-database" => snapshot.server.database = "foreign".into(),
+                "native-epoch" => {
+                    let SourcePartition::InstanceLocal { epoch, .. } = &mut captured(&mut snapshot).context.partition
+                    else {
+                        panic!()
+                    };
+                    *epoch = None;
+                }
+                "outside-clock" => captured(&mut snapshot).context.observed_until = "2019-01-01T00:00:00Z".into(),
+                "mixed-clock" => captured(&mut snapshot).observations[0].observed_at = "2020-01-01T08:01:01Z".into(),
+                "missing-clock" => captured(&mut snapshot).observed_at.clear(),
+                "source-missing" => snapshot.sources.retain(|source| source.source != "current request memory"),
+                "source-denied" => snapshot.sources.last_mut().unwrap().state = SourceState::Unavailable,
+                "source-empty" => snapshot.sources.last_mut().unwrap().state = SourceState::Empty,
+                "source-inapplicable" => snapshot.sources.last_mut().unwrap().state = SourceState::NotApplicable,
+                "source-duplicate" => snapshot.sources.push(snapshot.sources.last().unwrap().clone()),
+                "recycled-session" => {
+                    let mut recycled = grant("43", ExecutionGrantState::Waiting);
+                    recycled.request.as_mut().unwrap().key.session.id = "41".into();
+                    recycled.request.as_mut().unwrap().key.session.generation = "recycled-login".into();
+                    captured(&mut snapshot).observations = vec![grant("41", ExecutionGrantState::Waiting), recycled];
+                }
+                _ => unreachable!(),
             }
-            "foreign-endpoint" => {
-                snapshot.identity.as_mut().unwrap().location = culprit_core::DatabaseLocation::Unknown
-            }
-            "native-engine" => snapshot.server.engine = culprit_core::Engine::Postgres,
-            "scan-database" => snapshot.server.database = "foreign".into(),
-            "native-epoch" => {
-                let SourcePartition::InstanceLocal { epoch, .. } = &mut captured(&mut snapshot).context.partition
-                else {
-                    panic!()
-                };
-                *epoch = None;
-            }
-            "outside-clock" => captured(&mut snapshot).context.observed_until = "2019-01-01T00:00:00Z".into(),
-            "mixed-clock" => captured(&mut snapshot).observations[0].observed_at = "2020-01-01T08:01:01Z".into(),
-            "missing-clock" => captured(&mut snapshot).observed_at.clear(),
-            "source-missing" => snapshot.sources.retain(|source| source.source != "current request memory"),
-            "source-partial" => snapshot.sources.last_mut().unwrap().state = SourceState::Partial,
-            "source-denied" => snapshot.sources.last_mut().unwrap().state = SourceState::Unavailable,
-            "source-duplicate" => snapshot.sources.push(snapshot.sources.last().unwrap().clone()),
-            "recycled-session" => {
-                let mut recycled = grant("43", ExecutionGrantState::Waiting);
-                recycled.request.as_mut().unwrap().key.session.id = "41".into();
-                recycled.request.as_mut().unwrap().key.session.generation = "recycled-login".into();
-                captured(&mut snapshot).observations = vec![grant("41", ExecutionGrantState::Waiting), recycled];
-            }
-            _ => unreachable!(),
+            assert!(finding_at_point(&snapshot).is_none(), "{state:?}: {change}");
         }
-        assert!(finding_at_point(&snapshot).is_none(), "{change}");
     }
 }
 
@@ -204,12 +370,7 @@ fn unrelated_memory_resources_and_unqualified_reservations_keep_the_waiting_requ
             "foreign-resource" => holder.resource = Some(NativeIdentity::new("foreign-pool")),
             "missing-resource" => holder.resource = None,
             "zero-grant" => holder.granted_kibibytes = Some("0".into()),
-            "unresolved-request" => {
-                holder.request = None;
-                holder.scope = None;
-                holder.request_association = RequestGrantAssociation::MissingRequest;
-                holder.statement_relationship = GrantStatementRelationship::Unresolved;
-            }
+            "unresolved-request" => holder = unassociated(holder),
             _ => unreachable!(),
         }
         let finding = finding_at_point(&snapshot(vec![waiter, holder])).unwrap();

@@ -1406,6 +1406,7 @@
   "check.memory_queue.recorded.requested": "Requested memory (KiB)",
   "check.memory_queue.recorded.statement_unavailable": "Statement text is unavailable",
   "check.memory_queue.recorded.summary": "Recorded at {at}. Requests waiting for query memory: {count}.",
+  "check.memory_queue.recorded.summary.partial": "Recorded at {at}. At least {n, plural, one {{count} request was} other {{count} requests were}} waiting for query memory.",
   "check.memory_queue.recorded.title": "Memory-grant waiting recorded for specific requests",
   "check.memory_queue.recorded.waiter": "Observed statement for waiting request {session}/{request}",
   "check.memory_queue.summary.allocations": "Grant waits (RESOURCE_SEMAPHORE) mean queries queue for memory to sort or hash; allocation waits (CMEMTHREAD) mean many sessions contend for one of the server's memory objects, often while compiling.",
