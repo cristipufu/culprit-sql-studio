@@ -1854,6 +1854,17 @@ fn an_aggregate_is_not_titled_by_rows_read_per_row_returned() {
 
 // ── the costliest step of a cheap plan ───────────────────────────────────────────────────────────
 
+fn clear_conversion_facts(plan: &mut Plan) {
+    fn clear_node(node: &mut culprit_core::PlanNode) {
+        node.facts_mut().conversions.clear();
+        for child in &mut node.children {
+            clear_node(child);
+        }
+    }
+    plan.facts_mut().conversions.clear();
+    clear_node(&mut plan.root);
+}
+
 /// Query 7 as a lookup on a unique index, run thousands of times at a millisecond and returning its row each time (not
 /// so often that it's a chatty query): a seek and a key lookup of `looked_up` rows each in a table of 247K rows (SQL
 /// Server's TableCardinality), at `cost` in all.
@@ -1866,6 +1877,7 @@ fn point_lookup(looked_up: f64, cost: f64) -> Snapshot {
     // The demo's query compares a converted column; this one is the plain seek it stands in for.
     plan.warnings.clear();
     plan.props.remove("PlanAffectingConvert");
+    clear_conversion_facts(plan);
     plan.total_cost = cost;
     plan.root.subtree_cost = cost;
     plan.root.self_cost = 0.0;

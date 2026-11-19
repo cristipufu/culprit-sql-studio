@@ -639,20 +639,12 @@ impl MismatchAdvice {
 }
 
 fn converted_tvp(plan: &Plan, operand: &str) -> Option<String> {
-    let expression = column_reference_expression(operand);
-    let parts = native_column_parts(plan, expression)?;
     let mut ids = std::collections::BTreeSet::new();
     let nodes = plan.nodes();
     if !nodes.iter().all(|node| ids.insert(node.id)) {
         return None;
     }
-    let input = unique_conversion_relation(&nodes, &parts)?;
-    if expression.len() != operand.len() {
-        let alias = native_column_parts(plan, operand.get(expression.len() + " as ".len()..)?)?;
-        if unique_conversion_relation(&nodes, &alias)?.id != input.id {
-            return None;
-        }
-    }
+    let input = native_conversion_owner(plan, operand)?;
     if !matches!(input.kind, NodeKind::Scan | NodeKind::Seek)
         || input.facts().relational_input?.qualified_kind()
             != crate::plan_facts::RelationalInputKind::TableValuedParameter
@@ -660,6 +652,27 @@ fn converted_tvp(plan: &Plan, operand: &str) -> Option<String> {
         return None;
     }
     input.object.clone()
+}
+
+pub(super) fn native_conversion_owner<'a>(plan: &'a Plan, operand: &str) -> Option<&'a PlanNode> {
+    let references = native_conversion_references(plan, operand)?;
+    let nodes = plan.nodes();
+    let owner = unique_conversion_relation(&nodes, references.first()?)?;
+    for reference in references.iter().skip(1) {
+        if unique_conversion_relation(&nodes, reference)?.id != owner.id {
+            return None;
+        }
+    }
+    Some(owner)
+}
+
+pub(super) fn native_conversion_references(plan: &Plan, operand: &str) -> Option<Vec<Vec<String>>> {
+    let expression = column_reference_expression(operand);
+    let mut references = vec![native_column_parts(plan, expression)?];
+    if expression.len() != operand.len() {
+        references.push(native_column_parts(plan, operand.get(expression.len() + " as ".len()..)?)?);
+    }
+    Some(references)
 }
 
 fn native_column_parts(plan: &Plan, expression: &str) -> Option<Vec<String>> {

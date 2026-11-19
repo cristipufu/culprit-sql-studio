@@ -1087,7 +1087,7 @@
         {
           "id": "7",
           "note": "Implicit conversion",
-          "plan_node": null
+          "plan_node": 2
         }
       ],
       "severity": "medium",

@@ -521,7 +521,7 @@ fix: Make the types match: send the value as non-Unicode text (SqlDbType.VarChar
 verify:
   1. Re-scan after the change; the warning should be gone from this query's plan.
 queries:
-  - 7: 7% of database time
+  - 7: 7% of database time · plan step 2
     note: Implicit conversion
 brief:
     # A type mismatch on customers.email stops a read from customers from seeking an index

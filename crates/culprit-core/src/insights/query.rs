@@ -7,41 +7,20 @@ pub(super) fn implicit_conversion(cx: &Cx) -> Vec<Draft> {
     if cx.engine() != Engine::Mssql {
         return Vec::new();
     }
-    // Only the warnings about a converted column the table still has (see `current_conversions`); older scans flagged
-    // every conversion, and a plan captured before a column changed type still shows its old conversion.
-    let plan_facts = cx.plan.facts();
-    let conversions: Vec<&crate::PlanConversion> =
-        plan_facts.conversions.iter().filter(|c| !current_conversions(cx.plan, &c.expression).is_empty()).collect();
-    let plan_lines: Vec<String> = conversions.iter().map(|c| c.text()).collect();
-    let node = cx
-        .nodes
-        .iter()
-        // A converted column is the problem; a converted parameter, variable or literal costs nothing.
-        .filter(|n| !current_conversions(cx.plan, &conditions(n)).is_empty())
-        .max_by(|a, b| a.self_cost.total_cmp(&b.self_cost))
-        .copied();
-    if plan_lines.is_empty() && node.is_none() {
-        return Vec::new();
-    }
-    let seek_line = conversions.iter().find(|c| c.issue == crate::PlanConversionIssue::SeekPlan).map(|c| c.text());
-    let text =
-        seek_line.clone().or_else(|| plan_lines.first().cloned()).or_else(|| node.map(conditions)).unwrap_or_default();
-    // What the conversion costs is SQL Server's own verdict, never inferred from the plan's shape: a scan may have no
-    // index on the column to seek, or be the right plan for a small table. "Seek Plan" means it kept SQL Server from
-    // seeking an index; "Cardinality Estimate" that it swayed the row estimates; no warning, that it changed nothing.
-    // SQL Server words it "may affect": an operator that seeks all the same (a range through the conversion) wasn't
-    // stopped.
-    let blocks_seek = seek_line.is_some() && node.is_none_or(|n| n.kind != NodeKind::Seek);
-    let converted = current_conversions(cx.plan, &text).into_iter().next();
-    let column = converted.as_ref().map(|(c, _)| c.clone()).or_else(|| convert_column(&text));
-    let target = converted.map(|(_, t)| t);
+    let Some(evidence) = conversion_evidence(cx.plan) else { return Vec::new() };
+    let node = evidence.node();
+    let text = evidence.expression();
+    let effect = evidence.effect();
+    let blocks_seek = evidence.blocks_seek();
+    let column = Some(evidence.column().to_string());
+    let target = Some(evidence.target().to_string());
     let impact = node.map_or(0.05, |n| cx.share(n));
     let mut d =
         Draft::new("implicit-conversion", InsightArea::Query, impact, node.map(|n| vec![n.id]).unwrap_or_default());
     // The column and the type it is converted to, where the plan names them.
     let (named, col) = (known(column.is_some()), column.clone().unwrap_or_default());
     let (typed, to) = (known(target.is_some()), target.clone().unwrap_or_default());
-    let expression = format::predicate(&convert_expression(&text));
+    let expression = format::predicate(text);
     if blocks_seek {
         d.floor = Severity::Medium;
         d.title = t!("insight.implicit_conversion.title.blocks_seek", named = named, column = &col);
@@ -53,7 +32,15 @@ pub(super) fn implicit_conversion(cx: &Cx) -> Vec<Draft> {
             target = &to,
             expression = &expression
         );
-    } else if !plan_lines.is_empty() {
+    } else if let Some(title) = effect.warning_title(&col) {
+        d.cap = Severity::Low;
+        d.title = title;
+        d.detail = format!(
+            "{} {}",
+            t!("insight.implicit_conversion.detail.warning", column = &col, target = &to, expression = &expression),
+            effect.consequence().expect("a neutral native warning retains its qualified consequence")
+        );
+    } else if effect == ConversionEffect::Estimates {
         d.cap = Severity::Low;
         d.title = t!("insight.implicit_conversion.title.estimates", named = named, column = &col);
         d.detail = t!(
@@ -76,7 +63,7 @@ pub(super) fn implicit_conversion(cx: &Cx) -> Vec<Draft> {
             expression = &expression
         );
     }
-    let advice = MismatchAdvice::from_plan(Some(cx.plan), Some(&text), column.as_deref(), target.as_deref());
+    let advice = MismatchAdvice::from_plan(Some(cx.plan), Some(text), column.as_deref(), target.as_deref());
     d.fix = advice.fix(column.as_deref(), target.as_deref());
     d.verify = advice.verification().unwrap_or_else(|| {
         if blocks_seek {
@@ -86,24 +73,6 @@ pub(super) fn implicit_conversion(cx: &Cx) -> Vec<Draft> {
         }
     });
     vec![d]
-}
-
-/// `CONVERT_IMPLICIT(nvarchar(256),[db].[dbo].[Users].[Email],0)` → "Users.Email".
-pub(super) fn convert_column(text: &str) -> Option<String> {
-    let start = text.find("CONVERT_IMPLICIT(")? + "CONVERT_IMPLICIT(".len();
-    let rest = &text[start..];
-    let after_type = rest.find("),").map(|i| &rest[i + 2..]).or_else(|| rest.split_once(',').map(|(_, r)| r))?;
-    let expr = after_type.split(',').next()?;
-    let parts: Vec<String> = expr.split('.').map(clean_identifier).collect();
-    match parts.as_slice() {
-        [.., table, column] if !column.is_empty() && !column.starts_with('@') => Some(format!("{table}.{column}")),
-        [column] if !column.is_empty() && !column.starts_with('@') => Some(column.clone()),
-        _ => None,
-    }
-}
-
-pub(super) fn convert_expression(text: &str) -> String {
-    text.split_once(": ").map(|(_, e)| e.to_string()).unwrap_or_else(|| text.to_string())
 }
 
 pub(super) fn non_sargable(cx: &Cx) -> Vec<Draft> {

@@ -158,7 +158,8 @@ fn warned(mut s: Snapshot, id: &str, warning: culprit_core::PlanWarning) -> Snap
 }
 
 // What plan-warnings says, word for word, beyond the demo's (a mismatch SQL Server says stops a seek): a mismatch that
-// only affects estimates, one whose parameters or column aren't known, the same mismatch in two statements (with a
+// only affects estimates, one whose parameters aren't known, withheld flags with no conversion evidence, and the
+// same mismatch in two statements (with a
 // day's time and without, stopped), a spill on each engine, a join without a condition, one the engine dropped and one
 // asked for, and a statistics warning with what the catalog says now and without one. Its messages come from
 // locales/en.json.
@@ -185,6 +186,7 @@ fn plan_warnings_say_what_the_plan_warned_in_english() {
         n.predicate = n.predicate.take().filter(|p| !p.contains("CONVERT"));
         n.seek_predicate = n.seek_predicate.take().filter(|p| !p.contains("CONVERT"));
     });
+    assert!(said(no_column).is_empty(), "warning flags alone do not establish a current column conversion");
     let mut two_days = twice(snapshot());
     crate::last_hours(two_days.workload.as_mut().unwrap(), 48.0);
     two_days.workload.as_mut().unwrap().timeline = None;
@@ -198,7 +200,6 @@ fn plan_warnings_say_what_the_plan_warned_in_english() {
             said(estimate()),
             said(declared),
             said(undeclared),
-            said(no_column),
             said(two_days),
             said(stopped(stopped(twice(estimate()), "7"), "70")),
         ]
@@ -230,14 +231,6 @@ fn plan_warnings_say_what_the_plan_warned_in_english() {
                 metric: Column: customers.email\n\
                 note: Implicit conversion\n\
                 fix: Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nvarchar(200). Changing a column rewrites it and the indexes on it.\n\
-                verify: Re-scan after the change; the warning should be gone from this query's plan.",
-            "A type mismatch slows down a read from customers · Low · Medium\n\
-                The database has to convert a column before comparing it with a parameter of a different type. SQL Server warns that the conversion may affect its row estimates, which can lead it to a poorer plan; it doesn't say an index can't be used. The application declares its parameters as `@P1 nvarchar(4000)`: Unicode strings compared with a non-Unicode column.\n\
-                impact: 54% of DB time\n\
-                metric: Share of DB time\n\
-                metric: Average duration\n\
-                note: Implicit conversion\n\
-                fix: Make the types match: send the value with the column's own type, or change the column to the type the application sends if that's what it should hold. Changing a column rewrites it and the indexes on it.\n\
                 verify: Re-scan after the change; the warning should be gone from this query's plan.",
             "A type mismatch on customers.email stops 2 queries from seeking an index · Low · High\n\
                 The database has to convert customers.email before comparing it with a parameter of a different type (`CONVERT_IMPLICIT(nvarchar(200),[culprit_demo].[shop].[customers].[email],0)=[@P1]`). SQL Server warns that the conversion keeps it from searching an index, so it reads every row instead. The application declares its parameters as `@P1 nvarchar(4000)`: Unicode strings compared with a non-Unicode column. The same mismatch appears in 2 queries that together take 100% of database time.\n\
@@ -753,6 +746,178 @@ fn tvp_conversion_findings_do_not_merge_different_query_or_input_contracts() {
                 assert_eq!(finding.id, "plan-warnings:implicit-conversion:r.email");
                 assert_eq!(fix, &culprit_core::insights::mismatch_fix(Some("r.email"), Some("nvarchar(64)")));
             }
+        }
+    }
+}
+
+#[test]
+fn conversion_findings_share_the_native_warning_verdict_and_exact_operator_with_plan_insights() {
+    use culprit_core::plan_facts::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
+    let tvp = RelationalInput {
+        kind: RelationalInputKind::TableValuedParameter,
+        provenance: RelationalInputProvenance::NativeParameterMetadata,
+    };
+    for case in [
+        "node-only",
+        "unrelated-seek",
+        "same-owner-seek",
+        "ambiguous-owner",
+        "duplicate-node",
+        "scalar-only",
+        "scalar-with-unrelated-column",
+        "other-issue",
+    ] {
+        let mut snapshot = tvp_conversion_snapshot(Some(tvp));
+        let query = snapshot.workload.as_mut().unwrap().queries.iter_mut().find(|query| query.id == "7").unwrap();
+        let plan = query.plan.as_mut().unwrap();
+        plan.root.id = 1;
+        plan.facts_mut().conversions[0].issue = culprit_core::PlanConversionIssue::SeekPlan;
+        let warning = plan.facts().conversions[0].clone();
+        match case {
+            "node-only" => {
+                plan.facts_mut().conversions.clear();
+                plan.root.facts_mut().conversions.push(warning);
+                plan.root.predicate = None;
+                plan.root.warnings.clear();
+                plan.warnings.clear();
+            }
+            "same-owner-seek" => {
+                plan.root.kind = culprit_core::NodeKind::Seek;
+                plan.root.op = "Index Seek".into();
+            }
+            "unrelated-seek" | "ambiguous-owner" | "duplicate-node" => {
+                let input = plan.root.clone();
+                let mut peer = input.clone();
+                peer.id = if case == "duplicate-node" { 1 } else { 2 };
+                peer.kind = culprit_core::NodeKind::Seek;
+                peer.op = "Index Seek".into();
+                peer.self_cost = 100.0;
+                if case != "ambiguous-owner" {
+                    peer.object = Some("shop.customers".into());
+                    peer.facts_mut().table_alias = Some("x".into());
+                    peer.facts_mut().relational_input = None;
+                    let expression = "CONVERT_IMPLICIT(nvarchar(128),[x].[email],0)=[@peer]";
+                    peer.predicate = Some(expression.into());
+                    peer.facts_mut().conversions = vec![culprit_core::PlanConversion {
+                        issue: culprit_core::PlanConversionIssue::CardinalityEstimate,
+                        expression: expression.into(),
+                    }];
+                }
+                let mut root = input.clone();
+                root.id = 0;
+                root.kind = culprit_core::NodeKind::Join;
+                root.op = "Hash Match".into();
+                root.object = None;
+                root.predicate = None;
+                root.facts = culprit_core::PlanNodeFacts::default();
+                root.warnings.clear();
+                root.children = vec![input, peer];
+                plan.root = root;
+            }
+            "scalar-only" => {
+                let expression = "CONVERT_IMPLICIT(nvarchar(64),[@needle],0)";
+                plan.facts_mut().conversions[0].expression = expression.into();
+                plan.root.predicate = Some(expression.into());
+            }
+            "scalar-with-unrelated-column" => {
+                plan.facts_mut().conversions[0].expression = "CONVERT_IMPLICIT(nvarchar(64),[@needle],0)".into();
+            }
+            "other-issue" => {
+                plan.facts_mut().conversions[0].issue = culprit_core::PlanConversionIssue::Other("Future Issue".into())
+            }
+            _ => unreachable!(),
+        }
+        let evidence = culprit_core::insights::conversion_evidence(plan);
+        let expected = evidence
+            .as_ref()
+            .filter(|evidence| evidence.has_native_warning())
+            .map(|evidence| (evidence.node().map(|node| node.id), evidence.blocks_seek()));
+        let report = culprit_checks::analyze(snapshot);
+        let findings: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|finding| finding.id.starts_with("plan-warnings:implicit-conversion:"))
+            .collect();
+        if let Some((node, blocks_seek)) = expected {
+            assert_eq!(findings.len(), 1, "{case}");
+            let finding = findings[0];
+            assert_eq!(finding.queries.len(), 1);
+            assert_eq!(finding.queries[0].id, "7");
+            assert_eq!(finding.queries[0].plan_node, node, "{case}");
+            if matches!(case, "same-owner-seek" | "other-issue") {
+                assert_eq!(finding.actionability, culprit_core::Actionability::Information);
+                assert!(finding.summary.contains(&if case == "same-owner-seek" {
+                    culprit_core::t!("insight.implicit_conversion.consequence.seek_observed")
+                } else {
+                    culprit_core::t!("insight.implicit_conversion.consequence.other_warning")
+                }));
+            }
+            assert_eq!(
+                finding.confidence,
+                if blocks_seek { culprit_core::Confidence::High } else { culprit_core::Confidence::Medium },
+                "{case}"
+            );
+        } else {
+            assert!(findings.is_empty(), "{case}");
+        }
+    }
+}
+
+#[test]
+fn merging_neutral_and_lost_seek_warnings_keeps_one_consistent_representative_in_both_orders() {
+    for neutral_is_other in [false, true] {
+        for strong_first in [false, true] {
+            let mut snapshot = tvp_conversion_snapshot(None);
+            let workload = snapshot.workload.as_mut().unwrap();
+            let mut neutral = workload.queries.iter().find(|query| query.id == "7").unwrap().clone();
+            neutral.text = "SELECT r.email FROM shop.customers r WHERE r.email=@needle".into();
+            let plan = neutral.plan.as_mut().unwrap();
+            plan.statement = Some(neutral.text.clone());
+            plan.root.object = Some("shop.customers".into());
+            plan.facts_mut().conversions[0].issue = if neutral_is_other {
+                culprit_core::PlanConversionIssue::Other("Future Issue".into())
+            } else {
+                plan.root.kind = culprit_core::NodeKind::Seek;
+                plan.root.op = "Index Seek".into();
+                culprit_core::PlanConversionIssue::SeekPlan
+            };
+            let mut strong = neutral.clone();
+            strong.id = "lost-seek".into();
+            let plan = strong.plan.as_mut().unwrap();
+            plan.root.kind = culprit_core::NodeKind::Scan;
+            plan.root.op = "Index Scan".into();
+            let expression = "CONVERT_IMPLICIT(nvarchar(128),[r].[email],0)=[@needle]";
+            plan.root.predicate = Some(expression.into());
+            plan.facts_mut().conversions[0] = culprit_core::PlanConversion {
+                issue: culprit_core::PlanConversionIssue::SeekPlan,
+                expression: expression.into(),
+            };
+            workload.queries = if strong_first { vec![strong, neutral] } else { vec![neutral, strong] };
+            let report = culprit_checks::analyze(snapshot);
+            let findings: Vec<_> = report
+                .findings
+                .iter()
+                .filter(|finding| finding.id == "plan-warnings:implicit-conversion:r.email")
+                .collect();
+            assert_eq!(findings.len(), 1);
+            let finding = findings[0];
+            assert_eq!(finding.actionability, culprit_core::Actionability::NeedsAttention);
+            assert_eq!(finding.confidence, culprit_core::Confidence::High);
+            assert!(finding.summary.contains(expression));
+            assert!(finding.summary.contains(&culprit_core::t!("check.plan_warnings.summary.blocks_seek")));
+            assert!(
+                !finding.summary.contains(&culprit_core::t!("insight.implicit_conversion.consequence.seek_observed"))
+            );
+            assert!(
+                !finding.summary.contains(&culprit_core::t!("insight.implicit_conversion.consequence.other_warning"))
+            );
+            assert_eq!(
+                finding.fix.as_ref().unwrap().summary,
+                culprit_core::insights::mismatch_fix(Some("r.email"), Some("nvarchar(128)"))
+            );
+            let mut queries: Vec<_> = finding.queries.iter().map(|query| query.id.as_str()).collect();
+            queries.sort_unstable();
+            assert_eq!(queries, vec!["7", "lost-seek"]);
         }
     }
 }

@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
-use culprit_core::insights::{MismatchAdvice, PlanInsight, StaleIndexStatistics};
+use culprit_core::insights::{
+    ConversionEffect, ConversionEvidence, MismatchAdvice, PlanInsight, StaleIndexStatistics, conversion_evidence,
+};
 use culprit_core::t;
 
 pub fn plan_warnings_info() -> CheckInfo {
@@ -27,14 +29,11 @@ check!(
 /// A warning in the plans of one or more statements, and what it establishes: one cause (a type mismatch on one
 /// column) is one case, however many statements' plans show it.
 pub struct PlanWarningCase<'s> {
-    /// The first statement whose plan warned.
+    /// The representative statement, selected with its strongest supported native verdict.
     query: &'s QueryStat,
     impact: QueryImpact,
-    /// What the plan warned of, as the first statement's plan shows it.
+    /// The representative plan's warning and the advice that its own native evidence permits.
     warned: Warned,
-    /// The type mismatch to describe, where several statements show it: SQL Server's verdict that it stops a seek, from
-    /// whichever statement's plan says so.
-    said: Option<Conversion>,
     severity: Severity,
     confidence: Confidence,
     /// A warning about a plan that runs cheaply, or one a saved plan alone can't establish: information.
@@ -77,6 +76,7 @@ struct Conversion {
     target: Option<String>,
     /// SQL Server says the conversion stops a seek ("Seek Plan"), not only that it affects estimates.
     blocks_seek: bool,
+    effect: ConversionEffect,
     /// The conversion as the plan writes it.
     expression: Option<String>,
     /// The parameters the application declares.
@@ -112,6 +112,7 @@ fn plan_warning_cases(snapshot: &Snapshot) -> Vec<PlanWarningCase<'_>> {
         if impact.share < 0.005 {
             continue;
         }
+        let mut conversion = conversion_evidence(plan);
         for warning in [
             PlanWarning::ImplicitConversion,
             PlanWarning::Spill,
@@ -119,10 +120,14 @@ fn plan_warning_cases(snapshot: &Snapshot) -> Vec<PlanWarningCase<'_>> {
             PlanWarning::MissingStatistics,
         ] {
             let nodes: Vec<&PlanNode> = plan.nodes().into_iter().filter(|n| n.warnings.contains(&warning)).collect();
-            if nodes.is_empty() && !plan.warnings.contains(&warning) {
+            let conversion = if warning == PlanWarning::ImplicitConversion { conversion.take() } else { None };
+            if nodes.is_empty()
+                && !plan.warnings.contains(&warning)
+                && !conversion.as_ref().is_some_and(ConversionEvidence::has_native_warning)
+            {
                 continue;
             }
-            if let Some(case) = plan_warning_case(snapshot, q, &impact, warning, nodes.first().copied()) {
+            if let Some(case) = plan_warning_case(snapshot, q, &impact, warning, nodes.first().copied(), conversion) {
                 out.push(case);
             }
         }
@@ -168,10 +173,10 @@ fn merge_same_cause<'s>(snapshot: &'s Snapshot, cases: Vec<PlanWarningCase<'s>>)
                 if c.confidence == Confidence::High && m.confidence != Confidence::High {
                     m.confidence = Confidence::High;
                     m.severity = m.severity.max(c.severity);
-                    m.said = match &c.warned {
-                        Warned::Conversion(conversion) => Some(conversion.clone()),
-                        _ => None,
-                    };
+                    m.query = c.query;
+                    m.impact = c.impact;
+                    m.warned = c.warned;
+                    m.informational = c.informational;
                 }
                 for step in c.steps {
                     if !m.steps.iter().any(|(q, _)| q.id == step.0.id) {
@@ -199,51 +204,22 @@ fn plan_warning_case<'s>(
     q: &'s QueryStat,
     impact: &QueryImpact,
     warning: PlanWarning,
-    node: Option<&PlanNode>,
+    mut node: Option<&'s PlanNode>,
+    conversion: Option<ConversionEvidence<'s>>,
 ) -> Option<PlanWarningCase<'s>> {
     let mut informational = false;
     let (warned, severity, confidence) = match warning {
         PlanWarning::ImplicitConversion => {
-            let mut named: Vec<culprit_core::PlanConversion> =
-                node.into_iter().flat_map(|n| n.facts().conversions.clone()).collect();
-            named.extend(q.plan.iter().flat_map(|p| p.facts().conversions.clone()));
-            if named.is_empty() {
-                named.extend(
-                    node.into_iter()
-                        .flat_map(|n| [n.predicate.as_ref(), n.seek_predicate.as_ref()])
-                        .flatten()
-                        .filter(|s| s.contains("CONVERT"))
-                        .map(|expression| culprit_core::PlanConversion {
-                            issue: culprit_core::PlanConversionIssue::Other("Convert".into()),
-                            expression: expression.clone(),
-                        }),
-                );
-            }
-            let still = |c: &&culprit_core::PlanConversion| {
-                q.plan.as_ref().map_or_else(
-                    || converts_column(&c.expression),
-                    |p| !current_conversions(p, &c.expression).is_empty(),
-                )
-            };
-            let lines: Vec<_> = named.iter().filter(still).collect();
-            if !named.is_empty() && lines.is_empty() {
-                return None;
-            }
-            let issue = lines
-                .iter()
-                .find(|c| c.issue == culprit_core::PlanConversionIssue::SeekPlan)
-                .or(lines.first())
-                .copied();
-            // "Can't seek an index" is SQL Server's verdict (a "Seek Plan" warning), not a reading of the conversion:
-            // without it the plan may still seek (a range through the conversion), and the warning is about its
-            // estimates. With it, the plan may still scan the index, so the index isn't unused: it can't be searched.
-            let blocks_seek = issue.is_some_and(|c| c.issue == culprit_core::PlanConversionIssue::SeekPlan);
-            let converted = issue.and_then(|c| current_conversions(q.plan.as_ref()?, &c.expression).into_iter().next());
-            let column = converted.as_ref().map(|(c, _)| c.clone());
-            let target = converted.map(|(_, t)| t);
+            let evidence = conversion.filter(ConversionEvidence::has_native_warning)?;
+            node = evidence.node();
+            let blocks_seek = evidence.blocks_seek();
+            let effect = evidence.effect();
+            informational = matches!(effect, ConversionEffect::SeekObserved | ConversionEffect::OtherWarning);
+            let column = Some(evidence.column().to_string());
+            let target = Some(evidence.target().to_string());
             let advice = MismatchAdvice::from_plan(
                 q.plan.as_ref(),
-                issue.map(|c| c.expression.as_str()),
+                Some(evidence.expression()),
                 column.as_deref(),
                 target.as_deref(),
             );
@@ -251,7 +227,8 @@ fn plan_warning_case<'s>(
                 column,
                 target,
                 blocks_seek,
-                expression: issue.map(|c| c.expression.clone()),
+                effect,
+                expression: Some(evidence.expression().to_string()),
                 parameters: q.parameters.clone(),
                 advice,
             };
@@ -301,7 +278,6 @@ fn plan_warning_case<'s>(
         query: q,
         impact: query_impact(snapshot, &[q])?,
         warned,
-        said: None,
         severity,
         confidence,
         informational,
@@ -340,14 +316,16 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
     f.confidence = case.confidence;
     match &case.warned {
         Warned::Conversion(conversion) => {
-            f.title = match &conversion.column {
-                Some(c) if conversion.blocks_seek => {
-                    t!("check.plan_warnings.title.conversion_stops_seek", column = c, query = query, tense = tense)
-                }
-                Some(c) => t!("check.plan_warnings.title.conversion", column = c, query = query, tense = tense),
-                None => t!("check.plan_warnings.title.conversion_unknown", query = query, tense = tense),
-            };
-            f.summary = conversion_summary(case.said.as_ref().unwrap_or(conversion));
+            f.title = conversion.effect.warning_title(conversion.column.as_deref().unwrap_or_default()).unwrap_or_else(
+                || match &conversion.column {
+                    Some(c) if conversion.blocks_seek => {
+                        t!("check.plan_warnings.title.conversion_stops_seek", column = c, query = query, tense = tense)
+                    }
+                    Some(c) => t!("check.plan_warnings.title.conversion", column = c, query = query, tense = tense),
+                    None => t!("check.plan_warnings.title.conversion_unknown", query = query, tense = tense),
+                },
+            );
+            f.summary = conversion_summary(conversion);
             f.fix = Some(Fix {
                 summary: conversion.advice.fix(conversion.column.as_deref(), conversion.target.as_deref()),
                 sql: None,
@@ -470,7 +448,22 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
                 tense = tense
             )
         } else {
-            t!("check.plan_warnings.title.shared", column = column, count = shared.queries.to_string(), tense = tense)
+            match &case.warned {
+                Warned::Conversion(conversion) => conversion.effect.warning_title(&column).unwrap_or_else(|| {
+                    t!(
+                        "check.plan_warnings.title.shared",
+                        column = &column,
+                        count = shared.queries.to_string(),
+                        tense = tense
+                    )
+                }),
+                _ => t!(
+                    "check.plan_warnings.title.shared",
+                    column = column,
+                    count = shared.queries.to_string(),
+                    tense = tense
+                ),
+            }
         };
         f.summary = [
             f.summary.clone(),
@@ -501,11 +494,13 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
 /// What a type mismatch makes the database do, what SQL Server says it costs, and what the application declares.
 fn conversion_summary(c: &Conversion) -> String {
     let column = c.column.clone().unwrap_or_else(|| t!("check.plan_warnings.summary.a_column"));
-    let consequence = if c.blocks_seek {
-        t!("check.plan_warnings.summary.blocks_seek")
-    } else {
-        t!("check.plan_warnings.summary.estimates")
-    };
+    let consequence = c.effect.consequence().unwrap_or_else(|| {
+        if c.blocks_seek {
+            t!("check.plan_warnings.summary.blocks_seek")
+        } else {
+            t!("check.plan_warnings.summary.estimates")
+        }
+    });
     if let Some(summary) = c.advice.summary() {
         return format!("{summary} {consequence}");
     }

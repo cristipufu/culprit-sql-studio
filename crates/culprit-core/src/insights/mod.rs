@@ -21,6 +21,7 @@ use crate::sql::{clean_identifier, split_top_level_and as top_level_and};
 use crate::{key, t};
 
 mod catalog;
+mod conversions;
 mod growth;
 mod index;
 mod memory;
@@ -43,6 +44,7 @@ pub use catalog::{
 #[cfg(test)]
 use catalog::{CatalogTable, mark_index_kinds, mark_table_indexes};
 use catalog::{table_indexes, updates_statistics};
+pub use conversions::{ConversionEffect, ConversionEvidence, conversion_evidence};
 use index::*;
 use memory::*;
 use parallelism::*;

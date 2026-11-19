@@ -2,7 +2,6 @@
 //! the worse, statements that got slower, runs that swing with their values, and spills to temporary files. What several of them share (how a slow log's time is named, the
 //! statement's shape) is here; each check is a file of its own.
 
-use culprit_core::insights::{converts_column, current_conversions};
 use culprit_core::{
     Capability, Category, CheckInfo, Confidence, Engine, Finding, Fix, Metric, NodeKind, Plan, PlanNode, PlanVariant,
     PlanWarning, QueryRef, QueryStat, Severity, Snapshot, SubjectKind, Unit, format,
