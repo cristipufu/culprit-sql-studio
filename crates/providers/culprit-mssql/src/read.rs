@@ -358,16 +358,7 @@ impl ReadSession {
     }
 
     pub(crate) async fn close(&mut self) -> culprit_core::telemetry::SourceShutdown {
-        // Release both the cancellation sender and any blocked channel delivery before joining the native owner.
-        self.streaming.take();
-        if self.acquiring {
-            self.cancellation_confirmed = false;
-        }
-        if self.active.is_some() {
-            // Keep the handle in this owner across await: cancelling close must not admit replacement SQL.
-            // finish_active records shutdown uncertainty; the return value is represented by SourceShutdown below.
-            let _ = self.finish_active().await;
-        }
+        self.settle_native().await;
         if let Some(client) = self.client.take()
             && self.cancellation_confirmed
         {
@@ -379,6 +370,19 @@ impl ReadSession {
         let shutdown = self.pool.source_shutdown();
         self.native_work.close(shutdown, self.connection_generation);
         shutdown
+    }
+
+    async fn settle_native(&mut self) {
+        // Release both the cancellation sender and any blocked channel delivery before joining the native owner.
+        self.streaming.take();
+        if self.acquiring {
+            self.cancellation_confirmed = false;
+        }
+        if self.active.is_some() {
+            // Keep the handle in this owner across await: cancelling close must not admit replacement SQL.
+            // finish_active records shutdown uncertainty; the return value is represented by SourceShutdown below.
+            let _ = self.finish_active().await;
+        }
     }
 
     pub(crate) async fn finish<T>(&mut self, result: Result<T>) -> Result<T> {

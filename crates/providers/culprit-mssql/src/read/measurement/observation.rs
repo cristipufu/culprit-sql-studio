@@ -11,6 +11,13 @@ impl SampleSource for Observer {
     }
 }
 
+pub(super) async fn settled_sample(owner: &mut ReadSession, observer: &mut impl SampleSource) -> Result<Sample> {
+    // The original task is joined while its client remains retained. A quiet independent sample grants no
+    // acknowledgement or reconnect authority; close still owns the source fence and physical release.
+    owner.settle_native().await;
+    observer.sample().await
+}
+
 pub(super) async fn await_observed<T>(
     work: impl Future<Output = ReadResult<T>>,
     observer: &mut impl SampleSource,

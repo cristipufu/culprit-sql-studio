@@ -45,6 +45,118 @@ fn completed() -> SessionWork {
     work
 }
 
+fn boundary(work: &mut SessionWork, at: u32, cpu: i64, ordinal: u32) {
+    let Observation::Point(point) = sample(&authority(at), &self_row(Some(cpu), Some(30)), ordinal, 1) else {
+        panic!("native boundary fixture")
+    };
+    work.source_boundary(&point.authority, point.session, point.point, point.generation);
+}
+
+#[test]
+fn independent_boundaries_include_the_first_dispatch_and_final_settlement_without_relabeling_self_samples() {
+    let mut work = SessionWork::default();
+    work.observe(Observation::Started);
+    boundary(&mut work, 0, 5, 0);
+    work.observe(sample(&authority(1), &self_row(Some(10), Some(30)), 3, 1));
+    work.observe(sample(&authority(2), &self_row(Some(17), Some(20)), 9, 1));
+    boundary(&mut work, 3, 20, 9);
+    assert_eq!(measured(&work), None, "a quiet independent sample cannot settle the original native owner");
+    work.close(SourceShutdown::Quiescent, 1);
+    assert_eq!(measured(&work).as_deref(), Some("15"));
+    let interval = body(&work).interval.unwrap();
+    assert_eq!(interval.initial.query_ordinal, 0);
+    assert_eq!(interval.latest.unwrap().query_ordinal, 9);
+
+    let mut ordinary = completed();
+    ordinary.close(SourceShutdown::Quiescent, 1);
+    assert_eq!(body(&ordinary).interval.unwrap().initial.query_ordinal, 3);
+    assert_eq!(measured(&ordinary).as_deref(), Some("7"));
+}
+
+#[test]
+fn a_boundary_never_repairs_an_original_scope_session_counter_or_settlement_failure() {
+    for failure in ["scope", "session", "counters", "unconfirmed", "missing-context"] {
+        let mut work = SessionWork::default();
+        work.observe(Observation::Started);
+        boundary(&mut work, 0, 5, 0);
+        if failure != "missing-context" {
+            let source = if failure == "scope" {
+                crate::local_source::test_azure_authority(&replace(
+                    &row(5),
+                    &[
+                        ("updateability", Val::Text("READ_ONLY".into())),
+                        ("observed_at", Val::Text("2020-01-01T06:00:01Z".into())),
+                    ],
+                ))
+                .unwrap()
+            } else {
+                authority(1)
+            };
+            let row = if failure == "session" {
+                replace(&self_row(Some(10), Some(30)), &[("collector_session_id", Val::Int(72))])
+            } else {
+                self_row(Some(10), Some(30))
+            };
+            work.observe(sample(&source, &row, 3, 1));
+        }
+        boundary(&mut work, 3, if failure == "counters" { 1 } else { 20 }, 3);
+        work.close(if failure == "unconfirmed" { SourceShutdown::Unconfirmed } else { SourceShutdown::Quiescent }, 1);
+        assert_eq!(measured(&work), None, "{failure}");
+        assert!(work.snapshot().unwrap().is_valid(), "{failure}");
+    }
+}
+
+#[test]
+fn a_zero_self_sample_or_final_without_a_before_dispatch_boundary_cannot_claim_a_whole_window() {
+    let mut work = SessionWork::default();
+    work.observe(sample(&authority(0), &self_row(Some(5), Some(30)), 0, 1));
+    work.close(SourceShutdown::Quiescent, 1);
+    assert_eq!(body(&work).issue, Some(NativeReadWorkIssue::InvalidObservation));
+
+    let mut work = completed();
+    boundary(&mut work, 3, 20, 9);
+    work.close(SourceShutdown::Quiescent, 1);
+    assert_eq!(body(&work).issue, Some(NativeReadWorkIssue::InvalidObservation));
+    assert_eq!(body(&work).interval.unwrap().initial.query_ordinal, 3);
+}
+
+#[test]
+fn a_partial_self_point_cannot_substitute_for_a_missing_final_independent_boundary() {
+    let mut work = SessionWork::default();
+    boundary(&mut work, 0, 5, 0);
+    work.observe(sample(&authority(1), &self_row(Some(10), Some(30)), 3, 1));
+    work.close(SourceShutdown::Quiescent, 1);
+    assert_eq!(body(&work).issue, Some(NativeReadWorkIssue::MissingFinalObservation));
+    assert_eq!(measured(&work), None);
+}
+
+#[test]
+fn unrelated_source_capability_discovery_does_not_change_independent_boundary_identity_or_relax_self_points() {
+    let mut prepared = authority(0);
+    prepared.activity.request_page_server_read_capability = PageServerReadAvailability::Unknown;
+    let mut captured = authority(1);
+    captured.activity.request_page_server_read_capability = PageServerReadAvailability::Available;
+    let mut work = SessionWork::default();
+    let Observation::Point(point) = sample(&prepared, &self_row(Some(5), Some(30)), 0, 1) else { panic!() };
+    work.source_boundary(&point.authority, point.session, point.point, point.generation);
+    work.observe(sample(&captured, &self_row(Some(10), Some(30)), 3, 1));
+    captured.activity.at = "2020-01-01T06:00:02Z".into();
+    work.observe(sample(&captured, &self_row(Some(17), Some(20)), 9, 1));
+    prepared.activity.at = "2020-01-01T06:00:03Z".into();
+    let Observation::Point(point) = sample(&prepared, &self_row(Some(20), Some(20)), 9, 1) else { panic!() };
+    work.source_boundary(&point.authority, point.session, point.point, point.generation);
+    work.close(SourceShutdown::Quiescent, 1);
+    assert_eq!(measured(&work).as_deref(), Some("15"));
+    assert_eq!(body(&work).interval.unwrap().context.observed_from, "2020-01-01T06:00:00.000000000Z");
+
+    let mut ordinary = SessionWork::default();
+    ordinary.observe(sample(&prepared, &self_row(Some(5), Some(30)), 3, 1));
+    captured.activity.at = "2020-01-01T06:00:04Z".into();
+    ordinary.observe(sample(&captured, &self_row(Some(10), Some(30)), 9, 1));
+    ordinary.close(SourceShutdown::Quiescent, 1);
+    assert_eq!(body(&ordinary).issue, Some(NativeReadWorkIssue::SourceChanged));
+}
+
 #[test]
 fn native_interval_is_provisional_until_the_same_owner_close_is_confirmed() {
     let mut work = completed();

@@ -70,7 +70,9 @@ fn an_unobserved_grant_is_unknown_and_a_wait_sentinel_does_not_identify_a_blocke
         observer_error: None,
     };
     phase.observe(&Sample {
+        observed_at: "2020-01-01T06:00:00Z".into(),
         counters: phase.before.clone(),
+        memory_pages: None,
         active: true,
         wait: Some("PAGELATCH_EX".into()),
         blocker: Some(-5),
@@ -81,7 +83,9 @@ fn an_unobserved_grant_is_unknown_and_a_wait_sentinel_does_not_identify_a_blocke
     assert_eq!(phase.blocking_samples, 0);
     assert_eq!(phase.maximum_sampled_granted_kb, None);
     phase.observe(&Sample {
+        observed_at: "2020-01-01T06:00:00Z".into(),
         counters: phase.before.clone(),
+        memory_pages: None,
         active: true,
         wait: Some("RESOURCE_SEMAPHORE".into()),
         blocker: None,
@@ -123,6 +127,64 @@ async fn preparation_uses_the_explicit_source_endpoint_and_preserves_the_callers
     assert!(owner.calls.iter().all(|call| !call.sql.contains("routed-source.invalid")));
     assert_eq!(owner.close().await, SourceShutdown::Quiescent);
     assert_eq!(owner.closed, 1);
+}
+
+#[tokio::test]
+async fn an_independent_observer_qualifies_its_native_owner_without_charging_or_replacing_source_work() {
+    use crate::{
+        activity::database_context::tests::row,
+        instance::test_support::{epoch, metadata},
+    };
+    let mut owner = preparation_reader();
+    let prepared = prepare(&mut owner, "routed-source.invalid", 3344).await.unwrap();
+    let mut observer = crate::resources::test_support::FakeRead::new(vec![
+        Ok(vec![metadata()]),
+        Ok(vec![epoch(100)]),
+        Ok(vec![row(3)]),
+    ]);
+    let scope = observer_scope(&mut observer, &prepared.context, "routed-source.invalid", 3344).await.unwrap();
+    assert!(scope.matches_earlier_scope(&prepared.context));
+    assert_eq!(observer.queries(), 3);
+    assert_eq!(owner.queries(), 4, "all existing source preparation remains separately charged");
+    assert_eq!(observer.closed, 0);
+    assert_eq!(owner.closed, 0);
+}
+
+#[tokio::test]
+async fn equal_endpoint_labels_cannot_repair_foreign_unknown_or_reversed_observer_scope() {
+    use crate::{
+        activity::database_context::tests::row,
+        instance::test_support::{epoch, metadata},
+        resources::test_support::replace,
+    };
+    let mut owner = preparation_reader();
+    let original = prepare(&mut owner, "routed-source.invalid", 3344).await.unwrap().context;
+    for change in ["member", "process", "database", "role", "unknown-owner", "unknown-role", "clock"] {
+        let mut source = original.clone();
+        let mut member = metadata();
+        let mut database = row(3);
+        match change {
+            "member" => member = replace(&member, &[("server_name", Val::Text("foreign-instance".into()))]),
+            "process" => member = replace(&member, &[("process_id", Val::Int(43))]),
+            "database" => {
+                database =
+                    replace(&database, &[("database_guid", Val::Text("11111111-2222-3333-4444-555555555555".into()))])
+            }
+            "role" => database = replace(&database, &[("updateability", Val::Text("READ_ONLY".into()))]),
+            "unknown-owner" => source.partition = SourcePartition::InstanceLocal { member: None, epoch: None },
+            "unknown-role" => source.database_writable = None,
+            "clock" => source.observed_until = "2020-01-01T06:00:01Z".into(),
+            _ => unreachable!(),
+        }
+        let mut observer = crate::resources::test_support::FakeRead::new(vec![
+            Ok(vec![member]),
+            Ok(vec![epoch(100)]),
+            Ok(vec![database]),
+        ]);
+        assert!(observer_scope(&mut observer, &source, "routed-source.invalid", 3344).await.is_err(), "{change}");
+        assert_eq!(observer.queries(), 3, "{change}: no discovery retry or native rescue");
+        assert_eq!(owner.queries(), 4);
+    }
 }
 
 #[tokio::test]
@@ -191,15 +253,15 @@ async fn held_observer_acquisition_uses_its_supplied_pool_route_and_cannot_fence
     let mut observer_config = tiberius::Config::new();
     observer_config.host("observer-route.invalid");
     observer_config.port(3345);
-    let observer_pool = Pool::new(observer_config, Some(observer_route.clone()));
+    let observer_pool = Arc::new(Pool::new(observer_config, Some(observer_route.clone())));
     let source_pool = Pool::new(tiberius::Config::new(), None);
-    let error = HeldObserver::acquire(&observer_pool).await.err().unwrap();
+    let error = HeldObserver::acquire(observer_pool.clone()).await.err().unwrap();
     assert_eq!(error.code, ErrorCode::ConnectionFailed);
     assert_eq!(*observer_route.0.lock().unwrap(), vec![("observer-route.invalid".into(), 3345)]);
     assert_eq!(observer_pool.source_shutdown(), SourceShutdown::Quiescent, "the route refused before native login");
     assert_eq!(source_pool.source_shutdown(), SourceShutdown::Quiescent);
     observer_pool.mark_uncertain();
-    let error = HeldObserver::acquire(&observer_pool).await.err().unwrap();
+    let error = HeldObserver::acquire(observer_pool.clone()).await.err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
     assert_eq!(observer_route.0.lock().unwrap().len(), 1, "a fenced observer pool cannot initiate another route");
     assert_eq!(source_pool.source_shutdown(), SourceShutdown::Quiescent);

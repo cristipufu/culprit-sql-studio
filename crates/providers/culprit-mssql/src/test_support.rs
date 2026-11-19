@@ -37,8 +37,9 @@ pub(crate) async fn measured_read(
 ) -> culprit_core::Result<crate::read::measurement::MeasuredRead> {
     budget.validate()?;
     pool.ensure_available()?;
-    let observer_pool = crate::conn::Pool::new(config(port, database, password, "culprit-cost-observer"), None);
-    let observer = crate::read::measurement::HeldObserver::acquire(&observer_pool).await?;
+    let observer_pool =
+        std::sync::Arc::new(crate::conn::Pool::new(config(port, database, password, "culprit-cost-observer"), None));
+    let observer = crate::read::measurement::HeldObserver::acquire(observer_pool).await?;
     crate::read::measurement::MeasuredRead::open(pool, "127.0.0.1", port, observer, budget).await
 }
 

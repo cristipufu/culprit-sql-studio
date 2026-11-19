@@ -18,7 +18,7 @@ pub fn assess_recipe_qualification(
             if work.settlement == NativeReadSettlement::Quiescent && work.issue.is_none() =>
         {
             if work.interval.as_ref().is_none_or(|interval| {
-                interval.initial.query_ordinal > 1
+                interval.initial.query_ordinal != 0
                     || interval.latest.as_ref().is_none_or(|point| point.query_ordinal < manifest.source_queries)
             }) {
                 gaps.push(RecipeQualificationGap::PartialNativeMeasurementWindow);

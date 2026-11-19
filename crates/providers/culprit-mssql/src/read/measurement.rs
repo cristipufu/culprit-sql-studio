@@ -1,6 +1,6 @@
 //! Owned-fixture instrumentation around the real reader. Observer and preparation work are separate from source work.
 use super::*;
-use crate::{activity::IdentityDetail, conn::SessionKind, local_source};
+use crate::{activity::IdentityDetail, local_source};
 use culprit_core::telemetry::*;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,11 +9,12 @@ const OBSERVER_TIMEOUT: Duration = Duration::from_secs(3);
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_PHASES: usize = 32;
 const MAX_OBSERVER_QUERIES: u32 = 512;
+const OBSERVER_TOTAL_TIMEOUT_MS: u32 = 60_000;
 mod lifecycle;
 mod observation;
 mod result_trace;
 pub(crate) use lifecycle::{assert_no_followup, lifecycle_cases};
-use observation::{await_observed, measured_result};
+use observation::{await_observed, measured_result, settled_sample};
 use result_trace::ResultTrace;
 
 #[derive(Clone)]
@@ -46,7 +47,9 @@ struct Counters {
     dirty_marks: u64,
 }
 struct Sample {
+    observed_at: String,
     counters: Counters,
+    memory_pages: Option<u64>,
     active: bool,
     wait: Option<String>,
     blocker: Option<i64>,
@@ -56,20 +59,48 @@ struct Sample {
 }
 /// A separately acquired observer keeps its own route and setup cost. Fixture admission belongs to its caller.
 pub(crate) struct HeldObserver {
-    client: MsClient,
+    owner: ReadSession,
     setup_elapsed_ms: f64,
-    _transport: Option<Arc<dyn culprit_core::ConnectionTransport>>,
+    scope: Option<NativeReadContext>,
 }
 impl HeldObserver {
-    pub(crate) async fn acquire(pool: &Pool) -> culprit_core::Result<Self> {
+    pub(crate) async fn acquire(pool: Arc<Pool>) -> culprit_core::Result<Self> {
         let started = Instant::now();
-        let client = pool.connect(SessionKind::User).await?;
-        Ok(Self {
-            client,
-            setup_elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
-            _transport: pool.transport_owner(),
-        })
+        let mut owner = ReadSession::new(pool, observer_budget());
+        let client = owner.acquire(OBSERVER_TIMEOUT).await.map_err(ReadError::into_error)?;
+        owner.client = Some(client);
+        Ok(Self { owner, setup_elapsed_ms: started.elapsed().as_secs_f64() * 1000.0, scope: None })
     }
+    async fn qualify(&mut self, source: &NativeReadContext, host: &str, port: u16) -> culprit_core::Result<()> {
+        let started = Instant::now();
+        let result = observer_scope(&mut self.owner, source, host, port).await;
+        self.setup_elapsed_ms += started.elapsed().as_secs_f64() * 1000.0;
+        self.scope = Some(result?);
+        Ok(())
+    }
+}
+
+fn observer_budget() -> CollectionBudget {
+    CollectionBudget {
+        max_queries: MAX_OBSERVER_QUERIES,
+        statement_timeout_ms: OBSERVER_TIMEOUT.as_millis() as u32,
+        total_timeout_ms: OBSERVER_TOTAL_TIMEOUT_MS,
+        ..Default::default()
+    }
+}
+
+async fn observer_scope<R: NativeRead>(
+    observer: &mut R,
+    source: &NativeReadContext,
+    host: &str,
+    port: u16,
+) -> culprit_core::Result<NativeReadContext> {
+    let authority = local_source::Context::read(observer, host, port).await?;
+    let context = authority.completed(&authority)?;
+    if !context.matches_earlier_scope(source) {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    Ok(context)
 }
 struct Observer {
     connection: HeldObserver,
@@ -99,6 +130,7 @@ pub(crate) struct MeasuredRead {
     observer: Observer,
     generation: u64,
     context: NativeReadContext,
+    authority: local_source::Context,
     preparation: Value,
     phase: Option<Phase>,
     phases: Vec<Value>,
@@ -106,6 +138,9 @@ pub(crate) struct MeasuredRead {
     template_watch: Option<TemplateObservation>,
     result_trace: Option<ResultTrace>,
     errors: Vec<String>,
+    closing: bool,
+    final_sample_started: bool,
+    closed: bool,
 }
 
 impl MeasuredRead {
@@ -113,7 +148,7 @@ impl MeasuredRead {
         pool: Arc<Pool>,
         host: &str,
         port: u16,
-        observer: HeldObserver,
+        mut observer: HeldObserver,
         budget: CollectionBudget,
     ) -> culprit_core::Result<Self> {
         budget.validate()?;
@@ -121,9 +156,25 @@ impl MeasuredRead {
             pool,
             CollectionBudget { max_queries: 16, total_timeout_ms: 10_000, ..Default::default() },
         );
-        let PreparedSource { identity, context, report: preparation } = prepare_owned(&mut owner, host, port).await?;
-        let observer =
-            Observer { connection: observer, identity, queries: 0, elapsed_ms: 0.0, charged_bytes: 0, failed: false };
+        let PreparedSource { identity, context, authority, report: preparation } =
+            prepare_owned(&mut owner, host, port).await?;
+        if let Err(error) = observer.qualify(&context, host, port).await {
+            let source_shutdown = owner.close().await;
+            let _ = observer.owner.close().await;
+            return Err(if source_shutdown == SourceShutdown::Unconfirmed {
+                CollectionStop::CancellationUnconfirmed.error()
+            } else {
+                error
+            });
+        }
+        let observer = Observer {
+            queries: observer.owner.queries(),
+            connection: observer,
+            identity,
+            elapsed_ms: 0.0,
+            charged_bytes: 0,
+            failed: false,
+        };
         let generation = owner.connection_generation;
         if let Err(error) = owner.measurement_window(budget) {
             let shutdown = owner.close().await;
@@ -135,6 +186,7 @@ impl MeasuredRead {
             observer,
             generation,
             context,
+            authority,
             preparation,
             phase: None,
             phases: vec![],
@@ -142,6 +194,9 @@ impl MeasuredRead {
             template_watch: None,
             result_trace: None,
             errors: vec![],
+            closing: false,
+            final_sample_started: false,
+            closed: false,
         })
     }
 
@@ -184,16 +239,60 @@ impl MeasuredRead {
             "source_read_metrics":self.owner.read_metrics(),
             "source_queries":self.owner.queries(),
             "phases":self.phases,
-            "observer":{"setup_client_elapsed_ms":self.observer.connection.setup_elapsed_ms,"queries":self.observer.queries,"client_elapsed_ms":self.observer.elapsed_ms,"charged_value_bytes":self.observer.charged_bytes.to_string()},
+            "observer":{"setup_client_elapsed_ms":self.observer.connection.setup_elapsed_ms,"queries":self.observer.connection.owner.queries(),"attempts_including_scope":self.observer.queries,"client_elapsed_ms":self.observer.elapsed_ms,"charged_value_bytes":self.observer.charged_bytes.to_string(),"scope":self.observer.connection.scope,"read_metrics":self.observer.connection.owner.read_metrics()},
             "grant_evidence":"sampled-current-grants-only; missed samples do not establish no grant or a peak",
             "measurement_errors":self.errors,
-            "measurement_complete":self.errors.is_empty() && self.phase.is_none() && self.phases.len()==self.owner.queries() as usize,
+            "measurement_complete":self.measurement_complete(),
             "native_cpu_io_cost_qualified":false,
+            "measurement_scope":"all original capture SQL after separately charged preparation; excludes login, session setup and cold-start cost",
         })
     }
 
+    fn measurement_complete(&self) -> bool {
+        self.closed
+            && self.errors.is_empty()
+            && self.phase.is_none()
+            && self.phases.len() == self.owner.queries() as usize
+            && self.owner.read_metrics().is_some_and(|metrics| {
+                metrics.is_valid()
+                    && metrics.active_tasks == 0
+                    && metrics.untracked_tasks == 0
+                    && matches!(metrics.native_session_work.as_deref(), Some(NativeSessionReadWork::MssqlSession(work))
+                        if work.settlement == NativeReadSettlement::Quiescent
+                            && work.issue.is_none()
+                            && work.interval.as_ref().is_some_and(|interval|
+                                interval.initial.query_ordinal == 0
+                                && interval.latest.as_ref().is_some_and(|point| point.query_ordinal == self.owner.queries())))
+            })
+    }
+
+    fn record_boundary(&mut self, sample: &Sample, ordinal: u32) {
+        if ObservationBounds::new(&self.context.observed_until, &sample.observed_at).is_none() {
+            self.owner.native_work.poison(NativeReadWorkIssue::ClockChanged);
+            return;
+        }
+        let mut authority = self.authority.clone();
+        authority.activity.at = sample.observed_at.clone();
+        self.owner.native_work.source_boundary(
+            &authority,
+            NativeActivityIdentity {
+                id: self.observer.identity.id.to_string(),
+                generation: self.observer.identity.login.clone(),
+            },
+            MssqlSessionReadPoint {
+                query_ordinal: ordinal,
+                cpu_ms: Some(sample.counters.cpu_ms.to_string()),
+                reads: Some(sample.counters.reads.to_string()),
+                logical_reads: Some(sample.counters.logical_reads.to_string()),
+                dirty_marks: Some(sample.counters.dirty_marks.to_string()),
+                memory_pages: sample.memory_pages.map(|value| value.to_string()),
+            },
+            self.owner.connection_generation,
+        );
+    }
+
     async fn begin(&mut self, sql: &str, parameters: &[Parameter], row_limit: usize) -> culprit_core::Result<()> {
-        if self.phase.is_some() || self.phases.len() == MAX_PHASES {
+        if self.closing || self.phase.is_some() || self.phases.len() == MAX_PHASES {
             return Err(invalid_data());
         }
         let before = match self.observer.sample().await {
@@ -205,6 +304,9 @@ impl MeasuredRead {
         };
         if before.active {
             return Err(invalid_data());
+        }
+        if self.owner.queries() == 0 {
+            self.record_boundary(&before, 0);
         }
         self.phase = Some(Phase {
             sql: sql.into(),
@@ -280,6 +382,7 @@ impl MeasuredRead {
         // Losing the observer never drops an in-flight native operation. Callers first await that same
         // bounded operation, then close its retained owner before completing a successful unmeasured statement.
         let shutdown = if self.phase.as_ref().is_some_and(|phase| phase.observer_error.is_some()) {
+            self.owner.native_work.poison(NativeReadWorkIssue::MissingFinalObservation);
             Some(self.owner.close().await)
         } else {
             None
@@ -357,10 +460,39 @@ impl NativeRead for MeasuredRead {
         self.owner.read_metrics()
     }
     async fn close(&mut self) -> SourceShutdown {
-        let shutdown = self.owner.close().await;
+        self.closing = true;
+        if self.closed {
+            return self.owner.close().await;
+        }
+        self.owner.settle_native().await;
         if self.phase.is_some() {
             let _ = self.end("interrupted-before-completion").await;
         }
+        if !self.final_sample_started {
+            self.final_sample_started = true;
+            match settled_sample(&mut self.owner, &mut self.observer).await {
+                Ok(sample) if !sample.active => self.record_boundary(&sample, self.owner.queries()),
+                Ok(_) => {
+                    self.errors.push("original-session-still-active".into());
+                    self.owner.native_work.poison(NativeReadWorkIssue::MissingFinalObservation);
+                }
+                Err(error) => {
+                    self.errors.push(format!("observer-final:{:?}", error.code));
+                    self.owner.native_work.poison(NativeReadWorkIssue::MissingFinalObservation);
+                }
+            }
+        } else {
+            self.owner.native_work.poison(NativeReadWorkIssue::MissingFinalObservation);
+        }
+        // Later independent quiet checks keep this same held observer. Settlement joins its original native
+        // task without returning the socket to a pool or permitting an unnoticed replacement connection.
+        self.observer.connection.owner.settle_native().await;
+        let observer_shutdown = self.observer.connection.owner.pool.source_shutdown();
+        if observer_shutdown == SourceShutdown::Unconfirmed {
+            self.errors.push("observer-shutdown-unconfirmed".into());
+        }
+        let shutdown = self.owner.close().await;
+        self.closed = true;
         shutdown
     }
 }
@@ -424,40 +556,27 @@ impl Observer {
         }
         self.queries += 1;
         let started = Instant::now();
-        let mut query = Query::new(
-            "SELECT /* culprit */ CONVERT(bigint,s.cpu_time) AS cpu_ms,s.logical_reads,s.reads,s.writes AS dirty_marks,CAST(CASE WHEN r.session_id IS NULL THEN 0 ELSE 1 END AS bit) AS active,r.wait_type,r.blocking_session_id,CONVERT(bigint,g.granted_memory_kb) AS granted_kb,CONVERT(bigint,g.requested_memory_kb) AS requested_kb,CONVERT(bigint,g.used_memory_kb) AS used_kb FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id LEFT JOIN sys.dm_exec_query_memory_grants g ON g.session_id=r.session_id AND g.request_id=r.request_id WHERE s.session_id=@P1 AND CONVERT(datetime2(7),s.login_time)=CONVERT(datetime2(7),@P2,126) OPTION(MAXDOP 1)",
-        );
-        query.bind(self.identity.id);
-        query.bind(self.identity.login.as_str());
-        let attempted = tokio::time::timeout(OBSERVER_TIMEOUT, async {
-            query
-                .query(&mut self.connection.client)
-                .await
-                .map_err(crate::conn::map_error)?
-                .into_first_result()
-                .await
-                .map_err(crate::conn::map_error)
-        })
-        .await;
+        let attempted = self.connection.owner.query(
+            "SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,CONVERT(bigint,s.cpu_time) AS cpu_ms,s.logical_reads,s.reads,s.writes AS dirty_marks,s.memory_usage AS memory_pages,CAST(CASE WHEN r.session_id IS NULL THEN 0 ELSE 1 END AS bit) AS active,r.wait_type,r.blocking_session_id,CONVERT(bigint,g.granted_memory_kb) AS granted_kb,CONVERT(bigint,g.requested_memory_kb) AS requested_kb,CONVERT(bigint,g.used_memory_kb) AS used_kb FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id LEFT JOIN sys.dm_exec_query_memory_grants g ON g.session_id=r.session_id AND g.request_id=r.request_id WHERE s.session_id=@P1 AND CONVERT(datetime2(7),s.login_time)=CONVERT(datetime2(7),@P2,126) OPTION(MAXDOP 1)",
+            vec![Parameter::Integer(self.identity.id), Parameter::Text(self.identity.login.clone())],
+            2,
+        ).await;
         self.elapsed_ms += started.elapsed().as_secs_f64() * 1000.0;
         let rows = match attempted {
-            Ok(Ok(rows)) => rows,
-            Ok(Err(error)) => {
+            Ok(rows) => rows,
+            Err(error) => {
                 self.failed = true;
-                return Err(error);
-            }
-            Err(_) => {
-                self.failed = true;
-                return Err(CollectionStop::TimedOut.error());
+                return Err(error.into_error());
             }
         };
-        let rows = rows.iter().map(Rec::from_row).collect::<Vec<_>>();
         let [row] = rows.as_slice() else {
             return if rows.is_empty() { Ok(None) } else { Err(CollectionStop::SourceChanged.error()) };
         };
         self.charged_bytes += value_bytes(row) as u64;
         Ok(Some(Sample {
+            observed_at: canonical_time(&text(row, "observed_at")?)?,
             counters: Counters::read(row)?,
+            memory_pages: optional_count(row, "memory_pages")?,
             active: boolean(row, "active")?,
             wait: optional_text(row, "wait_type")?,
             blocker: optional_signed_integer(row, "blocking_session_id")?,
@@ -530,6 +649,7 @@ fn parameter_values(parameters: &[Parameter]) -> Value {
 struct PreparedSource {
     identity: SessionIdentity,
     context: NativeReadContext,
+    authority: local_source::Context,
     report: Value,
 }
 async fn prepare_owned<R: NativeRead>(owner: &mut R, host: &str, port: u16) -> culprit_core::Result<PreparedSource> {
@@ -555,7 +675,13 @@ async fn prepare<R: NativeRead>(owner: &mut R, host: &str, port: u16) -> culprit
     let [identity] = identity.as_slice() else {
         return Err(invalid_data());
     };
-    let identity = SessionIdentity { id: integer(identity, "session_id")?, login: text(identity, "login_time")? };
+    let identity = SessionIdentity {
+        id: integer(identity, "session_id")?,
+        login: crate::sql_time::native_time(&text(identity, "login_time")?)?,
+    };
+    if !(1..=i16::MAX as i64).contains(&identity.id) || identity.login.starts_with("1900-01-01") {
+        return Err(invalid_data());
+    }
     let (authority, metadata) =
         local_source::read_initial(owner, host, port, IdentityDetail::Endpoint, local_source::Detail::Authority)
             .await?;
@@ -567,7 +693,7 @@ async fn prepare<R: NativeRead>(owner: &mut R, host: &str, port: u16) -> culprit
         target: authority.activity.database.clone().into(),
         partition,
         observed_from: authority.activity.at.clone(),
-        observed_until: authority.activity.at,
+        observed_until: authority.activity.at.clone(),
         database_writable: authority.activity.writable,
     };
     let preparation = json!({
@@ -583,7 +709,7 @@ async fn prepare<R: NativeRead>(owner: &mut R, host: &str, port: u16) -> culprit
         "temperature":"prepared-connection; cache temperature uncontrolled",
         "native_setup_cpu":"not isolated from preparation identity reads",
     });
-    Ok(PreparedSource { identity, context, report: preparation })
+    Ok(PreparedSource { identity, context, authority, report: preparation })
 }
 
 fn retain_maximum(retained: &mut Option<u64>, observed: Option<u64>) {

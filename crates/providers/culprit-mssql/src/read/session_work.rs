@@ -43,6 +43,8 @@ pub(crate) struct SessionWork {
     authority: Option<Context>,
     counters: CounterWatermark,
     awaiting_context: bool,
+    #[cfg(test)]
+    source_boundary_pending: bool,
 }
 impl SessionWork {
     pub(crate) fn observe(&mut self, observation: Observation) {
@@ -57,8 +59,35 @@ impl SessionWork {
             }
             Observation::Point(point) => {
                 self.awaiting_context = false;
-                self.point(point.authority, point.session, point.point, point.generation);
+                if point.point.query_ordinal == 0 {
+                    self.poison(NativeReadWorkIssue::InvalidObservation);
+                } else {
+                    self.point(point.authority, point.session, point.point, point.generation, false);
+                }
             }
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn source_boundary(
+        &mut self,
+        authority: &Context,
+        session: NativeActivityIdentity,
+        point: MssqlSessionReadPoint,
+        generation: u64,
+    ) {
+        let valid_position = self.work.as_ref().map_or(point.query_ordinal == 0, |work| {
+            point.query_ordinal > 0
+                && work.settlement == NativeReadSettlement::Pending
+                && work.interval.as_ref().is_some_and(|interval| interval.initial.query_ordinal == 0)
+        });
+        if !valid_position {
+            self.poison(NativeReadWorkIssue::InvalidObservation);
+            return;
+        }
+        self.source_boundary_pending = point.query_ordinal == 0;
+        match ObservedPoint::new(authority, session, point, generation) {
+            Ok(point) => self.point(point.authority, point.session, point.point, point.generation, true),
+            Err(_) => self.poison(NativeReadWorkIssue::InvalidObservation),
         }
     }
     fn point(
@@ -67,6 +96,7 @@ impl SessionWork {
         session: NativeActivityIdentity,
         point: MssqlSessionReadPoint,
         generation: u64,
+        boundary: bool,
     ) {
         if self.work.as_ref().is_some_and(|work| work.issue.is_some()) {
             return;
@@ -104,27 +134,55 @@ impl SessionWork {
             self.authority = Some(authority);
             return;
         }
-        let issue = self.changed(&authority, &session, &point, generation);
+        let first_original = self.is_first_original_point();
+        let independent_scope = boundary || first_original;
+        let issue = self.changed(&authority, &session, &point, generation, boundary, independent_scope);
         if let Some(issue) = issue {
             if matches!(issue, NativeReadWorkIssue::CounterDecreased | NativeReadWorkIssue::MissingCounters) {
-                self.retain(&authority, point);
+                self.retain(&authority, point, independent_scope);
             }
             self.poison(issue);
             return;
         }
         self.counters.observe(&point);
-        self.retain(&authority, point);
+        self.retain(&authority, point, independent_scope);
+        if first_original && !boundary {
+            // The first original self-point confirms the held session and establishes its actual optional
+            // source capabilities. Earlier independent counters never assert those unrelated capabilities.
+            self.authority = Some(authority);
+        }
     }
-    fn retain(&mut self, authority: &Context, point: MssqlSessionReadPoint) {
+    fn is_first_original_point(&self) -> bool {
+        self.work
+            .as_ref()
+            .and_then(|work| work.interval.as_ref())
+            .is_some_and(|interval| interval.initial.query_ordinal == 0 && interval.latest.is_none())
+    }
+    fn boundary_context(&self, authority: &Context) -> Result<NativeReadContext> {
+        let before = &self.work.as_ref().and_then(|work| work.interval.as_ref()).ok_or_else(invalid_data)?.context;
+        let after = authority.completed(authority)?;
+        if !after.matches_earlier_scope(before) {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        Ok(after)
+    }
+    fn retain(&mut self, authority: &Context, point: MssqlSessionReadPoint, independent_scope: bool) {
+        let next = if independent_scope {
+            self.boundary_context(authority).ok()
+        } else {
+            self.authority.as_ref().and_then(|before| before.completed(authority).ok())
+        };
         let Some(work) = &mut self.work else {
             return;
         };
         let Some(interval) = &mut work.interval else {
             return;
         };
-        let before = self.authority.as_ref();
-        match before.and_then(|before| before.completed(authority).ok()) {
-            Some(context) => {
+        match next {
+            Some(mut context) => {
+                if interval.initial.query_ordinal == 0 {
+                    context.observed_from = interval.context.observed_from.clone();
+                }
                 interval.context = context;
                 interval.latest = Some(point);
             }
@@ -137,6 +195,8 @@ impl SessionWork {
         session: &NativeActivityIdentity,
         point: &MssqlSessionReadPoint,
         generation: u64,
+        boundary: bool,
+        independent_scope: bool,
     ) -> Option<NativeReadWorkIssue> {
         let work = self.work.as_ref()?;
         let interval = work.interval.as_ref()?;
@@ -150,15 +210,19 @@ impl SessionWork {
         if !authority.is_qualified() {
             return Some(NativeReadWorkIssue::NativeScopeUnqualified);
         }
-        if !before.same_source(authority) {
+        if !independent_scope && !before.same_source(authority) {
             return Some(NativeReadWorkIssue::SourceChanged);
         }
         let previous = interval.latest.as_ref().unwrap_or(&interval.initial);
-        if point.query_ordinal <= previous.query_ordinal {
+        if point.query_ordinal < previous.query_ordinal || (!boundary && point.query_ordinal == previous.query_ordinal)
+        {
             return Some(NativeReadWorkIssue::InvalidObservation);
         }
         if ObservationBounds::new(&interval.context.observed_until, &authority.activity.at).is_none() {
             return Some(NativeReadWorkIssue::ClockChanged);
+        }
+        if independent_scope && self.boundary_context(authority).is_err() {
+            return Some(NativeReadWorkIssue::SourceChanged);
         }
         if !self.counters.accepts(point) {
             return Some(NativeReadWorkIssue::CounterDecreased);
@@ -187,6 +251,10 @@ impl SessionWork {
         }
     }
     pub(crate) fn close(&mut self, shutdown: SourceShutdown, generation: u64) {
+        #[cfg(test)]
+        if self.source_boundary_pending {
+            self.poison(NativeReadWorkIssue::MissingFinalObservation);
+        }
         if self.awaiting_context {
             self.poison(NativeReadWorkIssue::MissingFinalObservation);
         }
@@ -242,10 +310,6 @@ fn point(authority: &Context, row: &Rec, query_ordinal: u32, generation: Option<
     let (Some(id), Some(login)) = (id, login) else {
         return Ok(None);
     };
-    let native_id = id.parse::<u16>().map_err(|_| invalid_data())?;
-    if !(1..=i16::MAX as u16).contains(&native_id) {
-        return Err(invalid_data());
-    }
     let session = NativeActivityIdentity { id, generation: crate::sql_time::native_time(&login)? };
     let point = MssqlSessionReadPoint {
         query_ordinal,
@@ -255,10 +319,29 @@ fn point(authority: &Context, row: &Rec, query_ordinal: u32, generation: Option<
         dirty_marks: optional(row, "collector_dirty_marks")?,
         memory_pages: optional(row, "collector_memory_pages")?,
     };
-    if !point.is_valid() || session.generation.starts_with("1900-01-01") {
-        return Err(invalid_data());
+    ObservedPoint::new(authority, session, point, generation).map(Some)
+}
+
+impl ObservedPoint {
+    fn new(
+        authority: &Context,
+        session: NativeActivityIdentity,
+        point: MssqlSessionReadPoint,
+        generation: u64,
+    ) -> Result<Self> {
+        let native_id = session.id.parse::<u16>().map_err(|_| invalid_data())?;
+        if generation == 0
+            || !(1..=i16::MAX as u16).contains(&native_id)
+            || native_id.to_string() != session.id
+            || !session.is_valid()
+            || !point.is_valid()
+            || crate::sql_time::native_time(&session.generation)? != session.generation
+            || session.generation.starts_with("1900-01-01")
+        {
+            return Err(invalid_data());
+        }
+        Ok(Self { authority: authority.clone(), session, point, generation })
     }
-    Ok(Some(ObservedPoint { authority: authority.clone(), session, point, generation }))
 }
 fn optional(row: &Rec, name: &str) -> Result<Option<String>> {
     if field(row, name)?.is_none() {

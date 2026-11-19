@@ -72,6 +72,23 @@ fn exact_session_deltas_keep_large_native_counts_and_decreasing_memory_as_a_gaug
 }
 
 #[test]
+fn an_initial_zero_dispatch_boundary_can_cover_the_whole_source_but_no_dispatch_cannot_settle() {
+    let mut native = work();
+    let NativeSessionReadWork::MssqlSession(body) = &mut native;
+    body.interval.as_mut().unwrap().initial.query_ordinal = 0;
+    assert!(native.is_valid());
+    let summary = native.summary(Some(&source(&native))).unwrap();
+    assert_eq!(observed(&summary).first_query_ordinal, 0);
+    assert_eq!(observed(&summary).last_query_ordinal, Some(9));
+    assert_eq!(observed(&summary).cpu_ms.as_deref(), Some("5"));
+
+    let NativeSessionReadWork::MssqlSession(body) = &mut native;
+    body.interval.as_mut().unwrap().latest.as_mut().unwrap().query_ordinal = 0;
+    assert!(!native.is_valid(), "a final zero boundary proves no original dispatch");
+    assert!(native.summary(None).is_err());
+}
+
+#[test]
 fn public_summary_retains_an_opaque_original_proof_receipt_and_no_private_identity_or_preview_bytes() {
     let native = work();
     let raw = serde_json::to_value(&native).unwrap();
@@ -250,7 +267,10 @@ fn native_signed_counter_bounds_and_canonical_integers_are_deliberate() {
             "reads" => interval.initial.reads = Some((i64::MAX as u64 + 1).to_string()),
             "leading_zero" => interval.initial.cpu_ms = Some("001".into()),
             "negative" => interval.initial.cpu_ms = Some("-1".into()),
-            "ordinal" => interval.initial.query_ordinal = 0,
+            "ordinal" => {
+                interval.initial.query_ordinal = 0;
+                interval.latest.as_mut().unwrap().query_ordinal = 0;
+            }
             "session" => interval.session.id = "0".into(),
             "login" => interval.session.generation = "1900-01-01T00:00:00.0000000".into(),
             "generation" => interval.reader_generation = "0".into(),

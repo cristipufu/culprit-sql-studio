@@ -35,7 +35,9 @@ fn phase(sql: &str) -> Phase {
 }
 fn sample(active: bool) -> Result<Sample> {
     Ok(Sample {
+        observed_at: "2020-01-01T06:00:00Z".into(),
         counters: Counters { cpu_ms: 2, logical_reads: 12, reads: 0, dirty_marks: 0 },
+        memory_pages: None,
         active,
         wait: None,
         blocker: None,
@@ -239,4 +241,32 @@ fn a_successful_unmeasured_native_body_is_not_a_successful_measurement() {
         assert_eq!(CollectionStop::from_error(&native_error(result)), CollectionStop::SourceChanged);
     }
     assert!(measured_result(Ok(()), Ok(()), None).is_ok());
+}
+
+#[tokio::test]
+async fn final_sampling_waits_for_the_same_original_task_and_never_turns_quiet_into_acknowledgement() {
+    for (stop, shutdown) in [
+        (CollectionStop::Cancelled, SourceShutdown::Quiescent),
+        (CollectionStop::CancellationUnconfirmed, SourceShutdown::Unconfirmed),
+    ] {
+        let pool = Arc::new(Pool::new(tiberius::Config::new(), None));
+        let mut owner = ReadSession::new(pool, CollectionBudget::default());
+        let (release, waiting) = tokio::sync::oneshot::channel::<()>();
+        owner.active = Some(tokio::spawn(async move {
+            waiting.await.unwrap();
+            Err(ReadError::Stopped(stop))
+        }));
+        let mut observer = Samples::new([sample(false)]);
+        let mut final_point = Box::pin(settled_sample(&mut owner, &mut observer));
+        assert!(matches!(futures_util::poll!(final_point.as_mut()), std::task::Poll::Pending));
+        drop(final_point);
+        assert!(owner.active.is_some(), "cancelled finalization retains the original task for its owner");
+        assert_eq!(observer.attempts, 0, "no native counter is observed ahead of original task settlement");
+        release.send(()).unwrap();
+        assert!(!settled_sample(&mut owner, &mut observer).await.unwrap().active);
+        assert_eq!(observer.attempts, 1);
+        assert!(owner.active.is_none());
+        assert_eq!(owner.close().await, shutdown);
+        assert_eq!(owner.queries(), 0, "neither settlement nor its observer dispatches replacement source SQL");
+    }
 }

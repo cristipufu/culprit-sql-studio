@@ -100,8 +100,13 @@ async fn capture(
         interval.session.generation,
         crate::sql_time::native_time(accounting["preparation"]["login_time"].as_str().unwrap())?
     );
-    assert_eq!(interval.context, context);
-    assert_eq!(interval.initial.query_ordinal, 3);
+    assert_eq!(interval.context.target, context.target);
+    assert_eq!(interval.context.partition, context.partition);
+    assert_eq!(interval.context.database_writable, context.database_writable);
+    let measured_bounds =
+        ObservationBounds::new(&interval.context.observed_from, &interval.context.observed_until).unwrap();
+    assert!(measured_bounds.contains(&context.observed_from) && measured_bounds.contains(&context.observed_until));
+    assert_eq!(interval.initial.query_ordinal, 0);
     assert_eq!(interval.latest.as_ref().unwrap().query_ordinal, 6);
     assert!(!population.contains(&interval.session), "an unrelated actor is never the collector's native session");
     Ok(())

@@ -50,6 +50,8 @@ pub enum NativeReadOwnerBinding {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct MssqlSessionReadPoint {
+    /// Reader-local original query count at this boundary, independent of native completion.
+    /// Only an interval's initial point may be zero, before its first capture query.
     pub query_ordinal: u32,
     pub cpu_ms: Option<String>,
     pub reads: Option<String>,
@@ -61,8 +63,7 @@ pub struct MssqlSessionReadPoint {
 }
 impl MssqlSessionReadPoint {
     pub fn is_valid(&self) -> bool {
-        self.query_ordinal > 0
-            && bounded_count(&self.cpu_ms, i32::MAX as u64)
+        bounded_count(&self.cpu_ms, i32::MAX as u64)
             && bounded_count(&self.memory_pages, i32::MAX as u64)
             && [&self.reads, &self.logical_reads, &self.dirty_marks]
                 .into_iter()

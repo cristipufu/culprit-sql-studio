@@ -285,6 +285,8 @@ impl Fixture {
         let point = observations::capture(
             self.source_pool()?,
             self.admitted.as_ref().ok_or_else(invalid_data)?.port,
+            self.admitted.as_ref().ok_or_else(invalid_data)?.password(),
+            self.database.as_deref().ok_or_else(invalid_data)?,
             &self.cancellation,
             &self.directory,
             self.observations,
@@ -470,6 +472,8 @@ pub(super) async fn run(case: Case) {
             "source_query_count": (fixture.completed_observations == fixture.observations)
                 .then_some(fixture.completed_source_queries),
             "source_queries_upper_bound": fixture.observations * super::SOURCE_QUERY_LIMIT as usize,
+            "source_query_scope":"original capture SQL only; separately charged preparation and independent observer work are retained in each source-point receipt",
+            "whole_login_or_cold_start_cost_proved":false,
             "rust_case_elapsed_ms": elapsed.as_secs_f64() * 1000.0,
             "rust_case_limit_seconds": CASE_TIMEOUT.as_secs(),
             "supervisor_startup_included": false,
