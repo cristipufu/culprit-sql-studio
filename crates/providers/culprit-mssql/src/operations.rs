@@ -102,7 +102,7 @@ async fn collect_with<R: crate::read::NativeRead>(
     let mut coverage = Coverage::default();
     let mut staged = Vec::new();
     let mut stopped: Option<culprit_core::Error> = None;
-    for kind in native::Kind::ALL {
+    for kind in native::Kind::SCAN {
         if kind == native::Kind::SuspectPages && probe.is_azure_sql_database() {
             coverage
                 .not_applicable(kind.source(), culprit_core::message!("provider.mssql.suspect_pages.not_applicable"));

@@ -6,12 +6,35 @@ pub enum StorageCase {
     Unknown,
     Partial,
     Denied,
+    SharedTempdbLog,
+    SharedTempdbLogUnknown,
+    SharedTempdbLogPartial,
+    SharedTempdbLogDenied,
 }
 impl StorageCase {
-    pub const ALL: [Self; 5] = [Self::Exact, Self::ReadOnlyOffline, Self::Unknown, Self::Partial, Self::Denied];
+    pub const ALL: [Self; 9] = [
+        Self::Exact,
+        Self::ReadOnlyOffline,
+        Self::Unknown,
+        Self::Partial,
+        Self::Denied,
+        Self::SharedTempdbLog,
+        Self::SharedTempdbLogUnknown,
+        Self::SharedTempdbLogPartial,
+        Self::SharedTempdbLogDenied,
+    ];
 }
 /// Native-shaped controlled facts reuse genuine collection/sealing/publication. They are not live qualification.
 pub fn storage_evidence(case: StorageCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    if matches!(
+        case,
+        StorageCase::SharedTempdbLog
+            | StorageCase::SharedTempdbLogUnknown
+            | StorageCase::SharedTempdbLogPartial
+            | StorageCase::SharedTempdbLogDenied
+    ) {
+        return shared_tempdb_log(case);
+    }
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/storage.native.json")))
             .unwrap();
@@ -83,5 +106,82 @@ pub fn storage_evidence(case: StorageCase) -> (CollectionDescription, Vec<Teleme
             sources: vec![coverage],
         }),
     };
+    (source, rows)
+}
+
+fn shared_tempdb_log(case: StorageCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (mut source, rows) = storage_evidence(StorageCase::Exact);
+    let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::Space(mut data), .. }) =
+        rows.into_iter().next().unwrap()
+    else {
+        unreachable!()
+    };
+    data.population = StoragePopulation::SharedTempdbDataFiles;
+    data.kind = culprit_core::FileKind::Temp;
+    data.scope = culprit_core::FileScope::Server;
+    data.database = None;
+    data.native_name = None;
+    data.total_bytes = Some("1048576".into());
+    data.used_bytes = Some("4096".into());
+    data.limit_bytes = None;
+    data.growth_enabled = None;
+    data.reuse_wait = None;
+    data.parts.clear();
+    let mut log = data.clone();
+    log.population = StoragePopulation::SharedTempdbTransactionLog;
+    log.kind = culprit_core::FileKind::Log;
+    log.native_name = Some("tempdb".into());
+    log.total_bytes = Some("9007199254740993".into());
+    log.used_bytes = Some("1".into());
+    log.limit_bytes = Some("9007199254740993".into());
+    log.growth_enabled = Some(false);
+    log.reuse_wait = Some("ACTIVE_TRANSACTION".into());
+    if case == StorageCase::SharedTempdbLogUnknown {
+        log.used_bytes = None;
+        log.limit_bytes = None;
+        log.growth_enabled = None;
+        log.reuse_wait = None;
+    }
+    let mut rows = vec![TelemetryRecord::Operational(OperationalObservation {
+        source: culprit_core::source_id::TEMP_CAPACITY.into(),
+        key: "shared-tempdb".into(),
+        fact: OperationalFact::Space(data),
+    })];
+    if case != StorageCase::SharedTempdbLogDenied {
+        rows.push(TelemetryRecord::Operational(OperationalObservation {
+            source: culprit_core::source_id::LOG_CAPACITY.into(),
+            key: "shared-tempdb-log".into(),
+            fact: OperationalFact::Space(log),
+        }));
+    }
+    let owner = SharedResourceIdentity {
+        engine: culprit_core::Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("original-native-tempdb-machine")
+            .qualified("kind", "sql-server-network-machine"),
+        native: NativeIdentity::new("original-native-tempdb-instance").qualified("kind", "sql-server-instance"),
+    };
+    source.target = CollectionTarget::Shared(owner.clone());
+    source.partition =
+        SourcePartition::InstanceLocal { member: Some(owner), epoch: Some(digest(b"original-tempdb-process")) };
+    source.source = "shared-operational-state".into();
+    let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+    snapshot.records = rows.len() as u32;
+    snapshot.sources = vec![
+        StateSourceCoverage::collected(culprit_core::source_id::TEMP_CAPACITY.into(), 1),
+        if case == StorageCase::SharedTempdbLogDenied {
+            StateSourceCoverage::unavailable(
+                culprit_core::source_id::LOG_CAPACITY.into(),
+                culprit_core::ErrorCode::PermissionDenied,
+                None,
+            )
+        } else {
+            StateSourceCoverage::observed(
+                culprit_core::source_id::LOG_CAPACITY.into(),
+                1,
+                case != StorageCase::SharedTempdbLogPartial,
+            )
+        },
+    ];
     (source, rows)
 }

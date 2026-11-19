@@ -8,33 +8,36 @@ use crate::{
 };
 use culprit_core::{FileKind, FileScope, Result, operations::SequenceCapacity, telemetry::CollectionStop};
 const MAX_OPERATION_ROWS: usize = 10_000;
+mod log;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Log,
     Filegroups,
     Temp,
+    TempLog,
     Sequences,
     SuspectPages,
 }
 impl Kind {
-    pub const ALL: [Self; 5] = [Self::Log, Self::Filegroups, Self::Temp, Self::Sequences, Self::SuspectPages];
+    // The shared log requires the explicit instance-qualified source, never an extra database scan read.
+    pub const SCAN: [Self; 5] = [Self::Log, Self::Filegroups, Self::Temp, Self::Sequences, Self::SuspectPages];
     pub fn source(self) -> &'static culprit_core::Source {
         match self {
-            Self::Log => &crate::sources::LOG_CAPACITY,
+            Self::Log | Self::TempLog => &crate::sources::LOG_CAPACITY,
             Self::Filegroups => &crate::sources::FILE_CAPACITY,
             Self::Temp => &crate::sources::TEMP_CAPACITY,
             Self::Sequences => &crate::sources::SEQUENCE_CAPACITY,
             Self::SuspectPages => &crate::sources::SUSPECT_PAGES,
         }
     }
-    fn sql(self) -> &'static str {
+    fn sql(self) -> String {
         match self {
-            Self::Log => LOG_SQL,
-            Self::Filegroups => FILES_SQL,
-            Self::Temp => TEMP_SQL,
-            Self::Sequences => SEQUENCES_SQL,
-            Self::SuspectPages => SUSPECT_PAGES_SQL,
+            Self::Log | Self::TempLog => log::query(self),
+            Self::Filegroups => FILES_SQL.into(),
+            Self::Temp => TEMP_SQL.into(),
+            Self::Sequences => SEQUENCES_SQL.into(),
+            Self::SuspectPages => SUSPECT_PAGES_SQL.into(),
         }
     }
 }
@@ -123,6 +126,12 @@ impl Facts {
     }
 }
 pub(crate) async fn read<R: NativeRead>(io: &mut R, kind: Kind, limit: usize) -> Result<Facts> {
+    if kind == Kind::TempLog {
+        if limit == 0 {
+            return Err(CollectionStop::RowLimit.error());
+        }
+        log::require_tempdb_layout(io).await?;
+    }
     let sql = format!("{} OPTION(MAXDOP 1)", kind.sql());
     let rows = io.query(&sql, vec![], limit.min(MAX_OPERATION_ROWS) + 1).await.map_err(ReadError::into_error)?;
     if rows.len() > limit.min(MAX_OPERATION_ROWS) {
@@ -148,7 +157,7 @@ pub(crate) async fn read<R: NativeRead>(io: &mut R, kind: Kind, limit: usize) ->
             }
             Ok(Facts::Files { spaces, files })
         }
-        Kind::Log | Kind::Temp => {
+        Kind::Log | Kind::Temp | Kind::TempLog => {
             let [row] = rows.as_slice() else {
                 return Err(invalid_data());
             };
@@ -169,11 +178,15 @@ pub(crate) async fn read<R: NativeRead>(io: &mut R, kind: Kind, limit: usize) ->
 fn space(row: &Rec, kind: Kind) -> Result<SpaceFact> {
     let (file_kind, scope) = match kind {
         Kind::Log => (FileKind::Log, FileScope::Database),
+        Kind::TempLog => (FileKind::Log, FileScope::Server),
         Kind::Filegroups => (FileKind::Data, FileScope::Database),
         Kind::Temp => (FileKind::Temp, FileScope::Server),
         _ => return Err(invalid_data()),
     };
     let temp = kind == Kind::Temp;
+    if kind == Kind::TempLog && (integer(row, "database_id")? != 2 || optional_text(row, "database_name")?.is_some()) {
+        return Err(CollectionStop::SourceChanged.error());
+    }
     let mut parts = vec![];
     if temp {
         for (kind, column) in [
@@ -191,6 +204,7 @@ fn space(row: &Rec, kind: Kind) -> Result<SpaceFact> {
             Kind::Log => culprit_core::telemetry::StoragePopulation::DatabaseTransactionLog,
             Kind::Filegroups => culprit_core::telemetry::StoragePopulation::WritableOnlineDataFilegroups,
             Kind::Temp => culprit_core::telemetry::StoragePopulation::SharedTempdbDataFiles,
+            Kind::TempLog => culprit_core::telemetry::StoragePopulation::SharedTempdbTransactionLog,
             _ => return Err(invalid_data()),
         },
         observed_at,
@@ -198,6 +212,7 @@ fn space(row: &Rec, kind: Kind) -> Result<SpaceFact> {
         key: match kind {
             Kind::Log => "database".into(),
             Kind::Temp => "shared-tempdb".into(),
+            Kind::TempLog => "shared-tempdb-log".into(),
             _ => format!("filegroup:{}", integer(row, "native_id")?),
         },
         kind: file_kind,
@@ -310,14 +325,6 @@ const SUSPECT_PAGES_SQL: &str = "SELECT COUNT_BIG(*) AS count,
  CONVERT(varchar(30), MAX(last_update_date), 126) AS last_native_at
  FROM msdb.dbo.suspect_pages
  WHERE database_id = DB_ID() AND event_type IN (1, 2, 3)";
-
-const LOG_SQL: &str = "DECLARE /* culprit */ @observed_at varchar(40)=CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z';
- SELECT /* culprit */ @observed_at AS observed_at,DB_NAME() AS database_name,
- total_log_size_in_bytes AS total,used_log_space_in_bytes AS used,
- (SELECT log_reuse_wait_desc FROM sys.databases WHERE database_id=DB_ID()) AS reuse_wait,
- (SELECT MAX(CASE WHEN growth>0 AND(max_size=-1 OR size<max_size) THEN 1 ELSE 0 END) FROM sys.database_files WHERE type=1) AS can_grow,
- (SELECT CASE WHEN MAX(CASE WHEN growth>0 AND max_size=-1 THEN 1 ELSE 0 END)=1 THEN NULL ELSE SUM(CONVERT(bigint,CASE WHEN growth=0 OR max_size<size THEN size ELSE max_size END))*CONVERT(bigint,8192) END FROM sys.database_files WHERE type=1) AS max_bytes
- FROM sys.dm_db_log_space_usage";
 
 // One existing catalog dispatch now keeps every visible file independently of the narrower growth population.
 const FILES_SQL: &str = "DECLARE /* culprit */ @observed_at varchar(40)=CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z';

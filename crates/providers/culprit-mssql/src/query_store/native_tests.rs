@@ -256,7 +256,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     batch(&mut application,"CREATE SEQUENCE dbo.culprit_sequence AS bigint START WITH 9007199254740993 INCREMENT BY 1;SELECT NEXT VALUE FOR dbo.culprit_sequence;").await;
     let mut operations =
         crate::read::ReadSession::new(pool.clone(), culprit_core::telemetry::CollectionBudget::default());
-    for kind in crate::operations::native::Kind::ALL {
+    for kind in crate::operations::native::Kind::SCAN {
         let facts = crate::operations::native::read(&mut operations, kind, 10_000).await.unwrap();
         let observations = facts.observations(kind).unwrap();
         assert!(observations.iter().all(|row| row.is_valid()));

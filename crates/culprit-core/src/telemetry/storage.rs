@@ -12,6 +12,7 @@ pub enum StoragePopulation {
     DatabaseTransactionLog,
     WritableOnlineDataFilegroups,
     SharedTempdbDataFiles,
+    SharedTempdbTransactionLog,
 }
 impl StoragePopulation {
     pub fn matches(self, kind: FileKind, scope: FileScope) -> bool {
@@ -20,6 +21,7 @@ impl StoragePopulation {
             (Self::DatabaseTransactionLog, FileKind::Log, FileScope::Database)
                 | (Self::WritableOnlineDataFilegroups, FileKind::Data, FileScope::Database)
                 | (Self::SharedTempdbDataFiles, FileKind::Temp, FileScope::Server)
+                | (Self::SharedTempdbTransactionLog, FileKind::Log, FileScope::Server)
         )
     }
 }
@@ -197,7 +199,15 @@ impl StorageRead {
                 return false;
             }
             let (at, database) = match &row.fact {
-                OperationalFact::Space(space) => (&space.observed_at, space.database.as_deref()),
+                OperationalFact::Space(space) => {
+                    if space.population == StoragePopulation::SharedTempdbTransactionLog
+                        && (row.source != crate::source_id::LOG_CAPACITY
+                            || !space.has_shared_tempdb_log_owner(self.context.native()))
+                    {
+                        return false;
+                    }
+                    (&space.observed_at, space.database.as_deref())
+                }
                 OperationalFact::MssqlDatabaseFile(file) => (&file.observed_at, Some(file.database.as_str())),
                 _ => return false,
             };
@@ -246,7 +256,26 @@ fn storage_invalid() -> Error {
 
 impl OperationalSpace {
     pub fn fits_source(&self, source: &CollectionDescription) -> bool {
+        if self.population == StoragePopulation::SharedTempdbTransactionLog
+            && !NativeReadContext::from_snapshot(source)
+                .is_ok_and(|context| self.has_shared_tempdb_log_owner(Some(&context)))
+        {
+            return false;
+        }
         storage_scope_fits_source(source, &self.observed_at, self.database.as_deref())
+    }
+
+    fn has_shared_tempdb_log_owner(&self, context: Option<&NativeReadContext>) -> bool {
+        self.database.is_none()
+            && self.parts.is_empty()
+            && context.is_some_and(|context| {
+                context.has_qualified_local_owner()
+                    && matches!((&context.target, &context.partition),
+                        (CollectionTarget::Shared(owner), SourcePartition::InstanceLocal { member: Some(member), .. })
+                        if owner.engine == crate::Engine::Mssql
+                            && owner.kind == SharedResourceKind::Instance
+                            && owner == member)
+            })
     }
 }
 impl MssqlDatabaseFile {

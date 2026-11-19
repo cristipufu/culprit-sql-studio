@@ -62,7 +62,8 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
         .collect::<BTreeSet<_>>();
     assert_eq!(snapshot.sources.len(), expected_sources.len(), "each registered family appears once");
     assert_eq!(snapshot.sources.iter().map(|source| source.source.as_str()).collect::<BTreeSet<_>>(), expected_sources);
-    for name in [crate::sources::MEMORY_CLERKS.name, crate::sources::SCHEDULERS.name] {
+    for name in [crate::sources::MEMORY_CLERKS.name, crate::sources::SCHEDULERS.name, crate::sources::LOG_CAPACITY.name]
+    {
         let coverage = snapshot.sources.iter().find(|source| source.source == name).unwrap();
         assert_eq!(coverage.state, SourceState::Collected, "{coverage:?}");
         assert!(coverage.complete_scope && coverage.records > 0);
@@ -71,6 +72,8 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     let capture = CaptureIdentity { observation_id: "owned-shared-native".into(), revision: None };
     let mut counter_sources = BTreeSet::new();
     let mut instance_points = 0;
+    let mut tempdb_log_points = 0;
+    let mut tempdb_data_points = 0;
     let mut cursor = None;
     let mut records = 0;
     loop {
@@ -95,6 +98,25 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
                         assert!(point.matches_context(&NativeReadContext::from_snapshot(&description).unwrap()));
                         instance_points += 1;
                     }
+                    OperationalFact::Space(space) => {
+                        assert_eq!(space.scope, culprit_core::FileScope::Server);
+                        assert_eq!(space.database, None);
+                        match space.population {
+                            StoragePopulation::SharedTempdbTransactionLog => {
+                                assert_eq!(source, culprit_core::source_id::LOG_CAPACITY);
+                                let total = space.total_bytes.as_ref().unwrap().parse::<u64>().unwrap();
+                                let used = space.used_bytes.as_ref().unwrap().parse::<u64>().unwrap();
+                                assert!(total > 0 && used <= total);
+                                assert!(space.parts.is_empty());
+                                tempdb_log_points += 1;
+                            }
+                            StoragePopulation::SharedTempdbDataFiles => {
+                                assert_eq!(source, culprit_core::source_id::TEMP_CAPACITY);
+                                tempdb_data_points += 1;
+                            }
+                            _ => panic!("an app-database allocation cannot enter the shared tempdb capture"),
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -106,6 +128,8 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     }
     assert_eq!(records, snapshot.records as usize);
     assert_eq!(instance_points, 1, "the seventh family retains its raw instance point without admission");
+    assert_eq!(tempdb_log_points, 1, "native tempdb log visibility must be proved, never skipped");
+    assert_eq!(tempdb_data_points, 1, "data and log retain independent source populations");
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert_eq!(member.source_shutdown(), SourceShutdown::Quiescent);

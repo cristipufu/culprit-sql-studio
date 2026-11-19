@@ -1,5 +1,5 @@
 use super::*;
-fn read() -> StorageRead {
+pub(super) fn read() -> StorageRead {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/storage.native.json")))
             .unwrap();

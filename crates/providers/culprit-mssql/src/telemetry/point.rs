@@ -47,7 +47,7 @@ impl Records {
 }
 pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
     Ok(match dataset {
-        SnapshotDataset::Operational => native::Kind::ALL
+        SnapshotDataset::Operational => native::Kind::SCAN
             .into_iter()
             .filter(|kind| *kind != native::Kind::Temp)
             .map(Family::Operation)
@@ -109,6 +109,7 @@ pub(super) fn shared_families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
     }
     Ok(vec![
         Family::Operation(native::Kind::Temp),
+        Family::Operation(native::Kind::TempLog),
         Family::MemoryClerks,
         Family::InstanceResources,
         Family::Schedulers,

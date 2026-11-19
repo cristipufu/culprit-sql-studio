@@ -5,6 +5,59 @@ use culprit_collector::analytical::{
 };
 use culprit_core::{SourceState, telemetry::*};
 #[tokio::test]
+async fn original_shared_tempdb_log_replay_preserves_data_separation_exact_free_bytes_and_independent_missingness() {
+    for case in [
+        StorageCase::SharedTempdbLog,
+        StorageCase::SharedTempdbLogUnknown,
+        StorageCase::SharedTempdbLogPartial,
+        StorageCase::SharedTempdbLogDenied,
+    ] {
+        let (source, rows) = test_support::storage_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows).await;
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let analysis = culprit_engine::collected_resources::storage(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert!(matches!(analysis.report.target, CollectionTarget::Shared(_)));
+        assert!(analysis.report.entries.iter().all(|entry| entry.scope == culprit_core::FileScope::Server));
+        let data = analysis
+            .report
+            .entries
+            .iter()
+            .find(|entry| entry.source == culprit_core::source_id::TEMP_CAPACITY)
+            .unwrap();
+        assert_eq!(data.fields.iter().find(|field| field.key == "used_bytes").unwrap().value.as_deref(), Some("4096"));
+        assert!(!data.fields.iter().any(|field| field.key == "allocated_free_bytes"));
+        let log = analysis.report.entries.iter().find(|entry| entry.source == culprit_core::source_id::LOG_CAPACITY);
+        if case == StorageCase::SharedTempdbLogDenied {
+            assert!(log.is_none());
+            assert_eq!(analysis.report.source_state, SourceState::Partial);
+            assert_eq!(
+                analysis
+                    .report
+                    .native_sources
+                    .iter()
+                    .find(|source| source.source == culprit_core::source_id::LOG_CAPACITY)
+                    .unwrap()
+                    .state,
+                SourceState::Unavailable
+            );
+        } else {
+            let log = log.unwrap();
+            assert_eq!(log.observation_key, "shared-tempdb-log");
+            let free = log.fields.iter().find(|field| field.key == "allocated_free_bytes").unwrap().value.as_deref();
+            assert_eq!(free, (case != StorageCase::SharedTempdbLogUnknown).then_some("9007199254740992"));
+            assert!(log.explanation.contains(&culprit_core::t!("view.storage.temp_log.limit")));
+            if case != StorageCase::SharedTempdbLogUnknown {
+                assert!(log.explanation.contains(&culprit_core::t!("view.storage.temp_log.active")));
+            }
+            if case == StorageCase::SharedTempdbLogPartial {
+                assert_eq!(analysis.report.source_state, SourceState::Partial);
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn authentic_storage_capture_keeps_exact_quantities_populations_file_meanings_and_original_receipts() {
     for case in StorageCase::ALL {
         let (source, rows) = test_support::storage_evidence(case);

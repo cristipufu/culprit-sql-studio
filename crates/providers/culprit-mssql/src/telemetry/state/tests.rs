@@ -91,7 +91,7 @@ fn source_with_properties(
         Ok(vec![initial_identity]),
         Ok(vec![properties]),
     ];
-    for kind in native::Kind::ALL {
+    for kind in native::Kind::SCAN {
         if matches!(kind, native::Kind::SuspectPages | native::Kind::Temp)
             || (kind == native::Kind::Sequences && !metadata)
         {

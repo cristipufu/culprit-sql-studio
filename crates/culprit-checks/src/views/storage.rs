@@ -4,6 +4,7 @@ use culprit_core::{
 };
 pub const MAX_STORAGE_ENTRIES: usize = 256;
 mod allocations;
+mod tempdb_log;
 pub(crate) use allocations::AllocationEvidence;
 
 pub fn explain_snapshot(snapshot: &Snapshot) -> Result<Option<StorageReport>> {
@@ -128,6 +129,12 @@ fn allocation_fields(space: &OperationalSpace) -> Vec<StorageField> {
                 &space.parts.iter().find(|part| part.kind == kind).and_then(|part| part.bytes.clone()),
             ));
         }
+    } else if space.population == StoragePopulation::SharedTempdbTransactionLog {
+        fields.push(number(
+            "allocated_free_bytes",
+            t!("view.storage.temp_log.field.free_bytes"),
+            &tempdb_log::free_bytes(space),
+        ));
     }
     fields
 }
@@ -135,8 +142,16 @@ fn entry(row: &OperationalObservation) -> Result<StorageEntry> {
     let (scope, title, explanation, fields) = match &row.fact {
         OperationalFact::Space(space) => (
             space.scope,
-            space.native_name.clone().unwrap_or_else(|| population(space.population)),
-            population(space.population),
+            if space.population == StoragePopulation::SharedTempdbTransactionLog {
+                t!("view.storage.temp_log.title")
+            } else {
+                space.native_name.clone().unwrap_or_else(|| population(space.population))
+            },
+            if space.population == StoragePopulation::SharedTempdbTransactionLog {
+                tempdb_log::explanation(space)
+            } else {
+                population(space.population)
+            },
             allocation_fields(space),
         ),
         OperationalFact::MssqlDatabaseFile(file) => (
@@ -183,6 +198,7 @@ fn population(population: StoragePopulation) -> String {
         StoragePopulation::DatabaseTransactionLog => t!("view.storage.population.log"),
         StoragePopulation::WritableOnlineDataFilegroups => t!("view.storage.population.writable"),
         StoragePopulation::SharedTempdbDataFiles => t!("view.storage.population.temp"),
+        StoragePopulation::SharedTempdbTransactionLog => t!("view.storage.population.temp_log"),
     }
 }
 fn basis(basis: StorageFileSizeBasis) -> String {

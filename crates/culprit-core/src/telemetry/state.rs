@@ -722,6 +722,9 @@ impl OperationalObservation {
                 OperationalFact::HyperscaleLogComponent(_) => self.source == HYPERSCALE_LOG_COMPONENTS_SOURCE,
                 OperationalFact::DatabaseProperties(_) => self.source == DATABASE_PROPERTIES_SOURCE,
                 OperationalFact::MssqlDatabaseFile(_) => self.source == crate::source_id::FILE_CAPACITY,
+                OperationalFact::Space(space) if space.population == StoragePopulation::SharedTempdbTransactionLog => {
+                    self.source == crate::source_id::LOG_CAPACITY
+                }
                 OperationalFact::MssqlInstanceResources(_) => self.source == INSTANCE_RESOURCES_SOURCE,
                 OperationalFact::Retention(retainer) => retainer.source == self.source,
                 OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,

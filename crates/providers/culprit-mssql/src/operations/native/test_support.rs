@@ -22,6 +22,33 @@ pub(crate) fn space_row() -> Rec {
 pub(crate) fn temp_space_row() -> Rec {
     replace(&space_row(), &[("database_name", Val::Null)])
 }
+pub(crate) fn temp_log_layout_row() -> Rec {
+    Rec::of(&[
+        ("edition", Val::Int(3)),
+        ("major", Val::Int(16)),
+        ("database_id", Val::Int(2)),
+        ("metadata_visible", Val::Int(1)),
+        ("log_permission", Val::Int(1)),
+        ("usage_columns", Val::Int(3)),
+        ("file_columns", Val::Int(4)),
+        ("reuse_columns", Val::Int(1)),
+    ])
+}
+pub(crate) fn temp_log_row() -> Rec {
+    let row = replace(
+        &space_row(),
+        &[
+            ("database_name", Val::Null),
+            ("name", Val::Text("tempdb".into())),
+            ("total", Val::Int(9_007_199_254_740_993)),
+            ("used", Val::Int(0)),
+            ("reuse_wait", Val::Text("ACTIVE_TRANSACTION".into())),
+        ],
+    );
+    let mut columns = row.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    columns.push(("database_id", Val::Int(2)));
+    Rec::of(&columns)
+}
 pub(crate) fn file_row() -> Rec {
     Rec::of(&[
         ("row_kind", Val::Int(1)),

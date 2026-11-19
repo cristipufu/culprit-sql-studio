@@ -1,4 +1,5 @@
 use super::*;
+mod shared_tempdb_log;
 fn rows() -> Vec<OperationalObservation> {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/storage.native.json")))
