@@ -591,3 +591,176 @@ fn complete_access_and_output_comparisons_preserve_their_existing_wording() {
         )
     );
 }
+
+fn converted_tvp_plan() -> Plan {
+    let mut plan = input_plan(
+        Some(RelationalInput { kind: Kind::TableValuedParameter, provenance: Provenance::NativeParameterMetadata }),
+        20_000.0,
+        20_000.0,
+    );
+    plan.root.facts_mut().table_alias = Some("r".into());
+    set_conversion(&mut plan, "CONVERT_IMPLICIT(nvarchar(64),[r].[value],0)=[@needle]");
+    plan
+}
+
+fn set_conversion(plan: &mut Plan, expression: &str) {
+    plan.root.predicate = Some(expression.into());
+    plan.facts_mut().conversions = vec![crate::PlanConversion {
+        issue: crate::PlanConversionIssue::CardinalityEstimate,
+        expression: expression.into(),
+    }];
+}
+
+fn conversion_concern(plan: &Plan) -> PlanInsight {
+    insights(plan).into_iter().find(|insight| insight.rule == "implicit-conversion").expect("native column conversion")
+}
+
+fn with_conversion_peer(mut plan: Plan, mut peer: PlanNode) -> Plan {
+    peer.id = 2;
+    let mut join = measured(0, "Hash Match", NodeKind::Join, 20_000.0, 20_000.0, 1.0);
+    join.children = vec![plan.root, peer];
+    plan.root = join;
+    plan
+}
+
+#[test]
+fn converted_tvp_columns_receive_structured_type_advice_without_a_cardinality_story() {
+    for operand in ["[r].[value]", "[@input].[value]", "[@input].[value] as [r].[value]"] {
+        let mut plan = converted_tvp_plan();
+        set_conversion(&mut plan, &format!("CONVERT_IMPLICIT(nvarchar(64),{operand},0)=[@needle]"));
+        let concern = conversion_concern(&plan);
+        let column = current_conversions(&plan, &plan.facts().conversions[0].expression)[0].0.clone();
+        assert_eq!(concern.fix, t!("insight.implicit_conversion.fix_tvp", input = "@input", column = &column));
+        assert_eq!(concern.verify, t!("insight.implicit_conversion.verify_tvp"));
+        assert!(concern.fix_sql.is_none());
+        assert!(plan.root.misestimates().is_empty(), "accurate large input does not establish a cardinality problem");
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "misestimate"));
+    }
+}
+
+#[test]
+fn unresolved_local_ambiguous_and_detached_inputs_retain_existing_conversion_english() {
+    for case in [
+        "local",
+        "unknown",
+        "unproven",
+        "invalid-provenance",
+        "alias-case",
+        "alias-collision",
+        "duplicate-id",
+        "unqualified-column",
+        "foreign-object",
+        "collated-operand",
+        "one-row-shape",
+        "display-only",
+    ] {
+        let mut plan = converted_tvp_plan();
+        match case {
+            "local" => {
+                plan.root.facts_mut().relational_input =
+                    Some(RelationalInput { kind: Kind::LocalTableVariable, provenance: Provenance::NativeDeclaration })
+            }
+            "unknown" => {
+                plan.root.facts_mut().relational_input =
+                    Some(RelationalInput { kind: Kind::Unknown, provenance: Provenance::Unresolved })
+            }
+            "unproven" => plan.root.facts_mut().relational_input = None,
+            "invalid-provenance" => {
+                plan.root.facts_mut().relational_input =
+                    Some(RelationalInput { kind: Kind::TableValuedParameter, provenance: Provenance::NativePlan })
+            }
+            "alias-case" => plan.root.facts_mut().table_alias = Some("R".into()),
+            "alias-collision" | "duplicate-id" => {
+                let mut peer = measured(2, "Index Scan", NodeKind::Scan, 20_000.0, 20_000.0, 1.0);
+                peer.object = Some("dbo.Items".into());
+                peer.facts_mut().table_alias = Some(if case == "alias-collision" { "r" } else { "i" }.into());
+                plan = with_conversion_peer(plan, peer);
+                if case == "duplicate-id" {
+                    plan.root.children[1].id = 1;
+                }
+            }
+            "unqualified-column" => set_conversion(&mut plan, "CONVERT_IMPLICIT(nvarchar(64),[value],0)=[@needle]"),
+            "foreign-object" => {
+                set_conversion(&mut plan, "CONVERT_IMPLICIT(nvarchar(64),[dbo].[Other].[value],0)=[@needle]")
+            }
+            "collated-operand" => set_conversion(
+                &mut plan,
+                "CONVERT_IMPLICIT(nvarchar(64),[r].[value] COLLATE Latin1_General_100_CI_AS,0)=[@needle]",
+            ),
+            "one-row-shape" => {
+                plan.root.facts_mut().relational_input = None;
+                plan.root.est_rows = 1.0;
+                plan.root.act_rows = Some(1.0);
+            }
+            "display-only" => {
+                plan.root.facts_mut().relational_input = None;
+                plan.root.props.insert("RelationalInput".into(), "TableValuedParameter".into());
+            }
+            _ => unreachable!(),
+        }
+        let concern = conversion_concern(&plan);
+        let converted = current_conversions(&plan, &plan.facts().conversions[0].expression);
+        let (column, target) = &converted[0];
+        assert_eq!(concern.fix, mismatch_fix(Some(column), Some(target)), "{case}");
+        assert_eq!(concern.verify, t!("insight.implicit_conversion.verify", named = "true", column = column), "{case}");
+    }
+}
+
+#[test]
+fn a_conversion_on_another_relation_does_not_borrow_the_plans_tvp_contract() {
+    let mut plan = converted_tvp_plan();
+    plan.root.predicate = None;
+    let expression = "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value]";
+    let mut peer = measured(2, "Index Scan", NodeKind::Scan, 20_000.0, 20_000.0, 1.0);
+    peer.object = Some("dbo.Items".into());
+    peer.facts_mut().table_alias = Some("i".into());
+    peer.predicate = Some(expression.into());
+    plan = with_conversion_peer(plan, peer);
+    plan.facts_mut().conversions[0].expression = expression.into();
+    let concern = conversion_concern(&plan);
+    assert_eq!(concern.fix, mismatch_fix(Some("i.value"), Some("nvarchar(64)")));
+    assert_ne!(concern.verify, t!("insight.implicit_conversion.verify_tvp"));
+}
+
+#[test]
+fn explicit_or_scalar_value_conversion_does_not_become_a_tvp_type_mismatch() {
+    for expression in
+        ["[r].[value]=CONVERT_IMPLICIT(nvarchar(64),[@needle],0)", "CONVERT(nvarchar(64),[r].[value],0)=[@needle]"]
+    {
+        let mut plan = converted_tvp_plan();
+        set_conversion(&mut plan, expression);
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "implicit-conversion"));
+    }
+}
+
+#[test]
+fn every_native_relation_operator_participates_in_tvp_conversion_alias_uniqueness() {
+    for kind in [NodeKind::Other, NodeKind::Lookup, NodeKind::Modify, NodeKind::Compute] {
+        let mut peer = measured(2, "native relation", kind, 20_000.0, 20_000.0, 1.0);
+        peer.object = Some("dbo.NativeFunction".into());
+        peer.facts_mut().table_alias = Some("r".into());
+        peer.facts_mut().relational_input =
+            Some(RelationalInput { kind: Kind::TableValuedFunction, provenance: Provenance::NativePlan });
+        let plan = with_conversion_peer(converted_tvp_plan(), peer);
+        let concern = conversion_concern(&plan);
+        assert_eq!(concern.fix, mismatch_fix(Some("r.value"), Some("nvarchar(64)")), "{kind:?}");
+        assert_ne!(concern.verify, t!("insight.implicit_conversion.verify_tvp"));
+    }
+}
+
+#[test]
+fn the_complete_native_as_reference_must_be_plain_and_belong_to_the_same_tvp() {
+    for suffix in [
+        "[r].[value] COLLATE Latin1_General_100_CI_AS",
+        "[r].[value] + 1",
+        "[r]",
+        "[foreign].[value]",
+        "[r].[value] AS [r].[value]",
+    ] {
+        let mut plan = converted_tvp_plan();
+        set_conversion(&mut plan, &format!("CONVERT_IMPLICIT(nvarchar(64),[@input].[value] AS {suffix},0)=[@needle]"));
+        let concern = conversion_concern(&plan);
+        assert_eq!(concern.fix, mismatch_fix(Some("@input.value"), Some("nvarchar(64)")), "{suffix}");
+        assert_ne!(concern.verify, t!("insight.implicit_conversion.verify_tvp"));
+    }
+}

@@ -302,3 +302,78 @@ fn unsupported_namespace_scope_keeps_payloads_and_does_not_mint_a_retained_bindi
         assert!(value.statement.payload.is_available() && value.estimated_plan.payload.is_available());
     }
 }
+
+fn native_conversion_join(expression: &str) -> String {
+    let left = scan(1, ROWS).replace(
+        "</TableScan>",
+        &format!(r#"<Predicate><ScalarOperator ScalarString="{expression}" /></Predicate></TableScan>"#),
+    );
+    join(SQL, &left, &scan(2, ITEMS), "").replace(
+        "<QueryPlan>",
+        &format!(r#"<QueryPlan><Warnings><PlanAffectingConvert ConvertIssue="Cardinality Estimate" Expression="{expression}" /></Warnings>"#),
+    )
+}
+
+#[test]
+fn native_conversion_of_a_bound_tvp_column_uses_its_structured_type_contract() {
+    let read = crate::plan_xml::test_read_context("app");
+    let expression = "CONVERT_IMPLICIT(nvarchar(64),[r].[id],0)=[i].[id]";
+    let plan = parse(SQL, &native_conversion_join(expression), Some(&read));
+    let input = &plan.root.children[0];
+    assert_eq!(input.facts().relational_input.unwrap().qualified_kind(), Kind::TableValuedParameter);
+    assert_eq!(input.facts().access_rows.unwrap().actual_total, Some(20_000.0));
+    assert_eq!(plan.facts().conversions[0].expression, expression);
+    let insight = culprit_core::insights::insights(&plan)
+        .into_iter()
+        .find(|insight| insight.rule == "implicit-conversion")
+        .expect("the native input column is converted");
+    assert_eq!(insight.fix, culprit_core::t!("insight.implicit_conversion.fix_tvp", input = "@Rows", column = "r.id"));
+    assert_eq!(insight.verify, culprit_core::t!("insight.implicit_conversion.verify_tvp"));
+    assert!(insight.fix_sql.is_none());
+}
+
+#[test]
+fn native_missing_or_foreign_input_proof_keeps_generic_conversion_advice() {
+    let expression = "CONVERT_IMPLICIT(nvarchar(64),[r].[id],0)=[i].[id]";
+    for read in [None, Some(crate::plan_xml::test_read_context("other"))] {
+        let plan = parse(SQL, &native_conversion_join(expression), read.as_ref());
+        assert_eq!(plan.root.children[0].facts().relational_input.unwrap().qualified_kind(), Kind::Unknown);
+        let insight = culprit_core::insights::insights(&plan)
+            .into_iter()
+            .find(|insight| insight.rule == "implicit-conversion")
+            .unwrap();
+        assert_eq!(insight.fix, culprit_core::insights::mismatch_fix(Some("r.id"), Some("nvarchar(64)")));
+    }
+    let read = crate::plan_xml::test_read_context("app");
+    let healthy = "[r].[id]=CONVERT_IMPLICIT(nvarchar(64),[@needle],0)";
+    let plan = parse(SQL, &native_conversion_join(healthy), Some(&read));
+    assert!(!culprit_core::insights::insights(&plan).iter().any(|insight| insight.rule == "implicit-conversion"));
+}
+
+#[test]
+fn native_tvp_conversion_as_format_keeps_only_a_complete_plain_same_input_reference() {
+    let read = crate::plan_xml::test_read_context("app");
+    for (suffix, qualified) in [
+        ("[r].[id]", true),
+        ("[r].[id] COLLATE Latin1_General_100_CI_AS", false),
+        ("[r].[id] + 1", false),
+        ("[i].[id]", false),
+    ] {
+        let expression = format!("CONVERT_IMPLICIT(nvarchar(64),[@Rows].[id] AS {suffix},0)=[i].[id]");
+        let plan = parse(SQL, &native_conversion_join(&expression), Some(&read));
+        assert_eq!(
+            plan.root.children[0].facts().relational_input.unwrap().qualified_kind(),
+            Kind::TableValuedParameter
+        );
+        let insight = culprit_core::insights::insights(&plan)
+            .into_iter()
+            .find(|insight| insight.rule == "implicit-conversion")
+            .unwrap();
+        let expected = if qualified {
+            culprit_core::t!("insight.implicit_conversion.fix_tvp", input = "@Rows", column = "@Rows.id")
+        } else {
+            culprit_core::insights::mismatch_fix(Some("@Rows.id"), Some("nvarchar(64)"))
+        };
+        assert_eq!(insight.fix, expected, "{suffix}");
+    }
+}

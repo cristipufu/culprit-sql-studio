@@ -498,32 +498,7 @@ pub(super) struct ColumnReference {
 }
 
 pub(super) fn column_reference(plan: &Plan, operand: &str) -> Option<ColumnReference> {
-    // Showplan can append `as [alias].[column]` to its physical column. An AS inside a delimited name is a name.
-    let mut quote = None;
-    let mut end = operand.len();
-    let mut chars = operand.char_indices().peekable();
-    while let Some((at, c)) = chars.next() {
-        if let Some(close) = quote {
-            if c == close {
-                if chars.peek().is_some_and(|(_, next)| *next == close) {
-                    chars.next();
-                } else {
-                    quote = None;
-                }
-            }
-        } else if operand.get(at..at + 4).is_some_and(|part| part.eq_ignore_ascii_case(" as ")) {
-            end = at;
-            break;
-        } else {
-            quote = match c {
-                '[' => Some(']'),
-                '"' => Some('"'),
-                '`' => Some('`'),
-                _ => None,
-            };
-        }
-    }
-    let parts = identifier_parts(&operand[..end])?;
+    let parts = column_reference_parts(operand)?;
     let column = parts.last()?.clone();
     let label = match parts.as_slice() {
         [.., table, column] => format!("{table}.{column}"),
@@ -562,6 +537,147 @@ pub(super) fn column_reference(plan: &Plan, operand: &str) -> Option<ColumnRefer
         }
     }
     Some(ColumnReference { label, schema, table, column })
+}
+
+fn column_reference_parts(operand: &str) -> Option<Vec<String>> {
+    identifier_parts(column_reference_expression(operand))
+}
+
+fn column_reference_expression(operand: &str) -> &str {
+    // Showplan can append `as [alias].[column]` to its physical column. An AS inside a delimited name is a name.
+    let mut quote = None;
+    let mut end = operand.len();
+    let mut chars = operand.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if let Some(close) = quote {
+            if c == close {
+                if chars.peek().is_some_and(|(_, next)| *next == close) {
+                    chars.next();
+                } else {
+                    quote = None;
+                }
+            }
+        } else if operand.get(at..at + 4).is_some_and(|part| part.eq_ignore_ascii_case(" as ")) {
+            end = at;
+            break;
+        } else {
+            quote = match c {
+                '[' => Some(']'),
+                '"' => Some('"'),
+                '`' => Some('`'),
+                _ => None,
+            };
+        }
+    }
+    &operand[..end]
+}
+
+/// Advice is selected from the original conversion operand and same-plan input proof, before rendering prose.
+#[derive(Clone)]
+pub enum MismatchAdvice {
+    ColumnTypes,
+    TableValuedParameter { input: String, column: String, target: String },
+}
+
+impl MismatchAdvice {
+    pub fn from_plan(
+        plan: Option<&Plan>,
+        expression: Option<&str>,
+        column: Option<&str>,
+        target: Option<&str>,
+    ) -> Self {
+        let qualified = || {
+            let (plan, expression, column, target) = (plan?, expression?, column?, target?);
+            if plan.engine != Engine::Mssql
+                || target.is_empty()
+                || !current_conversions(plan, expression).iter().any(|(name, to)| name == column && to == target)
+            {
+                return None;
+            }
+            let operands: Vec<_> = convert_calls(expression)
+                .into_iter()
+                .filter(|(to, operand)| {
+                    *to == target
+                        && is_column_operand(operand)
+                        && column_reference(plan, operand).is_some_and(|reference| reference.label == column)
+                })
+                .collect();
+            let [(_, operand)] = operands.as_slice() else { return None };
+            Some(Self::TableValuedParameter {
+                input: converted_tvp(plan, operand)?,
+                column: column.to_string(),
+                target: target.to_string(),
+            })
+        };
+        qualified().unwrap_or(Self::ColumnTypes)
+    }
+
+    pub fn fix(&self, column: Option<&str>, target: Option<&str>) -> String {
+        match self {
+            Self::ColumnTypes => mismatch_fix(column, target),
+            Self::TableValuedParameter { input, column, .. } => {
+                t!("insight.implicit_conversion.fix_tvp", input = input, column = column)
+            }
+        }
+    }
+
+    pub fn summary(&self) -> Option<String> {
+        match self {
+            Self::ColumnTypes => None,
+            Self::TableValuedParameter { input, column, target } => {
+                Some(t!("insight.implicit_conversion.summary_tvp", input = input, column = column, target = target))
+            }
+        }
+    }
+
+    pub fn verification(&self) -> Option<String> {
+        match self {
+            Self::ColumnTypes => None,
+            Self::TableValuedParameter { .. } => Some(t!("insight.implicit_conversion.verify_tvp")),
+        }
+    }
+}
+
+fn converted_tvp(plan: &Plan, operand: &str) -> Option<String> {
+    let expression = column_reference_expression(operand);
+    let parts = native_column_parts(plan, expression)?;
+    let mut ids = std::collections::BTreeSet::new();
+    let nodes = plan.nodes();
+    if !nodes.iter().all(|node| ids.insert(node.id)) {
+        return None;
+    }
+    let input = unique_conversion_relation(&nodes, &parts)?;
+    if expression.len() != operand.len() {
+        let alias = native_column_parts(plan, operand.get(expression.len() + " as ".len()..)?)?;
+        if unique_conversion_relation(&nodes, &alias)?.id != input.id {
+            return None;
+        }
+    }
+    if !matches!(input.kind, NodeKind::Scan | NodeKind::Seek)
+        || input.facts().relational_input?.qualified_kind()
+            != crate::plan_facts::RelationalInputKind::TableValuedParameter
+    {
+        return None;
+    }
+    input.object.clone()
+}
+
+fn native_column_parts(plan: &Plan, expression: &str) -> Option<Vec<String>> {
+    let parts = identifier_parts(expression)?;
+    let names: Vec<_> = parts.iter().map(String::as_str).collect();
+    // Native SQL Server column references are delimited. Validate the complete physical or AS reference;
+    // COLLATE, arithmetic and other opaque suffixes cannot be treated as part of a column name.
+    (parts.len() >= 2 && plan.engine.dialect().qualified(&names) == expression.trim()).then_some(parts)
+}
+
+fn unique_conversion_relation<'a>(nodes: &[&'a PlanNode], parts: &[String]) -> Option<&'a PlanNode> {
+    let (_, relation) = parts.split_last()?;
+    let mut matches = nodes.iter().copied().filter(|node| {
+        identifier_parts(node.object.as_deref().unwrap_or_default()).as_deref() == Some(relation)
+            || matches!(relation, [alias] if node.facts().table_alias.as_deref() == Some(alias.as_str()))
+    });
+    let matched = matches.next()?;
+    matches.next().is_none().then_some(matched)
 }
 
 /// Whether a column of type `now` needs no conversion to `converted_to`: the same type, or text of the same kind.

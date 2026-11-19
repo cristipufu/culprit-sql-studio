@@ -599,3 +599,160 @@ fn plan_warnings_say_what_the_plan_warned_in_english() {
         ]
     );
 }
+
+fn tvp_conversion_snapshot(input: Option<culprit_core::plan_facts::RelationalInput>) -> Snapshot {
+    let mut snapshot = snapshot();
+    let query = snapshot.workload.as_mut().unwrap().queries.iter_mut().find(|query| query.id == "7").unwrap();
+    query.text = "SELECT r.email FROM @Rows r WHERE r.email=@needle".into();
+    query.parameters = None;
+    let plan = query.plan.as_mut().unwrap();
+    let expression = "CONVERT_IMPLICIT(nvarchar(64),[r].[email],0)=[@needle]";
+    plan.statement = Some(query.text.clone());
+    plan.raw = None;
+    plan.kind = culprit_core::PlanKind::Actual;
+    plan.root.id = 0;
+    plan.root.kind = culprit_core::NodeKind::Scan;
+    plan.root.op = "Table Scan".into();
+    plan.root.object = Some("@Rows".into());
+    plan.root.index = None;
+    plan.root.children.clear();
+    plan.root.seek_predicate = None;
+    plan.root.predicate = Some(expression.into());
+    plan.root.est_rows = 20_000.0;
+    plan.root.act_rows = Some(20_000.0);
+    plan.root.act_executions = Some(1.0);
+    plan.root.rows_read = Some(20_000.0);
+    plan.root.props.clear();
+    plan.root.facts = culprit_core::PlanNodeFacts::default();
+    plan.root.facts_mut().relational_input = input;
+    plan.root.facts_mut().table_alias = Some("r".into());
+    plan.root.facts_mut().access_rows = culprit_core::plan_facts::PlanAccessRows::new(Some(20_000.0), Some(20_000.0));
+    plan.root.warnings = vec![culprit_core::PlanWarning::ImplicitConversion];
+    plan.facts = culprit_core::PlanFacts::default();
+    plan.facts_mut().conversions = vec![culprit_core::PlanConversion {
+        issue: culprit_core::PlanConversionIssue::CardinalityEstimate,
+        expression: expression.into(),
+    }];
+    snapshot
+}
+
+#[test]
+fn a_native_tvp_conversion_finding_reuses_the_plans_type_contract_advice_and_verification() {
+    use culprit_core::plan_facts::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
+    let snapshot = tvp_conversion_snapshot(Some(RelationalInput {
+        kind: RelationalInputKind::TableValuedParameter,
+        provenance: RelationalInputProvenance::NativeParameterMetadata,
+    }));
+    let plan = snapshot
+        .workload
+        .as_ref()
+        .unwrap()
+        .queries
+        .iter()
+        .find(|query| query.id == "7")
+        .unwrap()
+        .plan
+        .as_ref()
+        .unwrap();
+    let insight = culprit_core::insights::insights(plan)
+        .into_iter()
+        .find(|insight| insight.rule == "implicit-conversion")
+        .unwrap();
+    let report = culprit_checks::analyze(snapshot);
+    let finding = report
+        .findings
+        .iter()
+        .find(|finding| finding.id.starts_with("plan-warnings:implicit-conversion:tvp:"))
+        .expect("the query-owned TVP conversion finding");
+    let fix = finding.fix.as_ref().unwrap();
+    assert_eq!(fix.summary, insight.fix);
+    assert!(fix.sql.is_none());
+    assert_eq!(finding.verify, vec![insight.verify]);
+    assert!(finding.summary.contains(&culprit_core::t!(
+        "insight.implicit_conversion.summary_tvp",
+        input = "@Rows",
+        column = "r.email",
+        target = "nvarchar(64)"
+    )));
+    assert!(finding.queries.iter().any(|query| query.id == "7"));
+}
+
+#[test]
+fn a_local_or_unresolved_input_conversion_keeps_existing_scalar_conversion_english() {
+    use culprit_core::plan_facts::{
+        RelationalInput, RelationalInputKind as Kind, RelationalInputProvenance as Provenance,
+    };
+    for input in [
+        None,
+        Some(RelationalInput { kind: Kind::LocalTableVariable, provenance: Provenance::NativeDeclaration }),
+        Some(RelationalInput { kind: Kind::Unknown, provenance: Provenance::Unresolved }),
+        Some(RelationalInput { kind: Kind::TableValuedParameter, provenance: Provenance::NativePlan }),
+    ] {
+        let report = culprit_checks::analyze(tvp_conversion_snapshot(input));
+        let finding =
+            report.findings.iter().find(|finding| finding.id == "plan-warnings:implicit-conversion:r.email").unwrap();
+        assert_eq!(
+            finding.fix.as_ref().unwrap().summary,
+            culprit_core::insights::mismatch_fix(Some("r.email"), Some("nvarchar(64)"))
+        );
+        assert_eq!(finding.verify, vec![culprit_core::t!("check.plan_warnings.verify.rescan")]);
+    }
+}
+
+#[test]
+fn tvp_conversion_findings_do_not_merge_different_query_or_input_contracts() {
+    use culprit_core::plan_facts::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
+    let tvp = RelationalInput {
+        kind: RelationalInputKind::TableValuedParameter,
+        provenance: RelationalInputProvenance::NativeParameterMetadata,
+    };
+    for other_is_tvp in [true, false] {
+        let mut snapshot = tvp_conversion_snapshot(Some(tvp));
+        let mut other =
+            snapshot.workload.as_ref().unwrap().queries.iter().find(|query| query.id == "7").unwrap().clone();
+        other.id = "conversion-peer".into();
+        let object = if other_is_tvp { "@Other" } else { "shop.customers" };
+        other.text = format!("SELECT r.email FROM {object} r WHERE r.email=@needle");
+        let plan = other.plan.as_mut().unwrap();
+        plan.statement = Some(other.text.clone());
+        plan.root.object = Some(object.into());
+        plan.root.facts_mut().relational_input = other_is_tvp.then_some(tvp);
+        plan.facts_mut().conversions[0].issue = culprit_core::PlanConversionIssue::SeekPlan;
+        snapshot.workload.as_mut().unwrap().queries.push(other);
+        let report = culprit_checks::analyze(snapshot);
+        let findings: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|finding| finding.id.starts_with("plan-warnings:implicit-conversion:"))
+            .collect();
+        assert_eq!(findings.len(), 2, "native contracts sharing an alias remain independent");
+        assert_ne!(findings[0].id, findings[1].id);
+        for finding in findings {
+            assert_eq!(finding.queries.len(), 1, "a contract cannot borrow another query's impact or SQL reference");
+            let query = &finding.queries[0].id;
+            let input = match query.as_str() {
+                "7" => Some("@Rows"),
+                "conversion-peer" if other_is_tvp => Some("@Other"),
+                "conversion-peer" => None,
+                _ => panic!("unexpected query"),
+            };
+            let fix = &finding.fix.as_ref().unwrap().summary;
+            if let Some(input) = input {
+                assert!(finding.id.starts_with("plan-warnings:implicit-conversion:tvp:"));
+                assert_eq!(
+                    fix,
+                    &culprit_core::t!("insight.implicit_conversion.fix_tvp", input = input, column = "r.email")
+                );
+                assert!(finding.summary.contains(&culprit_core::t!(
+                    "insight.implicit_conversion.summary_tvp",
+                    input = input,
+                    column = "r.email",
+                    target = "nvarchar(64)"
+                )));
+            } else {
+                assert_eq!(finding.id, "plan-warnings:implicit-conversion:r.email");
+                assert_eq!(fix, &culprit_core::insights::mismatch_fix(Some("r.email"), Some("nvarchar(64)")));
+            }
+        }
+    }
+}

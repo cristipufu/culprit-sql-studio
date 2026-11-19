@@ -47,7 +47,9 @@ use index::*;
 use memory::*;
 use parallelism::*;
 use predicates::*;
-pub use predicates::{condition_count, converts_column, current_conversions, mismatch_fix, mysql_guessed_filtered};
+pub use predicates::{
+    MismatchAdvice, condition_count, converts_column, current_conversions, mismatch_fix, mysql_guessed_filtered,
+};
 use query::*;
 use server::*;
 use statistics::*;

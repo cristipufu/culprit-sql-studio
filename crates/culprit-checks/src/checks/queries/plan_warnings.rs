@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
-use culprit_core::insights::{PlanInsight, StaleIndexStatistics};
+use culprit_core::insights::{MismatchAdvice, PlanInsight, StaleIndexStatistics};
 use culprit_core::t;
 
 pub fn plan_warnings_info() -> CheckInfo {
@@ -81,6 +81,8 @@ struct Conversion {
     expression: Option<String>,
     /// The parameters the application declares.
     parameters: Option<String>,
+    /// The original plan's qualified input contract, independent of wording and merged query impact.
+    advice: MismatchAdvice,
 }
 
 /// What the catalog says now of the statistics a plan warned held nothing usable.
@@ -129,9 +131,17 @@ fn plan_warning_cases(snapshot: &Snapshot) -> Vec<PlanWarningCase<'_>> {
 }
 
 impl PlanWarningCase<'_> {
-    /// The finding's id: a type mismatch's column, so every statement that shows it is one finding.
+    /// Persistent-column warnings retain shared grouping. A TVP contract stays within its original query/input.
     fn id(&self) -> String {
         match &self.warned {
+            Warned::Conversion(Conversion {
+                advice: MismatchAdvice::TableValuedParameter { input, column, target },
+                ..
+            }) => {
+                let identity = serde_json::to_vec(&(&self.query.id, &self.query.text, input, column, target))
+                    .expect("the conversion identity contains only strings");
+                format!("plan-warnings:implicit-conversion:tvp:{}", culprit_core::telemetry::digest(&identity))
+            }
             Warned::Conversion(Conversion { column: Some(c), .. }) => format!("plan-warnings:implicit-conversion:{c}"),
             _ => format!("plan-warnings:{}:{}", self.query.id, warning_key(self.warning())),
         }
@@ -229,12 +239,21 @@ fn plan_warning_case<'s>(
             // estimates. With it, the plan may still scan the index, so the index isn't unused: it can't be searched.
             let blocks_seek = issue.is_some_and(|c| c.issue == culprit_core::PlanConversionIssue::SeekPlan);
             let converted = issue.and_then(|c| current_conversions(q.plan.as_ref()?, &c.expression).into_iter().next());
+            let column = converted.as_ref().map(|(c, _)| c.clone());
+            let target = converted.map(|(_, t)| t);
+            let advice = MismatchAdvice::from_plan(
+                q.plan.as_ref(),
+                issue.map(|c| c.expression.as_str()),
+                column.as_deref(),
+                target.as_deref(),
+            );
             let conversion = Conversion {
-                column: converted.as_ref().map(|(c, _)| c.clone()),
-                target: converted.map(|(_, t)| t),
+                column,
+                target,
                 blocks_seek,
                 expression: issue.map(|c| c.expression.clone()),
                 parameters: q.parameters.clone(),
+                advice,
             };
             let severity = if blocks_seek { severity_for_impact(snapshot, &[q], impact) } else { Severity::Low };
             (Warned::Conversion(conversion), severity, if blocks_seek { Confidence::High } else { Confidence::Medium })
@@ -330,10 +349,13 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
             };
             f.summary = conversion_summary(case.said.as_ref().unwrap_or(conversion));
             f.fix = Some(Fix {
-                summary: mismatch_fix(conversion.column.as_deref(), conversion.target.as_deref()),
+                summary: conversion.advice.fix(conversion.column.as_deref(), conversion.target.as_deref()),
                 sql: None,
                 cost: None,
             });
+            if let Some(verification) = conversion.advice.verification() {
+                f.verify.push(verification);
+            }
             if let Some(c) = &conversion.column {
                 f.id = id;
                 f.subject = subject(SubjectKind::Table, c);
@@ -479,6 +501,14 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
 /// What a type mismatch makes the database do, what SQL Server says it costs, and what the application declares.
 fn conversion_summary(c: &Conversion) -> String {
     let column = c.column.clone().unwrap_or_else(|| t!("check.plan_warnings.summary.a_column"));
+    let consequence = if c.blocks_seek {
+        t!("check.plan_warnings.summary.blocks_seek")
+    } else {
+        t!("check.plan_warnings.summary.estimates")
+    };
+    if let Some(summary) = c.advice.summary() {
+        return format!("{summary} {consequence}");
+    }
     let mut summary = vec![
         match &c.expression {
             Some(expression) => t!(
@@ -488,11 +518,7 @@ fn conversion_summary(c: &Conversion) -> String {
             ),
             None => t!("check.plan_warnings.summary.convert", column = column),
         },
-        if c.blocks_seek {
-            t!("check.plan_warnings.summary.blocks_seek")
-        } else {
-            t!("check.plan_warnings.summary.estimates")
-        },
+        consequence,
     ];
     let unicode = c.target.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("nvarchar"));
     summary.extend(match &c.parameters {

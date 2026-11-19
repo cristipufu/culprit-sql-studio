@@ -76,12 +76,15 @@ pub(super) fn implicit_conversion(cx: &Cx) -> Vec<Draft> {
             expression = &expression
         );
     }
-    d.fix = mismatch_fix(column.as_deref(), target.as_deref());
-    d.verify = if blocks_seek {
-        t!("insight.implicit_conversion.verify_seek")
-    } else {
-        t!("insight.implicit_conversion.verify", named = named, column = &col)
-    };
+    let advice = MismatchAdvice::from_plan(Some(cx.plan), Some(&text), column.as_deref(), target.as_deref());
+    d.fix = advice.fix(column.as_deref(), target.as_deref());
+    d.verify = advice.verification().unwrap_or_else(|| {
+        if blocks_seek {
+            t!("insight.implicit_conversion.verify_seek")
+        } else {
+            t!("insight.implicit_conversion.verify", named = named, column = &col)
+        }
+    });
     vec![d]
 }
 
