@@ -62,9 +62,22 @@ pub struct StatementCounterSample {
 impl StatementCounterSample {
     /// Storage admission binds typed membership and the native point clock to the original source header.
     pub fn fits_source_scope(&self, source: &CollectionDescription) -> bool {
+        if !self.is_valid() || source.target.database().is_none() {
+            return false;
+        }
+        if let SourceObservation::PagedSnapshot(header) | SourceObservation::PagedSourceRead { snapshot: header, .. } =
+            &source.observation
+        {
+            // Staging has only its native lower bound. The same source owner's final header must admit the
+            // original retained row again before the capture can become complete.
+            return header.dataset == SnapshotDataset::StatementCounters
+                && header.is_valid()
+                && source.partition_is_consistent()
+                && ObservationBounds::new(&header.observed_from, &self.observed_at).is_some()
+                && self.matches_partition(&source.partition, source.partition.is_qualified());
+        }
         NativeReadContext::from_snapshot(source).is_ok_and(|context| {
-            self.is_valid()
-                && context.target.database().is_some()
+            source.observation.snapshot().is_some_and(|header| header.dataset == SnapshotDataset::StatementCounters)
                 && ObservationBounds::new(&context.observed_from, &context.observed_until)
                     .is_some_and(|bounds| bounds.contains(&self.observed_at))
                 && self.matches_population(&context)
@@ -72,11 +85,15 @@ impl StatementCounterSample {
     }
 
     fn matches_population(&self, context: &NativeReadContext) -> bool {
+        self.matches_partition(&context.partition, context.has_qualified_local_owner())
+    }
+
+    fn matches_partition(&self, partition: &SourcePartition, owner_qualified: bool) -> bool {
         match self.scope {
             crate::MeasurementScope::Database => true,
-            crate::MeasurementScope::Node => matches!(&context.partition,
+            crate::MeasurementScope::Node => matches!(partition,
                 SourcePartition::InstanceLocal { member: Some(member), epoch: Some(_) }
-                    if context.has_qualified_local_owner() && self.member.as_ref() == Some(member)),
+                    if owner_qualified && self.member.as_ref() == Some(member)),
             _ => false,
         }
     }

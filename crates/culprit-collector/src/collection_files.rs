@@ -1,5 +1,9 @@
 //! Local observation artifacts. A manifest is incomplete until source verification and file sealing finish.
-use crate::{collection_references::ObservationReferences, durable_fs};
+use crate::{
+    collection_references::ObservationReferences,
+    durable_fs,
+    record_verification::{NoObservation, RecordFileErrors, RecordVerification},
+};
 use chrono::Utc;
 use culprit_core::{
     Error, Result, t,
@@ -273,6 +277,17 @@ impl ObservationFiles {
                 handle.sync_all().map_err(file_error)?;
             }
         }
+        // This blocking finalizer runs only after the original native owner has closed. Provisional pages
+        // retain their original bytes; only a final-header proof can promote all of them to a complete capture.
+        if self.source_rechecked && self.manifest.files.iter().all(|file| file.status == CollectionStatus::Complete) {
+            if let Err(error) = self.verify_source_records() {
+                if CollectionStop::from_error(&error) != CollectionStop::InvalidPage {
+                    return Err(error);
+                }
+                self.source_rechecked = false;
+                self.invalidate(CollectionStop::InvalidPage);
+            }
+        }
         self.manifest.source_queries = queries;
         self.manifest.finished_at = Some(Utc::now().to_rfc3339());
         self.manifest.references = self.references.coverage(self.source_rechecked, self.manifest.description.as_ref());
@@ -301,6 +316,30 @@ impl ObservationFiles {
         }
         self.persist()?;
         Ok(self.manifest)
+    }
+    fn verify_source_records(&self) -> Result<()> {
+        let bytes = self.manifest.files.iter().map(|file| u64::from(file.bytes)).sum::<u64>();
+        if bytes > u64::from(self.manifest.request.budget.total_bytes) {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        let errors = RecordFileErrors { integrity: || CollectionStop::InvalidPage.error(), storage: file_error };
+        let mut verification = RecordVerification::default();
+        for file in &self.manifest.files {
+            crate::record_verification::verify_file(
+                &self.directory,
+                file,
+                &self.manifest,
+                None,
+                &mut verification,
+                &mut NoObservation,
+                errors,
+            )?;
+        }
+        let source = self.manifest.description.as_ref();
+        if verification.references().coverage(true, source) != self.references.coverage(true, source) {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        Ok(())
     }
     fn persist(&self) -> Result<()> {
         self.publish_manifest(&self.manifest_bytes()?)
@@ -331,6 +370,74 @@ mod tests {
                 until: "2020-01-01T07:00:00Z".into(),
             },
             budget: CollectionBudget::default(),
+        }
+    }
+
+    #[test]
+    fn final_header_verification_rejects_clock_member_source_byte_hash_and_count_tampering() {
+        use culprit_core::telemetry::*;
+        for change in ["clock", "member", "source", "bytes", "hash", "count"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let directory = temporary.path().join("observation");
+            let (completed, records) = crate::analytical::test_support::node_statement_work_evidence_cases().remove(0);
+            let snapshot = completed.observation.snapshot().unwrap().clone();
+            let mut provisional = completed.clone();
+            provisional.observation = SourceObservation::PagedSnapshot(PagedSnapshotDescription {
+                dataset: snapshot.dataset,
+                observed_from: snapshot.observed_from.clone(),
+                sources: snapshot.sources.iter().map(|scope| scope.source.clone()).collect(),
+            });
+            let request = CollectionRequest {
+                subject: CollectionSubject::Database,
+                selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::StatementCounters },
+                budget: CollectionBudget::default(),
+            };
+            let capture = CaptureIdentity { observation_id: "closed-row-proof".into(), revision: None };
+            let mut files = ObservationFiles::create(&directory, request, capture.clone(), None).unwrap();
+            files.describe(provisional).unwrap();
+            files.begin_page(0).unwrap();
+            assert_eq!(files.write_page(0, &records).unwrap(), None);
+            files.seal(0).unwrap();
+            files.confirm_source(SourceCompletion::Snapshot(snapshot)).unwrap();
+            let path = directory.join(&files.manifest.files[0].file);
+            match change {
+                "bytes" => files.manifest.files[0].bytes += 1,
+                "hash" => files.manifest.files[0].sha256 = Some("0".repeat(64)),
+                "count" => files.manifest.files[0].rows += 1,
+                _ => {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    let mut rows = text
+                        .lines()
+                        .map(|line| serde_json::from_str::<ExportedRecord>(line).unwrap())
+                        .collect::<Vec<_>>();
+                    let TelemetryRecord::Operational(row) = &mut rows[0].record else { panic!() };
+                    let OperationalFact::StatementCounters(point) = &mut row.fact else { panic!() };
+                    match change {
+                        "clock" => point.observed_at = "2020-01-01T12:00:02Z".into(),
+                        "member" => {
+                            point.member = culprit_core::engines::ysql_node_member("11111111111111111111111111111111")
+                        }
+                        "source" => row.source.push_str("-tampered"),
+                        _ => unreachable!(),
+                    }
+                    assert!(rows[0].record.is_valid());
+                    assert!(ExportedRecord::new(&completed, &capture, rows[0].record.clone()).is_err(), "{change}");
+                    let mut bytes = Vec::new();
+                    for row in rows {
+                        serde_json::to_writer(&mut bytes, &row).unwrap();
+                        bytes.push(b'\n');
+                    }
+                    std::fs::write(&path, &bytes).unwrap();
+                    // Isolate semantic final-header validation: matching file bytes/hash cannot authorize
+                    // a point outside its native clock/member/source, even after its initial staging succeeded.
+                    files.manifest.files[0].bytes = bytes.len().try_into().unwrap();
+                    files.manifest.files[0].sha256 = Some(digest(&bytes));
+                }
+            }
+            let manifest = files.finish(3).unwrap();
+            assert_eq!(manifest.status, CollectionStatus::Incomplete(CollectionStop::InvalidPage), "{change}");
+            assert!(!manifest.references.integrity_complete, "{change}");
+            assert!(path.is_file(), "failed final proof preserves original retained artifacts");
         }
     }
     #[test]

@@ -4,6 +4,7 @@ pub mod capture;
 mod collection_activity;
 mod collection_files;
 mod collection_references;
+mod record_verification;
 use culprit_read::durable_fs;
 pub mod outbox;
 

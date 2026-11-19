@@ -3,6 +3,7 @@ use culprit_core::telemetry::*;
 use std::sync::Arc;
 mod admission_window;
 mod investigation_owner;
+mod snapshot_completion;
 
 #[derive(Default)]
 struct Lifecycle {

@@ -1,16 +1,14 @@
 //! Streaming proof of the exact files a journal commit or replay will reference.
 use super::{MANIFEST_LIMIT, journal::Capture, problem, storage};
 mod read;
-use crate::{collection_references::ObservationReferences, durable_fs};
+use crate::durable_fs;
+pub(super) use crate::record_verification::{NoObservation, VerificationObserver};
+use crate::record_verification::{ObservedFile, RecordFileErrors, RecordVerification, read_error};
 use culprit_core::{Result, telemetry::*};
-pub(super) use read::{CanonicalRows, MAX_CANONICAL_ROWS, NoObservation, VerificationObserver};
-use read::{ObservedFile, read_error};
-use sha2::{Digest, Sha256};
-use std::{
-    collections::HashSet,
-    io::{BufRead, BufReader, Read, Write},
-    path::Path,
-};
+pub(super) use read::{CanonicalRows, MAX_CANONICAL_ROWS};
+use std::{collections::HashSet, io::Read, path::Path};
+
+const RECORD_FILE_ERRORS: RecordFileErrors = RecordFileErrors { integrity, storage };
 
 pub(super) struct ValidatedCapture {
     pub manifest: CollectionManifest,
@@ -19,17 +17,6 @@ pub(super) struct ValidatedCapture {
     pub bytes: u64,
     pub diagnostic_checkpoint: Option<DiagnosticCheckpoint>,
     pub diagnostic_revisions: Vec<DiagnosticRevision>,
-}
-#[derive(Default)]
-struct RecordIdentities {
-    native: HashSet<NativeRecordIdentity>,
-    semantic: HashSet<String>,
-}
-impl RecordIdentities {
-    fn insert(&mut self, row: &ExportedRecord) -> bool {
-        self.native.insert(row.record.native_identity())
-            && row.record_id.as_ref().is_none_or(|id| self.semantic.insert(id.clone()))
-    }
 }
 impl ValidatedCapture {
     pub fn range(&self) -> Result<CapturedRange> {
@@ -60,9 +47,9 @@ fn manifest_observed(
     if length > MANIFEST_LIMIT as u64 {
         return Err(integrity());
     }
-    let mut input = ObservedFile::new(input, length, observer);
+    let mut input = ObservedFile::new(input, length, observer, RECORD_FILE_ERRORS);
     let mut bytes = Vec::new();
-    input.read_to_end(&mut bytes).map_err(read_error)?;
+    input.read_to_end(&mut bytes).map_err(|error| read_error(error, RECORD_FILE_ERRORS))?;
     input.finish()?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| integrity())?;
     let manifest: CollectionManifest = serde_json::from_value(value.clone()).map_err(|_| integrity())?;
@@ -134,8 +121,7 @@ pub(super) fn validate_observed(
     {
         return Err(integrity());
     }
-    let mut references = ObservationReferences::default();
-    let mut ids = RecordIdentities::default();
+    let mut verification = RecordVerification::default();
     let mut bytes = 0;
     for (file, stream) in manifest.files.iter().zip(streams.iter().copied()) {
         if file.stream != stream
@@ -152,8 +138,17 @@ pub(super) fn validate_observed(
         if bytes > u64::from(manifest.request.budget.total_bytes) {
             return Err(integrity());
         }
-        verify_file(directory, file, &manifest, destination, &mut references, &mut ids, observer)?;
+        crate::record_verification::verify_file(
+            directory,
+            file,
+            &manifest,
+            destination,
+            &mut verification,
+            observer,
+            RECORD_FILE_ERRORS,
+        )?;
     }
+    let references = verification.into_references();
     if references.coverage(true, Some(source)) != manifest.references {
         return Err(integrity());
     }
@@ -170,79 +165,6 @@ pub(super) fn validate_observed(
     })
 }
 
-fn verify_file(
-    directory: &Path,
-    file: &CollectedFile,
-    manifest: &CollectionManifest,
-    destination: Option<&Path>,
-    references: &mut ObservationReferences,
-    ids: &mut RecordIdentities,
-    observer: &mut dyn VerificationObserver,
-) -> Result<()> {
-    let source = manifest.description.as_ref().ok_or_else(integrity)?;
-    observer.check()?;
-    let input = durable_fs::regular_file(&directory.join(&file.file)).map_err(|_| integrity())?;
-    if input.metadata().map_err(storage)?.len() != u64::from(file.bytes) {
-        return Err(integrity());
-    }
-    let mut input = BufReader::new(ObservedFile::new(input, u64::from(file.bytes), observer));
-    let mut output =
-        destination.map(|path| durable_fs::create_file(&path.join(&file.file)).map_err(storage)).transpose()?;
-    let mut digest = Sha256::new();
-    let mut count = 0;
-    let mut bytes = 0;
-    let mut line = Vec::new();
-    loop {
-        line.clear();
-        let read = (&mut input)
-            .take(u64::from(manifest.request.budget.page_bytes) + 1)
-            .read_until(b'\n', &mut line)
-            .map_err(read_error)?;
-        if read == 0 {
-            break;
-        }
-        if line.len() > manifest.request.budget.page_bytes as usize || line.last() != Some(&b'\n') {
-            return Err(integrity());
-        }
-        bytes += read as u64;
-        count += 1;
-        if bytes > u64::from(file.bytes) || count > file.rows {
-            return Err(integrity());
-        }
-        let value: serde_json::Value = serde_json::from_slice(&line).map_err(|_| integrity())?;
-        let row: ExportedRecord = serde_json::from_value(value.clone()).map_err(|_| integrity())?;
-        if serde_json::to_value(&row).map_err(|_| integrity())? != value
-            || row.capture != manifest.capture
-            || row.format_version != EXPORT_FORMAT_VERSION
-            || row.representation_version != REPRESENTATION_VERSION
-            || row.batch_id != file.batch_id
-            || row.record.stream() != file.stream
-            || !row.record.is_valid()
-            || !references.accepts_page(std::slice::from_ref(&row.record))
-        {
-            return Err(integrity());
-        }
-        let expected = ExportedRecord::new(source, &manifest.capture, row.record.clone()).map_err(|_| integrity())?;
-        if expected != row || expected.payload_sha256()? != row.payload_sha256()? || !ids.insert(&row) {
-            return Err(integrity());
-        }
-        input.get_mut().observer.row(&row, count - 1)?;
-        references.record(&row.record);
-        digest.update(&line);
-        if let Some(output) = &mut output {
-            output.write_all(&line).map_err(storage)?;
-        }
-    }
-    input.get_mut().finish()?;
-    let actual = digest.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-    if bytes != u64::from(file.bytes) || count != file.rows || file.sha256.as_deref() != Some(&actual) {
-        return Err(integrity());
-    }
-    if let Some(output) = output {
-        output.sync_all().map_err(storage)?;
-    }
-    Ok(())
-}
 fn integrity() -> culprit_core::Error {
     problem(OutboxProblem::Integrity)
 }

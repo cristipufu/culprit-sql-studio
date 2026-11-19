@@ -199,6 +199,13 @@ fn export_admission_requires_the_original_typed_member_and_native_point_bounds()
     let capture = CaptureIdentity { observation_id: "native-counter-capture".into(), revision: None };
     let original = TelemetryRecord::Operational(input.observations[0].clone());
     assert!(ExportedRecord::new(&source, &capture, original.clone()).is_ok());
+    let mut staged = source.clone();
+    staged.observation = SourceObservation::PagedSnapshot(PagedSnapshotDescription {
+        dataset: SnapshotDataset::StatementCounters,
+        observed_from: context.observed_from.clone(),
+        sources: vec![input.source.clone()],
+    });
+    assert!(ExportedRecord::new(&staged, &capture, original.clone()).is_ok());
     for change in ["member", "clock"] {
         let mut changed = original.clone();
         let TelemetryRecord::Operational(row) = &mut changed else { panic!() };
@@ -210,6 +217,47 @@ fn export_admission_requires_the_original_typed_member_and_native_point_bounds()
         }
         assert!(point.is_valid());
         assert!(!point.fits_source_scope(&source));
+        assert!(!point.fits_source_scope(&staged));
         assert!(ExportedRecord::new(&source, &capture, changed).is_err(), "{change}");
     }
+}
+
+#[test]
+fn a_streamed_point_requires_its_declared_dataset_and_native_lower_bound_before_final_enclosure() {
+    let input = snapshot(sample(Some("1"), Some("0")));
+    let context = input.context.as_ref().unwrap();
+    let mut source = CollectionDescription {
+        target: context.target.clone(),
+        partition: context.partition.clone(),
+        source: input.source.clone(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
+            dataset: SnapshotDataset::StatementCounters,
+            observed_from: context.observed_from.clone(),
+            sources: vec![input.source.clone()],
+        }),
+    };
+    let capture = CaptureIdentity { observation_id: "streamed-counter-capture".into(), revision: None };
+    let mut row = input.observations[0].clone();
+    assert!(ExportedRecord::new(&source, &capture, TelemetryRecord::Operational(row.clone())).is_ok());
+    let OperationalFact::StatementCounters(point) = &mut row.fact else { panic!() };
+    point.observed_at = "2020-01-01T12:00:02Z".into();
+    assert!(ExportedRecord::new(&source, &capture, TelemetryRecord::Operational(row.clone())).is_ok());
+    let completion = StateSnapshotDescription {
+        dataset: SnapshotDataset::StatementCounters,
+        observed_from: context.observed_from.clone(),
+        observed_until: context.observed_until.clone(),
+        records: 1,
+        sources: vec![input.coverage.clone()],
+    };
+    let completed = source.completed(SourceCompletion::Snapshot(completion)).unwrap().unwrap();
+    assert!(ExportedRecord::new(&completed, &capture, TelemetryRecord::Operational(row.clone())).is_err());
+    let OperationalFact::StatementCounters(point) = &mut row.fact else { panic!() };
+    point.observed_at = "2020-01-01T11:59:59Z".into();
+    assert!(ExportedRecord::new(&source, &capture, TelemetryRecord::Operational(row.clone())).is_err());
+    let SourceObservation::PagedSnapshot(header) = &mut source.observation else { panic!() };
+    header.dataset = SnapshotDataset::Operational;
+    assert!(
+        ExportedRecord::new(&source, &capture, TelemetryRecord::Operational(input.observations[0].clone())).is_err()
+    );
 }
