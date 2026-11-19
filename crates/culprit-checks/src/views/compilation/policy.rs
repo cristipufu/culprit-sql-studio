@@ -25,12 +25,16 @@ pub(super) fn with_statement<'a>(
 ) -> Option<RepeatedRecompile<'a>> {
     let statement = recompile_statement(native, statement, origin)?;
     let count = native.compilations.parse::<u64>().ok()?;
-    if count < MIN_RECORDED_COMPILATIONS || native.average_duration_us < MIN_AVERAGE_COMPILE_MICROSECONDS {
-        return None;
-    }
     let total_milliseconds = native.average_duration_us / 1_000.0 * count as f64;
-    (total_milliseconds.is_finite() && total_milliseconds >= MIN_TOTAL_COMPILE_MILLISECONDS)
+    has_material_compile_cost(count, native.average_duration_us, total_milliseconds)
         .then_some(RepeatedRecompile { total_milliseconds, statement })
+}
+
+pub(super) fn has_material_compile_cost(count: u64, average_microseconds: f64, total_milliseconds: f64) -> bool {
+    count >= MIN_RECORDED_COMPILATIONS
+        && average_microseconds >= MIN_AVERAGE_COMPILE_MICROSECONDS
+        && total_milliseconds.is_finite()
+        && total_milliseconds >= MIN_TOTAL_COMPILE_MILLISECONDS
 }
 
 pub(super) fn recompile_statement<'a>(

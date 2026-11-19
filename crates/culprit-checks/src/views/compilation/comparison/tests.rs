@@ -2,6 +2,8 @@ use super::*;
 use crate::views::compilation::tests::{native, observation};
 use culprit_core::{DatabaseIdentity, Engine, telemetry::*};
 
+mod elapsed_work;
+
 fn compare(
     context: Option<&NativeReadContext>,
     observations: &[&OperationalObservation],
@@ -243,9 +245,10 @@ fn compact_baselines_have_independent_count_and_serialized_byte_limits_without_s
             .unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::ByteLimit)));
     let json = serde_json::to_value(baseline(&row)).unwrap();
-    for field in ["statement", "memory", "average_duration_us"] {
+    for field in ["statement", "memory"] {
         assert!(json["points"][0].get(field).is_none());
     }
+    assert_eq!(json["points"][0]["average_duration_us"], 1500.5);
 }
 
 #[test]

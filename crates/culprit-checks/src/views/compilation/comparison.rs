@@ -3,6 +3,7 @@ use super::*;
 use culprit_core::telemetry::{CompilationBaseline, compilation_namespace};
 use culprit_core::{CompilationChange, CompilationComparisonIssue as Issue, CompilationComparisonReport};
 use std::collections::BTreeMap;
+mod elapsed_work;
 
 pub fn compare(input: CompilationEvidence<'_>, previous: &CompilationBaseline) -> Result<CompilationComparisonReport> {
     validate_context(input.context)?;
@@ -46,6 +47,7 @@ pub fn compare(input: CompilationEvidence<'_>, previous: &CompilationBaseline) -
         previous.points.iter().map(|point| (point.observation_key.as_str(), point)).collect();
     let current_keys: BTreeSet<_> = cases.iter().map(|case| case.observation.key.as_str()).collect();
     report.missing_after = previous.keys().filter(|key| !current_keys.contains(**key)).count() as u32;
+    let mut estimated_work = false;
     for case in cases {
         let Some(before_point) = previous.get(case.observation.key.as_str()) else {
             report.missing_before += 1;
@@ -69,7 +71,12 @@ pub fn compare(input: CompilationEvidence<'_>, previous: &CompilationBaseline) -
             add_issue(&mut report, Issue::NativeClockConflict);
             continue;
         }
-        report.entries.push(render_change(case, before_point, delta));
+        let work = elapsed_work::from_endpoints(before, after, before_point, case.native, delta);
+        estimated_work |= work.is_some();
+        report.entries.push(render_change(case, before_point, delta, work));
+    }
+    if estimated_work {
+        report.limitations.push(t!("view.compilation.comparison.limit.estimated"));
     }
     if report.missing_before > 0 || report.missing_after > 0 {
         add_issue(&mut report, Issue::UnmatchedEntries);
@@ -138,6 +145,7 @@ fn render_change(
     case: QueryCompilation<'_>,
     previous: &culprit_core::telemetry::CompilationCounterPoint,
     delta: u64,
+    work: Option<elapsed_work::CompileWork>,
 ) -> CompilationChange {
     let count = format::digits(delta.to_string());
     let mut explanation = if delta == 0 {
@@ -151,6 +159,25 @@ fn render_change(
         explanation.push(' ');
         explanation.push_str(&t!("view.compilation.comparison.entry.policy"));
     }
+    if let Some(work) = &work {
+        explanation.push(' ');
+        explanation.push_str(&t!(
+            "view.compilation.comparison.entry.elapsed",
+            elapsed = format::duration(work.milliseconds())
+        ));
+        if let Some(rate) = work.hourly_rate() {
+            explanation.push(' ');
+            let rate = if rate < 0.1 { format::digits(format!("{rate:.2e}")) } else { format::count(rate) };
+            explanation.push_str(&t!(
+                "view.compilation.comparison.entry.cadence",
+                span = format::duration(work.bracket_milliseconds()),
+                rate = rate
+            ));
+        }
+    } else if delta > 0 {
+        explanation.push(' ');
+        explanation.push_str(&t!("view.compilation.comparison.entry.elapsed_unavailable"));
+    }
     CompilationChange {
         observation_key: case.observation.key.clone(),
         baseline_observation_key: previous.observation_key.clone(),
@@ -160,6 +187,8 @@ fn render_change(
         explanation,
         investigation: if policy {
             t!("check.planning_time.fix.recompile_hint")
+        } else if work.as_ref().is_some_and(elapsed_work::CompileWork::is_material) {
+            t!("view.compilation.comparison.investigate.cadence")
         } else {
             t!("view.compilation.comparison.investigate")
         },

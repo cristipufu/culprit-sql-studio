@@ -279,9 +279,13 @@ pub(crate) fn compilation(report: &CompilationReport) -> String {
             ),
             _ => comparison.summary.clone(),
         };
-        let entries =
-            comparison.entries.iter().map(|entry| (entry.identity.query_id.as_str(), entry.explanation.as_str()));
-        text.push_str(&render_explanations(
+        let entries = comparison.entries.iter().map(|entry| {
+            (
+                entry.identity.query_id.as_str(),
+                vec![entry.explanation.clone(), entry.investigation.clone(), entry.verify.clone()],
+            )
+        });
+        text.push_str(&native_work_summary(
             Summary {
                 title: &comparison.title,
                 summary: &summary,
@@ -720,8 +724,8 @@ mod tests {
                     compilations: "18446744073709551615".into(),
                     last_compile_at: "2026-11-13T10:00:00Z".into(),
                     explanation: t!("view.compilation.comparison.entry.changed", count = "18446744073709551615"),
-                    investigation: String::new(),
-                    verify: String::new(),
+                    investigation: t!("view.compilation.comparison.investigate.cadence"),
+                    verify: t!("view.compilation.comparison.verify"),
                 }],
             }),
         };
@@ -732,6 +736,9 @@ mod tests {
         for limitation in &report.comparison.as_ref().unwrap().limitations {
             assert!(text.contains(limitation), "{limitation}");
         }
+        let change = &report.comparison.as_ref().unwrap().entries[0];
+        assert!(text.contains(&change.investigation), "the native entry's bounded next step remains visible");
+        assert!(text.contains(&change.verify), "the independent query-behavior check remains visible");
         assert!(!text.contains("duration_delta") && !text.contains("memory_total"));
     }
 
