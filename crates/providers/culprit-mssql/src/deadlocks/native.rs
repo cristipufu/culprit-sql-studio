@@ -84,7 +84,7 @@ fn decode(row: &Rec, database: &str) -> Result<Event> {
     let file = text(row, "file_name")?;
     let position =
         digest(&serde_json::to_vec(&("xml_deadlock_report", &file, offset, &at, &xml)).map_err(|_| invalid_data())?);
-    let graphs = super::parse_with_time(&xml, "system_health", Some(at.clone()))?
+    let graphs = super::parse_with_time(&xml, "system_health", Some(&at))?
         .into_iter()
         .filter(|graph| super::involves(graph, database))
         .collect();
@@ -96,7 +96,57 @@ fn decode(row: &Rec, database: &str) -> Result<Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deadlocks::tests::{KEY_LOOKUP_XDL, event, file_row};
     use crate::{resources::test_support::FakeRead, value::Val};
+
+    #[test]
+    fn full_native_clocks_keep_graph_identity_and_original_file_positions_separate() {
+        let at = "2026-10-11T12:05:01.1234567Z";
+        let xml = event(at);
+        let row = file_row(at, &xml);
+        let first = decode(&row, "shop").unwrap();
+        let replay = decode(&row, "shop").unwrap();
+        let later_at = "2026-10-11T12:05:01.1234568Z";
+        let later = decode(&file_row(later_at, &event(later_at)), "shop").unwrap();
+        assert_eq!(first.at, first.graphs[0].at.as_deref().unwrap());
+        assert_eq!(first.at, "2026-10-11T12:05:01.123456700Z");
+        assert_eq!(first.position, replay.position, "an identical native event replays the same position");
+        assert_eq!(first.graphs[0].id, replay.graphs[0].id);
+        assert_eq!(first.offset, later.offset, "multiple native events can share one file-buffer offset");
+        assert_ne!(first.position, later.position);
+        assert_ne!(first.graphs[0].id, later.graphs[0].id);
+        let moved = crate::resources::test_support::replace(
+            &row,
+            &[("file_name", Val::Text("/var/opt/mssql/log/system_health_1_134388425128000000.xel".into()))],
+        );
+        let moved = decode(&moved, "shop").unwrap();
+        assert_ne!(first.position, moved.position, "native positions still include original file identity");
+        assert_eq!(first.graphs[0].id, moved.graphs[0].id, "display replay matching never replaces native positions");
+        assert!(decode(&row, "another_database").unwrap().graphs.is_empty());
+    }
+
+    #[test]
+    fn native_row_clock_precedes_identity_and_conflicting_or_invalid_event_clocks_are_refused() {
+        let at = "2026-10-11T12:05:01.1234567Z";
+        let bare = decode(&file_row(at, KEY_LOOKUP_XDL), "shop").unwrap();
+        let wrapped = decode(&file_row(at, &event(at)), "shop").unwrap();
+        assert_eq!(bare.graphs[0], wrapped.graphs[0]);
+        assert_ne!(bare.position, wrapped.position, "original XML remains part of the native position");
+        for event_at in ["2026-10-11T12:05:01.1234568Z", "2026-10-11T12:05:01.1234567", "bad-clock"] {
+            assert!(decode(&file_row(at, &event(event_at)), "shop").is_err());
+        }
+        assert!(decode(&file_row("2026-10-11T12:05:01.1234567", &event(at)), "shop").is_err());
+        for missing in [
+            r#"<event name="xml_deadlock_report" timestamp="2026-10-11T12:05:01.1234567Z"><data name="xml_report"><value/></data></event>"#,
+            r#"<event name="xml_deadlock_report" timestamp="bad-clock"><data name="xml_report"><value/></data></event>"#,
+        ] {
+            assert!(
+                decode(&file_row(at, missing), "shop").is_err(),
+                "a selected report without a graph is not empty success"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn system_health_uses_its_observed_target_and_binds_the_rollover_pattern_as_data() {
         for path in [

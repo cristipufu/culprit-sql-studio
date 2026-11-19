@@ -5,6 +5,7 @@
 use culprit_core::deadlock::classify;
 use culprit_core::{
     Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, Error, LockHolder, LockWait, Result, t,
+    telemetry::canonical_time,
 };
 use roxmltree::{Document, Node};
 
@@ -120,19 +121,16 @@ pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Resul
         files = true;
         report.deadlocks.extend(events.into_iter().flat_map(|event| event.graphs));
     }
-    if let Ok(rows) = io.query(native::RING, vec![], 1).await {
+    if let Ok(graphs) = ring_deadlocks(io).await {
         ring = true;
-        for row in rows {
-            let Some(xml) = row.str("target_xml") else { continue };
-            for graph in parse_deadlock_xml(&xml, "system_health").unwrap_or_default() {
-                let recent = graph
-                    .at
-                    .as_deref()
-                    .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
-                    .is_none_or(|time| time >= cutoff);
-                if recent && !report.deadlocks.iter().any(|known| known.id == graph.id) {
-                    report.deadlocks.push(graph);
-                }
+        for graph in graphs {
+            let recent = graph
+                .at
+                .as_deref()
+                .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                .is_some_and(|time| time >= cutoff);
+            if recent && !report.deadlocks.iter().any(|known| known.id == graph.id) {
+                report.deadlocks.push(graph);
             }
         }
     }
@@ -144,6 +142,19 @@ pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Resul
     Ok(report)
 }
 
+async fn ring_deadlocks(io: &mut impl NativeRead) -> Result<Vec<Deadlock>> {
+    let rows = io.query(native::RING, vec![], 1).await.map_err(ReadError::into_error)?;
+    let mut graphs = Vec::new();
+    for row in rows {
+        let found = parse_deadlock_xml(&text(&row, "target_xml")?, "system_health")?;
+        if found.iter().any(|graph| graph.at.is_none()) {
+            return Err(invalid_data());
+        }
+        graphs.extend(found);
+    }
+    Ok(graphs)
+}
+
 /// Whether a deadlock from the instance-wide system_health session involves `database`: one of its processes ran in
 /// it. A graph that names no database for any process can't be placed and is kept.
 fn involves(d: &Deadlock, database: &str) -> bool {
@@ -151,32 +162,22 @@ fn involves(d: &Deadlock, database: &str) -> bool {
     named.peek().is_none() || named.any(|db| db.eq_ignore_ascii_case(database))
 }
 
-/// `2026-10-11T12:05:01.1230000` (UTC, no zone) → `2026-10-11T12:05:01Z`.
-fn normalize_time(text: &str) -> String {
-    let t = text.trim().trim_end_matches('Z');
-    let t = t.split('.').next().unwrap_or(t);
-    format!("{t}Z")
-}
-
-fn parse_with_time(xml: &str, source: &str, at: Option<String>) -> Result<Vec<Deadlock>> {
-    let mut found = parse_deadlock_xml(xml, source)?;
-    for d in &mut found {
-        if d.at.is_none() {
-            d.at = at.clone();
-        }
-    }
-    Ok(found)
-}
-
 /// Every deadlock in `xml`: a saved .xdl (`<deadlock-list>` or `<deadlock>`), a system_health event, or a ring buffer.
 pub fn parse_deadlock_xml(xml: &str, source: &str) -> Result<Vec<Deadlock>> {
+    parse_with_time(xml, source, None)
+}
+
+fn parse_with_time(xml: &str, source: &str, native_at: Option<&str>) -> Result<Vec<Deadlock>> {
+    // The XEL reader supplies its documented UTC clock. Imported XML needs an explicit offset of its own.
+    let native_at = native_at.map(canonical_time).transpose()?;
     culprit_core::xml::read(xml.trim_start_matches('\u{feff}'), |doc| {
         let doc = doc.map_err(|e| Error::invalid(t!("provider.mssql.deadlocks.unreadable", error = e.to_string())))?;
-        deadlock_graphs(&doc, source)
+        deadlock_graphs(&doc, source, native_at.as_deref())
     })
 }
 
-fn deadlock_graphs(doc: &Document, source: &str) -> Result<Vec<Deadlock>> {
+fn deadlock_graphs(doc: &Document, source: &str, native_at: Option<&str>) -> Result<Vec<Deadlock>> {
+    require_declared_graphs(doc)?;
     let mut out = Vec::new();
     for node in doc.descendants().filter(|n| n.has_tag_name("deadlock")) {
         // Ring buffers hold every kind of event; only deadlock reports carry a <deadlock>.
@@ -184,16 +185,35 @@ fn deadlock_graphs(doc: &Document, source: &str) -> Result<Vec<Deadlock>> {
             .ancestors()
             .find(|a| a.has_tag_name("event"))
             .and_then(|e| e.attribute("timestamp"))
-            .map(normalize_time);
-        if let Some(d) = deadlock(node, source, at) {
-            out.push(d);
+            .map(canonical_time)
+            .transpose()?;
+        if at.as_deref().zip(native_at).is_some_and(|(event, native)| event != native) {
+            return Err(invalid_data());
         }
+        let at = at.or_else(|| native_at.map(str::to_owned));
+        out.push(deadlock(node, source, at).ok_or_else(invalid_data)?);
     }
     if out.is_empty() && !doc.descendants().any(|n| n.has_tag_name("RingBufferTarget") || n.has_tag_name("event")) {
         return Err(Error::invalid(t!("provider.mssql.deadlocks.no_graph"))
             .with_hint(t!("provider.mssql.deadlocks.no_graph.hint")));
     }
     Ok(out)
+}
+
+fn require_declared_graphs(doc: &Document) -> Result<()> {
+    for event in doc.descendants().filter(|node| {
+        node.has_tag_name("event")
+            && matches!(node.attribute("name"), Some("xml_deadlock_report" | "database_xml_deadlock_report"))
+    }) {
+        let has_graph = event.descendants().any(|node| {
+            node.has_tag_name("deadlock")
+                && node.ancestors().find(|ancestor| ancestor.has_tag_name("event")) == Some(event)
+        });
+        if !has_graph {
+            return Err(invalid_data());
+        }
+    }
+    Ok(())
 }
 
 fn child<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
@@ -300,6 +320,11 @@ fn deadlock(node: Node, source: &str, at: Option<String>) -> Option<Deadlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        read::ReadResult,
+        resources::test_support::FakeRead,
+        value::{Rec, Val},
+    };
     use culprit_core::DeadlockPattern;
 
     pub(crate) const KEY_LOOKUP_XDL: &str = r#"<deadlock-list><deadlock victim="process61">
@@ -325,12 +350,45 @@ mod tests {
  </resource-list>
 </deadlock></deadlock-list>"#;
 
+    pub(super) fn event(at: &str) -> String {
+        format!(
+            r#"<event name="xml_deadlock_report" timestamp="{at}"><data name="xml_report"><value>{}</value></data></event>"#,
+            KEY_LOOKUP_XDL.replace("<deadlock-list>", "").replace("</deadlock-list>", "")
+        )
+    }
+
+    pub(super) fn file_row(at: &str, xml: &str) -> Rec {
+        Rec::of(&[
+            ("file_name", Val::Text("/var/opt/mssql/log/system_health_0_134388425128000000.xel".into())),
+            ("file_offset", Val::Int(512)),
+            ("at", Val::Text(at.into())),
+            ("event_xml", Val::Text(xml.into())),
+        ])
+    }
+
+    fn recent_reader(file_events: ReadResult<Vec<Rec>>, ring: Option<&str>) -> FakeRead {
+        FakeRead::new(vec![
+            Ok(vec![Rec::of(&[
+                ("edition", Val::Int(3)),
+                ("db", Val::Text("shop".into())),
+                ("observed_at", Val::Text("2026-10-11T12:10:00Z".into())),
+            ])]),
+            Ok(vec![Rec::of(&[(
+                "file_path",
+                Val::Text("/var/opt/mssql/log/system_health_0_134388425128000000.xel".into()),
+            )])]),
+            file_events,
+            Ok(vec![Rec::of(&[("target_xml", ring.map_or(Val::Null, |xml| Val::Text(xml.into())))])]),
+        ])
+    }
+
     #[test]
     fn a_saved_xdl_is_parsed_and_explained() {
         let found = parse_deadlock_xml(KEY_LOOKUP_XDL, "pasted").unwrap();
         assert_eq!(found.len(), 1);
         let d = &found[0];
         assert_eq!(d.pattern, DeadlockPattern::KeyLookup);
+        assert!(d.at.is_none(), "an imported graph without an event clock stays undated");
         assert_eq!(d.objects, vec!["shop.customers".to_string()]);
         let victim = d.victim().unwrap();
         assert_eq!((victim.session.as_deref(), victim.application.as_deref()), (Some("61"), Some("orders-api")));
@@ -351,16 +409,176 @@ mod tests {
 
     #[test]
     fn system_health_events_carry_their_time_and_dtds_are_refused() {
-        let event = format!(
-            r#"<event name="xml_deadlock_report" timestamp="2026-10-11T12:05:01.123Z"><data name="xml_report"><value>{}</value></data></event>"#,
-            KEY_LOOKUP_XDL.replace("<deadlock-list>", "").replace("</deadlock-list>", "")
-        );
-        let found = parse_deadlock_xml(&event, "system_health").unwrap();
-        assert_eq!(found[0].at.as_deref(), Some("2026-10-11T12:05:01Z"));
+        let found = parse_deadlock_xml(&event("2026-10-11T12:05:01.123Z"), "system_health").unwrap();
+        assert_eq!(found[0].at.as_deref(), Some("2026-10-11T12:05:01.123000000Z"));
         let evil =
             r#"<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><deadlock>&e;</deadlock>"#;
         assert!(parse_deadlock_xml(evil, "pasted").is_err());
         assert!(parse_deadlock_xml("<nothing/>", "pasted").is_err());
+    }
+
+    #[test]
+    fn full_event_precision_distinguishes_repeated_participants_and_canonicalizes_replays() {
+        let first = parse_deadlock_xml(&event("2026-10-11T12:05:01.1234567Z"), "system_health").unwrap();
+        let second = parse_deadlock_xml(&event("2026-10-11T12:05:01.1234568Z"), "system_health").unwrap();
+        let replay = parse_deadlock_xml(&event("2026-10-11T14:05:01.123456700+02:00"), "system_health").unwrap();
+        assert_eq!(first[0].at.as_deref(), Some("2026-10-11T12:05:01.123456700Z"));
+        assert_eq!(second[0].at.as_deref(), Some("2026-10-11T12:05:01.123456800Z"));
+        assert_ne!(first[0].id, second[0].id, "two native events with the same SPIDs remain distinct");
+        assert_eq!(first, replay, "equivalent explicit offsets and trailing zeros describe the same event");
+        assert_eq!(first[0].processes, second[0].processes);
+        assert_eq!(first[0].headline, second[0].headline);
+        assert_eq!(first[0].explanation, second[0].explanation);
+        assert_eq!(first[0].fixes, second[0].fixes);
+    }
+
+    #[test]
+    fn invalid_event_clocks_are_rejected_without_inventing_an_offset_or_losing_precision() {
+        let too_long = format!("2026-10-11T12:05:01.{}Z", "0".repeat(50));
+        for at in [
+            "",
+            "2026-10-11T12:05:01.1234567",
+            "2026-10-11T12:05:01.1234567Zgarbage",
+            "2026-02-30T12:05:01.1234567Z",
+            "2026-10-11T12:05:01.1234567001Z",
+            too_long.as_str(),
+        ] {
+            let xml = event(at);
+            assert!(parse_deadlock_xml(&xml, "pasted").is_err(), "invalid event clock: {at}");
+            assert!(
+                parse_with_time(&xml, "system_health", Some("2026-10-11T12:05:01.1234567Z")).is_err(),
+                "a native row clock cannot repair an invalid event clock: {at}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_claimed_report_cannot_be_empty_or_borrow_a_nested_events_graph() {
+        for name in ["xml_deadlock_report", "database_xml_deadlock_report"] {
+            for at in ["bad-clock", "2026-10-11T12:05:01.1234567Z"] {
+                let missing =
+                    format!(r#"<event name="{name}" timestamp="{at}"><data name="xml_report"><value/></data></event>"#);
+                assert!(parse_deadlock_xml(&missing, "pasted").is_err());
+                assert!(parse_with_time(&missing, "system_health", Some("2026-10-11T12:05:01.1234567Z")).is_err());
+                let nested = format!(
+                    r#"<event name="{name}" timestamp="{at}">{}</event>"#,
+                    event("2026-10-11T12:05:01.1234567Z")
+                );
+                assert!(parse_deadlock_xml(&nested, "pasted").is_err());
+            }
+        }
+        assert!(parse_deadlock_xml(r#"<event name="unrelated"/>"#, "system_health").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_native_row_clock_qualifies_identity_before_construction_and_must_agree_with_event_time() {
+        let at = "2026-10-11T12:05:01.1234567Z";
+        let supplied = parse_with_time(KEY_LOOKUP_XDL, "system_health", Some(at)).unwrap();
+        let wrapped = parse_deadlock_xml(&event(at), "system_health").unwrap();
+        assert_eq!(supplied, wrapped, "a timestamp-less native graph and its ring replay share one identity");
+        let later = parse_with_time(KEY_LOOKUP_XDL, "system_health", Some("2026-10-11T12:05:01.1234568Z")).unwrap();
+        assert_ne!(supplied[0].id, later[0].id, "the native fallback clock is not assigned after ID construction");
+        assert!(parse_with_time(&event(at), "system_health", Some("2026-10-11T12:05:01.1234568Z")).is_err());
+        assert!(parse_with_time(&event(at), "system_health", Some("2026-10-11T12:05:01.1234567")).is_err());
+    }
+
+    #[test]
+    fn a_claimed_deadlock_requires_a_graph_while_unrelated_events_can_be_empty() {
+        for xml in ["<RingBufferTarget/>", r#"<RingBufferTarget><event name="wait_info"/></RingBufferTarget>"#] {
+            assert!(parse_deadlock_xml(xml, "system_health").unwrap().is_empty());
+        }
+        let malformed = r#"<event name="xml_deadlock_report" timestamp="2026-10-11T12:05:01.1234568Z"><data name="xml_report"><value><deadlock/></value></data></event>"#;
+        assert!(parse_deadlock_xml(malformed, "system_health").is_err());
+        let partial =
+            format!("<RingBufferTarget>{}{malformed}</RingBufferTarget>", event("2026-10-11T12:05:01.1234567Z"));
+        assert!(
+            parse_deadlock_xml(&partial, "system_health").is_err(),
+            "a malformed claimed graph cannot yield a successful partial set"
+        );
+    }
+
+    #[tokio::test]
+    async fn file_and_ring_merge_keeps_distinct_same_second_events_and_deduplicates_replays() {
+        let first = event("2026-10-11T12:05:01.1234567Z");
+        let ring = format!(
+            "<RingBufferTarget>{}{}{}</RingBufferTarget>",
+            event("2026-10-11T14:05:01.123456700+02:00"),
+            event("2026-10-11T12:05:01.1234568Z"),
+            event("2026-10-11T12:05:01.1234568Z"),
+        );
+        let mut io = recent_reader(Ok(vec![file_row("2026-10-11T12:05:01.1234567Z", &first)]), Some(&ring));
+        let report = recent(&mut io, 1.0).await.unwrap();
+        assert_eq!(report.deadlocks.len(), 2);
+        assert_eq!(report.deadlocks[0].at.as_deref(), Some("2026-10-11T12:05:01.123456800Z"));
+        assert_eq!(report.deadlocks[1].at.as_deref(), Some("2026-10-11T12:05:01.123456700Z"));
+        assert_ne!(report.deadlocks[0].id, report.deadlocks[1].id);
+        assert_eq!((report.source, report.note), origin(true, true));
+        assert!(!report.recent_only);
+        assert_eq!(io.calls.len(), 4, "the existing native query population is unchanged");
+        assert_eq!(io.closed, 0, "the caller still owns the original reader's close");
+    }
+
+    #[tokio::test]
+    async fn ring_only_events_preserve_native_precision_at_the_existing_recency_boundary() {
+        let ring = format!(
+            "<RingBufferTarget>{}{}</RingBufferTarget>",
+            event("2026-10-11T11:09:59.9999999Z"),
+            event("2026-10-11T11:10:00.0000001Z"),
+        );
+        let mut io = recent_reader(Err(invalid_data().into()), Some(&ring));
+        let report = recent(&mut io, 1.0).await.unwrap();
+        assert_eq!(report.deadlocks.len(), 1);
+        assert_eq!(report.deadlocks[0].at.as_deref(), Some("2026-10-11T11:10:00.000000100Z"));
+        assert_eq!((report.source, report.note), origin(false, true));
+        assert!(report.recent_only, "ring history still asserts only recent retained events");
+    }
+
+    #[tokio::test]
+    async fn a_valid_empty_ring_remains_distinct_from_an_unavailable_ring() {
+        let mut io = recent_reader(Err(invalid_data().into()), Some("<RingBufferTarget/>"));
+        let report = recent(&mut io, 1.0).await.unwrap();
+        assert!(report.deadlocks.is_empty());
+        assert_eq!((report.source, report.note), origin(false, true));
+        assert!(report.recent_only);
+    }
+
+    #[tokio::test]
+    async fn malformed_ring_results_are_unavailable_without_erasing_readable_files() {
+        let undated = format!("<RingBufferTarget>{KEY_LOOKUP_XDL}</RingBufferTarget>");
+        let malformed = format!("<RingBufferTarget>{}</RingBufferTarget>", event("bad-clock"));
+        let partial = format!(
+            "<RingBufferTarget>{}{}</RingBufferTarget>",
+            event("2026-10-11T12:05:01.1234568Z"),
+            event("bad-clock")
+        );
+        let partial_graph = format!(
+            r#"<RingBufferTarget>{}<event name="xml_deadlock_report" timestamp="2026-10-11T12:05:01.1234568Z"><data name="xml_report"><value><deadlock/></value></data></event></RingBufferTarget>"#,
+            event("2026-10-11T12:05:01.1234567Z")
+        );
+        let empty_report = r#"<event name="xml_deadlock_report" timestamp="bad-clock"><data name="xml_report"><value/></data></event>"#;
+        let partial_empty_report =
+            format!("<RingBufferTarget>{}{empty_report}</RingBufferTarget>", event("2026-10-11T12:05:01.1234567Z"));
+        for ring in [
+            None,
+            Some(undated.as_str()),
+            Some(malformed.as_str()),
+            Some(partial.as_str()),
+            Some(partial_graph.as_str()),
+            Some(empty_report),
+            Some(partial_empty_report.as_str()),
+            Some("<broken>"),
+        ] {
+            let first = event("2026-10-11T12:05:01.1234567Z");
+            let mut io = recent_reader(Ok(vec![file_row("2026-10-11T12:05:01.1234567Z", &first)]), ring);
+            let report = recent(&mut io, 1.0).await.unwrap();
+            assert_eq!(report.deadlocks.len(), 1, "the independent file source remains readable");
+            assert_eq!((report.source, report.note), origin(true, false));
+            let mut io = recent_reader(Err(invalid_data().into()), ring);
+            let report = recent(&mut io, 1.0).await.unwrap();
+            assert!(report.deadlocks.is_empty());
+            assert_eq!((report.source, report.note), origin(false, false));
+            assert!(!report.recent_only, "an unreadable ring is not a successful empty retained feed");
+        }
     }
 }
 
