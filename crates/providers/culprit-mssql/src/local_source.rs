@@ -184,7 +184,7 @@ async fn read_initial_context<R: NativeRead>(
         Err(error) if stops_remaining_reads(&error) => return Err(error),
         Err(error) => (None, Some(error.code)),
     };
-    let identity = if platform.edition == 5 { IdentityDetail::AzureDatabase } else { IdentityDetail::Endpoint };
+    let identity = IdentityDetail::for_native_edition(platform.edition);
     let mut result = read_projection(reader, Address { host, port }, identity, instance, error, detail).await?;
     if connection_generation != reader.connection_generation() {
         result.0.instance = None;
@@ -206,10 +206,11 @@ pub(crate) async fn read_again<R: NativeRead>(
     detail: Detail,
 ) -> Result<(Context, Rec)> {
     reader.observe_session_work(crate::read::session_work::Observation::Started);
-    let result = if initial.activity.edition == 5 {
-        read_projection(reader, Address { host, port }, IdentityDetail::AzureDatabase, None, None, detail).await
-    } else {
-        read_initial_context(reader, host, port, IdentityDetail::Endpoint, detail).await
+    let result = match IdentityDetail::for_native_edition(initial.activity.edition) {
+        IdentityDetail::AzureDatabase => {
+            read_projection(reader, Address { host, port }, IdentityDetail::AzureDatabase, None, None, detail).await
+        }
+        IdentityDetail::Endpoint => read_initial_context(reader, host, port, IdentityDetail::Endpoint, detail).await,
     };
     observe_context_result(reader, result)
 }

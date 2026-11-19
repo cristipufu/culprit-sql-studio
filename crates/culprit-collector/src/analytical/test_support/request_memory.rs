@@ -76,6 +76,31 @@ pub fn request_memory_evidence_cases() -> Vec<(CollectionDescription, Vec<Teleme
         }
         assert!(grant.is_valid());
     }
+    cases.push((source.clone(), rows.clone()));
+    for record in &mut rows {
+        let TelemetryRecord::Operational(OperationalObservation {
+            fact: OperationalFact::ExecutionGrant(grant), ..
+        }) = record
+        else {
+            unreachable!()
+        };
+        grant.resource =
+            grant.resource.take().map(|resource| resource.qualified("kind", "sql-server-resource-governor"));
+        grant.workload_group = Some(NativeIdentity::new("7").qualified("kind", "sql-server-resource-governor-group"));
+        grant.workload_group_tempdb = Some(MssqlWorkloadGroupTempdbObservation {
+            group_id: "7".into(),
+            pool_id: "2".into(),
+            statistics_started_without_offset: Some("2020-01-01T10:00:00.003".into()),
+            current_kibibytes: Some("0".into()),
+            peak_kibibytes: Some("9007199254740993".into()),
+            limit_violations: Some("3".into()),
+            stored_limits: Some(MssqlStoredTempdbDataLimits {
+                fixed_mebibytes: Some("0.5".into()),
+                percent: Some("10.25".into()),
+            }),
+        });
+        assert!(grant.is_valid());
+    }
     cases.push((source, rows));
     cases
 }

@@ -23,6 +23,41 @@ fn observations(rows: &[TelemetryRecord]) -> Vec<&ExecutionGrantObservation> {
         .collect()
 }
 
+#[tokio::test]
+async fn authenticated_workload_group_tempdb_replays_shared_history_without_a_query_failure_or_effective_cap() {
+    let (source, rows) = request_memory_evidence_cases()
+        .into_iter()
+        .find(|(_, rows)| observations(rows).iter().any(|row| row.workload_group_tempdb.is_some()))
+        .expect("native-shaped group tempdb corpus");
+    let expected = culprit_checks::analyze(scan(&source, &rows)).request_memory.unwrap();
+    let fixture = Fixture::new(source.clone(), rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let result = collected_resources::request_memory(&capture).unwrap();
+    assert_eq!(result.context.source, source);
+    assert_eq!(result.report, expected);
+    assert_eq!(result.report.entries.len(), 2);
+    for entry in &result.report.entries {
+        assert!(entry.explanation.contains(&culprit_core::t!("view.request_memory.tempdb.current", value = "0")));
+        assert!(
+            entry
+                .explanation
+                .contains(&culprit_core::t!("view.request_memory.tempdb.peak", value = "9007199254740993"))
+        );
+        assert!(entry.explanation.contains(&culprit_core::t!("view.request_memory.tempdb.violations", count = "3")));
+        assert!(!entry.explanation.contains(&culprit_core::t!("view.request_memory.tempdb.violations", count = "6")));
+        assert!(entry.qualified_request.is_some());
+    }
+    assert!(result.report.limitations.contains(&culprit_core::t!("view.request_memory.tempdb.limit")));
+    for record in &rows {
+        let exported = ExportedRecord::new(&source, capture.capture(), record.clone()).unwrap();
+        assert!(result.context.records.iter().any(|row| row.row == exported));
+    }
+    let content = serde_json::to_string(&result.report).unwrap();
+    for private in ["SELECT payload", "9264", "fix_sql", "causal_share", "severity"] {
+        assert!(!content.contains(private));
+    }
+}
+
 fn native(source: &mut CollectionDescription) -> &mut StateSnapshotDescription {
     let SourceObservation::Snapshot(native) = &mut source.observation else { panic!("point fixture") };
     native

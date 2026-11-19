@@ -12,6 +12,7 @@ use culprit_core::{
     },
 };
 use std::collections::BTreeMap;
+mod workload_group_tempdb;
 
 pub struct RequestMemoryEvidence<'a> {
     pub context: &'a NativeReadContext,
@@ -97,6 +98,9 @@ fn limitations(evidence: &RequestMemoryEvidence<'_>, source: Option<&SourceOutco
         limits.push(t!("view.request_memory.resource.unqualified"));
     }
     limits.extend(memory_participants::source_limitation(source));
+    if observations.iter().any(|observation| observation.workload_group_tempdb.is_some()) {
+        limits.push(t!("view.request_memory.tempdb.limit"));
+    }
     limits
 }
 
@@ -170,8 +174,13 @@ fn participant_words(participant: &Participant<'_>) -> ParticipantWords {
 
 fn render(participant: Participant<'_>, resources: &[MemoryGrantAdmission]) -> MemoryParticipantExplanation {
     let observation = participant.observation();
-    let words = participant_words(&participant);
+    let mut words = participant_words(&participant);
     let mut details = vec![words.explanation, request_context(&participant)];
+    if let Some(group) = workload_group_tempdb::explain(&participant) {
+        details.push(group);
+        words.investigation = format!("{} {}", words.investigation, t!("view.request_memory.tempdb.investigation"));
+        words.verify = format!("{} {}", words.verify, t!("view.request_memory.tempdb.verify"));
+    }
     let admission = participant.resource().and_then(|identity| {
         resources.binary_search_by(|group| group.resource.cmp(identity)).ok().map(|index| &resources[index])
     });

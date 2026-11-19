@@ -6,6 +6,7 @@ mod fields;
 pub(crate) mod focus;
 mod resource;
 mod sql;
+mod workload_group;
 
 use super::{ActivityContext, ActivityFrame, ActivityReader, ActivityRecord, IdentityDetail, rows};
 use crate::{
@@ -89,31 +90,32 @@ impl<R: NativeRead> ActivityReader<R> {
         if !initial.database_wide {
             return Err(ActivityContext::visibility_error(&native_context, &initial.activity)?);
         }
-        if matches!(self.options.identity, IdentityDetail::AzureDatabase) {
-            if initial.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
-                return Err(culprit_core::Error::new(
-                    culprit_core::ErrorCode::Unsupported,
-                    culprit_core::t!("collection.azure_sql_only"),
-                ));
-            }
+        let identity = IdentityDetail::for_native_edition(initial.activity.edition);
+        if self.options.identity == IdentityDetail::AzureDatabase && identity != IdentityDetail::AzureDatabase {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                culprit_core::t!("collection.azure_sql_only"),
+            ));
+        }
+        if identity == IdentityDetail::AzureDatabase {
             crate::read::require_primary(initial.activity.writable)?;
         }
         if let Some(focus) = focus {
             focus::matches_owner(focus, &initial)?;
         }
-        let layout = fields::Layout::read(&mut self.io, resource::qualified_scope(&initial)).await?;
+        let layout = fields::Layout::read(&mut self.io, &initial).await?;
         let limit = (self.options.budget.max_snapshot_rows as usize).min(MAX_REQUEST_MEMORY_OBSERVATIONS);
         let native = self
             .io
             .query(
-                &sql::observation(&layout, self.options.identity, initial.activity.request_page_server_read_capability),
+                &sql::observation(&layout, identity, initial.activity.request_page_server_read_capability),
                 vec![Parameter::Integer((limit + 1) as i64)],
                 limit + 1,
             )
             .await
             .map_err(ReadError::into_error)?;
-        let context = self.decode_memory_context(native.first().ok_or_else(invalid_data)?)?;
-        if !initial.matches_frame(&context) {
+        let context = self.decode_memory_context(native.first().ok_or_else(invalid_data)?, identity)?;
+        if !initial.activity.same_source(&context) {
             return Err(CollectionStop::SourceChanged.error());
         }
         if native.len() > limit {
@@ -123,7 +125,7 @@ impl<R: NativeRead> ActivityReader<R> {
         let mut grants = Vec::new();
         let mut identities = BTreeSet::new();
         for row in &native {
-            if context != self.decode_memory_context(row)? {
+            if context != self.decode_memory_context(row, identity)? {
                 return Err(CollectionStop::SourceChanged.error());
             }
             let Some((grant, request)) = decode(row, &context, &layout)? else { continue };
@@ -174,14 +176,14 @@ impl<R: NativeRead> ActivityReader<R> {
         }
         initial.completed(&current)
     }
-    fn decode_memory_context(&self, row: &Rec) -> Result<ActivityContext> {
+    fn decode_memory_context(&self, row: &Rec, identity: IdentityDetail) -> Result<ActivityContext> {
         if !NATIVE_EDITIONS.contains(&integer(row, "edition")?) || integer(row, "major")? < MIN_NATIVE_MAJOR {
             return Err(culprit_core::Error::new(
                 culprit_core::ErrorCode::Unsupported,
                 culprit_core::t!("collection.unsupported"),
             ));
         }
-        ActivityContext::decode(row, &self.host, self.port, self.options.identity)
+        ActivityContext::decode(row, &self.host, self.port, identity)
     }
 }
 

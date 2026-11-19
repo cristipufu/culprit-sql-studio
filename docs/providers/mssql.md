@@ -170,8 +170,16 @@ A generation-checked request supplies current SQL context. It does not prove tha
 that every granted reservation is used, or that a waiting request owns memory. Unresolved associations remain
 unowned evidence. Historical peaks, compilation memory and tracked session allocations are separate measurements.
 
-Both entry points apply the same 200-row, five-query, three-second statement and ten-second total ceilings, with
-stricter caller limits preserved. The output limit does not by itself bound the native DMV traversal cost.
+Both entry points discover the native platform. Boxed SQL Server retains its qualified instance/process owner;
+Azure SQL requires the verified primary identity. Missing authority or permissions is unavailable evidence.
+
+Where SQL Server 17+ exposes them, the same read retains shared workload-group tempdb data usage, peak usage,
+limit-abort history and stored limits. Stored limits may not yet be effective; historical aborts do not identify
+the current request. Group totals must not be added once per captured grant.
+
+Both entry points apply the same 200-row, nine-query, three-second statement and ten-second total ceilings, with
+stricter caller limits preserved. The Azure route needs at most six queries. The output limit does not by itself
+bound native DMV traversal cost; these recipes remain unqualified for automatic scheduling.
 
 ### Task-level temporary-space observations
 

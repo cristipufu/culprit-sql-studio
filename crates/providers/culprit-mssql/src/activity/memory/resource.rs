@@ -121,11 +121,7 @@ impl Layout {
 }
 
 fn record_column(grant: &mut ExecutionGrantObservation, name: &str, null: bool) {
-    let name = inventory_name(name);
-    grant.available_columns.push(name.clone());
-    if null {
-        grant.native_null_columns.push(name);
-    }
+    fields::record_column(grant, inventory_name(name), null);
 }
 
 #[cfg(test)]

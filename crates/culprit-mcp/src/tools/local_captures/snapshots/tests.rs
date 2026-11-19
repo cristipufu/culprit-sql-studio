@@ -98,6 +98,57 @@ fn compact_shared_admission_resource_keeps_signed_exact_zero_and_unknown_values_
 }
 
 #[test]
+fn compact_group_tempdb_keeps_shared_current_peak_reset_and_abort_history_without_private_originals() {
+    let mut grant = original_grant();
+    assert_eq!(native_workload_group_tempdb(&grant), Value::Null);
+    grant.identity.qualifiers.insert("private-native-receipt".into(), "private-source-proof-canary".into());
+    grant.resource = Some(
+        NativeIdentity::new("2")
+            .qualified("kind", "sql-server-resource-governor")
+            .qualified("private-native-pool", "private-instance-canary"),
+    );
+    grant.workload_group = Some(NativeIdentity::new("7").qualified("kind", "sql-server-resource-governor-group"));
+    grant.workload_group_tempdb = Some(MssqlWorkloadGroupTempdbObservation {
+        group_id: "7".into(),
+        pool_id: "2".into(),
+        statistics_started_without_offset: Some("2020-01-01T10:00:00.003".into()),
+        current_kibibytes: Some("0".into()),
+        peak_kibibytes: Some("9007199254740993".into()),
+        limit_violations: Some("3".into()),
+        stored_limits: Some(MssqlStoredTempdbDataLimits { fixed_mebibytes: None, percent: None }),
+    });
+    assert!(grant.is_valid());
+    let original = grant.clone();
+    let value = native_workload_group_tempdb(&grant);
+    assert_eq!(value["current_kibibytes"], "0");
+    assert_eq!(value["peak_kibibytes"], "9007199254740993");
+    assert_eq!(value["limit_violations"], "3");
+    assert!(value["stored_limits"].is_object());
+    assert_eq!(value["stored_limits"]["fixed_mebibytes"], Value::Null);
+    assert_eq!(value["qualification"], culprit_core::t!("view.request_memory.tempdb.limit"));
+    for private in [
+        "private-source-proof-canary",
+        "private-instance-canary",
+        "private-native-receipt",
+        "sql_handle",
+        "plan_handle",
+        "statement",
+    ] {
+        assert!(!value.to_string().contains(private));
+    }
+    assert_eq!(grant, original);
+    let group = grant.workload_group_tempdb.as_mut().unwrap();
+    group.current_kibibytes = None;
+    group.limit_violations = None;
+    group.statistics_started_without_offset = None;
+    group.stored_limits = None;
+    let unknown = native_workload_group_tempdb(&grant);
+    for field in ["current_kibibytes", "limit_violations", "statistics_started_without_offset", "stored_limits"] {
+        assert_eq!(unknown[field], Value::Null);
+    }
+}
+
+#[test]
 fn bounded_database_property_disclosure_retains_recorded_check_metadata_without_offset_or_current_health_claims() {
     struct TestDirectory(std::path::PathBuf);
     impl Drop for TestDirectory {

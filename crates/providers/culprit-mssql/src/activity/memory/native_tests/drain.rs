@@ -9,6 +9,12 @@ use culprit_core::{Result, telemetry::*};
 
 pub(super) async fn prove(fixture: &mut Fixture) -> Result<()> {
     let pair = reservations::establish(fixture, HolderRequirement::ClientOutputWait).await?;
+    const FIRST_TEMPDB_GOVERNANCE_MAJOR: u32 = 17;
+    if pair.point.native_major < FIRST_TEMPDB_GOVERNANCE_MAJOR
+        && pair.point.observations.iter().any(|grant| grant.workload_group_tempdb.is_some())
+    {
+        return Err(invalid_data());
+    }
     if !fixture.can_observe() {
         return Err(fixture.observation_stop());
     }

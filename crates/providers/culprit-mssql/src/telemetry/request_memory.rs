@@ -17,12 +17,11 @@ struct MemoryObservationReader<R: NativeRead> {
 }
 impl MemorySource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        let options = ReadOptions {
-            budget: crate::request_memory::bounded_budget(&request.budget),
-            identity: IdentityDetail::AzureDatabase,
-        };
-        Self::from_reader(ActivityReader::open(pool, options, host, port)?, request)
+        Self::from_reader(ActivityReader::open(pool, read_options(request), host, port)?, request)
     }
+}
+fn read_options(request: &CollectionRequest) -> ReadOptions {
+    ReadOptions { budget: crate::request_memory::bounded_budget(&request.budget), identity: IdentityDetail::Endpoint }
 }
 impl<R: NativeRead> MemorySource<R> {
     pub(super) fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {
@@ -127,3 +126,7 @@ mod tests;
 
 #[cfg(test)]
 mod focused_tests;
+#[cfg(test)]
+mod native_tests;
+#[cfg(test)]
+mod profile_tests;

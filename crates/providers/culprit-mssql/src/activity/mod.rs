@@ -32,6 +32,12 @@ pub(crate) enum IdentityDetail {
     Endpoint,
     AzureDatabase,
 }
+impl IdentityDetail {
+    /// Projection selection for an already-validated native edition; it grants no platform or role admission.
+    pub(crate) fn for_native_edition(edition: i64) -> Self {
+        if edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE { Self::AzureDatabase } else { Self::Endpoint }
+    }
+}
 pub(crate) struct ReadOptions {
     pub budget: CollectionBudget,
     pub identity: IdentityDetail,

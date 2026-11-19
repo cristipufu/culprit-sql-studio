@@ -61,25 +61,35 @@ fn read_cost(row: &Rec, name: &str) -> Result<Option<String>> {
 pub(super) struct Layout {
     available: BTreeSet<String>,
     resource: resource::Layout,
+    workload_group: workload_group::Layout,
 }
 pub(super) fn inventory_sql(shared_scope: bool) -> String {
     let names = names().map(|name| format!("N'{name}'")).collect::<Vec<_>>().join(",");
     format!(
-        "SELECT /* culprit */ name FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{OBJECT}') AND name IN ({names}) UNION ALL {} {}",
+        "SELECT /* culprit */ name FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{OBJECT}') AND name IN ({names}) UNION ALL {} UNION ALL {} {}",
         resource::inventory_sql(shared_scope),
+        workload_group::inventory_sql(shared_scope),
         super::super::sql::QueryPolicy::MemoryDiagnostic.hints()
     )
 }
 impl Layout {
-    pub async fn read<R: NativeRead>(reader: &mut R, shared_scope: bool) -> Result<Self> {
+    pub async fn read<R: NativeRead>(reader: &mut R, owner: &crate::local_source::Context) -> Result<Self> {
+        let shared_scope = resource::qualified_scope(owner);
+        let workload_group_scope = workload_group::qualified_scope(owner, shared_scope);
         let rows = reader
-            .query(&inventory_sql(shared_scope), vec![], FIELDS.len() + PROPERTIES.len() + resource::COLUMN_COUNT + 1)
+            .query(
+                &inventory_sql(shared_scope),
+                vec![],
+                FIELDS.len() + PROPERTIES.len() + resource::COLUMN_COUNT + workload_group::COLUMN_COUNT + 1,
+            )
             .await
             .map_err(ReadError::into_error)?;
         let mut available = BTreeSet::new();
         for row in &rows {
             let name = crate::read::text(row, "name")?;
-            if !(self::names().any(|field| field == name) || resource::is_inventory_name(&name))
+            if !(self::names().any(|field| field == name)
+                || resource::is_inventory_name(&name)
+                || workload_group::is_inventory_name(&name))
                 || !available.insert(name)
             {
                 return Err(invalid_data());
@@ -90,7 +100,11 @@ impl Layout {
         {
             return Err(CollectionStop::SourceUnavailable.error());
         }
-        Ok(Self { resource: resource::Layout::from_inventory(&available, shared_scope), available })
+        Ok(Self {
+            resource: resource::Layout::from_inventory(&available, shared_scope),
+            workload_group: workload_group::Layout::from_inventory(&available, workload_group_scope),
+            available,
+        })
     }
     pub fn projection(&self) -> String {
         let counters = names()
@@ -101,10 +115,10 @@ impl Layout {
             })
             .collect::<Vec<_>>()
             .join(",");
-        format!("{counters},{}", self.resource.projection())
+        format!("{counters},{},{}", self.resource.projection(), self.workload_group.projection())
     }
-    pub fn resource_join(&self) -> &'static str {
-        self.resource.join()
+    pub fn resource_join(&self) -> String {
+        format!("{} {}", self.resource.join(), self.workload_group.joins())
     }
     pub fn decode(&self, row: &Rec, grant: &mut ExecutionGrantObservation) -> Result<()> {
         for field in FIELDS {
@@ -138,7 +152,8 @@ impl Layout {
                 grant.native_null_columns.push(name.into());
             }
         }
-        self.resource.decode(row, grant)
+        self.resource.decode(row, grant)?;
+        self.workload_group.decode(row, grant)
     }
 }
 
@@ -152,7 +167,23 @@ pub(super) fn observed_layout(columns: &[String]) -> Layout {
     let available = names()
         .map(str::to_owned)
         .filter(|name| columns.contains(name))
-        .chain(columns.iter().filter(|name| resource::is_inventory_name(name)).cloned())
+        .chain(
+            columns
+                .iter()
+                .filter(|name| resource::is_inventory_name(name) || workload_group::is_inventory_name(name))
+                .cloned(),
+        )
         .collect();
-    Layout { resource: resource::Layout::from_inventory(&available, true), available }
+    Layout {
+        resource: resource::Layout::from_inventory(&available, true),
+        workload_group: workload_group::Layout::from_inventory(&available, true),
+        available,
+    }
+}
+
+pub(super) fn record_column(grant: &mut ExecutionGrantObservation, name: String, null: bool) {
+    grant.available_columns.push(name.clone());
+    if null {
+        grant.native_null_columns.push(name);
+    }
 }

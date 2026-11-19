@@ -213,6 +213,7 @@ fn request_memory(analysis: &LocalSnapshotAnalysis, report: &culprit_core::Memor
                 "maximum_used_kibibytes":grant.maximum_used_kibibytes,"ideal_kibibytes":grant.ideal_kibibytes,
                 "wait_ms":grant.wait_ms,
                 "resource_observation":native_grant_resource(grant),
+                "workload_group_tempdb":native_workload_group_tempdb(grant),
             },
             "participant_context":participant,
         }))
@@ -242,6 +243,21 @@ fn native_grant_resource(grant: &culprit_core::telemetry::ExecutionGrantObservat
             "available_kibibytes":resource.available_kibibytes,
             "granted_kibibytes":resource.granted_kibibytes,
             "grantee_count":resource.grantee_count,"waiter_count":resource.waiter_count,
+        })
+    })
+}
+
+fn native_workload_group_tempdb(grant: &culprit_core::telemetry::ExecutionGrantObservation) -> Value {
+    grant.workload_group_tempdb.as_ref().map_or(Value::Null, |group| {
+        json!({
+            "qualification":culprit_core::t!("view.request_memory.tempdb.limit"),
+            "group_id":group.group_id,"pool_id":group.pool_id,
+            "statistics_started_without_offset":group.statistics_started_without_offset,
+            "current_kibibytes":group.current_kibibytes,"peak_kibibytes":group.peak_kibibytes,
+            "limit_violations":group.limit_violations,
+            "stored_limits":group.stored_limits.as_ref().map(|limits|json!({
+                "fixed_mebibytes":limits.fixed_mebibytes,"percent":limits.percent,
+            })),
         })
     })
 }

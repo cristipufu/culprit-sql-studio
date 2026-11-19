@@ -10,6 +10,8 @@ const OBSERVATION_DETAIL_CHARS: usize = 1024;
 mod compilation_tests;
 mod completed_spills;
 #[cfg(test)]
+mod participants_tests;
+#[cfg(test)]
 mod task_space_tests;
 pub(crate) use completed_spills::completed_spills;
 mod page_server_reads;
@@ -513,15 +515,19 @@ pub(crate) fn retained(report: &RetainedFailureReport) -> String {
 }
 
 pub(crate) fn participants(report: &MemoryParticipantsReport) -> String {
-    render(
+    let mut text = native_work_summary(
         Summary {
             title: &report.title,
             summary: &report.summary,
             source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
-        report.entries.iter().map(|entry| entry.title.as_str()),
-    )
+        report.entries.iter().map(|entry| {
+            (entry.title.as_str(), vec![entry.explanation.clone(), entry.investigation.clone(), entry.verify.clone()])
+        }),
+    );
+    append_remaining_limitations(&mut text, &report.limitations);
+    text
 }
 
 pub(crate) fn task_space(report: &TaskSpaceReport) -> String {
@@ -1093,8 +1099,8 @@ mod tests {
                     observation_identity: culprit_core::telemetry::NativeIdentity::new(format!("native-{index}")),
                     mechanism: None,
                     qualified_request: None,
-                    title: "x".repeat(1000),
-                    explanation: "not included in concise output".into(),
+                    title: "界".repeat(OBSERVATION_DETAIL_CHARS + 1),
+                    explanation: "canonical native memory explanation".into(),
                     investigation: "resource-first investigation".into(),
                     verify: "equivalent work".into(),
                     grant_admission: None,
@@ -1107,11 +1113,13 @@ mod tests {
         assert!(text.contains(&report.limitations[0]));
         assert_eq!(text.matches('•').count(), super::super::BRIEF_FINDING_LIMIT);
         assert_eq!(
-            text.chars().filter(|character| *character == 'x').count(),
-            super::super::BRIEF_FINDING_LIMIT * super::super::BRIEF_TITLE_CHARS
+            text.chars().filter(|character| *character == '界').count(),
+            super::super::BRIEF_FINDING_LIMIT * OBSERVATION_DETAIL_CHARS
         );
         assert!(!text.contains("native-"));
-        assert!(!text.contains("not included in concise output"));
+        assert!(text.contains("canonical native memory explanation"));
+        assert!(text.contains("resource-first investigation"));
+        assert!(text.contains("equivalent work"));
     }
 
     #[test]

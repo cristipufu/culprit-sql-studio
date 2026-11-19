@@ -1086,9 +1086,10 @@ from size or fullness.
 ### Current execution-memory requests
 
 `culprit scan CONNECTION --collect-request-memory` opts into the SQL Server family's current memory-grant
-observations. The default scan does not run this reader. The collector profile requires an Azure SQL primary replica:
-`culprit collect once CONNECTION --collection current-request-memory`. It writes typed operational facts through
-the same native reader. Other providers report this profile as unsupported rather than returning empty evidence.
+observations. The default scan does not run this reader. The collector uses the same native platform discovery:
+`culprit collect once CONNECTION --collection current-request-memory`. Boxed SQL Server retains its qualified
+instance/process owner; Azure SQL requires a verified primary identity. Other providers report this profile as
+unsupported rather than returning empty evidence.
 
 Facts distinguish waiting requests from granted reservations, retain exact KiB and worker counters, and associate
 a request only when native generations, request times and handles agree. Missing associations remain unassigned
@@ -1100,9 +1101,9 @@ The bounded probe has no sort, aggregate or plan retrieval. Its query chain uses
 thread to avoid diagnostic hash grants, following Microsoft's
 [memory-grant troubleshooting guidance](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/troubleshoot-memory-grant-issues).
 SQL detail uses the existing guarded activity reader;
-identity checks and confirmed shutdown precede accepting the result. Scan limits are 200 rows, five queries,
-three seconds per statement and ten seconds overall. These limits do not prove low server cost: qualify the
-source under representative load before scheduling it. Native application, login and host labels follow the
+identity checks and confirmed shutdown precede accepting the result. Scan and collector limits are 200 rows,
+nine queries (at most six on Azure), three seconds per statement and ten seconds overall. These limits do not prove
+low server cost: qualify the source under representative load before scheduling it. Native application, login and host labels follow the
 existing activity collection policy; SQL literals are redacted. Snapshot sharing removes those client labels.
 
 ## Session and request census
