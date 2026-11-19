@@ -96,7 +96,7 @@ pub use observations::{
     retention_evidence,
 };
 mod request_memory;
-pub use request_memory::request_memory_evidence_cases;
+pub use request_memory::{request_memory_evidence_cases, reservation_demand_evidence_cases};
 mod grant_output;
 pub use grant_output::{
     GrantOutputCase, assert_grant_output_capture, grant_output_evidence, output_wait_counter_evidence,

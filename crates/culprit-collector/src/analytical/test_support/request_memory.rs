@@ -105,6 +105,70 @@ pub fn request_memory_evidence_cases() -> Vec<(CollectionDescription, Vec<Teleme
     cases
 }
 
+/// One large observed reservation and several smaller positive reservations share the same native resource
+/// population. The resource has four native grantees; this database capture deliberately retains only a subset.
+pub fn reservation_demand_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
+    let (source, rows) = request_memory_evidence_cases()
+        .into_iter()
+        .find(|(_, rows)| {
+            rows.iter().any(|row| {
+                matches!(row,
+            TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::ExecutionGrant(grant), .. })
+                if grant.resource_observation.is_some() && grant.workload_group_tempdb.is_none())
+            })
+        })
+        .expect("native admission-resource fixture");
+    let grant = |state| {
+        rows.iter()
+            .find_map(|row| match row {
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::ExecutionGrant(grant),
+                    ..
+                }) if grant.state == state => Some(grant.as_ref().clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let template = grant(ExecutionGrantState::Granted);
+    let waiter = grant(ExecutionGrantState::Waiting);
+    [(vec![12288], true), (vec![2048, 4096, 4096], true), (vec![2048, 4096], false)]
+        .into_iter()
+        .map(|(amounts, complete)| {
+            let mut grants = vec![waiter.clone()];
+            for (index, amount) in amounts.into_iter().enumerate() {
+                let mut grant = template.clone();
+                let session = (71 + index).to_string();
+                grant.identity.id = format!("{session}:0");
+                let request = grant.request.as_mut().unwrap();
+                request.key.session.id = session.clone();
+                request.statement_identity = Some(NativeIdentity::new(format!("native-statement-{session}")));
+                grant.granted_kibibytes = Some(amount.to_string());
+                grant.maximum_used_kibibytes = Some("9007199254740993".into());
+                grants.push(grant);
+            }
+            for grant in &mut grants {
+                grant.resource = Some(
+                    NativeIdentity::new("2")
+                        .qualified("kind", "sql-server-resource-governor")
+                        .qualified("resource_semaphore_id", "0"),
+                );
+                grant.resource_observation = Some(ExecutionGrantResourceObservation {
+                    available_kibibytes: Some("-64".into()),
+                    granted_kibibytes: Some("16384".into()),
+                    grantee_count: Some("4".into()),
+                    waiter_count: Some("1".into()),
+                });
+            }
+            let records = grants.into_iter().map(record).collect::<Vec<_>>();
+            let mut source = source.clone();
+            let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+            snapshot.records = records.len() as u32;
+            snapshot.sources = vec![StateSourceCoverage::observed(source.source.clone(), snapshot.records, complete)];
+            (source, records)
+        })
+        .collect()
+}
+
 fn record(grant: ExecutionGrantObservation) -> TelemetryRecord {
     assert!(grant.is_valid());
     TelemetryRecord::Operational(OperationalObservation {

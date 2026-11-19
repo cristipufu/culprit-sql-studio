@@ -3,6 +3,7 @@ use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason},
     test_support::{
         focused_request_memory_evidence_with_peers, request_memory_evidence, request_memory_evidence_cases,
+        reservation_demand_evidence_cases,
     },
 };
 use culprit_core::{Snapshot, SourceOutcome, SourceState, telemetry::*};
@@ -384,4 +385,47 @@ async fn native_local_request_times_remain_independent_from_authenticated_utc_ob
         result.context.records[0].row,
         ExportedRecord::new(capture.source(), capture.capture(), rows[0].clone()).unwrap()
     );
+}
+
+#[tokio::test]
+async fn authenticated_reservation_sizes_replay_the_original_waiter_without_global_distribution_or_tempdb_usage_claims()
+{
+    for (index, (source, rows)) in reservation_demand_evidence_cases().into_iter().enumerate() {
+        let expected = culprit_checks::analyze(scan(&source, &rows)).request_memory.unwrap();
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let recovery_before = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        assert!(capture.is_read_complete());
+        let result = collected_resources::request_memory(&capture).unwrap();
+        assert_eq!(result.report, expected);
+        assert_eq!(result.context.source, source);
+        assert_eq!(result.context.records.len(), rows.len());
+        let waiter = observations(&rows).into_iter().find(|row| row.state == ExecutionGrantState::Waiting).unwrap();
+        let entry = result.report.entries.iter().find(|entry| entry.observation_identity == waiter.identity).unwrap();
+        let investigation = if index == 0 {
+            culprit_core::t!("view.request_memory.demand.larger_investigation")
+        } else {
+            culprit_core::t!("view.request_memory.demand.several_investigation")
+        };
+        assert!(entry.investigation.starts_with(&investigation));
+        assert_eq!(entry.qualified_request.as_ref(), waiter.request.as_ref().map(|request| &request.key));
+        assert_eq!(entry.verify, culprit_core::t!("view.request_memory.resource.verify"));
+        assert!(result.report.limitations.contains(&culprit_core::t!("view.request_memory.demand.limit")));
+        assert!(result.report.limitations.contains(&culprit_core::t!("view.request_memory.limit.population")));
+        assert_eq!(entry.mechanism, None);
+        if index == 2 {
+            assert_eq!(result.report.source_state, Some(SourceState::Partial));
+            assert!(
+                result.report.limitations.contains(&culprit_core::t!("view.memory_participants.limit.source_partial"))
+            );
+        }
+        for row in &rows {
+            let original = ExportedRecord::new(&source, capture.capture(), row.clone()).unwrap();
+            assert!(result.context.records.iter().any(|record| record.row == original));
+        }
+        let json = serde_json::to_string(&result.report).unwrap();
+        assert!(!json.contains("SELECT payload") && !json.contains("9007199254740993"));
+        assert!(result.report.entries.iter().all(|entry| !entry.explanation.contains("9264")));
+        assert_eq!(fixture.recovery_object_reads(), recovery_before);
+    }
 }

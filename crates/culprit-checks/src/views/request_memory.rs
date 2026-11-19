@@ -12,6 +12,7 @@ use culprit_core::{
     },
 };
 use std::collections::BTreeMap;
+mod reservation_demand;
 mod workload_group_tempdb;
 
 pub struct RequestMemoryEvidence<'a> {
@@ -31,7 +32,11 @@ pub fn explain(
         order(left.observation().state).cmp(&order(right.observation().state)).then_with(|| left.key().cmp(right.key()))
     });
     let waiting = observations.iter().filter(|row| row.state == ExecutionGrantState::Waiting).count();
-    let admission_resources = admission_resources(&evidence, &cases);
+    let resources = admission_resources(&evidence, &cases, source);
+    let mut limitations = limitations(&evidence, source);
+    if resources.iter().any(|resource| resource.demand.is_some()) {
+        limitations.push(t!("view.request_memory.demand.limit"));
+    }
     Ok(MemoryParticipantsReport {
         source_state: source.map(|source| source.state),
         source_reason: source.and_then(|source| source.reason.clone()),
@@ -47,30 +52,47 @@ pub fn explain(
                 granted = format::count((observations.len() - waiting) as f64)
             )
         },
-        limitations: limitations(&evidence, source),
-        entries: cases.into_iter().map(|participant| render(participant, &admission_resources)).collect(),
-        admission_resources,
+        limitations,
+        entries: cases.into_iter().map(|participant| render(participant, &resources)).collect(),
+        admission_resources: resources.into_iter().map(|resource| resource.admission).collect(),
     })
+}
+
+struct AdmissionResource {
+    admission: MemoryGrantAdmission,
+    demand: Option<reservation_demand::ReservationDemand>,
 }
 
 fn admission_resources(
     evidence: &RequestMemoryEvidence<'_>,
     participants: &[Participant<'_>],
-) -> Vec<MemoryGrantAdmission> {
+    source: Option<&SourceOutcome>,
+) -> Vec<AdmissionResource> {
     if !evidence.context.has_qualified_local_owner() {
         return vec![];
     }
-    let mut resources: BTreeMap<NativeIdentity, Vec<MemoryParticipantReference>> = BTreeMap::new();
+    let mut resources: BTreeMap<NativeIdentity, Vec<&Participant<'_>>> = BTreeMap::new();
     for participant in participants {
-        let row = participant.observation();
         if let Some(resource) = participant.resource() {
-            resources.entry(resource.clone()).or_default().push(MemoryParticipantReference {
-                observation_key: participant.key().to_owned(),
-                observation_identity: row.identity.clone(),
-            });
+            resources.entry(resource.clone()).or_default().push(participant);
         }
     }
-    resources.into_iter().map(|(resource, participants)| MemoryGrantAdmission { resource, participants }).collect()
+    resources
+        .into_iter()
+        .map(|(resource, members)| AdmissionResource {
+            demand: reservation_demand::ReservationDemand::from_participants(&members, source),
+            admission: MemoryGrantAdmission {
+                resource,
+                participants: members
+                    .into_iter()
+                    .map(|participant| MemoryParticipantReference {
+                        observation_key: participant.key().to_owned(),
+                        observation_identity: participant.observation().identity.clone(),
+                    })
+                    .collect(),
+            },
+        })
+        .collect()
 }
 
 fn limitations(evidence: &RequestMemoryEvidence<'_>, source: Option<&SourceOutcome>) -> Vec<String> {
@@ -118,7 +140,10 @@ struct ParticipantWords {
     verify: String,
 }
 
-fn participant_words(participant: &Participant<'_>) -> ParticipantWords {
+fn participant_words(
+    participant: &Participant<'_>,
+    demand: Option<&reservation_demand::ReservationDemand>,
+) -> ParticipantWords {
     let observation = participant.observation();
     if let Some(MemoryParticipantMechanism::ReservationDuringClientOutputWait) = participant.mechanism() {
         return ParticipantWords {
@@ -168,24 +193,28 @@ fn participant_words(participant: &Participant<'_>) -> ParticipantWords {
         words.explanation = format!("{} {detail} {}", words.explanation, t!("view.request_memory.resource.limit"));
         words.investigation = t!("view.request_memory.resource.investigation");
         words.verify = t!("view.request_memory.resource.verify");
+        if let Some(demand) = demand {
+            words.explanation = format!("{} {}", demand.explanation(), words.explanation);
+            words.investigation = format!("{} {}", demand.investigation(), words.investigation);
+        }
     }
     words
 }
 
-fn render(participant: Participant<'_>, resources: &[MemoryGrantAdmission]) -> MemoryParticipantExplanation {
+fn render(participant: Participant<'_>, resources: &[AdmissionResource]) -> MemoryParticipantExplanation {
     let observation = participant.observation();
-    let mut words = participant_words(&participant);
+    let admission = participant.resource().and_then(|identity| {
+        resources.binary_search_by(|group| group.admission.resource.cmp(identity)).ok().map(|index| &resources[index])
+    });
+    let mut words = participant_words(&participant, admission.and_then(|resource| resource.demand.as_ref()));
     let mut details = vec![words.explanation, request_context(&participant)];
     if let Some(group) = workload_group_tempdb::explain(&participant) {
         details.push(group);
         words.investigation = format!("{} {}", words.investigation, t!("view.request_memory.tempdb.investigation"));
         words.verify = format!("{} {}", words.verify, t!("view.request_memory.tempdb.verify"));
     }
-    let admission = participant.resource().and_then(|identity| {
-        resources.binary_search_by(|group| group.resource.cmp(identity)).ok().map(|index| &resources[index])
-    });
     if let Some(resource) = admission {
-        let other = resource.participants.len().saturating_sub(1);
+        let other = resource.admission.participants.len().saturating_sub(1);
         details.push(t!("view.request_memory.admission.participants", n = other, count = format::count(other as f64)));
     }
     queue_details(observation, &mut details);
@@ -208,7 +237,7 @@ fn render(participant: Participant<'_>, resources: &[MemoryGrantAdmission]) -> M
         explanation: details.join(" "),
         investigation: words.investigation,
         verify: words.verify,
-        grant_admission: admission.map(|resource| resource.resource.clone()),
+        grant_admission: admission.map(|resource| resource.admission.resource.clone()),
     }
 }
 

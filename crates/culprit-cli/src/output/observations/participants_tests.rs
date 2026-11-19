@@ -1,6 +1,7 @@
 use super::*;
 use culprit_collector::analytical::test_support::{
-    request_memory_evidence, request_memory_evidence_cases, session_memory_evidence_cases,
+    request_memory_evidence, request_memory_evidence_cases, reservation_demand_evidence_cases,
+    session_memory_evidence_cases,
 };
 use culprit_core::telemetry::*;
 
@@ -193,4 +194,27 @@ fn each_unicode_field_and_entry_is_bounded_without_hiding_later_verification() {
     assert!(!text.contains(&format!("native-participant-{}-", super::super::BRIEF_FINDING_LIMIT)));
     assert_eq!(text.matches("\n• native-participant-").count(), super::super::BRIEF_FINDING_LIMIT);
     assert_eq!(serde_json::to_value(&report).unwrap(), unchanged, "rendering cannot rewrite the raw report");
+}
+
+#[test]
+fn original_waiter_size_and_concurrency_advice_reuses_the_canonical_bounded_report() {
+    for (index, (source, rows)) in reservation_demand_evidence_cases().into_iter().enumerate() {
+        let report = request_report(&source, &rows);
+        assert_canonical_fields(&report);
+        let text = participants(&report);
+        let expected = if index == 0 {
+            t!("view.request_memory.demand.larger_investigation")
+        } else {
+            t!("view.request_memory.demand.several_investigation")
+        };
+        assert!(text.contains(&expected));
+        assert!(text.contains(&t!("view.request_memory.demand.limit")));
+        assert!(text.contains(&t!("view.request_memory.limit.population")));
+        for absent in ["SELECT payload", "9264", "9007199254740993", "observation_key", "qualified_request"] {
+            assert!(!text.contains(absent), "{absent}");
+        }
+        let restored: MemoryParticipantsReport =
+            serde_json::from_value(serde_json::to_value(&report).unwrap()).unwrap();
+        assert_eq!(participants(&restored), text);
+    }
 }

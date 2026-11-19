@@ -1,7 +1,7 @@
 use super::*;
 use culprit_collector::analytical::test_support::{
     current_request_work_evidence_cases, focused_request_memory_evidence, request_memory_evidence_cases,
-    task_space_evidence_cases,
+    reservation_demand_evidence_cases, task_space_evidence_cases,
 };
 use culprit_engine::LocalCaptureAnalysisKind;
 
@@ -129,7 +129,12 @@ async fn focused_memory_keeps_the_exact_original_and_later_participant_clocks_in
             assert!(!value.to_string().contains("private-memory-login"));
             assert!(!value.to_string().contains("private-memory-host"));
         }
-        assert!(!value.to_string().contains("9264"));
+        for entry in report["entries"].as_array().unwrap() {
+            assert!(!entry["explanation"].as_str().unwrap().contains("9264"));
+            if let Some(preview) = entry["participant_context"]["statement"]["preview"].as_str() {
+                assert!(!preview.contains("9264"));
+            }
+        }
         assert!(!value.to_string().contains("statement_identity"));
         assert!(!value.to_string().contains("manifest_sha256"));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -224,6 +229,66 @@ async fn focused_work_keeps_original_client_context_separate_from_the_native_poi
             assert_ne!(entry["observed_at"], original_at);
         }
         assert!(!value.to_string().contains("private-current-work-sql"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn reservation_demand_mcp_replays_canonical_original_waiter_advice_without_a_native_requery() {
+    for (index, (source, rows)) in reservation_demand_evidence_cases().into_iter().enumerate() {
+        let context = NativeReadContext::from_snapshot(&source).unwrap();
+        let observations = rows
+            .iter()
+            .map(|row| {
+                let TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::ExecutionGrant(grant),
+                    ..
+                }) = row
+                else {
+                    panic!("reservation-demand fixture")
+                };
+                grant.as_ref()
+            })
+            .collect::<Vec<_>>();
+        let native = &source.observation.snapshot().unwrap().sources[0];
+        let expected = culprit_checks::request_memory::explain(
+            culprit_checks::request_memory::RequestMemoryEvidence { context: &context, observations: &observations },
+            Some(&culprit_core::SourceOutcome {
+                source: native.source.clone(),
+                state: native.state,
+                reason: None,
+                reason_message: None,
+            }),
+        )
+        .unwrap();
+        let expected_waiter =
+            expected.entries.iter().find(|entry| entry.observation_identity == observations[0].identity).unwrap();
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::RequestMemory).await;
+        assert!(!error, "{value}");
+        let report = &value["request_memory"];
+        let entry = &report["entries"][0];
+        assert_eq!(entry["explanation"], expected_waiter.explanation);
+        assert_eq!(entry["investigation"], expected_waiter.investigation);
+        assert_eq!(entry["verify"], expected_waiter.verify);
+        assert_eq!(entry["qualified_request"], json!(expected_waiter.qualified_request));
+        assert_eq!(entry["native_observation"]["state"], "waiting");
+        assert_eq!(entry["native_observation"]["resource_observation"]["grantee_count"], "4");
+        assert_eq!(entry["native_observation"]["resource_observation"]["granted_kibibytes"], "16384");
+        assert_eq!(report["source_state"], if index == 2 { "partial" } else { "collected" });
+        assert!(
+            report["limitations"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(culprit_core::t!("view.request_memory.demand.limit")))
+        );
+        assert!(!entry["explanation"].as_str().unwrap().contains("9007199254740993"));
+        assert!(!entry["explanation"].as_str().unwrap().contains("9264"));
+        assert!(!entry["participant_context"]["statement"]["preview"].as_str().unwrap().contains("9264"));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
