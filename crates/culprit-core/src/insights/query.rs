@@ -14,6 +14,7 @@ pub(super) fn implicit_conversion(cx: &Cx) -> Vec<Draft> {
     let blocks_seek = evidence.blocks_seek();
     let column = Some(evidence.column().to_string());
     let target = Some(evidence.target().to_string());
+    let advice = MismatchAdvice::from_evidence(&evidence);
     let impact = node.map_or(0.05, |n| cx.share(n));
     let mut d =
         Draft::new("implicit-conversion", InsightArea::Query, impact, node.map(|n| vec![n.id]).unwrap_or_default());
@@ -37,7 +38,12 @@ pub(super) fn implicit_conversion(cx: &Cx) -> Vec<Draft> {
         d.title = title;
         d.detail = format!(
             "{} {}",
-            t!("insight.implicit_conversion.detail.warning", column = &col, target = &to, expression = &expression),
+            advice.summary().unwrap_or_else(|| t!(
+                "insight.implicit_conversion.detail.warning",
+                column = &col,
+                target = &to,
+                expression = &expression
+            )),
             effect.consequence().expect("a neutral native warning retains its qualified consequence")
         );
     } else if effect == ConversionEffect::Estimates {
@@ -63,7 +69,6 @@ pub(super) fn implicit_conversion(cx: &Cx) -> Vec<Draft> {
             expression = &expression
         );
     }
-    let advice = MismatchAdvice::from_plan(Some(cx.plan), Some(text), column.as_deref(), target.as_deref());
     d.fix = advice.fix(column.as_deref(), target.as_deref());
     d.verify = advice.verification().unwrap_or_else(|| {
         if blocks_seek {

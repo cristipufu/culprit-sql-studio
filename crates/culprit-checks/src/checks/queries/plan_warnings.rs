@@ -52,7 +52,7 @@ struct Shared {
 
 /// What one statement's plan warned of.
 enum Warned {
-    Conversion(Conversion),
+    Conversion(Box<Conversion>),
     Spill { node: Option<u32> },
     NoJoinPredicate(JoinCondition),
     MissingStatistics(Box<StatisticsWarning>),
@@ -83,6 +83,34 @@ struct Conversion {
     parameters: Option<String>,
     /// The original plan's qualified input contract, independent of wording and merged query impact.
     advice: MismatchAdvice,
+}
+
+impl Conversion {
+    fn finding_id(&self, query: &QueryStat) -> Option<String> {
+        Some(match &self.advice {
+            MismatchAdvice::TableValuedParameter { input, column, target } => {
+                let identity = serde_json::to_vec(&(&query.id, &query.text, input, column, target))
+                    .expect("the conversion identity contains only strings");
+                format!("plan-warnings:implicit-conversion:tvp:{}", culprit_core::telemetry::digest(&identity))
+            }
+            MismatchAdvice::TableValuedParameterCounterpart {
+                input,
+                input_reference,
+                column_reference,
+                target,
+                ..
+            } => {
+                let identity =
+                    serde_json::to_vec(&(&query.id, &query.text, input, input_reference, column_reference, target))
+                        .expect("the comparison identity contains only native strings");
+                format!(
+                    "plan-warnings:implicit-conversion:tvp-counterpart:{}",
+                    culprit_core::telemetry::digest(&identity)
+                )
+            }
+            MismatchAdvice::ColumnTypes => format!("plan-warnings:implicit-conversion:{}", self.column.as_ref()?),
+        })
+    }
 }
 
 /// What the catalog says now of the statistics a plan warned held nothing usable.
@@ -138,18 +166,12 @@ fn plan_warning_cases(snapshot: &Snapshot) -> Vec<PlanWarningCase<'_>> {
 impl PlanWarningCase<'_> {
     /// Persistent-column warnings retain shared grouping. A TVP contract stays within its original query/input.
     fn id(&self) -> String {
-        match &self.warned {
-            Warned::Conversion(Conversion {
-                advice: MismatchAdvice::TableValuedParameter { input, column, target },
-                ..
-            }) => {
-                let identity = serde_json::to_vec(&(&self.query.id, &self.query.text, input, column, target))
-                    .expect("the conversion identity contains only strings");
-                format!("plan-warnings:implicit-conversion:tvp:{}", culprit_core::telemetry::digest(&identity))
-            }
-            Warned::Conversion(Conversion { column: Some(c), .. }) => format!("plan-warnings:implicit-conversion:{c}"),
-            _ => format!("plan-warnings:{}:{}", self.query.id, warning_key(self.warning())),
+        if let Warned::Conversion(conversion) = &self.warned
+            && let Some(id) = conversion.finding_id(self.query)
+        {
+            return id;
         }
+        format!("plan-warnings:{}:{}", self.query.id, warning_key(self.warning()))
     }
 
     fn warning(&self) -> PlanWarning {
@@ -217,12 +239,7 @@ fn plan_warning_case<'s>(
             informational = matches!(effect, ConversionEffect::SeekObserved | ConversionEffect::OtherWarning);
             let column = Some(evidence.column().to_string());
             let target = Some(evidence.target().to_string());
-            let advice = MismatchAdvice::from_plan(
-                q.plan.as_ref(),
-                Some(evidence.expression()),
-                column.as_deref(),
-                target.as_deref(),
-            );
+            let advice = MismatchAdvice::from_evidence(&evidence);
             let conversion = Conversion {
                 column,
                 target,
@@ -233,7 +250,11 @@ fn plan_warning_case<'s>(
                 advice,
             };
             let severity = if blocks_seek { severity_for_impact(snapshot, &[q], impact) } else { Severity::Low };
-            (Warned::Conversion(conversion), severity, if blocks_seek { Confidence::High } else { Confidence::Medium })
+            (
+                Warned::Conversion(Box::new(conversion)),
+                severity,
+                if blocks_seek { Confidence::High } else { Confidence::Medium },
+            )
         }
         PlanWarning::Spill => {
             // A spill too small to matter stays Low, as the plan's own `spill` insight rates it.

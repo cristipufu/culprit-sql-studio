@@ -8,7 +8,7 @@ use crate::plan::{INDEX_KEEPS_AT_MOST, NodeKind, Plan, PlanNode};
 use crate::sql::{balanced_parens as balanced, identifier_parts, split_top_level_and as top_level_and};
 use crate::t;
 
-use super::{Cx, MANY_ROWS, column_leaf, conditions, rows_read};
+use super::{ConversionEvidence, Cx, MANY_ROWS, column_leaf, conditions, rows_read};
 
 const NOT_COLUMNS: &[&str] = &[
     "and",
@@ -576,46 +576,125 @@ fn column_reference_expression(operand: &str) -> &str {
 #[derive(Clone)]
 pub enum MismatchAdvice {
     ColumnTypes,
-    TableValuedParameter { input: String, column: String, target: String },
+    TableValuedParameter {
+        input: String,
+        column: String,
+        target: String,
+    },
+    TableValuedParameterCounterpart {
+        input: String,
+        input_column: String,
+        column: String,
+        target: String,
+        input_reference: Vec<String>,
+        column_reference: Vec<String>,
+    },
 }
 
 impl MismatchAdvice {
-    pub fn from_plan(
-        plan: Option<&Plan>,
-        expression: Option<&str>,
-        column: Option<&str>,
-        target: Option<&str>,
-    ) -> Self {
-        let qualified = || {
-            let (plan, expression, column, target) = (plan?, expression?, column?, target?);
-            if plan.engine != Engine::Mssql
-                || target.is_empty()
-                || !current_conversions(plan, expression).iter().any(|(name, to)| name == column && to == target)
-            {
+    pub fn from_evidence(evidence: &ConversionEvidence<'_>) -> Self {
+        let plan = evidence.plan();
+        let target = evidence.target();
+        if target.is_empty() {
+            return Self::ColumnTypes;
+        }
+        let operands: Vec<_> = convert_calls(evidence.expression())
+            .into_iter()
+            .filter(|(to, operand)| {
+                *to == target
+                    && is_column_operand(operand)
+                    && column_reference(plan, operand).is_some_and(|reference| reference.label == evidence.column())
+            })
+            .collect();
+        let [(_, operand)] = operands.as_slice() else { return Self::ColumnTypes };
+        if let Some(input) = tvp_column_input(plan, operand) {
+            return Self::TableValuedParameter {
+                input,
+                column: evidence.column().to_string(),
+                target: target.to_string(),
+            };
+        }
+        Self::counterpart(evidence, operand).unwrap_or(Self::ColumnTypes)
+    }
+
+    fn counterpart(evidence: &ConversionEvidence<'_>, operand: &str) -> Option<Self> {
+        evidence.node()?;
+        let selected = NativeComparisonColumn::read(evidence.plan(), operand)?;
+        if !matches!(selected.node.kind, NodeKind::Scan | NodeKind::Seek)
+            || super::relational_input_kind(selected.node).is_some()
+        {
+            return None;
+        }
+        let owned = evidence.owned_expressions();
+        if owned.len() > 1 {
+            return None;
+        }
+        if let Some(direct) = Self::comparison(evidence, evidence.expression(), &selected) {
+            if let Some(expression) = owned.first() {
+                let confirmed = Self::comparison(evidence, expression, &selected)?;
+                if !direct.same_counterpart(&confirmed) {
+                    return None;
+                }
+            } else if !evidence.has_declared_owner() {
                 return None;
             }
-            let operands: Vec<_> = convert_calls(expression)
-                .into_iter()
-                .filter(|(to, operand)| {
-                    *to == target
-                        && is_column_operand(operand)
-                        && column_reference(plan, operand).is_some_and(|reference| reference.label == column)
-                })
-                .collect();
-            let [(_, operand)] = operands.as_slice() else { return None };
-            Some(Self::TableValuedParameter {
-                input: converted_tvp(plan, operand)?,
-                column: column.to_string(),
-                target: target.to_string(),
-            })
-        };
-        qualified().unwrap_or(Self::ColumnTypes)
+            return Some(direct);
+        }
+        let call = format!("CONVERT_IMPLICIT({},{operand},0)", evidence.target());
+        if evidence.expression().trim_matches(|ch: char| ch.is_ascii_whitespace()) != call {
+            return None;
+        }
+        Self::comparison(evidence, owned.first()?, &selected)
+    }
+
+    fn comparison(
+        evidence: &ConversionEvidence<'_>,
+        expression: &str,
+        selected: &NativeComparisonColumn<'_>,
+    ) -> Option<Self> {
+        let comparison = NativeConversionEquality::read(expression)?;
+        if comparison.target != evidence.target() {
+            return None;
+        }
+        let plan = evidence.plan();
+        let column = NativeComparisonColumn::read(plan, comparison.converted)?;
+        if column.node.id != selected.node.id || column.identity != selected.identity {
+            return None;
+        }
+        let input = NativeComparisonColumn::read(plan, comparison.counterpart)?;
+        if input.node.id == column.node.id {
+            return None;
+        }
+        Some(Self::TableValuedParameterCounterpart {
+            input: tvp_column_input(plan, comparison.counterpart)?,
+            input_column: input.label,
+            column: evidence.column().to_string(),
+            target: evidence.target().to_string(),
+            input_reference: input.identity,
+            column_reference: column.identity,
+        })
+    }
+
+    fn same_counterpart(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::TableValuedParameterCounterpart { input_reference, column_reference, target, .. },
+                Self::TableValuedParameterCounterpart {
+                    input_reference: other_input,
+                    column_reference: other_column,
+                    target: other_target,
+                    ..
+                },
+            ) => input_reference == other_input && column_reference == other_column && target == other_target,
+            _ => false,
+        }
     }
 
     pub fn fix(&self, column: Option<&str>, target: Option<&str>) -> String {
         match self {
             Self::ColumnTypes => mismatch_fix(column, target),
-            Self::TableValuedParameter { input, column, .. } => {
+            Self::TableValuedParameter { input, column, .. }
+            | Self::TableValuedParameterCounterpart { input, input_column: column, .. } => {
                 t!("insight.implicit_conversion.fix_tvp", input = input, column = column)
             }
         }
@@ -627,18 +706,65 @@ impl MismatchAdvice {
             Self::TableValuedParameter { input, column, target } => {
                 Some(t!("insight.implicit_conversion.summary_tvp", input = input, column = column, target = target))
             }
+            Self::TableValuedParameterCounterpart { input, input_column, column, target, .. } => Some(t!(
+                "insight.implicit_conversion.summary_tvp_counterpart",
+                input = input,
+                input_column = input_column,
+                column = column,
+                target = target
+            )),
         }
     }
 
     pub fn verification(&self) -> Option<String> {
         match self {
             Self::ColumnTypes => None,
-            Self::TableValuedParameter { .. } => Some(t!("insight.implicit_conversion.verify_tvp")),
+            Self::TableValuedParameter { .. } | Self::TableValuedParameterCounterpart { .. } => {
+                Some(t!("insight.implicit_conversion.verify_tvp"))
+            }
         }
     }
 }
 
-fn converted_tvp(plan: &Plan, operand: &str) -> Option<String> {
+struct NativeComparisonColumn<'a> {
+    node: &'a PlanNode,
+    label: String,
+    identity: Vec<String>,
+}
+
+impl<'a> NativeComparisonColumn<'a> {
+    fn read(plan: &'a Plan, operand: &str) -> Option<Self> {
+        let node = native_conversion_owner(plan, operand)?;
+        let references = native_conversion_references(plan, operand)?;
+        let column = references.first()?.last()?.clone();
+        Some(Self { node, label: column_reference(plan, operand)?.label, identity: vec![node.object.clone()?, column] })
+    }
+}
+
+struct NativeConversionEquality<'a> {
+    target: &'a str,
+    converted: &'a str,
+    counterpart: &'a str,
+}
+
+impl<'a> NativeConversionEquality<'a> {
+    fn read(expression: &'a str) -> Option<Self> {
+        let calls = convert_calls(expression);
+        let [(target, converted)] = calls.as_slice() else { return None };
+        let (target, converted) = (*target, *converted);
+        let call = format!("CONVERT_IMPLICIT({target},{converted},0)");
+        let trim = |value: &'a str| value.trim_matches(|ch: char| ch.is_ascii_whitespace());
+        let expression = trim(expression);
+        let counterpart = if let Some(rest) = expression.strip_prefix(call.as_str()) {
+            trim(trim(rest).strip_prefix('=')?)
+        } else {
+            trim(trim(expression.strip_suffix(call.as_str())?).strip_suffix('=')?)
+        };
+        Some(Self { target, converted, counterpart })
+    }
+}
+
+fn tvp_column_input(plan: &Plan, operand: &str) -> Option<String> {
     let mut ids = std::collections::BTreeSet::new();
     let nodes = plan.nodes();
     if !nodes.iter().all(|node| ids.insert(node.id)) {

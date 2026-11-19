@@ -4554,6 +4554,7 @@
   "insight.implicit_conversion.fix_unicode": "Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change {named, select, true {{column}} other {the column}} to {target}. Changing a column rewrites it and the indexes on it.",
   "insight.implicit_conversion.rule": "A type mismatch that blocks an index seek (CONVERT_IMPLICIT)",
   "insight.implicit_conversion.summary_tvp": "SQL Server implicitly converts {column} in TVP {input} to {target} for this comparison. Check the TVP declaration and compared operand to establish the source type and collation.",
+  "insight.implicit_conversion.summary_tvp_counterpart": "SQL Server converts {column} to {target} for a comparison with {input_column} from TVP {input}. Check the TVP declaration and the caller's structured column metadata against the compared column.",
   "insight.implicit_conversion.title.blocks_seek": "A type mismatch on {named, select, true {{column}} other {a column}} stops SQL Server from seeking an index",
   "insight.implicit_conversion.title.estimates": "A type mismatch on {named, select, true {{column}} other {a column}} turns row estimates into guesses",
   "insight.implicit_conversion.title.other_warning": "SQL Server reported a conversion warning on {column}",

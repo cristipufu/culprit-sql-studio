@@ -377,3 +377,65 @@ fn native_tvp_conversion_as_format_keeps_only_a_complete_plain_same_input_refere
         assert_eq!(insight.fix, expected, "{suffix}");
     }
 }
+
+fn native_counterpart_join(expression: &str, warning: &str) -> String {
+    let right = scan(2, ITEMS).replace(
+        "</TableScan>",
+        &format!(r#"<Predicate><ScalarOperator ScalarString="{expression}" /></Predicate></TableScan>"#),
+    );
+    join(SQL, &scan(1, ROWS), &right, "").replace(
+        "<QueryPlan>",
+        &format!(r#"<QueryPlan><Warnings><PlanAffectingConvert ConvertIssue="Cardinality Estimate" Expression="{warning}" /></Warnings>"#),
+    )
+}
+
+#[test]
+fn native_named_column_conversion_uses_only_the_originally_bound_tvp_counterpart() {
+    let comparison = "CONVERT_IMPLICIT(nvarchar(64),[i].[id],0)=[r].[id]";
+    let read = crate::plan_xml::test_read_context("app");
+    for warning in [comparison, "CONVERT_IMPLICIT(nvarchar(64),[i].[id],0)"] {
+        let plan = parse(SQL, &native_counterpart_join(comparison, warning), Some(&read));
+        assert_eq!(
+            plan.root.children[0].facts().relational_input.unwrap().qualified_kind(),
+            Kind::TableValuedParameter
+        );
+        let evidence = culprit_core::insights::conversion_evidence(&plan).unwrap();
+        assert_eq!(evidence.node().unwrap().id, 2);
+        let advice = culprit_core::insights::MismatchAdvice::from_evidence(&evidence);
+        assert_eq!(
+            advice.fix(Some(evidence.column()), Some(evidence.target())),
+            culprit_core::t!("insight.implicit_conversion.fix_tvp", input = "@Rows", column = "r.id")
+        );
+        assert_eq!(
+            advice.summary(),
+            Some(culprit_core::t!(
+                "insight.implicit_conversion.summary_tvp_counterpart",
+                input = "@Rows",
+                input_column = "r.id",
+                column = "i.id",
+                target = "nvarchar(64)"
+            ))
+        );
+    }
+}
+
+#[test]
+fn native_counterpart_missing_foreign_or_scalar_proof_cannot_select_structured_tvp_advice() {
+    let comparison = "CONVERT_IMPLICIT(nvarchar(64),[i].[id],0)=[r].[id]";
+    for read in [None, Some(crate::plan_xml::test_read_context("other"))] {
+        let plan = parse(SQL, &native_counterpart_join(comparison, comparison), read.as_ref());
+        let evidence = culprit_core::insights::conversion_evidence(&plan).unwrap();
+        assert!(!matches!(
+            culprit_core::insights::MismatchAdvice::from_evidence(&evidence),
+            culprit_core::insights::MismatchAdvice::TableValuedParameterCounterpart { .. }
+        ));
+    }
+    let read = crate::plan_xml::test_read_context("app");
+    let scalar = "CONVERT_IMPLICIT(nvarchar(64),[i].[id],0)=[@needle]";
+    let plan = parse(SQL, &native_counterpart_join(scalar, scalar), Some(&read));
+    let evidence = culprit_core::insights::conversion_evidence(&plan).unwrap();
+    assert_eq!(
+        culprit_core::insights::MismatchAdvice::from_evidence(&evidence).fix(Some("i.id"), Some("nvarchar(64)")),
+        culprit_core::insights::mismatch_fix(Some("i.id"), Some("nvarchar(64)"))
+    );
+}

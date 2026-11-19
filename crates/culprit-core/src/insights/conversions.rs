@@ -32,6 +32,7 @@ impl ConversionEffect {
 }
 
 pub struct ConversionEvidence<'a> {
+    plan: &'a Plan,
     node: Option<&'a PlanNode>,
     issue: Option<PlanConversionIssue>,
     expression: String,
@@ -40,6 +41,9 @@ pub struct ConversionEvidence<'a> {
 }
 
 impl<'a> ConversionEvidence<'a> {
+    pub(super) fn plan(&self) -> &'a Plan {
+        self.plan
+    }
     pub fn node(&self) -> Option<&'a PlanNode> {
         self.node
     }
@@ -55,6 +59,14 @@ impl<'a> ConversionEvidence<'a> {
     pub fn has_native_warning(&self) -> bool {
         self.issue.is_some()
     }
+    pub(super) fn has_declared_owner(&self) -> bool {
+        self.node.is_some_and(|node| {
+            node.facts()
+                .conversions
+                .iter()
+                .any(|warning| self.issue.as_ref() == Some(&warning.issue) && self.expression == warning.expression)
+        })
+    }
     pub fn blocks_seek(&self) -> bool {
         self.effect() == ConversionEffect::BlocksSeek
     }
@@ -68,6 +80,16 @@ impl<'a> ConversionEvidence<'a> {
             Some(PlanConversionIssue::Other(_)) => ConversionEffect::OtherWarning,
             None => ConversionEffect::PerRow,
         }
+    }
+
+    pub(super) fn owned_expressions(&self) -> Vec<&str> {
+        let Some(node) = self.node else { return Vec::new() };
+        let references = selected_references(self.plan, &self.expression, &self.column, &self.target);
+        [node.predicate.as_deref(), node.seek_predicate.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter(|expression| matches_conversion(self.plan, expression, &self.target, &references, Some(node)))
+            .collect()
     }
 }
 
@@ -92,6 +114,7 @@ pub fn conversion_evidence(plan: &Plan) -> Option<ConversionEvidence<'_>> {
     {
         let (column, target) = current_conversions(plan, &warning.expression).into_iter().next()?;
         return Some(ConversionEvidence {
+            plan,
             node: unique_ids.then(|| warning_owner(plan, &nodes, warning, &column, &target)).flatten(),
             issue: Some(warning.issue.clone()),
             expression: warning.expression.clone(),
@@ -105,7 +128,7 @@ pub fn conversion_evidence(plan: &Plan) -> Option<ConversionEvidence<'_>> {
         .max_by(|left, right| left.self_cost.total_cmp(&right.self_cost))?;
     let expression = conditions(node);
     let (column, target) = current_conversions(plan, &expression).into_iter().next()?;
-    Some(ConversionEvidence { node: unique_ids.then_some(node), issue: None, expression, column, target })
+    Some(ConversionEvidence { plan, node: unique_ids.then_some(node), issue: None, expression, column, target })
 }
 
 fn warning_owner<'a>(
@@ -119,21 +142,38 @@ fn warning_owner<'a>(
     if !declared.is_empty() {
         return sole(declared.into_iter());
     }
-    let operands: Vec<_> = convert_calls(&warning.expression)
+    let references = selected_references(plan, &warning.expression, column, target);
+    sole(
+        nodes
+            .iter()
+            .copied()
+            .filter(|node| matches_conversion(plan, &conditions(node), target, &references, Some(node))),
+    )
+}
+
+fn selected_references(plan: &Plan, expression: &str, column: &str, target: &str) -> Vec<Vec<String>> {
+    convert_calls(expression)
         .into_iter()
         .filter(|(to, operand)| {
             *to == target && column_reference(plan, operand).is_some_and(|reference| reference.label == column)
         })
         .filter_map(|(_, operand)| scoped_references(plan, operand, None))
         .flatten()
-        .collect();
-    sole(nodes.iter().copied().filter(|node| {
-        convert_calls(&conditions(node)).into_iter().any(|(to, operand)| {
-            to == target
-                && scoped_references(plan, operand, Some(node))
-                    .is_some_and(|references| references.iter().any(|reference| operands.contains(reference)))
-        })
-    }))
+        .collect()
+}
+
+fn matches_conversion(
+    plan: &Plan,
+    expression: &str,
+    target: &str,
+    selected: &[Vec<String>],
+    node: Option<&PlanNode>,
+) -> bool {
+    convert_calls(expression).into_iter().any(|(to, operand)| {
+        to == target
+            && scoped_references(plan, operand, node)
+                .is_some_and(|references| references.iter().any(|reference| selected.contains(reference)))
+    })
 }
 
 fn scoped_references(plan: &Plan, operand: &str, node: Option<&PlanNode>) -> Option<Vec<Vec<String>>> {

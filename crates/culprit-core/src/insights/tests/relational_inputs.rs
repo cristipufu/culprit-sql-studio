@@ -706,20 +706,124 @@ fn unresolved_local_ambiguous_and_detached_inputs_retain_existing_conversion_eng
     }
 }
 
-#[test]
-fn a_conversion_on_another_relation_does_not_borrow_the_plans_tvp_contract() {
+fn counterpart_plan(expression: &str) -> Plan {
     let mut plan = converted_tvp_plan();
     plan.root.predicate = None;
-    let expression = "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value]";
     let mut peer = measured(2, "Index Scan", NodeKind::Scan, 20_000.0, 20_000.0, 1.0);
     peer.object = Some("dbo.Items".into());
     peer.facts_mut().table_alias = Some("i".into());
     peer.predicate = Some(expression.into());
     plan = with_conversion_peer(plan, peer);
     plan.facts_mut().conversions[0].expression = expression.into();
+    plan
+}
+
+#[test]
+fn a_conversion_on_another_relation_does_not_borrow_an_unrelated_tvps_contract() {
+    let plan = counterpart_plan("CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[@needle]");
     let concern = conversion_concern(&plan);
     assert_eq!(concern.fix, mismatch_fix(Some("i.value"), Some("nvarchar(64)")));
     assert_ne!(concern.verify, t!("insight.implicit_conversion.verify_tvp"));
+}
+
+#[test]
+fn direct_native_equalities_bind_the_tvp_counterpart_without_reassigning_the_converted_column() {
+    for (expression, expected_column, expected_input) in [
+        ("CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value]", "i.value", "r.value"),
+        ("[r].[value] = CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)", "i.value", "r.value"),
+        ("CONVERT_IMPLICIT(decimal(18,2),[i].[value],0)\t=\t[r].[value]", "i.value", "r.value"),
+        (
+            "CONVERT_IMPLICIT(nvarchar(64),[dbo].[Items].[value] AS [i].[value],0)=[@input].[value] AS [r].[value]",
+            "Items.value",
+            "@input.value",
+        ),
+    ] {
+        let plan = counterpart_plan(expression);
+        let evidence = conversion_evidence(&plan).unwrap();
+        let advice = MismatchAdvice::from_evidence(&evidence);
+        let MismatchAdvice::TableValuedParameterCounterpart {
+            input,
+            input_column,
+            column,
+            target,
+            input_reference,
+            column_reference,
+        } = &advice
+        else {
+            panic!("{expression}")
+        };
+        assert_eq!(input, "@input");
+        assert_eq!(input_column, expected_input);
+        assert_eq!(column, expected_column);
+        assert_eq!(input_reference, &vec!["@input".to_string(), "value".to_string()]);
+        assert_eq!(column_reference, &vec!["dbo.Items".to_string(), "value".to_string()]);
+        let concern = conversion_concern(&plan);
+        assert_eq!(concern.fix, t!("insight.implicit_conversion.fix_tvp", input = "@input", column = expected_input));
+        assert_eq!(concern.verify, t!("insight.implicit_conversion.verify_tvp"));
+        assert_eq!(
+            advice.summary(),
+            Some(t!(
+                "insight.implicit_conversion.summary_tvp_counterpart",
+                input = input,
+                input_column = input_column,
+                column = column,
+                target = target
+            ))
+        );
+        assert!(concern.fix_sql.is_none());
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "misestimate"));
+    }
+}
+
+#[test]
+fn neutral_conversion_verdicts_retain_proved_tvp_roles_and_their_qualified_consequence() {
+    for (issue, effect) in [
+        (crate::PlanConversionIssue::SeekPlan, ConversionEffect::SeekObserved),
+        (crate::PlanConversionIssue::Other("Future Issue".into()), ConversionEffect::OtherWarning),
+    ] {
+        let expression = "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value]";
+        let mut plan = counterpart_plan(expression);
+        plan.facts_mut().conversions[0].issue = issue;
+        if effect == ConversionEffect::SeekObserved {
+            plan.root.children[1].kind = NodeKind::Seek;
+            plan.root.children[1].op = "Index Seek".into();
+        }
+        let evidence = conversion_evidence(&plan).unwrap();
+        assert_eq!(evidence.effect(), effect);
+        let summary = t!(
+            "insight.implicit_conversion.summary_tvp_counterpart",
+            input = "@input",
+            input_column = "r.value",
+            column = "i.value",
+            target = "nvarchar(64)"
+        );
+        let consequence = effect.consequence().unwrap();
+        let concern = conversion_concern(&plan);
+        assert_eq!(concern.detail, format!("{summary} {consequence}"));
+        assert_eq!(concern.nodes, vec![2]);
+        assert_eq!(concern.severity, Severity::Low);
+        assert_eq!(concern.title, effect.warning_title("i.value").unwrap());
+        assert_eq!(concern.fix, t!("insight.implicit_conversion.fix_tvp", input = "@input", column = "r.value"));
+        assert_eq!(concern.verify, t!("insight.implicit_conversion.verify_tvp"));
+
+        plan.root.children[0].facts_mut().relational_input = None;
+        let unproved = conversion_concern(&plan);
+        assert_eq!(
+            unproved.detail,
+            format!(
+                "{} {consequence}",
+                t!(
+                    "insight.implicit_conversion.detail.warning",
+                    column = "i.value",
+                    target = "nvarchar(64)",
+                    expression = format::predicate(expression)
+                )
+            )
+        );
+        assert_eq!(unproved.title, concern.title);
+        assert_eq!(unproved.severity, concern.severity);
+        assert_eq!(unproved.fix, mismatch_fix(Some("i.value"), Some("nvarchar(64)")));
+    }
 }
 
 #[test]
@@ -763,4 +867,152 @@ fn the_complete_native_as_reference_must_be_plain_and_belong_to_the_same_tvp() {
         assert_eq!(concern.fix, mismatch_fix(Some("@input.value"), Some("nvarchar(64)")), "{suffix}");
         assert_ne!(concern.verify, t!("insight.implicit_conversion.verify_tvp"));
     }
+}
+
+fn has_counterpart_advice(plan: &Plan) -> bool {
+    conversion_evidence(plan).is_some_and(|evidence| {
+        matches!(MismatchAdvice::from_evidence(&evidence), MismatchAdvice::TableValuedParameterCounterpart { .. })
+    })
+}
+
+#[test]
+fn opaque_non_equality_and_multi_operand_forms_cannot_supply_a_tvp_counterpart() {
+    for expression in [
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[@needle]",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[value]",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value]+1",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value] COLLATE Latin1_General_100_CI_AS",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=LOWER([r].[value])",
+        "UPPER(CONVERT_IMPLICIT(nvarchar(64),[i].[value],0))=[r].[value]",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)>=[r].[value]",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)==[r].[value]",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value] AND [i].[id]=(1)",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value] OR [i].[id]=(1)",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=CONVERT_IMPLICIT(nvarchar(64),[r].[value],0)",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],1)=[r].[value]",
+        "(CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value])",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[i].[value]",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[i].[value] AS [r].[value]",
+        "CONVERT_IMPLICIT(nvarchar(64),[foreign].[dbo].[Rows].[value],0)=[r].[value]",
+    ] {
+        assert!(!has_counterpart_advice(&counterpart_plan(expression)), "{expression}");
+    }
+}
+
+#[test]
+fn counterpart_advice_requires_positive_original_input_and_unique_native_owner_proof() {
+    for case in [
+        "local",
+        "temporary",
+        "function",
+        "unresolved",
+        "unproven",
+        "invalid-provenance",
+        "converted-local",
+        "converted-tvp",
+        "converted-function",
+        "converted-temporary",
+        "converted-unresolved",
+        "converted-variable",
+        "duplicate-node",
+        "foreign-as",
+        "alias-collision",
+    ] {
+        let mut plan = counterpart_plan("CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value]");
+        match case {
+            "local" | "temporary" | "function" | "unresolved" | "invalid-provenance" => {
+                plan.root.children[0].facts_mut().relational_input = Some(match case {
+                    "local" => {
+                        RelationalInput { kind: Kind::LocalTableVariable, provenance: Provenance::NativeDeclaration }
+                    }
+                    "temporary" => RelationalInput { kind: Kind::TemporaryTable, provenance: Provenance::NativePlan },
+                    "function" => {
+                        RelationalInput { kind: Kind::TableValuedFunction, provenance: Provenance::NativePlan }
+                    }
+                    "unresolved" => RelationalInput { kind: Kind::Unknown, provenance: Provenance::Unresolved },
+                    _ => RelationalInput { kind: Kind::TableValuedParameter, provenance: Provenance::NativePlan },
+                });
+            }
+            "unproven" => plan.root.children[0].facts_mut().relational_input = None,
+            "converted-local" => {
+                plan.root.children[1].facts_mut().relational_input =
+                    Some(RelationalInput { kind: Kind::LocalTableVariable, provenance: Provenance::NativeDeclaration })
+            }
+            "converted-tvp" => {
+                plan.root.children[1].object = Some("@Other".into());
+                plan.root.children[1].facts_mut().relational_input = Some(RelationalInput {
+                    kind: Kind::TableValuedParameter,
+                    provenance: Provenance::NativeParameterMetadata,
+                });
+            }
+            "converted-function" => {
+                plan.root.children[1].facts_mut().relational_input =
+                    Some(RelationalInput { kind: Kind::TableValuedFunction, provenance: Provenance::NativePlan });
+            }
+            "converted-temporary" => {
+                plan.root.children[1].facts_mut().relational_input =
+                    Some(RelationalInput { kind: Kind::TemporaryTable, provenance: Provenance::NativePlan })
+            }
+            "converted-unresolved" => {
+                plan.root.children[1].facts_mut().relational_input =
+                    Some(RelationalInput { kind: Kind::Unknown, provenance: Provenance::Unresolved })
+            }
+            "converted-variable" => plan.root.children[1].object = Some("@unresolved".into()),
+            "duplicate-node" => plan.root.children[1].id = plan.root.children[0].id,
+            "foreign-as" => {
+                let expression = "CONVERT_IMPLICIT(nvarchar(64),[dbo].[Items].[value] AS [r].[value],0)=[r].[value]";
+                plan.facts_mut().conversions[0].expression = expression.into();
+                plan.root.children[1].predicate = Some(expression.into());
+            }
+            "alias-collision" => {
+                let mut peer = measured(3, "Table Valued Function", NodeKind::Other, 1.0, 1.0, 1.0);
+                peer.object = Some("dbo.NativeFunction".into());
+                peer.facts_mut().table_alias = Some("r".into());
+                peer.facts_mut().relational_input =
+                    Some(RelationalInput { kind: Kind::TableValuedFunction, provenance: Provenance::NativePlan });
+                plan.root.children.push(peer);
+            }
+            _ => unreachable!(),
+        }
+        assert!(!has_counterpart_advice(&plan), "{case}");
+    }
+}
+
+#[test]
+fn a_bare_warning_uses_one_original_owned_comparison_without_borrowing_other_bodies() {
+    let comparison = "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value]";
+    let bare = "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)";
+    let mut plan = counterpart_plan(comparison);
+    plan.facts_mut().conversions[0].expression = bare.into();
+    assert!(has_counterpart_advice(&plan));
+    for case in ["missing", "multiple", "only-current-sql", "different-owned-column"] {
+        let mut control = plan.clone();
+        match case {
+            "missing" => control.root.children[1].predicate = None,
+            "multiple" => control.root.children[1].seek_predicate = Some(comparison.into()),
+            "only-current-sql" => {
+                control.root.children[1].predicate = None;
+                control.statement = Some(comparison.into());
+            }
+            "different-owned-column" => {
+                control.root.children[1].predicate =
+                    Some("CONVERT_IMPLICIT(nvarchar(64),[i].[other],0)=[r].[value]".into())
+            }
+            _ => unreachable!(),
+        }
+        assert!(!has_counterpart_advice(&control), "{case}");
+    }
+}
+
+#[test]
+fn a_complete_warning_and_its_owned_body_must_agree_on_the_counterpart() {
+    let comparison = "CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[r].[value]";
+    let mut plan = counterpart_plan(comparison);
+    let warning = plan.facts().conversions[0].clone();
+    plan.root.children[1].facts_mut().conversions.push(warning);
+    plan.root.children[1].predicate = None;
+    assert!(has_counterpart_advice(&plan), "original node-scoped full equality remains sufficient");
+    plan.root.children[1].predicate = Some("CONVERT_IMPLICIT(nvarchar(64),[i].[value],0)=[@needle]".into());
+    assert!(!has_counterpart_advice(&plan), "a scalar comparison cannot borrow a different native TVP equality");
 }

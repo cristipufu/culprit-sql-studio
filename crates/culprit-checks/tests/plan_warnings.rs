@@ -921,3 +921,175 @@ fn merging_neutral_and_lost_seek_warnings_keeps_one_consistent_representative_in
         }
     }
 }
+
+fn counterpart_conversion_snapshot(expression: &str) -> Snapshot {
+    use culprit_core::plan_facts::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
+    let mut snapshot = tvp_conversion_snapshot(Some(RelationalInput {
+        kind: RelationalInputKind::TableValuedParameter,
+        provenance: RelationalInputProvenance::NativeParameterMetadata,
+    }));
+    let query = snapshot.workload.as_mut().unwrap().queries.iter_mut().find(|query| query.id == "7").unwrap();
+    query.text = "SELECT i.email FROM shop.customers i JOIN @Rows r ON i.email=r.email".into();
+    let plan = query.plan.as_mut().unwrap();
+    plan.statement = Some(query.text.clone());
+    let mut input = plan.root.clone();
+    input.id = 1;
+    input.predicate = None;
+    input.warnings.clear();
+    let mut column = input.clone();
+    column.id = 2;
+    column.object = Some("shop.customers".into());
+    column.facts_mut().relational_input = None;
+    column.facts_mut().table_alias = Some("i".into());
+    column.predicate = Some(expression.into());
+    let mut root = input.clone();
+    root.id = 0;
+    root.kind = culprit_core::NodeKind::Join;
+    root.op = "Hash Match".into();
+    root.object = None;
+    root.facts = culprit_core::PlanNodeFacts::default();
+    root.children = vec![input, column];
+    plan.root = root;
+    plan.facts_mut().conversions[0].expression = expression.into();
+    snapshot
+}
+
+#[test]
+fn counterpart_finding_reuses_core_guidance_and_keeps_both_native_column_roles() {
+    for (issue, seeking) in [
+        (culprit_core::PlanConversionIssue::CardinalityEstimate, false),
+        (culprit_core::PlanConversionIssue::SeekPlan, true),
+        (culprit_core::PlanConversionIssue::Other("Future Issue".into()), false),
+    ] {
+        let mut snapshot = counterpart_conversion_snapshot("CONVERT_IMPLICIT(nvarchar(64),[i].[email],0)=[r].[email]");
+        let (fix, summary, verify, consequence) = {
+            let plan = snapshot
+                .workload
+                .as_mut()
+                .unwrap()
+                .queries
+                .iter_mut()
+                .find(|query| query.id == "7")
+                .unwrap()
+                .plan
+                .as_mut()
+                .unwrap();
+            plan.facts_mut().conversions[0].issue = issue;
+            if seeking {
+                plan.root.children[1].kind = culprit_core::NodeKind::Seek;
+                plan.root.children[1].op = "Index Seek".into();
+            }
+            let evidence = culprit_core::insights::conversion_evidence(plan).unwrap();
+            let advice = culprit_core::insights::MismatchAdvice::from_evidence(&evidence);
+            (
+                advice.fix(Some(evidence.column()), Some(evidence.target())),
+                advice.summary().unwrap(),
+                advice.verification().unwrap(),
+                evidence.effect().consequence(),
+            )
+        };
+        let report = culprit_checks::analyze(snapshot);
+        let finding = report
+            .findings
+            .iter()
+            .find(|finding| finding.id.starts_with("plan-warnings:implicit-conversion:tvp-counterpart:"))
+            .unwrap();
+        assert_eq!(finding.fix.as_ref().unwrap().summary, fix);
+        assert!(finding.fix.as_ref().unwrap().sql.is_none());
+        assert!(
+            finding
+                .summary
+                .starts_with("The associated statements used 22.2 s of database time over the last 5 hours (54%). "),
+            "{}",
+            finding.summary
+        );
+        assert!(
+            finding.summary.contains(&summary),
+            "expected comparison context: {summary}\nactual finding summary: {}",
+            finding.summary
+        );
+        assert_eq!(finding.verify, vec![verify]);
+        assert_eq!(finding.queries.len(), 1);
+        assert_eq!(finding.queries[0].id, "7");
+        assert_eq!(finding.queries[0].plan_node, Some(2));
+        if let Some(consequence) = consequence {
+            assert!(finding.summary.contains(&consequence));
+            assert_eq!(finding.actionability, culprit_core::Actionability::Information);
+        }
+    }
+}
+
+#[test]
+fn counterpart_identity_preserves_roles_across_native_alias_format_and_equality_direction() {
+    let mut ids = Vec::new();
+    for expression in [
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[email],0)=[r].[email]",
+        "[r].[email]=CONVERT_IMPLICIT(nvarchar(64),[i].[email],0)",
+        "CONVERT_IMPLICIT(nvarchar(64),[shop].[customers].[email] AS [i].[email],0)=[@Rows].[email] AS [r].[email]",
+    ] {
+        let report = culprit_checks::analyze(counterpart_conversion_snapshot(expression));
+        let finding = report
+            .findings
+            .iter()
+            .find(|finding| finding.id.starts_with("plan-warnings:implicit-conversion:tvp-counterpart:"))
+            .unwrap();
+        ids.push(finding.id.clone());
+    }
+    assert!(ids.iter().all(|id| id == &ids[0]));
+    for expression in [
+        "CONVERT_IMPLICIT(nvarchar(128),[i].[email],0)=[r].[email]",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[email],0)=[r].[name]",
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[segment],0)=[r].[email]",
+    ] {
+        let report = culprit_checks::analyze(counterpart_conversion_snapshot(expression));
+        let finding = report
+            .findings
+            .iter()
+            .find(|finding| finding.id.starts_with("plan-warnings:implicit-conversion:tvp-counterpart:"))
+            .unwrap();
+        assert_ne!(finding.id, ids[0], "{expression}");
+    }
+}
+
+#[test]
+fn counterpart_findings_do_not_merge_different_input_contracts_or_borrow_native_effects() {
+    let mut snapshot = counterpart_conversion_snapshot("CONVERT_IMPLICIT(nvarchar(64),[i].[email],0)=[r].[email]");
+    let mut peer = snapshot.workload.as_ref().unwrap().queries.iter().find(|query| query.id == "7").unwrap().clone();
+    peer.id = "counterpart-peer".into();
+    peer.text = peer.text.replace("@Rows", "@Other");
+    let plan = peer.plan.as_mut().unwrap();
+    plan.statement = Some(peer.text.clone());
+    plan.root.children[0].object = Some("@Other".into());
+    plan.root.children[1].kind = culprit_core::NodeKind::Seek;
+    plan.root.children[1].op = "Index Seek".into();
+    plan.facts_mut().conversions[0].issue = culprit_core::PlanConversionIssue::SeekPlan;
+    snapshot.workload.as_mut().unwrap().queries.push(peer);
+    let report = culprit_checks::analyze(snapshot);
+    let findings: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.id.starts_with("plan-warnings:implicit-conversion:tvp-counterpart:"))
+        .collect();
+    assert_eq!(findings.len(), 2);
+    assert_ne!(findings[0].id, findings[1].id);
+    for finding in findings {
+        assert_eq!(finding.queries.len(), 1);
+        let input = if finding.queries[0].id == "7" { "@Rows" } else { "@Other" };
+        assert_eq!(
+            finding.fix.as_ref().unwrap().summary,
+            culprit_core::t!("insight.implicit_conversion.fix_tvp", input = input, column = "r.email")
+        );
+        if input == "@Other" {
+            assert_eq!(finding.actionability, culprit_core::Actionability::Information);
+        }
+    }
+    let report = culprit_checks::analyze(counterpart_conversion_snapshot(
+        "CONVERT_IMPLICIT(nvarchar(64),[i].[email],0)=[@needle]",
+    ));
+    assert!(
+        !report
+            .findings
+            .iter()
+            .any(|finding| finding.id.starts_with("plan-warnings:implicit-conversion:tvp-counterpart:"))
+    );
+}
