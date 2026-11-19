@@ -2657,10 +2657,10 @@ const RARELY_SAID: &str = r##"== automatic index, no columns
   fix: Use full-text search for word searches, or drop the leading % if a prefix search is enough. For suffix searches, store the reversed value of the column and index it.
   verify: Explain again: users is read through an index (a Bitmap Index Scan on PostgreSQL).
 == legacy estimator, memory limit, desired grant, compile
-[memory-grant] Asks for 1.9 GB of memory per run
-  detail: Large grants are reserved for the whole run; a few of these at once make other queries queue for memory.
-  fix: Check the row estimates of the sorts and hashes; sort fewer rows or columns, or cap it with OPTION (MAX_GRANT_PERCENT = n).
-  verify: Explain again: the desired memory is lower.
+[memory-grant] Estimated desired memory: 1.9 GB
+  detail: The estimated plan records desired execution memory; it does not show an actual grant, grant wait or pressure on other requests.
+  fix: Inspect input counts, row widths and memory-consuming operators. Compare an actual plan for representative work before choosing a query or memory-setting change.
+  verify: Compare estimated desire with the actual request, grant and usage under representative work. Check grant waits, spills and runtime; a lower estimate alone does not prove improvement.
 [optimizer-timeout] Plan search stopped at an optimizer memory limit
   detail: SQL Server reports StatementOptmEarlyAbortReason = MemoryLimitExceeded. A memory limit on optimization stopped further plan search for this statement. The plan alone does not identify a current compiler memory owner or prove a memory shortage across the server. This selected plan records compilation elapsed time of 800 ms.
   fix: Inspect join, view and partition expansion and this selected plan's compilation memory, when measured. Test removing unnecessary optimizer work while preserving results and checking representative inputs. Review contemporaneous native compiler admission and other memory consumers before attributing wider pressure; this plan alone does not justify memory settings changes.

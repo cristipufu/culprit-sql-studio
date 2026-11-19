@@ -2,6 +2,7 @@
 
 use culprit_core::{Finding, Snapshot};
 
+mod memory_grants;
 mod tvp_loops;
 
 fn report(name: &str) -> Snapshot {

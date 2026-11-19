@@ -110,7 +110,18 @@ fn sql_server_shapes() {
     assert!(find("mssql-grant.sqlplan", "memory-grant").title.starts_with("Reserves 41.5 MB"));
     // GrantWaitTime is in seconds (showplan schema): these runs waited 3 s for their grant.
     let wait = insights(&load("mssql-sort-spill.sqlplan")).into_iter().find(|i| i.title.starts_with("Waited"));
-    assert_eq!(wait.map(|i| i.title), Some("Waited 3.0 s for memory before it could start".into()));
+    let wait = wait.expect("the native actual plan records the grant admission delay");
+    assert_eq!(wait.title, "Waited 3.0 s for an execution memory grant");
+    assert_eq!(wait.detail, culprit_core::t!("insight.memory_grant.wait.detail"));
+    assert_eq!(wait.fix, culprit_core::t!("insight.memory_grant.wait.fix"));
+    assert_eq!(wait.verify, culprit_core::t!("insight.memory_grant.wait.verify"));
+    let reservation = find("mssql-grant.sqlplan", "memory-grant");
+    assert_eq!(reservation.fix, culprit_core::t!("insight.memory_grant.oversized.fix"));
+    assert!(
+        reservation
+            .detail
+            .contains(&culprit_core::t!("insight.memory_grant.oversized.warned", warning = "Excessive Grant"))
+    );
     let loops = find("mssql-loops.sqlplan", "nested-loops");
     assert!(loops.fix.contains("forces a loop join"), "{}", loops.fix);
     // The orders scan returns 30K of the 1M rows it expected because the hash join's bitmap filtered it, which the

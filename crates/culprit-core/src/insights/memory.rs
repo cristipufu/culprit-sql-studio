@@ -48,8 +48,8 @@ pub(super) fn memory_grant(cx: &Cx) -> Vec<Draft> {
     {
         let mut d = Draft::new("memory-grant", InsightArea::Memory, 0.1, vec![memory_node(cx).unwrap_or(root)]);
         d.fixed_weight = true;
-        // A gigabyte or more asked for each run is enough on its own to make others queue.
-        d.floor = Severity::Medium;
+        // A large compiled desire is plan context; actual reservation and pressure remain unproved.
+        d.cap = Severity::Low;
         d.subtree = true;
         d.title = t!("insight.memory_grant.desired.title", size = format::bytes(desired * 1024.0));
         d.detail = t!("insight.memory_grant.desired.detail");

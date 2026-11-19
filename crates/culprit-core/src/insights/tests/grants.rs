@@ -31,7 +31,7 @@ fn overestimated_input() -> Plan {
 }
 
 fn grant(plan: &Plan) -> PlanInsight {
-    insights(plan).into_iter().find(|insight| insight.rule == "memory-grant").expect("measured oversized grant")
+    insights(plan).into_iter().find(|insight| insight.rule == "memory-grant").expect("native memory-grant insight")
 }
 
 fn linked_input(plan: &Plan) -> bool {
@@ -137,5 +137,105 @@ fn invalid_planned_memory_or_wait_time_cannot_become_a_memory_warning() {
         measured.facts_mut().memory_granted_kb = None;
         measured.facts_mut().memory_grant_wait_ms = Some(invalid);
         assert!(!insights(&measured).iter().any(|insight| insight.rule == "memory-grant"));
+    }
+}
+
+#[test]
+fn native_admission_delay_does_not_identify_a_competing_request_or_an_oversized_reservation() {
+    for granted in [4096.0, 8192.0, 12288.0] {
+        let mut plan = actual(Engine::Mssql, measured(0, "Sort", NodeKind::Sort, 100.0, 100.0, 1.0), 5000.0);
+        plan.facts_mut().memory_requested_kb = Some(8192.0);
+        plan.facts_mut().memory_granted_kb = Some(granted);
+        plan.facts_mut().memory_max_used_kb = Some(granted);
+        plan.facts_mut().memory_grant_wait_ms = Some(3000.0);
+        let insight = grant(&plan);
+        assert_eq!(insight.title, t!("insight.memory_grant.wait.title", time = "3.0 s"));
+        assert_eq!(insight.detail, t!("insight.memory_grant.wait.detail"));
+        assert_eq!(insight.fix, t!("insight.memory_grant.wait.fix"));
+        assert_eq!(insight.verify, t!("insight.memory_grant.wait.verify"));
+        assert!(insight.fix_sql.is_none());
+        assert!(!insight.detail.contains("Other queries held"));
+        assert!(!insight.fix.contains("adding memory only postpones"));
+        assert!(!insight.verify.contains("GrantWaitTime is 0"));
+        assert_eq!(plan.facts().memory_grant_wait_ms, Some(3000.0));
+        assert_eq!(plan.facts().memory_max_used_kb, Some(granted));
+    }
+}
+
+#[test]
+fn generic_reservation_difference_preserves_native_warning_without_inventing_its_cause_or_feedback_eligibility() {
+    for version in [None, Some("14.0"), Some("16.0")] {
+        for warning in [None, Some("Excessive Grant"), Some("Grant Increase")] {
+            let mut plan = overestimated_input();
+            plan.root.children[0].facts_mut().relational_input = None;
+            plan.facts_mut().server_version = version.map(str::to_owned);
+            plan.facts_mut().memory_grant_warning = warning.map(str::to_owned);
+            let insight = grant(&plan);
+            assert_eq!(insight.title, t!("insight.memory_grant.oversized.title", granted = "32.0 MB", used = "128 KB"));
+            assert!(insight.detail.starts_with(&t!("insight.memory_grant.oversized.detail")));
+            if let Some(warning) = warning {
+                assert!(insight.detail.contains(&t!("insight.memory_grant.oversized.warned", warning = warning)));
+            }
+            assert_eq!(insight.fix, t!("insight.memory_grant.oversized.fix"));
+            assert_eq!(insight.verify, t!("insight.memory_grant.oversized.verify"));
+            assert!(insight.fix_sql.is_none());
+            for unproved in ["RESOURCE_SEMAPHORE", "update statistics", "SQL Server 2019", "MAX_GRANT_PERCENT"] {
+                assert!(!format!("{} {}", insight.detail, insight.fix).contains(unproved), "{unproved}");
+            }
+            assert_eq!(plan.facts().memory_granted_kb, Some(32768.0));
+            assert_eq!(plan.facts().memory_max_used_kb, Some(128.0));
+            assert!(plan.facts().memory_grant_feedback.is_none());
+        }
+    }
+}
+
+#[test]
+fn absent_zero_or_short_native_wait_does_not_create_an_admission_delay_diagnosis() {
+    for wait in [None, Some(0.0), Some(99.0)] {
+        let mut plan = actual(Engine::Mssql, measured(0, "Sort", NodeKind::Sort, 100.0, 100.0, 1.0), 5000.0);
+        plan.facts_mut().memory_granted_kb = Some(32768.0);
+        plan.facts_mut().memory_max_used_kb = Some(32768.0);
+        plan.facts_mut().memory_grant_wait_ms = wait;
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "memory-grant"));
+    }
+}
+
+#[test]
+fn efficient_recorded_use_does_not_create_a_reservation_imbalance_from_estimate_mismatch_alone() {
+    for used in [24576.0, 32768.0] {
+        let mut plan = overestimated_input();
+        plan.facts_mut().memory_max_used_kb = Some(used);
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "memory-grant"));
+        assert_eq!(plan.facts().memory_granted_kb, Some(32768.0));
+    }
+}
+
+#[test]
+fn estimated_desire_does_not_become_an_actual_reservation_or_a_pressure_verdict() {
+    let mut sort = node(0, "Sort", NodeKind::Sort);
+    sort.est_rows = 2_000_000.0;
+    let mut planned = plan(Engine::Mssql, sort);
+    planned.facts_mut().memory_desired_kb = Some(2000000.0);
+    assert!(does_real_work(&planned), "an expensive estimate cannot supply missing pressure evidence");
+    let insight = grant(&planned);
+    assert_eq!(insight.severity, Severity::Low);
+    assert_eq!(insight.title, t!("insight.memory_grant.desired.title", size = "1.9 GB"));
+    assert_eq!(insight.detail, t!("insight.memory_grant.desired.detail"));
+    assert_eq!(insight.fix, t!("insight.memory_grant.desired.fix"));
+    assert_eq!(insight.verify, t!("insight.memory_grant.desired.verify"));
+    assert!(insight.fix_sql.is_none());
+    assert!(!insight.fix.contains("MAX_GRANT_PERCENT"));
+    assert!(planned.facts().memory_granted_kb.is_none());
+    planned.kind = PlanKind::Actual;
+    assert!(!insights(&planned).iter().any(|insight| insight.rule == "memory-grant"));
+}
+
+#[test]
+fn sql_server_memory_values_cannot_create_grant_diagnoses_on_other_engines() {
+    for engine in Engine::ALL.iter().copied().filter(|engine| *engine != Engine::Mssql) {
+        let mut plan = overestimated_input();
+        plan.engine = engine;
+        plan.facts_mut().memory_grant_wait_ms = Some(3000.0);
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "memory-grant"), "{engine:?}");
     }
 }
