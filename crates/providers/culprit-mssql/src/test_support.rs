@@ -96,7 +96,23 @@ pub(crate) async fn assert_no_execution_grant(
     // This validator remains restricted to Culprit's metadata statements. Owned fixture workload plans use the
     // shared capture helper directly and establish their own runtime evidence instead of asserting no grant.
     let plans = actual_plans(client, sql, parameters).await;
-    for xml in &plans {
+    assert_plans_without_execution_grant(&plans);
+    plans
+}
+
+/// Optional showplan applies only to source metadata replay. None means unknown, never a zero-grant proof.
+pub(crate) async fn observe_metadata_execution_grant(
+    client: &mut MsClient,
+    sql: &str,
+    parameters: Vec<crate::read::Parameter>,
+) -> Option<Vec<String>> {
+    let plans = actual_plans::metadata_plans(client, sql, parameters).await?;
+    assert_plans_without_execution_grant(&plans);
+    Some(plans)
+}
+
+fn assert_plans_without_execution_grant(plans: &[String]) {
+    for xml in plans {
         culprit_core::xml::read(xml, |document| {
             let document = document.unwrap();
             assert_eq!(document.root_element().tag_name().name(), "ShowPlanXML");
@@ -124,5 +140,12 @@ pub(crate) async fn assert_no_execution_grant(
             }
         });
     }
-    plans
+}
+
+#[test]
+#[should_panic(expected = "GrantedMemory in diagnostic actual plan")]
+fn metadata_plan_presence_cannot_hide_a_positive_execution_grant() {
+    assert_plans_without_execution_grant(&[
+        r#"<ShowPlanXML><QueryPlan><MemoryGrantInfo GrantedMemory="1" /></QueryPlan></ShowPlanXML>"#.into(),
+    ]);
 }

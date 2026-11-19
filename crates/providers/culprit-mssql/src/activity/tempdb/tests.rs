@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub(crate) fn context() -> Rec {
-    let base = metadata(42);
+    let base = crate::activity::tests::authority(&metadata(42));
     let mut values = base.columns().map(|(key, value)| (key, value.clone())).collect::<Vec<_>>();
     values.push(("task_space_permission", Val::Int(1)));
     replace(&Rec::of(&values), &[("session_id", Val::Null)])

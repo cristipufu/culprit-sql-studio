@@ -150,6 +150,8 @@ pub(crate) enum Detail {
     /// Activity request counters need their native column capability; unrelated authority reads do not.
     Activity,
     PageLookup,
+    /// Native task-space permissions share the same source authority point.
+    TaskSpace,
 }
 
 pub(crate) async fn read_initial<R: NativeRead>(
@@ -237,7 +239,9 @@ async fn read_projection<R: NativeRead>(
 ) -> Result<(Context, Rec)> {
     let rows =
         reader.query(&query(identity, detail), vec![Parameter::Integer(1)], 1).await.map_err(ReadError::into_error)?;
-    let [row] = rows.as_slice() else { return Err(invalid_data()) };
+    let [row] = rows.as_slice() else {
+        return Err(invalid_data());
+    };
     let mut context = decode(row, address.host, address.port, identity, instance, qualification_error)?;
     context.connection_generation = reader.connection_generation();
     Ok((context, rows.into_iter().next().ok_or_else(invalid_data)?))
@@ -296,9 +300,10 @@ fn query(identity: IdentityDetail, detail: Detail) -> String {
         )
     };
     let page = match detail {
-        Detail::Authority | Detail::Activity => "",
+        Detail::Authority | Detail::Activity => String::new(),
+        Detail::TaskSpace => format!(",{} AS task_space_permission", crate::activity::tempdb::TASK_SPACE_PERMISSION),
         Detail::PageLookup => {
-            ",CASE WHEN OBJECT_ID('sys.dm_db_page_info') IS NOT NULL THEN 1 ELSE 0 END AS page_info_available,CASE WHEN HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE STATE')=1 OR HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE PERFORMANCE STATE')=1 THEN 1 ELSE 0 END AS page_permission"
+            ",CASE WHEN OBJECT_ID('sys.dm_db_page_info') IS NOT NULL THEN 1 ELSE 0 END AS page_info_available,CASE WHEN HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE STATE')=1 OR HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE PERFORMANCE STATE')=1 THEN 1 ELSE 0 END AS page_permission".to_owned()
         }
     };
     let rows = format!(
@@ -319,7 +324,7 @@ fn query(identity: IdentityDetail, detail: Detail) -> String {
     );
     let query = match detail {
         Detail::Authority => sql::frame_query(&rows, identity, sql::QueryPolicy::SerialMetadata),
-        Detail::Activity | Detail::PageLookup => {
+        Detail::Activity | Detail::PageLookup | Detail::TaskSpace => {
             sql::request_frame_query(&rows, identity, sql::QueryPolicy::SerialMetadata)
         }
     };

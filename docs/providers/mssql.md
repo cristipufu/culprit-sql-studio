@@ -185,8 +185,10 @@ bound native DMV traversal cost; these recipes remain unqualified for automatic 
 
 `culprit scan shop --collect-task-space` opts into `sys.dm_db_task_space_usage`; normal scans and Live add no task
 query. `--collection task-space` uses the same native reader for a database capture. Scans support SQL Server,
-Managed Instance and Azure SQL where the required native metadata is visible; fleet capture currently requires
-the verified Azure SQL primary identity route. Missing authority or permissions is unavailable evidence.
+Managed Instance and Azure SQL where the required native metadata is visible. Fleet capture supports Azure SQL
+Database and boxed SQL Server 2022 or later on a verified writable native source. Managed Instance fleet capture
+remains unavailable. Original native instance/process/database identity and permission checks must succeed;
+endpoint names and routing intent cannot supply those facts.
 
 Each retained session/request/execution-context tuple carries four exact native page counters: user allocations,
 user deallocations, internal allocations and internal deallocations. They are kept separately from session totals,
@@ -199,7 +201,10 @@ allocated the pages. Checked current SQL is an investigation link, not an alloca
 later task-counter subtraction. Missing or changed context retains the counters and withholds the SQL link.
 
 The native cap is 200 task rows plus one truncation witness, with a one-second statement deadline and five-second
-total budget. Acquisition uses at most six native batches; fleet completion adds a seventh context verification.
+total budget. Boxed acquisition uses at most ten native batches and fleet completion adds three native-owner
+checks (thirteen total). Azure acquisition uses at most seven batches, including initial platform discovery;
+fleet completion adds one verification (eight total). Stricter caller budgets remain in force. These are
+manual, cost-unqualified profiles; the extra ownership work invalidates earlier recipe cost fingerprints.
 The reader does not sort or aggregate task counters, fetch plan XML, read OS task stacks or change instrumentation.
 The output cap does not bound the native DMV traversal cost, so managed-service and representative-load
 qualification remain required before scheduling production polling. See the [native task-counter semantics](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-db-task-space-usage-transact-sql).

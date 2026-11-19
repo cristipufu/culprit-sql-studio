@@ -238,7 +238,7 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(task_space::TaskSpaceSource::new(pool, request, host, port)?)),
     )
     .bounded(crate::task_space::bounded_budget)
-    .version(2),
+    .version(3),
     state!("mssql.operational", Operational).baseline().version(6),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])

@@ -3,10 +3,7 @@ use super::super::{
     sql::{QueryPolicy, request_columns, request_frame_query},
 };
 
-pub(super) fn context(identity: IdentityDetail) -> String {
-    request_frame_query(
-        r#"SELECT CAST(NULL AS int) AS session_id,
- CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int)=5 THEN
+pub(crate) const TASK_SPACE_PERMISSION: &str = r#"CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int)=5 THEN
   CASE WHEN IS_SRVROLEMEMBER('##MS_ServerStateReader##')=1
     OR HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER STATE')=1
     OR HAS_PERMS_BY_NAME(NULL,NULL,'CONTROL SERVER')=1 THEN 1
@@ -15,11 +12,7 @@ pub(super) fn context(identity: IdentityDetail) -> String {
     AND HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE STATE')=1 THEN 1 ELSE 0 END
  WHEN CAST(PARSENAME(CONVERT(varchar(128),SERVERPROPERTY('ProductVersion')),4) AS int)>=16
   THEN CASE WHEN HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER PERFORMANCE STATE')=1 THEN 1 ELSE 0 END
- ELSE CASE WHEN HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER STATE')=1 THEN 1 ELSE 0 END END AS task_space_permission"#,
-        identity,
-        QueryPolicy::SerialMetadata,
-    )
-}
+ ELSE CASE WHEN HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER STATE')=1 THEN 1 ELSE 0 END END"#;
 
 pub(super) fn observation(
     identity: IdentityDetail,

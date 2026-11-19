@@ -8,7 +8,18 @@ use crate::{
 use culprit_core::{Coverage, telemetry::*};
 use std::sync::Arc;
 
-pub(crate) const MAX_QUERIES: u32 = 7; // Six acquisition reads plus the collector's final frozen-source verification.
+// A populated read uses one task inventory and three guarded participant/detail reads. Source authority
+// is observed at acquisition start/end and once more for collector completion, on the same held reader.
+const TASK_AND_REQUEST_QUERIES: u32 = 4;
+const AZURE_AUTHORITY_QUERIES: u32 = 1;
+const BOXED_AUTHORITY_QUERIES: u32 = 3; // Existing platform, instance/process and database authority reads.
+const SOURCE_AUTHORITY_POINTS: u32 = 3;
+pub(crate) const MAX_AZURE_QUERIES: u32 =
+    1 + SOURCE_AUTHORITY_POINTS * AZURE_AUTHORITY_QUERIES + TASK_AND_REQUEST_QUERIES;
+pub(crate) const MAX_BOXED_QUERIES: u32 = SOURCE_AUTHORITY_POINTS * BOXED_AUTHORITY_QUERIES + TASK_AND_REQUEST_QUERIES;
+// Discovery starts before the native profile is known; retain the larger supported envelope.
+pub(crate) const MAX_QUERIES: u32 =
+    if MAX_BOXED_QUERIES > MAX_AZURE_QUERIES { MAX_BOXED_QUERIES } else { MAX_AZURE_QUERIES };
 
 pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
     CollectionBudget {

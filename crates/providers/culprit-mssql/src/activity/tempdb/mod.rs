@@ -2,6 +2,7 @@
 //! joined context, not a task incarnation or proof that the displayed statement allocated these pages.
 //! https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-views/sys-dm-db-task-space-usage-transact-sql
 mod sql;
+pub(crate) use sql::TASK_SPACE_PERMISSION;
 
 use super::{
     ActivityContext, ActivityFrame, ActivityReader, ActivityRecord, NativeStatement,
@@ -22,11 +23,17 @@ pub(crate) const MAX_NATIVE_ROWS: usize = 200;
 const NATIVE_PAGE_BYTES: u32 = 8192;
 
 pub(crate) struct TaskSpaceCapture {
-    pub context: ActivityContext,
+    pub context: super::database_context::Context,
     pub snapshot: TaskSpaceSnapshot,
     pub limited: bool,
     pub context_complete: bool,
     pub context_error_code: Option<culprit_core::ErrorCode>,
+}
+
+#[derive(Clone, Copy)]
+enum TaskSpaceProfile {
+    Scan,
+    Collection,
 }
 
 struct RequestChecks {
@@ -36,19 +43,29 @@ struct RequestChecks {
 
 impl<R: NativeRead> ActivityReader<R> {
     pub(crate) async fn capture_task_space(&mut self) -> Result<TaskSpaceCapture> {
+        self.capture_task_space_for(TaskSpaceProfile::Scan).await
+    }
+
+    pub(crate) async fn capture_task_space_telemetry(&mut self) -> Result<TaskSpaceCapture> {
+        self.capture_task_space_for(TaskSpaceProfile::Collection).await
+    }
+
+    async fn capture_task_space_for(&mut self, profile: TaskSpaceProfile) -> Result<TaskSpaceCapture> {
         if self.observed {
             return Err(invalid_data());
         }
         self.observed = true;
-        let initial = self.task_space_context().await?;
-        if matches!(self.options.identity, super::IdentityDetail::AzureDatabase) {
-            crate::read::require_primary(initial.writable)?;
+        let initial = self.task_space_context(None).await?;
+        admit_profile(&initial, profile)?;
+        self.options.identity = super::IdentityDetail::for_native_edition(initial.activity.edition);
+        if initial.activity.edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
+            crate::read::require_primary(initial.activity.writable)?;
         }
         let limit = (self.options.budget.max_snapshot_rows as usize).min(MAX_NATIVE_ROWS);
         let native = self
             .io
             .query(
-                &sql::observation(self.options.identity, initial.request_page_server_read_capability),
+                &sql::observation(self.options.identity, initial.activity.request_page_server_read_capability),
                 vec![Parameter::Integer((limit + 1) as i64)],
                 limit + 1,
             )
@@ -60,7 +77,7 @@ impl<R: NativeRead> ActivityReader<R> {
             self.port,
             self.options.identity,
         )?;
-        if !same_source(&initial, &context) || initial.at > context.at {
+        if !initial.activity.same_source(&context) || initial.activity.at > context.at {
             return Err(CollectionStop::SourceChanged.error());
         }
         let limited = native.len() > limit;
@@ -71,7 +88,9 @@ impl<R: NativeRead> ActivityReader<R> {
             if context != ActivityContext::decode(row, &self.host, self.port, self.options.identity)? {
                 return Err(CollectionStop::SourceChanged.error());
             }
-            let Some((task, request)) = decode(row, &context)? else { continue };
+            let Some((task, request)) = decode(row, &context)? else {
+                continue;
+            };
             if !identities.insert(task.task.clone()) {
                 return Err(invalid_data());
             }
@@ -109,8 +128,8 @@ impl<R: NativeRead> ActivityReader<R> {
             .await?;
         let after = self.task_space_checks(&frame, &indices).await?;
         attach_requests(&mut observations, frame, &before.rows, &after.rows)?;
-        let final_context = self.task_space_context().await?;
-        if !same_source(&initial, &final_context) || context.at > final_context.at {
+        let final_context = self.task_space_context(Some(&initial)).await?;
+        if !initial.same_source(&final_context) || context.at > final_context.activity.at {
             return Err(CollectionStop::SourceChanged.error());
         }
         let detail_error = match details {
@@ -122,8 +141,8 @@ impl<R: NativeRead> ActivityReader<R> {
             && observations.iter().all(|row| row.request_context() == TaskRequestContext::CheckedAtBounds);
         let snapshot = TaskSpaceSnapshot {
             source: culprit_core::source_id::TASK_SPACE.into(),
-            observed_from: initial.at.clone(),
-            observed_until: final_context.at,
+            observed_from: initial.activity.at.clone(),
+            observed_until: final_context.activity.at.clone(),
             observations,
         };
         if !snapshot.is_valid() {
@@ -149,37 +168,65 @@ impl<R: NativeRead> ActivityReader<R> {
         }
     }
 
-    pub(crate) async fn verify_task_space_context(&mut self, initial: &ActivityContext) -> Result<bool> {
-        let after = self.task_space_context().await?;
-        Ok(same_source(initial, &after) && initial.at <= after.at)
+    pub(crate) async fn verify_task_space_context(
+        &mut self,
+        initial: &super::database_context::Context,
+        observed_until: &str,
+    ) -> Result<bool> {
+        let after = self.task_space_context(Some(initial)).await?;
+        Ok(initial.same_source(&after) && ObservationBounds::new(observed_until, &after.activity.at).is_some())
     }
 
-    async fn task_space_context(&mut self) -> Result<ActivityContext> {
-        let native = self
-            .io
-            .query(&sql::context(self.options.identity), vec![Parameter::Integer(1)], 1)
-            .await
-            .map_err(ReadError::into_error)?;
-        let [row] = native.as_slice() else { return Err(invalid_data()) };
-        if ![2, 3, 4, 5, 8].contains(&integer(row, "edition")?) || integer(row, "major")? < 11 {
-            return Err(culprit_core::Error::new(
-                culprit_core::ErrorCode::Unsupported,
-                culprit_core::t!("collection.unsupported"),
-            ));
+    async fn task_space_context(
+        &mut self,
+        initial: Option<&super::database_context::Context>,
+    ) -> Result<super::database_context::Context> {
+        let (context, row) = match initial {
+            Some(initial) => {
+                super::database_context::read_again(self, initial, super::database_context::Detail::TaskSpace).await?
+            }
+            None => super::database_context::read_initial(self, super::database_context::Detail::TaskSpace).await?,
+        };
+        if !context.database_wide {
+            return Err(ActivityContext::visibility_error(&row, &context.activity)?);
         }
-        let context = ActivityContext::decode(row, &self.host, self.port, self.options.identity)?;
-        if !boolean(row, "task_space_permission")? {
+        if !boolean(&row, "task_space_permission")? {
             return Err(culprit_core::Error::new(
                 culprit_core::ErrorCode::PermissionDenied,
                 culprit_core::t!("provider.mssql.task_space.visibility"),
             ));
         }
+        if !context.is_qualified() {
+            return Err(CollectionStop::SourceUnavailable.error());
+        }
         Ok(context)
     }
 }
 
-fn same_source(before: &ActivityContext, after: &ActivityContext) -> bool {
-    before.same_source(after)
+fn admit_profile(context: &super::database_context::Context, profile: TaskSpaceProfile) -> Result<()> {
+    let activity = &context.activity;
+    let supported = match profile {
+        TaskSpaceProfile::Scan => matches!(activity.edition, 2 | 3 | 4 | 5 | 8) && activity.major >= 11,
+        TaskSpaceProfile::Collection => {
+            activity.edition == 5 && activity.major >= 11
+                || matches!(activity.edition, 2 | 3 | 4) && activity.major >= 16
+        }
+    };
+    let unqualified_boxed_role = matches!(profile, TaskSpaceProfile::Collection)
+        && activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE
+        && activity.writable != Some(true);
+    if !supported || unqualified_boxed_role {
+        return Err(culprit_core::Error::new(
+            culprit_core::ErrorCode::Unsupported,
+            culprit_core::t!("collection.unsupported"),
+        ));
+    }
+    if matches!(profile, TaskSpaceProfile::Collection)
+        && context.connection_generation().is_none_or(|generation| generation == 0)
+    {
+        return Err(CollectionStop::SourceUnavailable.error());
+    }
+    Ok(())
 }
 
 fn same_statement(before: &ActivityRecord, after: &ActivityRecord) -> bool {
@@ -196,7 +243,9 @@ fn same_statement(before: &ActivityRecord, after: &ActivityRecord) -> bool {
 }
 
 fn decode(row: &Rec, context: &ActivityContext) -> Result<Option<(TaskSpaceObservation, Option<ActivityRecord>)>> {
-    let Some(session) = optional_counter(row, "task_session_id")? else { return Ok(None) };
+    let Some(session) = optional_counter(row, "task_session_id")? else {
+        return Ok(None);
+    };
     let task = TaskSpaceIdentity {
         session_id: session,
         request_id: integer(row, "task_request_id")?.to_string(),
@@ -259,7 +308,9 @@ fn attach_requests(
         .map(|(index, record)| (record.facts.key.clone(), (index, record)))
         .collect::<BTreeMap<_, _>>();
     for row in observations {
-        let Some(request) = &row.request else { continue };
+        let Some(request) = &row.request else {
+            continue;
+        };
         let (index, record) = requests.get(&request.key).ok_or_else(invalid_data)?;
         row.before_check = before.get(index).map(|check| task_check(check, record));
         row.after_check = after.get(index).map(|check| task_check(check, record));

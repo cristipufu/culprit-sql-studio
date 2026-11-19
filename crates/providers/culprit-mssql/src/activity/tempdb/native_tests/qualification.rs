@@ -116,7 +116,7 @@ async fn capture_with_budget(fixture: &CostFixture, budget: CollectionBudget) ->
     let source_started = Instant::now();
     let captured = reader.capture_task_space().await;
     let verification = match &captured {
-        Ok(captured) => reader.verify_task_space_context(&captured.context).await,
+        Ok(captured) => reader.verify_task_space_context(&captured.context, &captured.snapshot.observed_until).await,
         Err(_) => Ok(false),
     };
     let source_elapsed_ms = source_started.elapsed().as_secs_f64() * 1000.0;
@@ -147,7 +147,7 @@ async fn capture_with_budget(fixture: &CostFixture, budget: CollectionBudget) ->
         Ok(captured) => {
             assert!(captured.snapshot.is_valid());
             assert!(captured.snapshot.observations.iter().all(|row| row.is_valid()));
-            assert!(captured.context.database == *scope.target.database().expect("database scope"));
+            assert!(captured.context.activity.database == *scope.target.database().expect("database scope"));
             let observed = captured
                 .snapshot
                 .observations
@@ -171,7 +171,11 @@ async fn capture_with_budget(fixture: &CostFixture, budget: CollectionBudget) ->
                 );
             } else {
                 assert!(!captured.limited, "a capped population cannot qualify the complete cardinality case");
-                assert_eq!(reader.query_count(), 7, "the complete measured source keeps its original seven phases");
+                assert_eq!(
+                    reader.query_count(),
+                    crate::task_space::MAX_BOXED_QUERIES,
+                    "native owner checks are measured as source work"
+                );
             }
             assert!(verification?);
             assert_eq!(shutdown, SourceShutdown::Quiescent);

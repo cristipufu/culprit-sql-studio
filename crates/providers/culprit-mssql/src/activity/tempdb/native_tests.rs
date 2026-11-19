@@ -5,7 +5,7 @@ use crate::{
     activity::{IdentityDetail, ReadOptions},
     conn::{Pool, SessionKind, map_error},
     read::{ReadResult, ReadSession},
-    test_support::{assert_no_execution_grant, batch, config, session_id},
+    test_support::{batch, config, observe_metadata_execution_grant, session_id},
 };
 use futures_util::FutureExt;
 use std::{panic::AssertUnwindSafe, sync::Arc, time::Duration};
@@ -46,6 +46,9 @@ impl NativeRead for RecordedRead {
     }
     fn queries(&self) -> u32 {
         self.owner.queries()
+    }
+    fn connection_generation(&self) -> Option<u64> {
+        self.owner.connection_generation()
     }
     fn read_metrics(&self) -> Option<ReadWorkMetrics> {
         self.owner.read_metrics()
@@ -130,7 +133,10 @@ fn record_plan_work(query: usize, plan: &str) {
 async fn prove_task_space(pool: Arc<Pool>, session: &str, port: u16) {
     wait_for_fixture_request(pool.clone(), session).await;
     let budget = crate::task_space::bounded_budget(&CollectionBudget::default());
-    assert_eq!((budget.max_queries, budget.statement_timeout_ms, budget.total_timeout_ms), (7, 1000, 5000));
+    assert_eq!(
+        (budget.max_queries, budget.statement_timeout_ms, budget.total_timeout_ms),
+        (crate::task_space::MAX_BOXED_QUERIES, 1000, 5000)
+    );
     let mut reader = ActivityReader::new(
         RecordedRead { owner: ReadSession::new(pool.clone(), budget.clone()), calls: vec![] },
         ReadOptions { budget, identity: IdentityDetail::Endpoint },
@@ -139,7 +145,7 @@ async fn prove_task_space(pool: Arc<Pool>, session: &str, port: u16) {
     );
     let captured = reader.capture_task_space().await;
     let verified = match &captured {
-        Ok(captured) => reader.verify_task_space_context(&captured.context).await,
+        Ok(captured) => reader.verify_task_space_context(&captured.context, &captured.snapshot.observed_until).await,
         Err(_) => Ok(false),
     };
     let shutdown = reader.close().await;
@@ -166,25 +172,117 @@ async fn prove_task_space(pool: Arc<Pool>, session: &str, port: u16) {
     assert!(text.contains("WAITFOR") && !text.contains("INSERT"), "only current context is associated: {text}");
     assert!(!request.key.request.as_ref().unwrap().generation.ends_with('Z'));
     compare_native_task(pool.clone(), task).await;
-    assert_eq!(reader.query_count(), 7, "six source reads plus the collector's final identity verification");
-    assert_eq!(reader.io.calls[1].row_limit, MAX_NATIVE_ROWS + 1);
-    assert!(reader.io.calls.iter().all(|call| call.sql.contains("LOOP JOIN") && call.row_limit <= MAX_NATIVE_ROWS + 1));
+    assert_eq!(
+        reader.query_count(),
+        crate::task_space::MAX_BOXED_QUERIES,
+        "all native owner and task reads include collector completion"
+    );
+    assert_eq!(reader.io.calls[3].row_limit, MAX_NATIVE_ROWS + 1);
+    assert!(reader.io.calls.iter().all(|call| call.row_limit <= MAX_NATIVE_ROWS + 1));
+    assert!(
+        reader.io.calls[2..7].iter().all(|call| call.sql.contains("LOOP JOIN")),
+        "task and participant projections retain their serial metadata hints"
+    );
     let metrics = reader.read_metrics().unwrap();
     assert!(metrics.is_valid());
     assert!(metrics.templates.iter().all(|row| row.timeouts == 0 && row.unconfirmed_cancellations == 0));
     eprintln!("owned task metadata acquisition: {}", serde_json::to_string(&metrics).unwrap());
 
+    prove_factory(pool.clone(), &session, port, task).await;
+
     let mut qualification = pool.connect(SessionKind::User).await.unwrap();
     for (query, call) in reader.io.calls.iter().enumerate() {
-        for plan in assert_no_execution_grant(&mut qualification, &call.sql, copy_parameters(&call.parameters)).await {
-            record_plan_work(query, &plan);
+        let template = crate::statement_origin::template_id(&call.sql);
+        match observe_metadata_execution_grant(&mut qualification, &call.sql, copy_parameters(&call.parameters)).await {
+            Some(plans) => {
+                eprintln!("owned task metadata replay: query={query},template={template},actual_plan=available");
+                for plan in plans {
+                    record_plan_work(query, &plan);
+                }
+            }
+            None => eprintln!(
+                "owned task metadata replay: query={query},template={template},actual_plan=unavailable,execution_grant=unknown"
+            ),
         }
     }
-    // This small owned fixture qualifies the observed plan, not high-volume native DMV traversal under production load.
+    // Missing replay plans remain unknown. Neither available plans nor this small fixture qualify production costs.
+}
+
+async fn prove_factory(pool: Arc<Pool>, session: &str, port: u16, original: &TaskSpaceObservation) {
+    use culprit_core::{Environment, Provider};
+    let provider = crate::MssqlProvider {
+        pool,
+        endpoint_host: "127.0.0.1".into(),
+        endpoint_port: port,
+        environment: Environment::Development,
+    };
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::TaskSpace },
+        budget: crate::task_space::bounded_budget(&CollectionBudget::default()),
+    };
+    let mut source = provider.telemetry_source(&request).unwrap();
+    let created_queries = source.query_count();
+    let captured = async {
+        let description = source.describe().await?;
+        let mut rows = Vec::new();
+        let mut cursor = None;
+        loop {
+            match source.read_page(TelemetryStream::OperationalSamples, cursor.as_deref()).await? {
+                CollectionRead::Page { records, next_cursor } => {
+                    rows.extend(records);
+                    cursor = next_cursor;
+                    if cursor.is_none() {
+                        break;
+                    }
+                }
+                CollectionRead::Stopped(stop) => return Err(stop.error()),
+            }
+        }
+        let completed = source.finish().await?;
+        Ok::<_, culprit_core::Error>((description, rows, completed))
+    }
+    .await;
+    let queries = source.query_count();
+    let shutdown = source.close().await;
+    assert_eq!(shutdown, SourceShutdown::Quiescent);
+    assert_eq!(provider.source_shutdown(), SourceShutdown::Quiescent);
+    assert_eq!(created_queries, 0, "the real factory must not connect before collection");
+    let (description, rows, completed) = captured.unwrap();
+    assert_eq!(completed, SourceCompletion::Verified);
+    assert!(
+        matches!(&description.partition, SourcePartition::InstanceLocal { member: Some(member), epoch: Some(_) } if member.kind==SharedResourceKind::Instance)
+    );
+    assert!(
+        description.target.database().unwrap().incarnation.is_none(),
+        "local recovery metadata is not global database authority"
+    );
+    assert_eq!(queries, crate::task_space::MAX_BOXED_QUERIES);
+    let observed =
+        rows.iter()
+            .find_map(|record| match record {
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::TaskSpace(task), ..
+                }) if task.task.session_id == session && task.task.execution_context_id == "0" => Some(task.as_ref()),
+                _ => None,
+            })
+            .expect("the real factory must retain the owned native task");
+    assert_eq!(observed.task, original.task);
+    assert_eq!(observed.user_allocated_pages, original.user_allocated_pages);
+    assert_eq!(observed.user_deallocated_pages, original.user_deallocated_pages);
+    assert_eq!(observed.internal_allocated_pages, original.internal_allocated_pages);
+    assert_eq!(observed.internal_deallocated_pages, original.internal_deallocated_pages);
+    assert_eq!(observed.request_context(), TaskRequestContext::CheckedAtBounds);
+    assert!(
+        matches!(&observed.request.as_ref().unwrap().statement, DefinitionPayload::Available { text, .. } if text.contains("WAITFOR") && !text.contains("INSERT"))
+    );
+    let recipe = crate::telemetry::recipes().into_iter().find(|recipe| recipe.id == "mssql.task-space").unwrap();
+    assert_eq!(recipe.version, 3);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
 }
 
 #[tokio::test]
-#[ignore = "requires a disposable loopback SQL Server and CULPRIT_MSSQL_SOURCE_TEST_PORT / CULPRIT_MSSQL_SOURCE_TEST_PASSWORD"]
+#[ignore = "requires an owned nonce-labelled loopback SQL Server and the smoke-provider environment"]
 async fn native_task_allocations_keep_checked_current_context_without_allocator_or_session_total_inference() {
     let port = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PORT").unwrap().parse::<u16>().unwrap();
     let password = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PASSWORD").unwrap();
@@ -193,6 +291,7 @@ async fn native_task_allocations_keep_checked_current_context_without_allocator_
         crate::test_support::connect(&config(port, "master", &password, "task-fixture-admin"), SessionKind::User)
             .await
             .unwrap();
+    crate::test_support::verify_owned_source(&mut admin).await.unwrap();
     let mut actor = None;
     let result = AssertUnwindSafe(async {
         batch(&mut admin, &format!("/* culprit fixture */ CREATE DATABASE [{database}]")).await;

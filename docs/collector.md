@@ -706,7 +706,12 @@ keeps its own read bounds and publishes facts only after confirmed shutdown. An 
 acquisition bounds without inventing per-source clocks. Separate PVS and transaction reads cannot establish a
 SQL owner by matching transaction numbers. Both warehouse paths retain the original source outcomes and facts.
 
-`task-space` explains database-target task allocation/deallocation captures from `operational-samples`. It retains
+`task-space` explains database-target task allocation/deallocation captures from `operational-samples`.
+Native fleet capture supports a verified writable Azure SQL Database or boxed SQL Server 2022+ source; Managed
+Instance fleet capture remains unavailable. The shared native owner is checked before, after and at completion,
+with the same one-second statement and five-second absolute limits. Boxed capture permits thirteen native queries
+and Azure permits eight; stricter caller budgets are preserved. Recipe `mssql.task-space` version 3 remains
+cost-unqualified and never enables automatic polling. It retains
 exact page counters, native task tuples, request-check clocks and source coverage. The same pure view serves
 scans and authenticated readback from either warehouse. Current checked SQL does not prove allocation ownership;
 partial, unavailable and complete-empty sources stay distinct. The shared explanation distinguishes recorded

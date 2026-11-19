@@ -1,7 +1,8 @@
 //! Snapshot paging, cursors and close proof remain in FrozenSource. Native task and request reading is shared.
 use crate::{
-    activity::{ActivityContext, ActivityReader, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::Pool,
+    local_source::Context,
     read::{NativeRead, ReadSession, invalid_data},
     sources,
 };
@@ -13,31 +14,44 @@ pub(super) struct TaskSpaceSource<R: NativeRead = ReadSession> {
 }
 struct TaskSpaceReader<R: NativeRead> {
     reader: ActivityReader<R>,
-    context: Option<ActivityContext>,
+    context: Option<Context>,
 }
 
 impl TaskSpaceSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        let options = ReadOptions {
-            budget: crate::task_space::bounded_budget(&request.budget),
-            identity: IdentityDetail::AzureDatabase,
-        };
-        Self::from_reader(ActivityReader::open(pool, options, host, port)?, request)
+        let request = bounded_request(request)?;
+        Self::from_validated_io(ReadSession::new(pool, request.budget.clone()), request, host, port)
     }
 }
+
+fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
+    request.validate()?;
+    request.subject.require_database()?;
+    if request.selection != (CollectionSelection::Snapshot { dataset: SnapshotDataset::TaskSpace }) {
+        return Err(invalid_data());
+    }
+    let mut request = request.clone();
+    request.budget = crate::task_space::bounded_budget(&request.budget);
+    request.budget.validate()?;
+    Ok(request)
+}
+
 impl<R: NativeRead> TaskSpaceSource<R> {
-    fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {
-        request.subject.require_database()?;
-        if request.selection != (CollectionSelection::Snapshot { dataset: SnapshotDataset::TaskSpace }) {
-            return Err(invalid_data());
-        }
-        Ok(Self { inner: culprit_read::FrozenSource::new(TaskSpaceReader { reader, context: None }, request)? })
+    #[cfg(test)]
+    fn with_io(io: R, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
+        Self::from_validated_io(io, bounded_request(request)?, host, port)
+    }
+
+    fn from_validated_io(io: R, request: CollectionRequest, host: String, port: u16) -> Result<Self> {
+        let options = ReadOptions { budget: request.budget.clone(), identity: IdentityDetail::Endpoint };
+        let reader = ActivityReader::new(io, options, host, port);
+        Ok(Self { inner: culprit_read::FrozenSource::new(TaskSpaceReader { reader, context: None }, &request)? })
     }
 }
 #[async_trait::async_trait]
 impl<R: NativeRead> culprit_read::ObservationReader for TaskSpaceReader<R> {
     async fn observe(&mut self, _: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
-        let captured = self.reader.capture_task_space().await?;
+        let captured = self.reader.capture_task_space_telemetry().await?;
         let snapshot = captured.snapshot;
         let complete = !captured.limited && captured.context_complete;
         let records = snapshot
@@ -55,8 +69,8 @@ impl<R: NativeRead> culprit_read::ObservationReader for TaskSpaceReader<R> {
             StateSourceCoverage::observed(sources::TASK_SPACE.name.into(), records.len() as u32, complete);
         coverage.error_code = captured.context_error_code;
         let description = CollectionDescription {
-            partition: culprit_core::telemetry::SourcePartition::Target,
-            target: captured.context.database.clone().into(),
+            partition: captured.context.source_partition()?,
+            target: captured.context.activity.database.clone().into(),
             source: sources::TASK_SPACE.name.into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Snapshot(StateSnapshotDescription {
@@ -70,8 +84,9 @@ impl<R: NativeRead> culprit_read::ObservationReader for TaskSpaceReader<R> {
         self.context = Some(captured.context);
         Ok(culprit_read::FrozenObservation { description, records })
     }
-    async fn verify(&mut self, _: &CollectionDescription) -> Result<bool> {
-        self.reader.verify_task_space_context(self.context.as_ref().ok_or_else(invalid_data)?).await
+    async fn verify(&mut self, description: &CollectionDescription) -> Result<bool> {
+        let until = &description.observation.snapshot().ok_or_else(invalid_data)?.observed_until;
+        self.reader.verify_task_space_context(self.context.as_ref().ok_or_else(invalid_data)?, until).await
     }
     fn query_count(&self) -> u32 {
         self.reader.query_count()
