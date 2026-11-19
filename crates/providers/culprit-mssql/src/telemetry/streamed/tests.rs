@@ -884,7 +884,7 @@ async fn cached_definitions_export_two_bounded_payloads_without_duplicating_the_
     assert!(describe_pressure.sql.contains("FROM sys.dm_db_resource_stats"));
     assert_eq!(describe_pressure.sql, stream_pressure.sql, "pressure is checked again before native payload work");
     assert!(payload.sql.contains("sys.dm_exec_query_stats"));
-    assert!(payload.sql.contains("AS statement_bytes") && payload.sql.contains("AS plan_bytes"));
+    assert!(payload.sql.contains("AS [statement_bytes]") && payload.sql.contains("AS [plan_bytes]"));
     assert!(binding.sql.contains("sys.dm_exec_plan_attributes(selected.plan_handle)"));
     assert!(!binding.sql.contains("sys.dm_exec_query_stats"), "binding proof cannot walk the cache again");
     assert_eq!(calls.iter().filter(|call| call.sql.contains("sys.dm_exec_query_stats")).count(), 1);

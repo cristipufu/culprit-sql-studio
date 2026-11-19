@@ -1,11 +1,6 @@
-use super::fixture::{Fixture, invalid};
-use crate::{conn::map_error, value::Rec};
+use super::fixture::{Fixture, actors, invalid};
 use culprit_core::Result;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use tokio::sync::Barrier;
+use std::time::Instant;
 
 pub(super) const WRITERS_PER_PATTERN: usize = 8;
 pub(super) const ABBA_INSERTS_PER_WORKER: usize = 2048;
@@ -15,7 +10,6 @@ const HOLDER_LOCK_TIMEOUT_MS: u32 = 5000;
 const MAX_INSERTS: usize = 16_384;
 const _: () = assert!(ABBA_INSERTS_PER_WORKER <= MAX_INSERTS);
 const RUN_MS: u32 = 4000;
-const COMPLETION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub(super) struct CompletedWorker {
@@ -69,10 +63,7 @@ impl Fixture {
     }
 
     async fn start_workers(&mut self, workers: Vec<WorkerStatement>) -> Result<Instant> {
-        if !self.workers.is_empty() {
-            return Err(invalid("previous fixture workers were not joined"));
-        }
-        let barrier = Arc::new(Barrier::new(workers.len() + 1));
+        self.require_idle_workload()?;
         // Establish every connection before starting the comparable native work window.
         let mut clients = Vec::new();
         for worker in workers {
@@ -81,43 +72,18 @@ impl Fixture {
                 2 => WRITER_APPLICATIONS[1],
                 _ => "page-fixture-unrelated-select",
             };
-            clients.push((self.client(application).await?, worker));
+            clients.push((self.client(application).await?, worker.pattern, worker.sql));
         }
-        for (mut client, WorkerStatement { pattern, sql }) in clients {
-            let barrier = barrier.clone();
-            self.workers.push(Some(tokio::spawn(async move {
-                barrier.wait().await;
-                let rows =
-                    client.simple_query(sql).await.map_err(map_error)?.into_first_result().await.map_err(map_error)?;
-                let row =
-                    rows.first().map(Rec::from_row).ok_or_else(|| invalid("owned worker returned no completion"))?;
-                let inserts = crate::read::integer(&row, "completed")?
-                    .try_into()
-                    .map_err(|_| invalid("invalid owned completion"))?;
-                Ok(CompletedWorker { pattern, inserts })
-            })));
-        }
-        let started = Instant::now();
-        barrier.wait().await;
-        Ok(started)
+        actors::start(&mut self.workers, clients, |pattern, row| {
+            Ok(CompletedWorker { pattern, inserts: actors::completion_count(row, "completed")? })
+        })
+        .await
     }
     pub fn workers_finished(&self) -> bool {
         self.workers.iter().flatten().all(|task| task.is_finished())
     }
     pub async fn finish_workload(&mut self) -> Result<Vec<CompletedWorker>> {
-        let mut completed = Vec::new();
-        let deadline = tokio::time::Instant::now() + COMPLETION_TIMEOUT;
-        for slot in &mut self.workers {
-            let task = slot.as_mut().ok_or_else(|| invalid("owned worker was already joined"))?;
-            let result = tokio::time::timeout_at(deadline, task)
-                .await
-                .map_err(|_| invalid("owned workers exceeded their shared completion deadline"))?;
-            // Cancellation leaves the pending handle in its fixture; completed handles are removed before errors.
-            slot.take();
-            completed.push(result.map_err(|_| invalid("owned worker task failed"))??);
-        }
-        self.workers.clear();
-        Ok(completed)
+        actors::finish(&mut self.workers).await
     }
 }
 

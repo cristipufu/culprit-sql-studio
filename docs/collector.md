@@ -1596,6 +1596,19 @@ python3 dev/smoke-providers.py mssql --test culprit-mssql local_source::native_t
 A fast completed query does not exercise active cancellation. That case stays explicitly unqualified unless the
 observer sees the exact source template active. Endpoint evidence does not qualify Azure SQL or Hyperscale.
 
+Default provider smoke tests execute the real selected-writer payload SQL with empty original selectors and verify
+bounded completion without unsolicited rows. The stricter writer scenario requires a mapped coordinator wait to
+remain observable while all five writer/reader controls are checked. Select it explicitly:
+
+```sh
+python3 -B dev/smoke-providers.py mssql --test culprit-mssql \
+  activity::page_targets::native_tests::writers::local_native_writer_plans_keep_targeted_writes_separate_from_readers_and_other_resources
+```
+
+An expired or unqualified wait fails that positive qualification; it does not by itself establish a collector regression.
+Retain failed and successful runs separately. A pass establishes neither a direct latch holder, a per-query causal
+share nor representative production cost.
+
 Local recipe qualification uses the selected provider's trusted native issuer and the existing capture owner:
 
 ```sh

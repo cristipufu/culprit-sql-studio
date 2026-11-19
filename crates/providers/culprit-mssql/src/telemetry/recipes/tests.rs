@@ -23,7 +23,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.shared-tempdb-page-wait-targets", 3),
             ("mssql.focused-page-wait", 2),
             ("mssql.focused-page-task-holders", 2),
-            ("mssql.focused-page-wait-writers", 2),
+            ("mssql.focused-page-wait-writers", 3),
             ("mssql.focused-shared-tempdb-page-wait", 3),
             ("mssql.focused-compiler-admission", 2),
             ("mssql.focused-shared-compiler-admission", 2),
@@ -34,8 +34,8 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.shared-operational", 5),
             ("mssql.settings", 3),
             ("mssql.query-compilation", 3),
-            ("mssql.cached-definitions", 3),
-            ("mssql.retained-plans", 4),
+            ("mssql.cached-definitions", 4),
+            ("mssql.retained-plans", 5),
         ])
     );
 }

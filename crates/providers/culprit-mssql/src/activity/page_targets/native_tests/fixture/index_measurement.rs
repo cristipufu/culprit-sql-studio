@@ -48,6 +48,13 @@ pub(in crate::activity::page_targets::native_tests) struct IndexWindow {
 }
 
 impl IndexWindow {
+    pub(in crate::activity::page_targets::native_tests) fn delta(
+        &self,
+        name: &str,
+        counter: MssqlIndexCounter,
+    ) -> Result<u64> {
+        counter_delta(&self.before, &self.after, name, counter)
+    }
     pub(in crate::activity::page_targets::native_tests) fn before(&self) -> &Indexes {
         &self.before
     }
@@ -63,6 +70,25 @@ impl IndexWindow {
     pub(in crate::activity::page_targets::native_tests) fn metrics(&self) -> &ReadWorkMetrics {
         &self.metrics
     }
+}
+
+pub(in crate::activity::page_targets::native_tests) fn counter_delta(
+    before: &Indexes,
+    after: &Indexes,
+    name: &str,
+    counter: MssqlIndexCounter,
+) -> Result<u64> {
+    let before = before.get(name).ok_or_else(|| invalid("native index was absent before work"))?;
+    let after = after.get(name).ok_or_else(|| invalid("native index was absent after work"))?;
+    if !same_index_target(before, after) {
+        return Err(invalid("native index generation changed during fixture measurement"));
+    }
+    let value = |row: &MssqlIndexOperations| {
+        row.counter(counter)
+            .and_then(|value| value.parse::<u64>().ok())
+            .ok_or_else(|| invalid("required native index counter is unknown"))
+    };
+    value(after)?.checked_sub(value(before)?).ok_or_else(|| invalid("native index counter reset during fixture work"))
 }
 
 impl<R: NativeRead> IndexMeasurement<R> {

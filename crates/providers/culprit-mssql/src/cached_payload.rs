@@ -6,10 +6,15 @@ use crate::{
 };
 use culprit_core::{Engine, Result, telemetry::*};
 pub(crate) fn columns(expression: &str, bytes_alias: &str, value_alias: &str, limit: &str) -> String {
+    let bytes_alias = Engine::Mssql.dialect().quote(bytes_alias);
+    let value_alias = Engine::Mssql.dialect().quote(value_alias);
     format!(
         "CAST(DATALENGTH({expression}) AS bigint) AS {bytes_alias},CASE WHEN DATALENGTH({expression})<={limit} THEN {expression} END AS {value_alias}"
     )
 }
+
+#[cfg(test)]
+mod tests;
 pub(crate) fn read(row: &Rec, bytes_name: &str, value_name: &str, maximum: usize) -> Result<(Payload, Option<usize>)> {
     let bytes =
         optional_integer(row, bytes_name)?.map(|value| value.try_into().map_err(|_| invalid_data())).transpose()?;

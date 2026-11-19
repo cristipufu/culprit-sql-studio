@@ -1,6 +1,6 @@
 //! Concurrent native writes are bounded fixture input, not a diagnostic query or a proposed production fix.
 use super::{
-    fixture::{self, Fixture, invalid, same_index_target},
+    fixture::{self, Fixture, counter_delta, invalid},
     workload::{CompletedWorker, WRITERS_PER_PATTERN, require_abba_completions},
 };
 use culprit_core::{Result, telemetry::*};
@@ -97,26 +97,12 @@ struct Counters {
     latch_waits: u64,
     latch_ms: u64,
 }
-fn counter(row: &MssqlIndexOperations, kind: MssqlIndexCounter) -> Result<u64> {
-    row.counter(kind)
-        .and_then(|value| value.parse().ok())
-        .ok_or_else(|| invalid("required native index counter is unknown"))
-}
 fn delta(
     before: &BTreeMap<String, MssqlIndexOperations>,
     after: &BTreeMap<String, MssqlIndexOperations>,
     name: &str,
 ) -> Result<Counters> {
-    let before = before.get(name).ok_or_else(|| invalid("native index was absent before work"))?;
-    let after = after.get(name).ok_or_else(|| invalid("native index was absent after work"))?;
-    if !same_index_target(before, after) {
-        return Err(invalid("native index generation changed during fixture measurement"));
-    }
-    let difference = |kind| {
-        counter(after, kind)?
-            .checked_sub(counter(before, kind)?)
-            .ok_or_else(|| invalid("native index counter reset during fixture work"))
-    };
+    let difference = |kind| counter_delta(before, after, name, kind);
     Ok(Counters {
         inserts: difference(MssqlIndexCounter::LeafInserts)?,
         latch_waits: difference(MssqlIndexCounter::PageLatchWaits)?,

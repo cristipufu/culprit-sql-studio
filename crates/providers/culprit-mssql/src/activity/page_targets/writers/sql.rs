@@ -63,3 +63,55 @@ OUTER APPLY sys.dm_exec_text_query_plan(r.plan_handle,r.statement_start_offset,r
 OPTION(MAXDOP 1,LOOP JOIN)"#
     )
 }
+
+#[cfg(test)]
+mod native_tests {
+    use super::payloads;
+    use crate::{
+        read::{Parameter, ReadSession},
+        test_support::OwnedSourceFixture,
+    };
+    use culprit_core::telemetry::{CollectionBudget, SourceShutdown};
+
+    #[tokio::test]
+    #[ignore = "requires disposable loopback SQL Server and CULPRIT_MSSQL_SOURCE_TEST_PORT / CULPRIT_MSSQL_SOURCE_TEST_PASSWORD"]
+    async fn local_native_selected_writer_payloads_compile_with_empty_original_selectors() {
+        let fixture = OwnedSourceFixture::open("culprit-writer-payload-sql").await.expect("native owned source");
+        let mut reader = ReadSession::new(
+            fixture.pool.clone(),
+            CollectionBudget {
+                max_queries: 1,
+                statement_timeout_ms: 1_000,
+                total_timeout_ms: 3_000,
+                ..Default::default()
+            },
+        );
+        let result = reader
+            .query(
+                &payloads(),
+                vec![Parameter::Text("<writers/>".into()), Parameter::Integer(4 * 1024), Parameter::Integer(4 * 1024)],
+                1,
+            )
+            .await;
+        let shutdown = reader.close().await;
+        let metrics = reader.read_metrics();
+        // Native syntax errors must remain failures even when no original handles authorize payloads.
+        // Confirm this same reader's shutdown before inspecting the result or accounting.
+        assert_eq!(shutdown, SourceShutdown::Quiescent);
+        let rows = result.expect("actual writer payload SQL and its quoted aliases must compile");
+        assert!(rows.is_empty(), "empty original selectors cannot discover unsolicited native rows");
+        assert_eq!(reader.queries(), 1);
+        let metrics = metrics.expect("one native payload read must retain its accounting");
+        assert!(metrics.is_valid() && !metrics.has_unconfirmed_work());
+        assert_eq!(metrics.active_tasks, 0);
+        assert_eq!(metrics.untracked_tasks, 0);
+        assert_eq!(metrics.templates.len(), 1);
+        let template = &metrics.templates[0];
+        assert_eq!(template.completed_tasks, 1);
+        assert_eq!(template.failures, 0);
+        assert_eq!(template.rows_decoded, "0");
+        eprintln!(
+            "owned writer payload SQL compiled: native_queries=1,decoded_rows=0,shutdown=Quiescent,writer_qualification=false,native_cost_qualified=false"
+        );
+    }
+}

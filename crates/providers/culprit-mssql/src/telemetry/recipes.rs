@@ -182,7 +182,7 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
     )
     .bounded(page_waits::writer_budget)
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.focused-shared-tempdb-page-wait",
         RecipeSelector::FocusedPageWait,
@@ -274,9 +274,9 @@ const REGISTRATIONS: &[Registration] = &[
     streamed!("mssql.objects", Objects, objects::Objects),
     streamed!("mssql.triggers", Triggers, triggers::Triggers),
     streamed!("mssql.partitions", Partitions, partitions::Partitions),
-    streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions).version(3),
+    streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions).version(4),
     streamed!("mssql.retained-plans", RetainedPlans, retained_definitions::RetainedPlans)
-        .version(4)
+        .version(5)
         .bounded(retained_definitions::bounded_budget),
 ];
 

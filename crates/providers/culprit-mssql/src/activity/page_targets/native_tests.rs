@@ -6,6 +6,7 @@ mod focused;
 mod holders;
 mod shared_tempdb;
 mod workload;
+mod writers;
 use super::*;
 use crate::activity::{IdentityDetail, ReadOptions};
 

@@ -115,6 +115,8 @@ async fn writer_investigation_reads_only_original_handles_and_keeps_waiters_sepa
     );
     assert!(!selected.sql.contains("sys.dm_exec_query_stats"));
     assert!(!selected.sql.contains("sys.dm_exec_plan_attributes"));
+    assert!(selected.sql.contains("AS [statement_bytes]") && selected.sql.contains("END AS [statement]"));
+    assert!(selected.sql.contains("AS [plan_bytes]") && selected.sql.contains("END AS [plan]"));
     assert!(
         matches!(&selected.parameters[0],Parameter::Text(xml) if xml.contains("session=\"43\"") && !xml.contains("session=\"42\""))
     );

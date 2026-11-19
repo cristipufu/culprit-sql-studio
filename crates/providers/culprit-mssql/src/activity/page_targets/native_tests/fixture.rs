@@ -6,20 +6,28 @@ use crate::{
     read::ReadSession,
     test_support::config,
 };
-use culprit_core::{Error, ErrorCode, Result, telemetry::*};
+use culprit_core::{Engine, Error, ErrorCode, Result, telemetry::*};
 use futures_util::{FutureExt, future::BoxFuture};
 use std::{collections::BTreeMap, future::Future, panic::AssertUnwindSafe, sync::Arc, time::Duration};
 
+pub(super) mod actors;
 mod index_measurement;
-pub(super) use index_measurement::{IndexWindow, same_index_target};
+use actors::WORKER_CLEANUP_TIMEOUT;
+pub(super) use index_measurement::{IndexWindow, counter_delta};
 
-const WORKER_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 const HOLDER_GATE_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 const DATABASE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(8);
 
 struct HolderGate {
     client: Option<MsClient>,
     transaction_possible: bool,
+    connection_owner: GateConnectionOwner,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GateConnectionOwner {
+    Dedicated,
+    FixtureAdmin,
 }
 
 pub(super) struct Fixture {
@@ -28,6 +36,7 @@ pub(super) struct Fixture {
     password: String,
     pub(super) pool: Option<Arc<Pool>>,
     pub(super) workers: Vec<Option<tokio::task::JoinHandle<Result<super::workload::CompletedWorker>>>>,
+    pub(super) writer_workers: Vec<Option<tokio::task::JoinHandle<Result<super::writers::workload::CompletedWriter>>>>,
     pub(super) setup_elapsed_ms: f64,
     setup_started: std::time::Instant,
     admin: Option<MsClient>,
@@ -51,6 +60,7 @@ impl Fixture {
             password,
             pool: None,
             workers: Vec::new(),
+            writer_workers: Vec::new(),
             setup_elapsed_ms: 0.0,
             setup_started,
             admin: Some(admin),
@@ -105,10 +115,14 @@ impl Fixture {
     /// The retained owner exists before connection or transaction work can be cancelled. Only this nonce
     /// fixture's seed table is locked; no page latch, task pointer or native holder relationship is imposed.
     pub async fn start_holder_gate(&mut self) -> Result<()> {
-        if !self.owned_host || self.pool.is_none() || self.holder_gate.is_some() || !self.workers.is_empty() {
+        if !self.owned_host || self.pool.is_none() || self.holder_gate.is_some() || self.has_workers() {
             return Err(invalid("owned holder gate requires an initialized idle fixture"));
         }
-        self.holder_gate = Some(HolderGate { client: None, transaction_possible: false });
+        self.holder_gate = Some(HolderGate {
+            client: None,
+            transaction_possible: false,
+            connection_owner: GateConnectionOwner::Dedicated,
+        });
         let client = tokio::time::timeout(HOLDER_GATE_CONTROL_TIMEOUT, self.client("page-fixture-holder-gate"))
             .await
             .map_err(|_| invalid("owned holder gate connection exceeded its bound"))??;
@@ -119,8 +133,35 @@ impl Fixture {
         .await
     }
 
+    /// Borrow the already-owned admin so the wrong-target UPDATE remains pending without another actor
+    /// or additional data work. Its native lock timeout and the workload's clock remain unchanged.
+    pub(super) async fn start_other_target_gate(&mut self) -> Result<()> {
+        self.require_idle_workload()?;
+        if self.holder_gate.is_some() {
+            return Err(invalid("owned wrong-target gate requires an idle gate owner"));
+        }
+        let admin = self.admin.take().ok_or_else(|| invalid("owned fixture admin connection was retired"))?;
+        self.holder_gate = Some(HolderGate {
+            client: Some(admin),
+            transaction_possible: false,
+            connection_owner: GateConnectionOwner::FixtureAdmin,
+        });
+        self.holder_gate_command(&other_target_gate_statement(&self.name)).await
+    }
+
     pub(super) fn holder_gate_active(&self) -> bool {
         self.holder_gate.as_ref().is_some_and(|gate| gate.transaction_possible && gate.client.is_some())
+    }
+
+    pub(super) fn require_idle_workload(&self) -> Result<()> {
+        if !self.owned_host || self.pool.is_none() || self.has_workers() {
+            return Err(invalid("owned actors require an initialized idle fixture"));
+        }
+        Ok(())
+    }
+
+    fn has_workers(&self) -> bool {
+        !self.workers.is_empty() || !self.writer_workers.is_empty()
     }
 
     pub async fn release_holder_gate(&mut self) -> Result<()> {
@@ -128,7 +169,12 @@ impl Fixture {
             return Err(invalid("owned holder gate is absent or its control response is unconfirmed"));
         }
         self.holder_gate_command("IF @@TRANCOUNT>0 ROLLBACK TRANSACTION;").await?;
-        self.holder_gate.take();
+        let gate = self.holder_gate.take().ok_or_else(|| invalid("owned holder gate was retired"))?;
+        if gate.connection_owner == GateConnectionOwner::FixtureAdmin {
+            // Only the fully drained rollback returns this connection to database cleanup. An interrupted
+            // command leaves no reusable client, and cleanup independently reports that missing authority.
+            self.admin = gate.client;
+        }
         Ok(())
     }
 
@@ -162,7 +208,7 @@ impl Fixture {
     }
 
     pub async fn reset(&self) -> Result<()> {
-        if self.index_measurement.is_some() || !self.workers.is_empty() {
+        if self.index_measurement.is_some() || self.has_workers() {
             return Err(invalid("owned fixture reset cannot change an active measurement or workload"));
         }
         let mut client = self.client("page-fixture-reset").await?;
@@ -222,7 +268,7 @@ impl Fixture {
         }
     }
     pub async fn begin_index_measurement(&mut self) -> Result<()> {
-        if !self.owned_host || self.index_measurement.is_some() || !self.workers.is_empty() {
+        if !self.owned_host || self.index_measurement.is_some() || self.has_workers() {
             return Err(invalid("an owned index measurement requires an idle fixture"));
         }
         let pool = self.pool.as_ref().ok_or_else(|| invalid("owned index measurement has no source pool"))?.clone();
@@ -344,30 +390,13 @@ impl Fixture {
         first_error.map_or(Ok(()), Err)
     }
     async fn stop_workers(&mut self) -> Result<()> {
-        for task in self.workers.iter().flatten() {
-            task.abort();
+        let (inserts, writers) = tokio::join!(actors::stop(&mut self.workers), actors::stop(&mut self.writer_workers));
+        if inserts.is_err()
+            && let Err(error) = &writers
+        {
+            eprintln!("owned writer cleanup also failed: {error}");
         }
-        let deadline = tokio::time::Instant::now() + WORKER_CLEANUP_TIMEOUT;
-        let mut failure = None;
-        for slot in &mut self.workers {
-            let Some(task) = slot.as_mut() else { continue };
-            let result = tokio::time::timeout_at(deadline, task)
-                .await
-                .map_err(|_| invalid("owned worker cleanup timed out; settlement is unconfirmed"))?;
-            // Pending handles stay in the fixture through every await, including cancellation/timeout.
-            slot.take();
-            let error = match result {
-                Ok(Ok(_)) => None,
-                Ok(Err(error)) => Some(error),
-                Err(error) if error.is_cancelled() => None,
-                Err(_) => Some(invalid("owned worker panicked during cleanup")),
-            };
-            if failure.is_none() {
-                failure = error;
-            }
-        }
-        self.workers.clear();
-        failure.map_or(Ok(()), Err)
+        inserts.and(writers)
     }
     async fn drop_owned_database(&mut self) -> Result<()> {
         if !self.owned_host {
@@ -392,10 +421,16 @@ impl Drop for Fixture {
         // acknowledged control, joined workers and exact database cleanup establish their own settlement.
         self.holder_gate.take();
         self.index_measurement.take();
-        for task in self.workers.iter().flatten() {
-            task.abort();
-        }
+        actors::abort(&self.workers);
+        actors::abort(&self.writer_workers);
     }
+}
+
+fn other_target_gate_statement(database: &str) -> String {
+    let database = Engine::Mssql.dialect().quote(database);
+    format!(
+        "SET LOCK_TIMEOUT 1000; BEGIN TRANSACTION; SELECT id FROM {database}.dbo.page_fixture_split WITH(UPDLOCK,HOLDLOCK,ROWLOCK) WHERE id=1;"
+    )
 }
 
 async fn bounded_holder_gate_control(control: impl Future<Output = Result<()>>) -> Result<()> {
@@ -461,6 +496,7 @@ mod cleanup_tests {
             password: String::new(),
             pool: None,
             workers: Vec::new(),
+            writer_workers: Vec::new(),
             setup_elapsed_ms: 0.0,
             setup_started: std::time::Instant::now(),
             admin: None,
@@ -480,6 +516,45 @@ mod cleanup_tests {
         })));
         ready.await.unwrap();
         finished
+    }
+
+    async fn pending_writer(fixture: &mut Fixture) -> oneshot::Receiver<()> {
+        let (started, ready) = oneshot::channel();
+        let (retired, finished) = oneshot::channel();
+        fixture.writer_workers.push(Some(tokio::spawn(async move {
+            let _actor = Retired(Some(retired));
+            started.send(()).unwrap();
+            pending::<Result<super::super::writers::workload::CompletedWriter>>().await
+        })));
+        ready.await.unwrap();
+        finished
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_writer_completion_keeps_both_actor_populations_owned_until_cleanup() {
+        let mut fixture = unconnected_fixture();
+        let insert = pending_worker(&mut fixture).await;
+        let writer = pending_writer(&mut fixture).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1), actors::finish(&mut fixture.writer_workers)).await.is_err()
+        );
+        assert_eq!(fixture.writer_workers.len(), 1);
+        assert!(fixture.writer_workers[0].is_some());
+        fixture.close().await.unwrap();
+        assert!(fixture.workers.is_empty() && fixture.writer_workers.is_empty());
+        insert.await.expect("existing actors are joined");
+        writer.await.expect("cancelled writer actors are joined by the same cleanup owner");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn one_actor_population_failure_cannot_skip_the_other_populations_settlement() {
+        let mut fixture = unconnected_fixture();
+        fixture.workers.push(Some(tokio::spawn(async { Err(invalid("owned insert actor failed")) })));
+        tokio::task::yield_now().await;
+        let writer = pending_writer(&mut fixture).await;
+        assert!(fixture.close().await.is_err());
+        assert!(fixture.workers.is_empty() && fixture.writer_workers.is_empty());
+        writer.await.expect("an independent actor failure cannot bypass writer settlement");
     }
 
     #[tokio::test(start_paused = true)]
@@ -521,13 +596,46 @@ mod cleanup_tests {
     #[tokio::test(start_paused = true)]
     async fn uncertain_holder_gate_cleanup_still_joins_every_owned_worker_and_never_reports_success() {
         let mut fixture = unconnected_fixture();
-        fixture.holder_gate = Some(HolderGate { client: None, transaction_possible: true });
+        fixture.holder_gate = Some(HolderGate {
+            client: None,
+            transaction_possible: true,
+            connection_owner: GateConnectionOwner::Dedicated,
+        });
         let retired = pending_worker(&mut fixture).await;
         let error = fixture.close().await.unwrap_err();
         assert!(error.message.contains("unconfirmed"));
         assert!(fixture.holder_gate.is_none());
         assert!(fixture.workers.is_empty());
         retired.await.expect("an unconfirmed gate cannot prevent explicit worker settlement");
+    }
+
+    #[test]
+    fn wrong_target_gate_only_reads_its_quoted_owned_database_seed_row() {
+        assert_eq!(
+            other_target_gate_statement("owned]nonce"),
+            "SET LOCK_TIMEOUT 1000; BEGIN TRANSACTION; SELECT id FROM [owned]]nonce].dbo.page_fixture_split WITH(UPDLOCK,HOLDLOCK,ROWLOCK) WHERE id=1;"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unconfirmed_admin_gate_never_returns_a_client_and_still_settles_both_actor_populations() {
+        let mut fixture = unconnected_fixture();
+        fixture.holder_gate = Some(HolderGate {
+            client: None,
+            transaction_possible: true,
+            connection_owner: GateConnectionOwner::FixtureAdmin,
+        });
+        let insert = pending_worker(&mut fixture).await;
+        let writer = pending_writer(&mut fixture).await;
+        assert!(fixture.release_holder_gate().await.is_err());
+        assert!(fixture.admin.is_none());
+        assert!(fixture.holder_gate.is_some(), "cleanup retains the unconfirmed gate owner");
+        let error = fixture.close().await.unwrap_err();
+        assert!(error.message.contains("unconfirmed"));
+        assert!(fixture.admin.is_none() && fixture.holder_gate.is_none());
+        assert!(fixture.workers.is_empty() && fixture.writer_workers.is_empty());
+        insert.await.expect("an unconfirmed admin cannot bypass insert actor settlement");
+        writer.await.expect("an unconfirmed admin cannot bypass writer actor settlement");
     }
 
     #[tokio::test(start_paused = true)]

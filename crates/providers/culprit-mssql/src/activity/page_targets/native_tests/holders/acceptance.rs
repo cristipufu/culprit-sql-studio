@@ -1,6 +1,5 @@
 //! Native compatibility requires actual task evidence; only a separately validated positive qualifies a holder.
 use super::*;
-use culprit_core::SourceState;
 
 #[derive(Default)]
 pub(super) struct NativeHolderEvidence {
@@ -59,40 +58,9 @@ impl NativeHolderEvidence {
     }
 }
 
-pub(super) fn require_readable_capture(capture: &Captured) -> Result<()> {
-    let metrics = capture.manifest.read_metrics.as_ref().ok_or_else(|| invalid("native source accounting absent"))?;
-    // OwnedCaptures already authenticates canonical persisted rows, completion and confirmed shutdown. This
-    // scenario additionally refuses swallowed source errors; a truthful limitation is not compatibility proof.
-    require_successful_reads(metrics)?;
-    require_readable_source(capture.source()?)
-}
-
-fn require_successful_reads(metrics: &ReadWorkMetrics) -> Result<()> {
-    if metrics.templates.iter().any(|template| template.failures != 0) {
-        return Err(invalid("owned native compatibility capture included a failed source read"));
-    }
-    Ok(())
-}
-
-fn require_readable_source(source: &CollectionDescription) -> Result<()> {
-    let coverage = match &source.observation {
-        SourceObservation::Activity(activity) => std::slice::from_ref(&activity.coverage),
-        observation => observation
-            .snapshot()
-            .map(|snapshot| snapshot.sources.as_slice())
-            .ok_or_else(|| invalid("owned native compatibility capture omitted its declared source coverage"))?,
-    };
-    if coverage.is_empty()
-        || coverage.iter().any(|source| {
-            matches!(source.state, SourceState::Unavailable | SourceState::NotApplicable)
-                || source.error_code.is_some()
-                || source.stopped.is_some()
-        })
-    {
-        return Err(invalid("owned native compatibility capture did not read its declared source successfully"));
-    }
-    Ok(())
-}
+pub(super) use super::super::durable_capture::{
+    require_readable_capture, require_readable_source, require_successful_reads,
+};
 
 #[cfg(test)]
 mod tests;

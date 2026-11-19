@@ -561,9 +561,10 @@ class NativeSelection(unittest.TestCase):
         self.assertEqual(agent.configuration()[0]["MSSQL_SA_PASSWORD"], agent.password)
         plain.test_environment = Mock(return_value={})
         strict_holder = "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request"
+        strict_writer = "local_native_writer_plans_keep_targeted_writes_separate_from_readers_and_other_resources"
         for selection, expected in [
-            ("native_tests::", ["telemetry::replication::native_tests::", "jobs::", strict_holder]),
-            ("jobs::native_tests::", ["telemetry::replication::native_tests::", strict_holder]),
+            ("native_tests::", ["telemetry::replication::native_tests::", "jobs::", strict_holder, strict_writer]),
+            ("jobs::native_tests::", ["telemetry::replication::native_tests::", strict_holder, strict_writer]),
         ]:
             with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
                 plain.test("culprit-mssql", selection)
@@ -594,6 +595,31 @@ class NativeSelection(unittest.TestCase):
         database.verify()
         ordinary = [call for call in database.test.call_args_list if call.args == ("culprit-mssql", "native_tests::")]
         self.assertEqual(len(ordinary), 1, "default verification owns one broad native run")
+
+    def test_mssql_broad_selection_runs_writer_sql_without_claiming_strict_writer_qualification(self):
+        database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql"))
+        database.test_environment = Mock(return_value={})
+        strict_prefix = "activity::page_targets::native_tests::writers::"
+        strict = "local_native_writer_plans_keep_targeted_writes_separate_from_readers_and_other_resources"
+        regression_prefix = "activity::page_targets::writers::sql::native_tests::"
+        regression = "local_native_selected_writer_payloads_compile_with_empty_original_selectors"
+        native_tests = [strict_prefix + strict, regression_prefix + regression]
+        for selection, expected in [
+            ("", [regression_prefix + regression]),
+            ("native_tests::", [regression_prefix + regression]),
+            ("activity::page_targets::", [regression_prefix + regression]),
+            (strict_prefix, []),
+            (strict, [strict_prefix + strict]),
+            (strict_prefix + strict, [strict_prefix + strict]),
+            (regression, [regression_prefix + regression]),
+            (regression_prefix + regression, [regression_prefix + regression]),
+        ]:
+            with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                database.test("culprit-mssql", selection)
+                run_tests.assert_called_once()
+                skips = run_tests.call_args.kwargs["skip"]
+                selected = [test for test in native_tests if selection in test and not any(skip in test for skip in skips)]
+                self.assertEqual(selected, expected)
 
     def test_broad_selection_excludes_optional_topologies_without_their_environment(self):
         database = smoke.Database(smoke.FIXTURES[1])

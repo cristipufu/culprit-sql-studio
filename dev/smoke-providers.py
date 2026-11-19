@@ -72,6 +72,7 @@ OPTIONAL_NATIVE_MODULES = {
     "culprit-mssql": (
         "telemetry::replication::native_tests::", "jobs::",
         "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request",
+        "local_native_writer_plans_keep_targeted_writes_separate_from_readers_and_other_resources",
     ),
 }
 
