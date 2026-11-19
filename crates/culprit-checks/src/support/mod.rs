@@ -1,5 +1,7 @@
 mod handles;
 mod predicates;
+pub(crate) mod request_memory;
+pub(crate) mod source_coverage;
 #[cfg(test)]
 pub(crate) mod tests;
 

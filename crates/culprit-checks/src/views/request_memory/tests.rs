@@ -33,7 +33,7 @@ pub(crate) fn associated(row: &mut ExecutionGrantObservation) {
     assert!(row.is_valid());
 }
 
-fn context() -> NativeReadContext {
+pub(crate) fn context() -> NativeReadContext {
     NativeReadContext {
         target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,

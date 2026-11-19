@@ -1,7 +1,7 @@
-//! Pure views admit rows only from one exact source with a compatible native outcome.
+//! One exact source and compatible native outcome qualify the supplied population.
 use culprit_core::{SourceOutcome, SourceState};
 
-pub(super) fn consistent_source<'a>(
+pub(crate) fn consistent_source<'a>(
     source: Option<&SourceOutcome>,
     native_sources: impl IntoIterator<Item = &'a str>,
 ) -> bool {

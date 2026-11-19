@@ -1,15 +1,15 @@
 //! Current execution reservations identify participants, never the statement that acquired them or a causal owner.
-use super::{memory_participants, source_coverage};
+use super::memory_participants;
+use crate::support::request_memory::{Participant, qualified_participants};
 use culprit_core::{
-    Engine, Error, MemoryGrantAdmission, MemoryParticipantExplanation, MemoryParticipantMechanism,
-    MemoryParticipantReference, MemoryParticipantsReport, Result, SourceOutcome, format, t,
+    MemoryGrantAdmission, MemoryParticipantExplanation, MemoryParticipantMechanism, MemoryParticipantReference,
+    MemoryParticipantsReport, Result, SourceOutcome, format, t,
     telemetry::{
-        ActivityEvidence, ActivityKey, ExecutionGrantObservation, ExecutionGrantState, GrantStatementRelationship,
-        MAX_REQUEST_MEMORY_OBSERVATIONS, NativeIdentity, NativeReadContext, ObservationBounds, RequestGrantAssociation,
-        SourcePartition, WaitMechanism, canonical_time,
+        ExecutionGrantObservation, ExecutionGrantState, GrantStatementRelationship, NativeIdentity, NativeReadContext,
+        RequestGrantAssociation,
     },
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub struct RequestMemoryEvidence<'a> {
     pub context: &'a NativeReadContext,
@@ -23,9 +23,9 @@ pub fn explain(
     source: Option<&SourceOutcome>,
 ) -> Result<MemoryParticipantsReport> {
     let observations = evidence.observations;
-    let mut cases = validate(&evidence, source)?;
+    let mut cases = qualified_participants(evidence.context, evidence.observations, source)?;
     cases.sort_by(|left, right| {
-        order(left.observation.state).cmp(&order(right.observation.state)).then_with(|| left.key.cmp(&right.key))
+        order(left.observation().state).cmp(&order(right.observation().state)).then_with(|| left.key().cmp(right.key()))
     });
     let waiting = observations.iter().filter(|row| row.state == ExecutionGrantState::Waiting).count();
     let admission_resources = admission_resources(&evidence, &cases);
@@ -50,77 +50,6 @@ pub fn explain(
     })
 }
 
-struct Participant<'a> {
-    observation: &'a ExecutionGrantObservation,
-    key: String,
-    resource: Option<&'a NativeIdentity>,
-    mechanism: Option<MemoryParticipantMechanism>,
-    qualified_request: Option<&'a ActivityKey>,
-}
-
-fn validate<'a>(evidence: &RequestMemoryEvidence<'a>, source: Option<&SourceOutcome>) -> Result<Vec<Participant<'a>>> {
-    let observations = evidence.observations;
-    let Some(database) = evidence.context.target.database() else { return Err(invalid()) };
-    if !evidence.context.is_valid()
-        || !matches!(evidence.context.partition, SourcePartition::InstanceLocal { .. })
-        || observations.len() > MAX_REQUEST_MEMORY_OBSERVATIONS
-        || !source_coverage::consistent_source(source, observations.iter().map(|row| row.source.as_str()))
-    {
-        return Err(invalid());
-    }
-    let disqualified =
-        ActivityEvidence::disqualified_session_generations(observations.iter().filter_map(|row| row.request.as_ref()))?;
-    let mut keys = BTreeSet::new();
-    let bounds = ObservationBounds::new(&evidence.context.observed_from, &evidence.context.observed_until)
-        .ok_or_else(invalid)?;
-    let mut point = None;
-    observations
-        .iter()
-        .map(|observation| {
-            let at = canonical_time(&observation.observed_at).map_err(|_| invalid())?;
-            if !observation.is_valid()
-                || !observation.fits_database_capture(&database.database)
-                || !bounds.contains(&observation.observed_at)
-                || point.as_ref().is_some_and(|previous| previous != &at)
-            {
-                return Err(invalid());
-            }
-            point = Some(at);
-            let key = observation.key()?;
-            if !keys.insert(key.clone()) {
-                return Err(invalid());
-            }
-            let qualified_request = observation
-                .request
-                .as_ref()
-                .filter(|request| {
-                    evidence.context.has_qualified_local_owner()
-                        && observation.is_admission_participant(&database.database)
-                        && !disqualified.contains(&request.key.session)
-                })
-                .map(|request| &request.key);
-            let resource = qualified_request.and(observation.resource.as_ref());
-            let mechanism =
-                qualified_request.and_then(|_| observed_mechanism(observation, evidence.context.target.engine()));
-            Ok(Participant { observation, key, resource, mechanism, qualified_request })
-        })
-        .collect()
-}
-
-fn observed_mechanism(observation: &ExecutionGrantObservation, engine: Engine) -> Option<MemoryParticipantMechanism> {
-    if observation.state != ExecutionGrantState::Granted
-        || !observation
-            .granted_kibibytes
-            .as_deref()
-            .is_some_and(|value| value.parse::<u64>().is_ok_and(|granted| granted > 0))
-    {
-        return None;
-    }
-    let native_wait = observation.request.as_ref()?.wait.as_ref()?.native_type.as_deref()?;
-    (engine.spec().native_wait_mechanism(native_wait) == Some(WaitMechanism::ClientResultOutput))
-        .then_some(MemoryParticipantMechanism::ReservationDuringClientOutputWait)
-}
-
 fn admission_resources(
     evidence: &RequestMemoryEvidence<'_>,
     participants: &[Participant<'_>],
@@ -130,10 +59,10 @@ fn admission_resources(
     }
     let mut resources: BTreeMap<NativeIdentity, Vec<MemoryParticipantReference>> = BTreeMap::new();
     for participant in participants {
-        let row = participant.observation;
-        if let Some(resource) = participant.resource {
+        let row = participant.observation();
+        if let Some(resource) = participant.resource() {
             resources.entry(resource.clone()).or_default().push(MemoryParticipantReference {
-                observation_key: participant.key.clone(),
+                observation_key: participant.key().to_owned(),
                 observation_identity: row.identity.clone(),
             });
         }
@@ -178,8 +107,8 @@ struct ParticipantWords {
 }
 
 fn participant_words(participant: &Participant<'_>) -> ParticipantWords {
-    let observation = participant.observation;
-    if let Some(MemoryParticipantMechanism::ReservationDuringClientOutputWait) = participant.mechanism {
+    let observation = participant.observation();
+    if let Some(MemoryParticipantMechanism::ReservationDuringClientOutputWait) = participant.mechanism() {
         return ParticipantWords {
             title: observation.granted_kibibytes.as_ref().map_or_else(
                 || t!("view.request_memory.output_wait.title"),
@@ -212,10 +141,10 @@ fn participant_words(participant: &Participant<'_>) -> ParticipantWords {
 }
 
 fn render(participant: Participant<'_>, resources: &[MemoryGrantAdmission]) -> MemoryParticipantExplanation {
-    let observation = participant.observation;
+    let observation = participant.observation();
     let words = participant_words(&participant);
     let mut details = vec![words.explanation, request_context(&participant)];
-    let admission = participant.resource.and_then(|identity| {
+    let admission = participant.resource().and_then(|identity| {
         resources.binary_search_by(|group| group.resource.cmp(identity)).ok().map(|index| &resources[index])
     });
     if let Some(resource) = admission {
@@ -234,10 +163,10 @@ fn render(participant: Participant<'_>, resources: &[MemoryGrantAdmission]) -> M
         }
     }
     MemoryParticipantExplanation {
-        observation_key: participant.key,
+        observation_key: participant.key().to_owned(),
         observation_identity: observation.identity.clone(),
-        mechanism: participant.mechanism,
-        qualified_request: participant.qualified_request.cloned(),
+        mechanism: participant.mechanism(),
+        qualified_request: participant.qualified_request().cloned(),
         title: words.title,
         explanation: details.join(" "),
         investigation: words.investigation,
@@ -268,9 +197,9 @@ fn queue_details(observation: &ExecutionGrantObservation, details: &mut Vec<Stri
 }
 
 fn request_context(participant: &Participant<'_>) -> String {
-    let observation = participant.observation;
+    let observation = participant.observation();
     match observation.request_association {
-        RequestGrantAssociation::GenerationChecked if participant.qualified_request.is_none() => {
+        RequestGrantAssociation::GenerationChecked if participant.qualified_request().is_none() => {
             t!("view.request_memory.request.unqualified")
         }
         RequestGrantAssociation::GenerationChecked => {
@@ -284,10 +213,6 @@ fn request_context(participant: &Participant<'_>) -> String {
         RequestGrantAssociation::ChangedRequest => t!("view.request_memory.request.changed"),
         RequestGrantAssociation::InsufficientEvidence => t!("view.request_memory.request.unqualified"),
     }
-}
-
-fn invalid() -> Error {
-    Error::invalid(t!("view.request_memory.invalid_capture"))
 }
 
 #[cfg(test)]

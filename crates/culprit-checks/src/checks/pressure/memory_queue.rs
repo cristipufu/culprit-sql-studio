@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+mod recorded;
 
 pub fn memory_queue_info() -> CheckInfo {
     CheckInfo {
@@ -18,7 +19,7 @@ check!(
     MemoryQueueCheck: memory_queue_info,
     decide = memory_queues,
     render = memory_queue_finding,
-    case<'s> = MemoryQueue,
+    case<'s> = MemoryQueue<'s>,
     evidence = &[Evidence::Pressure {
         signal: Some(culprit_core::signal_id::MEMORY_GRANTS_PENDING),
         timed_files: false,
@@ -34,7 +35,14 @@ pub(crate) fn memory_queue(snapshot: &Snapshot) -> Vec<Finding> {
 
 /// Queries waiting for memory: on record over a measured period, from grant waits since the start, or queueing when
 /// the scan ran.
-pub struct MemoryQueue {
+pub struct MemoryQueue<'s> {
+    basis: QueueBasis<'s>,
+}
+enum QueueBasis<'s> {
+    Aggregate(AggregateQueue),
+    Recorded(recorded::RecordedQueue<'s>),
+}
+struct AggregateQueue {
     /// Memory waits' share of all waiting, and their time an hour.
     share: f64,
     memory_per_hour: f64,
@@ -60,7 +68,15 @@ pub struct MemoryQueue {
     confidence: Confidence,
 }
 
-fn memory_queues(snapshot: &Snapshot) -> Vec<MemoryQueue> {
+fn memory_queues(snapshot: &Snapshot) -> Vec<MemoryQueue<'_>> {
+    let mut cases: Vec<_> =
+        aggregate_queues(snapshot).into_iter().map(|case| MemoryQueue { basis: QueueBasis::Aggregate(case) }).collect();
+    if let Some(case) = recorded::decide(snapshot) {
+        cases.push(MemoryQueue { basis: QueueBasis::Recorded(case) });
+    }
+    cases
+}
+fn aggregate_queues(snapshot: &Snapshot) -> Vec<AggregateQueue> {
     let total: f64 = snapshot.waits.iter().map(|w| w.wait_ms).sum();
     let memory: f64 = snapshot.waits.iter().filter(|w| category_key(&w.category) == "memory").map(|w| w.wait_ms).sum();
     let share = if total > 0.0 { memory / total } else { 0.0 };
@@ -85,7 +101,7 @@ fn memory_queues(snapshot: &Snapshot) -> Vec<MemoryQueue> {
     let seen_once = !history && !grants;
     // Without Query Store's per-database waits, the totals are the instance's since it started: every database's.
     let shared = instance && !windowed;
-    vec![MemoryQueue {
+    vec![AggregateQueue {
         share,
         memory_per_hour: memory_per_hour.unwrap_or(0.0),
         history,
@@ -117,7 +133,13 @@ fn memory_queues(snapshot: &Snapshot) -> Vec<MemoryQueue> {
     }]
 }
 
-fn memory_queue_finding(snapshot: &Snapshot, m: MemoryQueue) -> Finding {
+fn memory_queue_finding(snapshot: &Snapshot, case: MemoryQueue<'_>) -> Finding {
+    match case.basis {
+        QueueBasis::Aggregate(case) => aggregate_finding(snapshot, case),
+        QueueBasis::Recorded(case) => recorded::render(case),
+    }
+}
+fn aggregate_finding(snapshot: &Snapshot, m: AggregateQueue) -> Finding {
     let mut f = finding(
         "memory-queue",
         &server_key(snapshot),
