@@ -30,6 +30,99 @@ fn assert_no_original_sql(text: &str) {
     }
 }
 
+fn population_report() -> CacheEntryMemoryReport {
+    let [(before_source, before_records), (after_source, after_records)] =
+        culprit_collector::analytical::test_support::cache_entry_memory_comparison_evidence();
+    let evidence = |source: &CollectionDescription| {
+        let mut context = NativeReadContext::from_snapshot(source).unwrap();
+        let SourceObservation::CacheEntryMemory { focus, snapshot } = &source.observation else { panic!() };
+        context.database_writable = focus.context.database_writable;
+        let source = SourceOutcome {
+            source: snapshot.sources[0].source.clone(),
+            state: snapshot.sources[0].state,
+            reason: None,
+            reason_message: None,
+        };
+        (context, source)
+    };
+    fn rows(records: &[TelemetryRecord]) -> Vec<&OperationalObservation> {
+        records
+            .iter()
+            .map(|record| {
+                let TelemetryRecord::Operational(row) = record else { panic!() };
+                row
+            })
+            .collect()
+    }
+    let (before_context, before_coverage) = evidence(&before_source);
+    let (after_context, after_coverage) = evidence(&after_source);
+    let before_rows = rows(&before_records);
+    let after_rows = rows(&after_records);
+    culprit_checks::cache_entry_memory::compare(
+        culprit_checks::cache_entry_memory::CacheEntryMemoryEvidence {
+            context: &before_context,
+            observations: &before_rows,
+            source: Some(&before_coverage),
+            read_complete: true,
+        },
+        culprit_checks::cache_entry_memory::CacheEntryMemoryEvidence {
+            context: &after_context,
+            observations: &after_rows,
+            source: Some(&after_coverage),
+            read_complete: true,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn selected_population_comparison_keeps_shared_exact_totals_named_context_and_lookup_meaning_without_sql() {
+    let report = population_report();
+    let comparison = report.comparison.as_ref().unwrap();
+    let text = cache_entry_memory(&report);
+    assert!(text.contains(&comparison.title) && text.contains(&comparison.summary));
+    assert!(text.contains("9007199254740993") && text.contains("9007199254872065"));
+    assert!(!text.contains("9007199254740992"));
+    for limit in &comparison.limitations {
+        assert!(text.contains(limit));
+    }
+    let retained = &comparison.retained_entries[0];
+    assert!(text.contains(&retained.explanation) && text.contains(&retained.verify));
+    assert!(text.contains(&comparison.additional_contexts[0].explanation));
+    assert!(text.contains("ARITH_ABORT"));
+    assert_no_original_sql(&text);
+}
+
+#[test]
+fn population_comparison_refuses_missing_or_ambiguous_links_and_keeps_independent_fields_bounded() {
+    let original = population_report();
+    for broken in ["missing-current", "foreign-anchor", "duplicate-anchor"] {
+        let mut report = original.clone();
+        let comparison = report.comparison.as_mut().unwrap();
+        comparison.additional_contexts[0].explanation = "additional-context-link-canary".into();
+        match broken {
+            "missing-current" => comparison.additional_contexts[0].right_observation_key = "foreign-current".into(),
+            "foreign-anchor" => comparison.additional_contexts[0].left_observation_key = "foreign-anchor".into(),
+            "duplicate-anchor" => comparison.retained_entries.push(comparison.retained_entries[0].clone()),
+            _ => unreachable!(),
+        }
+        let summary = comparison.summary.clone();
+        let text = cache_entry_memory(&report);
+        assert!(!text.contains("additional-context-link-canary"), "{broken}");
+        assert!(text.contains(&summary));
+    }
+    let mut report = original;
+    let comparison = report.comparison.as_mut().unwrap();
+    comparison.summary = format!("{}private-population-tail", "列".repeat(OBSERVATION_DETAIL_CHARS * 2));
+    comparison.retained_entries[0].explanation =
+        format!("{}private-retained-tail", "列".repeat(OBSERVATION_DETAIL_CHARS * 2));
+    comparison.retained_entries[0].verify = "retained-verification-canary".into();
+    let text = cache_entry_memory(&report);
+    assert!(!text.contains("private-population-tail") && !text.contains("private-retained-tail"));
+    assert!(text.contains("retained-verification-canary"));
+    assert!(text.len() < 64 * 1024);
+}
+
 #[test]
 fn named_set_options_keep_exact_whole_entry_metrics_shared_mechanism_and_investigation() {
     let report = report(CacheEntryMemoryCase::SetOptions);

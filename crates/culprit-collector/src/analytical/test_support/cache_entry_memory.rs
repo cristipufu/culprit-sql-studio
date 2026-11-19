@@ -160,6 +160,38 @@ fn paired_entry(original: &MssqlCacheEntryMemory, case: CacheEntryMemoryCase) ->
     Some(entry)
 }
 
+/// Two independently retained selections share one full anchor incarnation. The second context is additionally
+/// observed, never asserted to have been created between the UTC points. Native selected-scope coverage stays partial.
+pub fn cache_entry_memory_comparison_evidence() -> [(CollectionDescription, Vec<TelemetryRecord>); 2] {
+    let (mut source, mut rows) = cache_entry_memory_evidence(CacheEntryMemoryCase::SetOptions);
+    let SourceObservation::CacheEntryMemory { focus, .. } = &mut source.observation else { unreachable!() };
+    focus.context.database_writable = Some(true);
+    let mut previous = (source.clone(), vec![rows[0].clone()]);
+    let SourceObservation::CacheEntryMemory { focus, .. } = &mut previous.0.observation else { unreachable!() };
+    let TelemetryRecord::Operational(row) = &previous.1[0] else { unreachable!() };
+    let OperationalFact::MssqlCacheEntryMemory(anchor) = &row.fact else { unreachable!() };
+    focus.statements = anchor.statements.iter().map(|statement| statement.context.clone()).collect();
+    cache_entry_point(&mut previous.0, &mut previous.1, "2020-01-01T06:00:02Z", "40");
+    cache_entry_point(&mut source, &mut rows, "2020-01-01T06:00:04Z", "42");
+    [previous, (source, rows)]
+}
+
+fn cache_entry_point(source: &mut CollectionDescription, rows: &mut [TelemetryRecord], at: &str, lookups: &str) {
+    let SourceObservation::CacheEntryMemory { snapshot, .. } = &mut source.observation else { unreachable!() };
+    snapshot.observed_from = at.into();
+    snapshot.observed_until = at.into();
+    snapshot.records = rows.len() as u32;
+    snapshot.sources = vec![StateSourceCoverage::observed(source.source.clone(), rows.len() as u32, false)];
+    for (index, row) in rows.iter_mut().enumerate() {
+        let TelemetryRecord::Operational(row) = row else { unreachable!() };
+        let OperationalFact::MssqlCacheEntryMemory(entry) = &mut row.fact else { unreachable!() };
+        entry.observed_at = at.into();
+        entry.lookup_count = if index == 0 { lookups } else { "1" }.into();
+        row.key = entry.key().expect("same valid native-shaped entry at an ordered point");
+    }
+    assert!(source.partition_is_consistent() && source.observation.covers_request());
+}
+
 fn user_key(value: &str) -> CacheKeyAttribute {
     CacheKeyAttribute { name: "user_id".into(), native_type: Some("int".into()), value: Some(value.into()) }
 }

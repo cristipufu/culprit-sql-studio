@@ -2,4 +2,4 @@
 import type { CacheEntryMemoryReport } from "./CacheEntryMemoryReport";
 import type { CollectedEvidenceContext } from "./CollectedEvidenceContext";
 
-export type CollectedCacheEntryMemoryAnalysis = { context: CollectedEvidenceContext, report: CacheEntryMemoryReport, };
+export type CollectedCacheEntryMemoryAnalysis = { context: CollectedEvidenceContext, baseline_context: CollectedEvidenceContext | null, report: CacheEntryMemoryReport, };

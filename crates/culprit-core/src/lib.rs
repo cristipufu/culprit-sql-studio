@@ -113,7 +113,10 @@ pub use actual::{
 pub use advice::*;
 pub use blocking::{BlockNode, Blocking, BlockingChain, HeadKind, LockWait};
 pub use blocking_report::BlockingReport;
-pub use cache_entry_memory_report::{CacheEntryContextDifference, CacheEntryMemoryExplanation, CacheEntryMemoryReport};
+pub use cache_entry_memory_report::{
+    CacheEntryContextDifference, CacheEntryMemoryExplanation, CacheEntryMemoryReport, CacheEntryPopulationComparison,
+    CacheEntryRetainedChange,
+};
 pub use cached_plan_report::{
     CachedPlanEntry, CachedPlanIdentity, CachedPlanLimit, CachedPlanLimitation, CachedPlanPayload, CachedPlanReport,
     CollectedCachedPlanAnalysis,

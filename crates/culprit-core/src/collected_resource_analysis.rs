@@ -98,6 +98,7 @@ pub struct CollectedStatementGrantAnalysis {
 #[ts(export)]
 pub struct CollectedCacheEntryMemoryAnalysis {
     pub context: CollectedEvidenceContext,
+    pub baseline_context: Option<CollectedEvidenceContext>,
     pub report: crate::CacheEntryMemoryReport,
 }
 

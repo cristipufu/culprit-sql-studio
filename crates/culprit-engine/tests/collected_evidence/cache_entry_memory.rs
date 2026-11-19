@@ -1,4 +1,5 @@
 use super::*;
+mod comparison;
 use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason, RecoveryPayloadBudget},
     test_support::{self, CacheEntryMemoryCase},
@@ -35,7 +36,7 @@ async fn authenticated_cache_objects_reuse_the_pure_view_and_preserve_exact_focu
         let before = fixture.recovery_object_reads();
         let capture = fixture.read_families(FAMILY).await;
         test_support::assert_cache_entry_memory_capture(&capture, &source, &records);
-        let analysis = collected_resources::cache_entry_memory(&capture).unwrap();
+        let analysis = collected_resources::cache_entry_memory(&capture, None).unwrap();
         assert_eq!(serde_json::to_value(&analysis.report).unwrap(), serde_json::to_value(expected).unwrap());
         assert_eq!(analysis.context.source, source);
         assert_eq!(analysis.context.capture, *capture.capture());
@@ -56,7 +57,7 @@ async fn a_multi_statement_object_reports_one_whole_footprint_without_charging_e
     let (source, records) = test_support::cache_entry_memory_evidence(CacheEntryMemoryCase::Complete);
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read_families(FAMILY).await;
-    let analysis = collected_resources::cache_entry_memory(&capture).unwrap();
+    let analysis = collected_resources::cache_entry_memory(&capture, None).unwrap();
     assert_eq!(analysis.report.entries.len(), 1);
     assert_eq!(analysis.context.records.len(), 1);
     let TelemetryRecord::Operational(original) = &analysis.context.records[0].row.record else { panic!() };
@@ -92,7 +93,7 @@ async fn authenticated_set_options_keep_native_pair_roles_exact_bytes_and_safe_v
         let before = fixture.recovery_object_reads();
         let capture = fixture.read_families(FAMILY).await;
         test_support::assert_cache_entry_memory_capture(&capture, &source, &records);
-        let analysis = collected_resources::cache_entry_memory(&capture).unwrap();
+        let analysis = collected_resources::cache_entry_memory(&capture, None).unwrap();
         assert_eq!(analysis.report.entries.len(), 2);
         assert_eq!(analysis.context.records.len(), 2);
         assert_eq!(fixture.recovery_object_reads(), before);
@@ -162,7 +163,7 @@ async fn unknown_cache_keys_and_unavailable_sql_keep_the_original_positive_objec
         let (source, records) = test_support::cache_entry_memory_evidence(case);
         let fixture = Fixture::new(source.clone(), records).await;
         let capture = fixture.read_families(FAMILY).await;
-        let analysis = collected_resources::cache_entry_memory(&capture).unwrap();
+        let analysis = collected_resources::cache_entry_memory(&capture, None).unwrap();
         assert_eq!(analysis.report.source_state, Some(SourceState::Collected));
         assert_eq!(analysis.report.entries.len(), 1);
         assert!(analysis.report.context_differences.is_empty());
@@ -199,7 +200,7 @@ async fn partial_empty_and_unavailable_native_coverage_remain_distinct_from_read
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let capture = fixture.read_families(FAMILY).await;
         assert!(capture.is_read_complete());
-        let analysis = collected_resources::cache_entry_memory(&capture).unwrap();
+        let analysis = collected_resources::cache_entry_memory(&capture, None).unwrap();
         assert_eq!(analysis.report.source_state, Some(expected));
         assert_eq!(analysis.report.entries.len(), records.len());
         assert_eq!(analysis.context.source, source);
@@ -225,7 +226,7 @@ async fn a_lost_row_or_unpublished_capture_cannot_turn_selected_cache_context_in
         }
         let before = fixture.recovery_object_reads();
         let capture = fixture.read_families(FAMILY).await;
-        let analysis = collected_resources::cache_entry_memory(&capture).unwrap();
+        let analysis = collected_resources::cache_entry_memory(&capture, None).unwrap();
         assert!(analysis.report.entries.is_empty());
         assert_eq!(analysis.report.source_state, Some(SourceState::Partial));
         assert_eq!(analysis.context.source, source);
@@ -242,14 +243,14 @@ async fn explicit_recovery_restores_eight_sql_payloads_and_one_whole_entry_witho
     let fixture = Fixture::new(source.clone(), records.clone()).await;
     let before = fixture.recovery_object_reads();
     let capture = fixture.read_families(FAMILY).await;
-    let preview = collected_resources::cache_entry_memory(&capture).unwrap();
+    let preview = collected_resources::cache_entry_memory(&capture, None).unwrap();
     assert!(preview.report.entries.is_empty());
     assert_eq!(preview.report.source_state, Some(SourceState::Partial));
     assert!(preview.context.read_gaps.iter().any(|gap| gap.reason == EvidenceGapReason::DetailInRecovery));
     assert_eq!(fixture.recovery_object_reads(), before);
     let capture = fixture.read_families_with_recovery(FAMILY, RecoveryPayloadBudget::default()).await;
     test_support::assert_cache_entry_memory_capture(&capture, &source, &records);
-    let restored = collected_resources::cache_entry_memory(&capture).unwrap();
+    let restored = collected_resources::cache_entry_memory(&capture, None).unwrap();
     assert_eq!(restored.report.entries.len(), 1);
     assert_eq!(restored.report.source_state, Some(SourceState::Collected));
     assert_eq!(restored.context.source, source);
@@ -266,14 +267,14 @@ async fn unrelated_native_datasets_and_missing_selected_family_cannot_be_read_as
     let fixture = Fixture::new(source, records).await;
     let wrong = fixture.read_families(FAMILY).await;
     assert_eq!(
-        collected_resources::cache_entry_memory(&wrong).unwrap_err().detail,
+        collected_resources::cache_entry_memory(&wrong, None).unwrap_err().detail,
         Some(ErrorDetail::Delivery(DeliveryProblem::UnsupportedSchema))
     );
     let (source, records) = test_support::cache_entry_memory_evidence(CacheEntryMemoryCase::Complete);
     let fixture = Fixture::new(source, records).await;
     let wrong = fixture.read_families(&[EvidenceFamily::TuningObservations]).await;
     assert_eq!(
-        collected_resources::cache_entry_memory(&wrong).unwrap_err().detail,
+        collected_resources::cache_entry_memory(&wrong, None).unwrap_err().detail,
         Some(ErrorDetail::Delivery(DeliveryProblem::UnsupportedSchema))
     );
 }

@@ -550,6 +550,43 @@ fn compiler_baseline_selects_one_distinct_authenticated_range_and_rejects_other_
 }
 
 #[test]
+fn cache_baseline_selects_only_the_original_operational_family_with_one_shared_action_budget() {
+    let baseline = culprit_core::telemetry::digest(b"earlier-selected-cache-population");
+    let args = analyze_args(
+        "cache-entry-memory",
+        &["--cache-baseline", &baseline, "--max-queries", "7", "--max-rows", "3", "--page-rows", "1"],
+    );
+    let selection = selection::EvidenceSelection::from_command(EvidenceCommand::Analyze(args)).unwrap();
+    let request = selection.common.request(selection.plan.families.clone(), Format::Json).unwrap();
+    assert_eq!(request.families, [EvidenceFamily::OperationalSamples]);
+    assert_eq!(request.budget.max_queries, 7);
+    assert_eq!(request.budget.max_rows, 3);
+    assert!(request.budget.recovery_payloads.is_none());
+    assert_eq!(selection.plan.companions.cache_baseline.as_deref(), Some(baseline.as_str()));
+    assert!(selection.plan.companions.compilation_baseline.is_none());
+    assert!(selection.plan.companions.activity.is_none());
+    assert!(selection.plan.companions.definitions.is_none());
+}
+
+#[tokio::test]
+async fn invalid_or_foreign_cache_baselines_fail_before_configuration_and_credentials() {
+    let baseline = culprit_core::telemetry::digest(b"earlier-selected-cache-population");
+    for analysis in ["compilation", "queries", "request-memory"] {
+        let mut args = analyze_args(analysis, &["--cache-baseline", &baseline]);
+        args.common.config = std::env::temp_dir().join("cache-baseline-config-must-not-be-opened.json");
+        let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
+        assert_eq!(error.message, t!("evidence.cli.cache_baseline_only"));
+    }
+    let original = culprit_core::telemetry::digest(b"archive-population-capture");
+    for invalid in ["../outside", "", original.as_str()] {
+        let mut args = analyze_args("cache-entry-memory", &["--cache-baseline", invalid]);
+        args.common.config = std::env::temp_dir().join("cache-baseline-config-must-not-be-opened.json");
+        let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::InvalidContract)));
+    }
+}
+
+#[test]
 fn original_activity_selection_is_an_independent_exact_archive_range() {
     let parent = culprit_core::telemetry::digest(b"original-activity-capture");
     let args = analyze_args("page-waits", &["--activity-range", &parent]);

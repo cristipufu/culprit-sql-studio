@@ -83,8 +83,8 @@ mod connection_outcomes;
 pub use connection_outcomes::{assert_connection_outcome_capture, connection_outcome_evidence_cases};
 mod cache_entry_memory;
 pub use cache_entry_memory::{
-    CacheEntryMemoryCase, assert_cache_entry_memory_capture, cache_entry_memory_evidence,
-    cache_entry_memory_evidence_cases,
+    CacheEntryMemoryCase, assert_cache_entry_memory_capture, cache_entry_memory_comparison_evidence,
+    cache_entry_memory_evidence, cache_entry_memory_evidence_cases,
 };
 mod cleanup;
 mod observations;

@@ -33,8 +33,62 @@ pub(crate) fn cache_entry_memory(report: &CacheEntryMemoryReport) -> String {
     let comparisons = report.context_differences.iter().filter_map(|difference| comparison(report, difference));
     let comparisons = comparisons.take(super::super::BRIEF_FINDING_LIMIT).collect::<Vec<_>>();
     append_native_work_entries(&mut text, comparisons.iter().map(|(title, fields)| (title.as_str(), fields.clone())));
+    append_population_comparison(&mut text, report);
     append_remaining_limitations(&mut text, &limitations);
     text
+}
+
+fn append_population_comparison(text: &mut String, report: &CacheEntryMemoryReport) {
+    let Some(comparison) = &report.comparison else { return };
+    let mut fields = vec![comparison.summary.clone()];
+    fields.extend(comparison.limitations.iter().take(MAX_CACHE_ENTRY_LIMITATIONS).cloned());
+    append_native_work_entries(text, [(comparison.title.as_str(), fields)].into_iter());
+    let retained = comparison.retained_entries.iter().filter_map(|entry| {
+        let title = retained_title(report, entry)?;
+        let mut fields = vec![entry.explanation.clone()];
+        fields.extend(native_metrics(&entry.metrics).take(MAX_CACHE_ENTRY_METRICS));
+        fields.extend([entry.investigation.clone(), entry.verify.clone()]);
+        Some((title.to_owned(), fields))
+    });
+    let additional = comparison.additional_contexts.iter().filter_map(|difference| {
+        let mut anchors = comparison
+            .retained_entries
+            .iter()
+            .filter(|entry| entry.baseline_observation_key == difference.left_observation_key);
+        let anchor = anchors.next()?;
+        if anchors.next().is_some() || anchor.observation_key == difference.right_observation_key {
+            return None;
+        }
+        let left = retained_title(report, anchor)?;
+        let right = displayed_entry_title(report, &difference.right_observation_key)?;
+        Some((
+            t!("evidence.cli.cache_entry_memory.context_pair", left = left, right = right),
+            vec![difference.explanation.clone(), difference.investigation.clone()],
+        ))
+    });
+    let entries = additional.chain(retained).take(super::super::BRIEF_FINDING_LIMIT).collect::<Vec<_>>();
+    append_native_work_entries(text, entries.iter().map(|(title, fields)| (title.as_str(), fields.clone())));
+}
+
+fn retained_title<'a>(
+    report: &'a CacheEntryMemoryReport,
+    entry: &culprit_core::CacheEntryRetainedChange,
+) -> Option<&'a str> {
+    let comparison = report.comparison.as_ref()?;
+    if entry.baseline_observation_key == entry.observation_key
+        || comparison
+            .retained_entries
+            .iter()
+            .filter(|other| {
+                other.baseline_observation_key == entry.baseline_observation_key
+                    || other.observation_key == entry.observation_key
+            })
+            .count()
+            != 1
+    {
+        return None;
+    }
+    displayed_entry_title(report, &entry.observation_key)
 }
 
 fn comparison(

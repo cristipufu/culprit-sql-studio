@@ -1,5 +1,7 @@
 //! Whole-entry footprint and exact native cache-key differences establish context, not harmful churn or reuse.
+mod comparison;
 mod set_options;
+pub use comparison::{CacheEntryMemoryEvidence, compare};
 
 use super::source_coverage;
 use culprit_core::{
@@ -54,6 +56,7 @@ pub fn explain(
         limitations,
         context_differences: if context.has_qualified_local_owner() { differences(&entries) } else { vec![] },
         entries: entries.into_iter().map(|(observation, entry)| render(observation, entry)).collect(),
+        comparison: None,
     })
 }
 
@@ -97,21 +100,7 @@ fn validate<'a>(
 }
 
 fn render(observation: &OperationalObservation, entry: &MssqlCacheEntryMemory) -> CacheEntryMemoryExplanation {
-    let (summary, investigation) = match (entry.cache_object_type.as_str(), entry.object_type.as_str()) {
-        ("Compiled Plan Stub", _) => {
-            (t!("view.cache_entry_memory.entry.stub"), t!("view.cache_entry_memory.investigate.stub"))
-        }
-        ("Compiled Plan", "Adhoc") => {
-            (t!("view.cache_entry_memory.entry.adhoc"), t!("view.cache_entry_memory.investigate.adhoc"))
-        }
-        ("Compiled Plan", "Prepared") => {
-            (t!("view.cache_entry_memory.entry.prepared"), t!("view.cache_entry_memory.investigate.prepared"))
-        }
-        ("Compiled Plan", _) => {
-            (t!("view.cache_entry_memory.entry.module"), t!("view.cache_entry_memory.investigate.module"))
-        }
-        _ => (t!("view.cache_entry_memory.entry.other"), t!("view.cache_entry_memory.investigate.other")),
-    };
+    let (summary, investigation) = entry_words(entry);
     CacheEntryMemoryExplanation {
         observation_key: observation.key.clone(),
         title: t!("view.cache_entry_memory.entry.title", handle = &entry.plan_handle),
@@ -140,9 +129,39 @@ fn render(observation: &OperationalObservation, entry: &MssqlCacheEntryMemory) -
     }
 }
 
+fn entry_words(entry: &MssqlCacheEntryMemory) -> (String, String) {
+    match (entry.cache_object_type.as_str(), entry.object_type.as_str()) {
+        ("Compiled Plan Stub", _) => {
+            (t!("view.cache_entry_memory.entry.stub"), t!("view.cache_entry_memory.investigate.stub"))
+        }
+        ("Compiled Plan", "Adhoc") => {
+            (t!("view.cache_entry_memory.entry.adhoc"), t!("view.cache_entry_memory.investigate.adhoc"))
+        }
+        ("Compiled Plan", "Prepared") => {
+            (t!("view.cache_entry_memory.entry.prepared"), t!("view.cache_entry_memory.investigate.prepared"))
+        }
+        ("Compiled Plan", _) => {
+            (t!("view.cache_entry_memory.entry.module"), t!("view.cache_entry_memory.investigate.module"))
+        }
+        _ => (t!("view.cache_entry_memory.entry.other"), t!("view.cache_entry_memory.investigate.other")),
+    }
+}
+
 fn known_keys(entry: &MssqlCacheEntryMemory) -> bool {
     !entry.cache_keys.is_empty()
         && entry.cache_keys.iter().all(|attribute| attribute.native_type.is_some() && attribute.value.is_some())
+}
+
+fn same_cache_keys_except(left: &MssqlCacheEntryMemory, right: &MssqlCacheEntryMemory, excluded: Option<&str>) -> bool {
+    known_keys(left)
+        && known_keys(right)
+        && left.cache_keys.len() == right.cache_keys.len()
+        && left.cache_keys.iter().all(|left| {
+            right.cache_keys.iter().find(|right| left.name == right.name).is_some_and(|right| {
+                left.native_type == right.native_type
+                    && (excluded == Some(left.name.as_str()) || left.value == right.value)
+            })
+        })
 }
 
 fn differences(entries: &[Entry<'_>]) -> Vec<CacheEntryContextDifference> {

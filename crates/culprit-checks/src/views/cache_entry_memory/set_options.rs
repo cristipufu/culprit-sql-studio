@@ -1,5 +1,5 @@
 //! sys.dm_exec_plan_attributes flags describe compiled context; they are not @@OPTIONS or compilation counters.
-use super::{MssqlCacheEntryMemory, format, known_keys, same_native_range, same_native_statement, t};
+use super::{MssqlCacheEntryMemory, format, same_cache_keys_except, same_native_range, same_native_statement, t};
 
 // Only the documented boolean SET flags may become ON/OFF advice. Parallel, internal, parameterization,
 // date and language flags keep their native values without acquiring session-setting semantics.
@@ -33,7 +33,7 @@ pub(super) fn select<'a>(left: &'a MssqlCacheEntryMemory, right: &'a MssqlCacheE
         || left.cache_object_type != "Compiled Plan"
         || right.cache_object_type != "Compiled Plan"
         || left.object_type != right.object_type
-        || !only_set_options_differ(left, right)
+        || !same_cache_keys_except(left, right, Some("set_options"))
     {
         return None;
     }
@@ -52,30 +52,30 @@ pub(super) fn select<'a>(left: &'a MssqlCacheEntryMemory, right: &'a MssqlCacheE
     Some(Difference { left, right, options })
 }
 
-fn same_original_statement(left: &MssqlCacheEntryMemory, right: &MssqlCacheEntryMemory) -> bool {
-    left.statements.iter().any(|statement| {
-        if !statement.statement.is_available()
-            || left.statements.iter().filter(|other| same_native_range(statement, other)).count() != 1
-        {
-            return false;
-        }
-        let mut matches = right.statements.iter().filter(|other| same_native_range(statement, other));
-        let Some(other) = matches.next() else { return false };
-        matches.next().is_none()
-            && statement.context.source_text_bytes == other.context.source_text_bytes
-            && statement.statement == other.statement
-    })
+pub(super) fn same_original_statement(left: &MssqlCacheEntryMemory, right: &MssqlCacheEntryMemory) -> bool {
+    left.statements.iter().any(|statement| original_matches(statement, left, right))
 }
 
-fn only_set_options_differ(left: &MssqlCacheEntryMemory, right: &MssqlCacheEntryMemory) -> bool {
-    known_keys(left)
-        && known_keys(right)
-        && left.cache_keys.len() == right.cache_keys.len()
-        && left.cache_keys.iter().all(|left| {
-            right.cache_keys.iter().find(|right| left.name == right.name).is_some_and(|right| {
-                left.native_type == right.native_type && (left.name == "set_options" || left.value == right.value)
-            })
-        })
+pub(super) fn same_original_selection(left: &MssqlCacheEntryMemory, right: &MssqlCacheEntryMemory) -> bool {
+    left.statements.len() == right.statements.len()
+        && left.statements.iter().all(|statement| original_matches(statement, left, right))
+}
+
+fn original_matches(
+    statement: &super::CacheEntryStatement,
+    left: &MssqlCacheEntryMemory,
+    right: &MssqlCacheEntryMemory,
+) -> bool {
+    if !statement.statement.is_available()
+        || left.statements.iter().filter(|other| same_native_range(statement, other)).count() != 1
+    {
+        return false;
+    }
+    let mut matches = right.statements.iter().filter(|other| same_native_range(statement, other));
+    let Some(other) = matches.next() else { return false };
+    matches.next().is_none()
+        && statement.context.source_text_bytes == other.context.source_text_bytes
+        && statement.statement == other.statement
 }
 
 fn mask(entry: &MssqlCacheEntryMemory) -> Option<u32> {

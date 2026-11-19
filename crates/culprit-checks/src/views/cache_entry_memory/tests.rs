@@ -1,6 +1,7 @@
 use super::*;
 use culprit_core::{Engine, telemetry::*};
 
+mod comparison;
 mod set_options;
 
 fn context() -> NativeReadContext {

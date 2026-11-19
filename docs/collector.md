@@ -497,6 +497,11 @@ contexts for the same exact batch and statement; they do not establish wasted me
 The authenticated capture retains the exact original statement selectors. Missing selectors cannot trigger a
 cache-wide search, and an ordinary snapshot cannot bypass selection or publish an empty selected-cache report.
 
+Add `--cache-baseline EARLIER_RANGE` to `--analysis cache-entry-memory` to compare two original captures. Both
+selections share the action's read budget and explicit recovery policy. Matching native entry incarnations allow
+exact retained-byte and cache-lookup deltas. Additional SET contexts are described as newly observed in these
+selected sets; the comparison does not establish cache creation, eviction, global growth or wasted memory.
+
 Use `collect once --selection FILE` for an exact serialized `CollectionSelection`, with the normal output and
 budget flags. The JSON file is limited to 1 MiB and replaces `--collection`, `--from` and `--until`. A cache-memory
 selection uses `kind: "cache-entry-memory"` and a `focus` containing the original `NativeReadContext` and selected

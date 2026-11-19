@@ -47,6 +47,8 @@ pub(crate) struct AnalyzeArgs {
     activity_range: Option<String>,
     #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.compilation_baseline"))]
     compilation_baseline: Option<String>,
+    #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.cache_baseline"))]
+    cache_baseline: Option<String>,
     #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.blocking_range"))]
     blocking_range: Option<String>,
     #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.definitions_range"))]
@@ -79,6 +81,14 @@ impl AnalyzeArgs {
                 return Err(DeliveryProblem::InvalidContract.error());
             }
         }
+        if let Some(range) = &self.cache_baseline {
+            if self.analysis != Analysis::CacheEntryMemory {
+                return Err(culprit_core::Error::invalid(t!("evidence.cli.cache_baseline_only")));
+            }
+            if !valid_digest(range) || range == &self.common.range {
+                return Err(DeliveryProblem::InvalidContract.error());
+            }
+        }
         if let Some(range) = &self.blocking_range {
             if self.analysis != Analysis::MaintenanceBlocking {
                 return Err(culprit_core::Error::invalid(t!("evidence.cli.blocking_range_only")));
@@ -96,6 +106,7 @@ impl AnalyzeArgs {
             if !valid_digest(range)
                 || range == &self.common.range && self.analysis != Analysis::PageServerReads
                 || self.compilation_baseline.as_ref() == Some(range)
+                || self.cache_baseline.as_ref() == Some(range)
             {
                 return Err(DeliveryProblem::InvalidContract.error());
             }
@@ -386,7 +397,7 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             emit(out, &analysis, common.max_output_bytes, || observations::statement_grants(&analysis.report))?;
         }
         Some(Analysis::CacheEntryMemory) => {
-            let analysis = culprit_engine::collected_resources::cache_entry_memory(&capture)?;
+            let analysis = culprit_engine::collected_resources::cache_entry_memory(&capture, baseline.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::cache_entry_memory(&analysis.report))?;
         }
         Some(Analysis::RuntimeDistributions) => {
@@ -526,13 +537,19 @@ async fn read_captures(
     } else {
         None
     };
-    let baseline = if let Some(range) = &companions.compilation_baseline {
-        if !capture
-            .source()
-            .observation
-            .snapshot()
-            .is_some_and(|snapshot| snapshot.dataset == culprit_core::telemetry::SnapshotDataset::QueryCompilation)
-        {
+    let baseline_selection = match (&companions.compilation_baseline, &companions.cache_baseline) {
+        (Some(range), None) => Some((range, culprit_core::telemetry::SnapshotDataset::QueryCompilation)),
+        (None, Some(range)) => {
+            if !matches!(capture.source().observation, SourceObservation::CacheEntryMemory { .. }) {
+                return Err(DeliveryProblem::UnsupportedSchema.error());
+            }
+            Some((range, culprit_core::telemetry::SnapshotDataset::CacheEntryMemory))
+        }
+        (None, None) => None,
+        (Some(_), Some(_)) => return Err(DeliveryProblem::InvalidContract.error()),
+    };
+    let baseline = if let Some((range, dataset)) = baseline_selection {
+        if !capture.source().observation.snapshot().is_some_and(|snapshot| snapshot.dataset == dataset) {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
         Some(session.read(range, &[EvidenceFamily::OperationalSamples]).await?)

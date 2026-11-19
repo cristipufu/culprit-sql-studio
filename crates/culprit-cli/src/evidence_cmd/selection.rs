@@ -17,6 +17,7 @@ pub(super) struct ReadPlan {
 pub(super) struct CompanionReadPlan {
     pub activity: Option<String>,
     pub compilation_baseline: Option<String>,
+    pub cache_baseline: Option<String>,
     pub blocking: Option<String>,
     pub definitions: Option<DefinitionRead>,
 }
@@ -102,6 +103,7 @@ impl EvidenceSelection {
                         companions: CompanionReadPlan {
                             activity: args.activity_range,
                             compilation_baseline: args.compilation_baseline,
+                            cache_baseline: args.cache_baseline,
                             blocking: args.blocking_range,
                             definitions,
                         },
