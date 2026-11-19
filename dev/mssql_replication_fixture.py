@@ -32,6 +32,9 @@ CERTIFICATE_CHUNK_RADIX = 32
 SEEDING_BUDGET = 120
 READINESS_QUERY_BUDGET = 5
 POLL_INTERVAL = 0.2
+DIAGNOSTIC_BUDGET = 30
+DIAGNOSTIC_OPERATION_BUDGET = 5
+PEER_PROBE_BUDGET = 3
 VALUE_PREFIX = "culprit_fixture_value:"
 CERTIFICATE_PREFIX = "culprit_fixture_certificate:"
 CERTIFICATE_LINE_WIDTH = len(CERTIFICATE_PREFIX) + CERTIFICATE_CHUNK_HEX
@@ -105,6 +108,7 @@ class SqlServerReplication:
             certificates = {role: self.create_endpoint(database) for role, database, _ in self.members}
             self.trust_peer(self.primary, certificates["secondary"])
             self.trust_peer(self.secondary, certificates["primary"])
+            self.report_diagnostics("before AG creation", include_server_messages=False)
             self.create_group()
             self.wait_until_ready()
             self.setup_elapsed_seconds = time.monotonic() - started
@@ -121,18 +125,108 @@ class SqlServerReplication:
         self.stack.close()
 
     def report_failure(self):
+        self.report_diagnostics("failure", include_server_messages=True)
+
+    def report_diagnostics(self, stage, *, include_server_messages):
+        deadline = time.monotonic() + DIAGNOSTIC_BUDGET
         for role, database, _ in self.members:
-            try:
-                if not database.owns_container():
-                    continue
-                print(f"Owned AG {role} state and final server messages:", flush=True)
-                database.commands.run(["docker", "inspect", "--format",
-                                       "{{.State.Status}} OOM={{.State.OOMKilled}} exit={{.State.ExitCode}}",
-                                       database.name], timeout=5, check=False, echo=True)
-                database.commands.run(["docker", "logs", "--tail", "60", database.name],
-                                      timeout=5, check=False, echo=True)
-            except (OSError, RuntimeError, TimeoutError) as error:
-                print(f"Owned AG {role} diagnostics unavailable: {type(error).__name__}", flush=True)
+            peer = self.secondary if database is self.primary else self.primary
+            print(f"Owned AG {role} {stage} diagnostics:", flush=True)
+            operations = (
+                ("bridge", lambda timeout: self.report_bridge(database, timeout)),
+                ("endpoint certificates and grants", lambda timeout: self.report_endpoint(database, timeout)),
+                ("peer DNS and TCP", lambda timeout: self.report_peer(database, peer, timeout)),
+            )
+            if include_server_messages:
+                operations = (
+                    ("state", lambda timeout: database.commands.run(
+                        ["docker", "inspect", "--format",
+                         "{{.State.Status}} OOM={{.State.OOMKilled}} exit={{.State.ExitCode}}", database.name],
+                        timeout=timeout, check=False, echo=True)),
+                    ("server messages", lambda timeout: database.commands.run(
+                        ["docker", "logs", "--tail", "60", database.name], timeout=timeout, check=False, echo=True)),
+                ) + operations
+            for label, operation in operations:
+                if not self.diagnostic_operation(database, deadline, label, operation):
+                    break
+
+    @staticmethod
+    def diagnostic_operation(database, deadline, label, operation):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print("Owned AG diagnostic budget exhausted", flush=True)
+            return False
+        try:
+            if not database.owns_container(timeout=min(DIAGNOSTIC_OPERATION_BUDGET, remaining)):
+                return False
+        except (OSError, RuntimeError, TimeoutError) as error:
+            print(f"Owned AG diagnostic ownership unavailable: {type(error).__name__}", flush=True)
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        print(f"Owned AG diagnostic: {label}", flush=True)
+        try:
+            operation(min(DIAGNOSTIC_OPERATION_BUDGET, remaining))
+        except (OSError, RuntimeError, TimeoutError) as error:
+            print(f"Owned AG diagnostic unavailable: {type(error).__name__}", flush=True)
+        return True
+
+    def report_bridge(self, database, timeout):
+        selected = ('{{with index .NetworkSettings.Networks "' + self.network.name + '"}}'
+                    'IP={{.IPAddress}} aliases={{json .Aliases}}{{end}}')
+        database.commands.run(["docker", "inspect", "--format", selected, database.name],
+                              timeout=timeout, check=False, echo=True)
+
+    def report_endpoint(self, database, timeout):
+        # Only public metadata for the fixture's fixed endpoint, certificate names and exact owned AG.
+        # No CERTENCODED/private key, password hash, credential, application data or arbitrary catalog walk.
+        statement = f"""/* culprit */ SET NOCOUNT ON; SET LOCK_TIMEOUT 1000;
+SELECT TOP(1) e.name,e.state_desc,e.connection_auth_desc,e.is_encryption_enabled,
+ e.encryption_algorithm_desc,t.port,t.ip_address,e.certificate_id
+FROM sys.database_mirroring_endpoints e
+LEFT JOIN sys.tcp_endpoints t ON t.endpoint_id=e.endpoint_id
+WHERE e.name={sql_string(ENDPOINT_NAME)};
+SELECT TOP(1) name,is_master_key_encrypted_by_server FROM sys.databases WHERE name=N'master';
+SELECT TOP(2) c.name,CONVERT(varchar(66),c.thumbprint,1) AS public_thumbprint,
+ u.name AS certificate_owner,l.name AS mapped_login,c.pvt_key_encryption_type_desc,c.start_date,c.expiry_date
+FROM sys.certificates c
+LEFT JOIN sys.database_principals u ON u.principal_id=c.principal_id
+LEFT JOIN sys.server_principals l ON l.sid=u.sid
+WHERE c.name IN ({sql_string(CERTIFICATE_NAME)},N'culprit_ag_peer_certificate') ORDER BY c.name;
+SELECT TOP(4) e.name AS endpoint_name,l.name AS grantee,p.permission_name,p.state_desc
+FROM sys.endpoints e
+JOIN sys.server_permissions p ON p.major_id=e.endpoint_id AND p.class_desc=N'ENDPOINT'
+JOIN sys.server_principals l ON l.principal_id=p.grantee_principal_id
+WHERE e.name={sql_string(ENDPOINT_NAME)} AND l.name=N'culprit_ag_peer' AND p.permission_name=N'CONNECT';
+SELECT TOP(2) r.replica_server_name,r.endpoint_url
+FROM sys.availability_replicas r JOIN sys.availability_groups g ON g.group_id=r.group_id
+WHERE g.name={sql_string(self.name)} ORDER BY r.replica_server_name;
+"""
+        _, output = database.sql(statement, database="master", timeout=timeout)
+        print(output, end="" if output.endswith("\n") else "\n", flush=True)
+
+    @staticmethod
+    def report_peer(database, peer, timeout):
+        deadline = time.monotonic() + min(PEER_PROBE_BUDGET, timeout)
+        if not re.fullmatch(r"[ps]" + re.escape(peer.owner[:14]), member_hostname(peer)):
+            raise RuntimeError("the owned AG peer hostname changed before its diagnostic probe")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not peer.owns_container(timeout=remaining):
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        # Reachability is diagnostic evidence only; it cannot satisfy AG readiness or endpoint authentication.
+        script = ('set -euo pipefail; printf "peer=%s port=%s\\n" "$1" "$2"; '
+                  'getent ahostsv4 "$1" | head -n 4; '
+                  'if exec 3<>/dev/tcp/"$1"/"$2"; then printf "tcp=connected\\n"; '
+                  'else printf "tcp=unavailable\\n"; exit 1; fi')
+        status, _ = database.commands.run(
+            ["docker", "exec", database.name, "timeout", str(remaining), "bash", "-c", script,
+             "culprit-ag-peer-probe", member_hostname(peer), str(ENDPOINT_PORT)],
+            timeout=remaining, check=False, echo=True)
+        print(f"Owned AG peer probe exit={status}", flush=True)
 
     def require_cached_images(self):
         for _, database, _ in self.members:

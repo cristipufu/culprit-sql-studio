@@ -24,6 +24,7 @@ mod tests {
     use std::time::{Duration, Instant};
     use tokio::sync::oneshot;
     const CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
+    const OPTIONAL_SETUP_DELAY: Duration = Duration::from_millis(500);
     fn marker() -> String {
         format!("{TAG} /* unmatched-preview-fixture */")
     }
@@ -31,6 +32,7 @@ mod tests {
         let _ = tokio::time::timeout(CLEANUP_TIMEOUT, conn.disconnect()).await;
     }
     async fn worker(
+        connector: Arc<Connector>,
         client: Conn,
         control: Conn,
         sql: &str,
@@ -38,7 +40,7 @@ mod tests {
         setting: &str,
         cancellation: oneshot::Receiver<()>,
     ) -> Result<ResultSet> {
-        crate::read::preview_with_clients(connector(), client, control, sql, limit, setting, cancellation).await
+        crate::read::preview_with_clients(connector, client, control, sql, limit, setting, cancellation).await
     }
     use culprit_core::{ConnectionSpec, Engine, ErrorCode};
 
@@ -108,18 +110,21 @@ mod tests {
         let control = connector.connect(Scope::Server).await.unwrap();
         let (owner, canceled) = oneshot::channel();
         // A deliberately slow optional setup round-trip used to shorten the SELECT's client budget by 500 ms.
+        let lifecycle_timeout = crate::read::preview_lifecycle_timeout(OPTIONAL_SETUP_DELAY);
         let started = Instant::now();
         // Stream a large Cartesian product of tiny derived tables: no fixture data or SLEEP shortcut in the query.
         let digits = "(SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9)";
         let tables = (0..9).map(|i| format!("{digits} AS n{i}")).collect::<Vec<_>>().join(" CROSS JOIN ");
         let sum = (0..9).map(|i| format!("n{i}.n")).collect::<Vec<_>>().join(" + ");
         let sql = format!("SELECT COUNT(*) AS culprit_preview_cancel_test FROM {tables} WHERE MOD({sum}, 2) = 0");
-        let error = worker(conn, control, &sql, 1, "SELECT SLEEP(0.5)", canceled).await.unwrap_err();
+        let setup = format!("SELECT SLEEP({})", OPTIONAL_SETUP_DELAY.as_secs_f64());
+        let error = worker(connector.clone(), conn, control, &sql, 1, &setup, canceled).await.unwrap_err();
         drop(owner);
+        assert_eq!(connector.source_shutdown(), SourceShutdown::Quiescent);
         assert_eq!(error.code, ErrorCode::Timeout);
         assert!(!error.message.contains("could not confirm"), "{}", error.message);
         assert!(started.elapsed() >= PREVIEW_TIMEOUT + Duration::from_millis(400), "{:?}", started.elapsed());
-        assert!(started.elapsed() < Duration::from_secs(8), "{:?}", started.elapsed());
+        assert!(started.elapsed() < lifecycle_timeout, "{:?}", started.elapsed());
     }
 
     #[tokio::test]
@@ -131,9 +136,17 @@ mod tests {
         let control = connector.connect(Scope::Server).await.unwrap();
         let (owner, canceled) = oneshot::channel();
         // An unsupported setting must not prevent ordinary previews.
-        let result = worker(conn, control, "SELECT 42", 1, "SET SESSION culprit_unsupported_timeout = 5", canceled)
-            .await
-            .unwrap();
+        let result = worker(
+            connector.clone(),
+            conn,
+            control,
+            "SELECT 42",
+            1,
+            "SET SESSION culprit_unsupported_timeout = 5",
+            canceled,
+        )
+        .await
+        .unwrap();
         assert_eq!(result.rows[0][0], serde_json::json!(42));
         drop(owner);
         let mut conn = connector.connect(Scope::Database).await.unwrap();
@@ -148,10 +161,12 @@ mod tests {
         let id = conn.id();
         let started = Instant::now();
         let error =
-            worker(conn, control, sql, 1, "SET SESSION culprit_unsupported_timeout = 5", canceled).await.unwrap_err();
+            worker(connector.clone(), conn, control, sql, 1, "SET SESSION culprit_unsupported_timeout = 5", canceled)
+                .await
+                .unwrap_err();
         drop(owner);
         assert_eq!(error.code, ErrorCode::Timeout);
-        assert!(started.elapsed() < Duration::from_secs(8), "{:?}", started.elapsed());
+        assert!(started.elapsed() < crate::read::preview_lifecycle_timeout(Duration::ZERO), "{:?}", started.elapsed());
         assert_eq!(active(&connector, id).await, 0, "deadline left a server query running");
 
         let mut conn = connector.connect(Scope::Database).await.unwrap();
@@ -159,8 +174,10 @@ mod tests {
         let control = connector.connect(Scope::Server).await.unwrap();
         let (owner, canceled) = oneshot::channel();
         let id = conn.id();
+        let worker_connector = connector.clone();
         let task = tokio::spawn(async move {
-            worker(conn, control, sql, 1, "SET SESSION culprit_unsupported_timeout = 5", canceled).await
+            worker(worker_connector, conn, control, sql, 1, "SET SESSION culprit_unsupported_timeout = 5", canceled)
+                .await
         });
         for _ in 0..100 {
             if active(&connector, id).await == 1 {

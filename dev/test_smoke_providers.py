@@ -16,6 +16,41 @@ spec = importlib.util.spec_from_file_location("smoke_providers", Path(__file__).
 smoke = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = smoke
 spec.loader.exec_module(smoke)
+container_spec = importlib.util.spec_from_file_location("smoke_container", Path(__file__).with_name("smoke-container.py"))
+container = importlib.util.module_from_spec(container_spec)
+container_spec.loader.exec_module(container)
+
+
+class ContainerSchema(unittest.TestCase):
+    def assets(self):
+        return {"routes": [{"table": table, "mapping": f"{table}Mapping", "format": "json",
+                            "blob_prefix": f"ready/{table}/", "blob_suffix": ".ndjson"}
+                           for table in sorted(container.ANALYTICAL_TABLES)]}
+
+    def test_all_native_tables_and_publication_have_exact_routes_independent_of_order(self):
+        assets = self.assets()
+        assets["routes"].reverse()
+        container.verify_schema(assets)
+
+    def test_an_unchanged_route_count_cannot_hide_missing_publication_or_an_unrelated_stream(self):
+        for replacement in ["CulpritObjectsV1", "unrelated-table"]:
+            assets = self.assets()
+            publication = next(route for route in assets["routes"] if route["table"] == "CulpritPublishedRangesV1")
+            publication.update(table=replacement, mapping=f"{replacement}Mapping", blob_prefix=f"ready/{replacement}/")
+            with self.assertRaisesRegex(ValueError, "exactly once"):
+                container.verify_schema(assets)
+
+    def test_missing_duplicate_or_changed_ready_file_routes_are_rejected(self):
+        for change in ["missing", "duplicate", "mapping", "format", "blob_prefix", "blob_suffix"]:
+            assets = self.assets()
+            if change == "missing":
+                assets["routes"].pop()
+            elif change == "duplicate":
+                assets["routes"].append(assets["routes"][0].copy())
+            else:
+                assets["routes"][0][change] = "unrelated-route"
+            with self.assertRaisesRegex(ValueError, "exactly once"):
+                container.verify_schema(assets)
 
 
 class DisposableOwnership(unittest.TestCase):
@@ -344,6 +379,176 @@ class MssqlFixtureIdentity(unittest.TestCase):
         self.assertEqual(primary.fixture.database, expected)
         self.assertEqual(secondary.fixture.database, expected)
         self.assertEqual(topology.name, "culprit_ag_" + primary.owner)
+
+
+class MssqlFailureDiagnostics(unittest.TestCase):
+    def topology(self):
+        fixture = next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql")
+        members = [smoke.Database(smoke.replace(fixture, name=f"mssql-ag-{role}"))
+                   for role in ("primary", "secondary")]
+        for database in members:
+            database.commands = Mock()
+            database.commands.run.return_value = (0, database.owner)
+            database.sql = Mock(return_value=(0, "public endpoint metadata\n"))
+        return smoke.SqlServerReplication(*members, smoke.OWNER_LABEL)
+
+    def test_failure_reads_only_bounded_public_metadata_for_the_exact_owned_endpoint_and_group(self):
+        topology = self.topology()
+        with redirect_stdout(io.StringIO()):
+            topology.report_failure()
+        for _, database, _ in topology.members:
+            database.sql.assert_called_once()
+            statement = database.sql.call_args.args[0]
+            self.assertEqual(database.sql.call_args.kwargs["database"], "master")
+            self.assertGreater(database.sql.call_args.kwargs["timeout"], 0)
+            self.assertLessEqual(database.sql.call_args.kwargs["timeout"], 5)
+            for required in ["SET LOCK_TIMEOUT 1000", "TOP(1)", "TOP(2)", "TOP(4)", "connection_auth_desc",
+                             "encryption_algorithm_desc", "c.thumbprint", "u.principal_id=c.principal_id",
+                             "c.pvt_key_encryption_type_desc", "is_master_key_encrypted_by_server",
+                             "l.sid=u.sid", "p.class_desc=N'ENDPOINT'", "p.permission_name=N'CONNECT'",
+                             "culprit_ag_endpoint", "culprit_ag_peer_certificate", topology.name]:
+                self.assertIn(required, statement)
+            for forbidden in ["CERTPRIVATEKEY", "CERTENCODED", "PASSWORD", "ALTER ", "GRANT ", "CREATE "]:
+                self.assertNotIn(forbidden, statement.upper())
+            for call in database.commands.run.call_args_list:
+                self.assertGreater(call.kwargs["timeout"], 0)
+                self.assertLessEqual(call.kwargs["timeout"], 5)
+            bridge = next(call.args[0] for call in database.commands.run.call_args_list
+                          if ".NetworkSettings.Networks" in " ".join(call.args[0]))
+            self.assertIn(topology.network.name, " ".join(bridge))
+            self.assertIn(".IPAddress", " ".join(bridge))
+            self.assertIn(".Aliases", " ".join(bridge))
+
+    def test_missing_or_foreign_members_cannot_supply_native_or_network_diagnostics(self):
+        for result in [(1, "missing"), (0, "foreign-owner")]:
+            topology = self.topology()
+            for _, database, _ in topology.members:
+                database.commands.run.return_value = result
+            with redirect_stdout(io.StringIO()):
+                topology.report_failure()
+            for _, database, _ in topology.members:
+                database.sql.assert_not_called()
+                database.commands.run.assert_called_once()
+                args = database.commands.run.call_args.args[0]
+                self.assertEqual(args[:2], ["docker", "inspect"])
+                self.assertIn(".Config.Labels", args[3])
+
+    def test_peer_probes_attest_both_members_and_keep_the_exact_hostname_out_of_shell_code(self):
+        topology = self.topology()
+        with redirect_stdout(io.StringIO()):
+            topology.report_failure()
+        for database, peer in [(topology.primary, topology.secondary), (topology.secondary, topology.primary)]:
+            calls = [call for call in database.commands.run.call_args_list if call.args[0][:2] == ["docker", "exec"]]
+            self.assertEqual(len(calls), 1)
+            call = calls[0]
+            args = call.args[0]
+            self.assertEqual(args[:4], ["docker", "exec", database.name, "timeout"])
+            self.assertLessEqual(float(args[4]), 3)
+            self.assertLessEqual(call.kwargs["timeout"], 3)
+            self.assertEqual(args[-2:], [peer.hostname, "5022"])
+            script = args[7]
+            self.assertNotIn(peer.hostname, script)
+            self.assertIn('getent ahostsv4 "$1" | head -n 4', script)
+            self.assertIn('/dev/tcp/"$1"/"$2"', script)
+        topology.secondary.commands.run.reset_mock()
+        topology.secondary.commands.run.return_value = (0, "foreign-owner")
+        topology.primary.commands.run.reset_mock()
+        with self.assertRaisesRegex(RuntimeError, "ownership label"):
+            topology.report_peer(topology.primary, topology.secondary, 3)
+        topology.primary.commands.run.assert_not_called()
+        topology.secondary.hostname = "unrelated.example"
+        with self.assertRaisesRegex(RuntimeError, "hostname changed"):
+            topology.report_peer(topology.primary, topology.secondary, 3)
+        topology.primary.commands.run.assert_not_called()
+
+    def test_expired_budget_never_starts_an_operation_or_extends_an_ownership_wait(self):
+        topology = self.topology()
+        database = Mock()
+        operation = Mock()
+        with patch("mssql_replication_fixture.time.monotonic", return_value=10), redirect_stdout(io.StringIO()):
+            self.assertFalse(topology.diagnostic_operation(database, 10, "expired", operation))
+        database.owns_container.assert_not_called()
+        operation.assert_not_called()
+        database.owns_container.return_value = True
+        with patch("mssql_replication_fixture.time.monotonic", side_effect=[0, 3]), redirect_stdout(io.StringIO()):
+            self.assertFalse(topology.diagnostic_operation(database, 2, "ownership consumed budget", operation))
+        database.owns_container.assert_called_once_with(timeout=2)
+        operation.assert_not_called()
+
+    def test_diagnostic_failure_preserves_the_original_setup_error_and_reverse_owned_cleanup(self):
+        topology = self.topology()
+        events = []
+        for role, database, _ in topology.members:
+            database.start = Mock()
+            database.close = Mock(side_effect=lambda role=role: events.append(role))
+            database.sql.side_effect = RuntimeError("must-not-print-secret-canary")
+
+        def network_and_member(args, **_):
+            if args[:3] == ["docker", "network", "rm"]:
+                events.append("network")
+            return (0, topology.primary.owner)
+
+        topology.primary.commands.run.side_effect = network_and_member
+        topology.require_cached_images = Mock()
+        topology.verify_instance_name = Mock()
+        topology.prepare_database = Mock(side_effect=ValueError("original setup failure"))
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaisesRegex(ValueError, "original setup failure"):
+            with topology:
+                self.fail("failed setup cannot become a ready AG")
+        self.assertEqual(events, ["secondary", "primary", "network"])
+        self.assertIn("Owned AG diagnostic unavailable: RuntimeError", output.getvalue())
+        self.assertNotIn("must-not-print-secret-canary", output.getvalue())
+
+    def test_successful_setup_captures_both_endpoints_after_peer_trust_and_before_group_creation_once(self):
+        topology = self.topology()
+        events = []
+        for role, database, _ in topology.members:
+            database.start = Mock()
+            database.close = Mock()
+
+            def metadata(*_, role=role, **__):
+                events.append(f"metadata:{role}")
+                return (0, "public endpoint metadata\n")
+
+            database.sql.side_effect = metadata
+        for method in ["require_cached_images", "verify_instance_name", "prepare_database", "create_endpoint",
+                       "trust_peer", "create_group", "wait_until_ready", "report_failure"]:
+            setattr(topology, method, Mock())
+        topology.trust_peer.side_effect = lambda database, _: events.append(f"trust:{database.name}")
+        topology.create_group.side_effect = lambda: events.append("create group")
+        with redirect_stdout(io.StringIO()), topology:
+            topology.report_failure.assert_not_called()
+        self.assertEqual(events, [f"trust:{topology.primary.name}", f"trust:{topology.secondary.name}",
+                                  "metadata:primary", "metadata:secondary", "create group"])
+        for _, database, _ in topology.members:
+            database.sql.assert_called_once()
+
+    def test_precreation_diagnostics_reuse_ownership_refusal_and_leave_the_original_join_error_intact(self):
+        topology = self.topology()
+        for _, database, _ in topology.members:
+            database.commands.run.return_value = (1, "missing")
+        with redirect_stdout(io.StringIO()):
+            topology.report_diagnostics("before AG creation", include_server_messages=False)
+        for _, database, _ in topology.members:
+            database.sql.assert_not_called()
+            database.commands.run.assert_called_once()
+        topology = self.topology()
+        for _, database, _ in topology.members:
+            database.start = Mock()
+            database.close = Mock()
+            database.sql.side_effect = TimeoutError("diagnostic metadata unavailable")
+        for method in ["require_cached_images", "verify_instance_name", "prepare_database", "create_endpoint",
+                       "trust_peer", "wait_until_ready"]:
+            setattr(topology, method, Mock())
+        topology.create_group = Mock(side_effect=ValueError("original join failed"))
+        with redirect_stdout(io.StringIO()), self.assertRaisesRegex(ValueError, "original join failed"):
+            with topology:
+                self.fail("diagnostics cannot make a failed join ready")
+        topology.create_group.assert_called_once()
+        for _, database, _ in topology.members:
+            self.assertEqual(database.sql.call_count, 2, "one precreation sample and independent failure diagnostics")
+            database.close.assert_called_once()
 
 
 class NativeSelection(unittest.TestCase):

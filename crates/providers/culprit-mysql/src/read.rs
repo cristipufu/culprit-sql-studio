@@ -269,13 +269,24 @@ impl Drop for ReadSession {
     }
 }
 impl Peer {
+    const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+
     async fn close(self) {
-        let timeout = Duration::from_secs(1);
+        let timeout = Self::DISCONNECT_TIMEOUT;
         let _ = tokio::join!(
             tokio::time::timeout(timeout, self.client.disconnect()),
             tokio::time::timeout(timeout, self.control.disconnect())
         );
     }
+}
+
+#[cfg(test)]
+pub(crate) fn preview_lifecycle_timeout(setup: Duration) -> Duration {
+    setup
+        + culprit_core::limits::PREVIEW_TIMEOUT
+        + owned::PREVIEW_EXECUTION_GRACE
+        + owned::ACKNOWLEDGEMENT_TIMEOUT
+        + Peer::DISCONNECT_TIMEOUT
 }
 
 pub(crate) async fn preview(

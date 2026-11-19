@@ -71,7 +71,9 @@ async fn genuine_copy_stdin_retains_exact_original_native_scope_request_and_prog
             };
             assert_eq!(*profile, CurrentRequestWorkProfile::PostgresCopy);
             assert_eq!(result.membership, FocusedRequestMembership::NotObserved);
-            assert_eq!(result.binding, FocusedRequestBinding::ParticipantChanged);
+            // release_and_complete closes this actor and verifies its original native backend has exited.
+            // A later request cannot replace that missing participant.
+            assert_eq!(result.binding, FocusedRequestBinding::ParticipantMissing);
             assert_eq!(result.focus.as_deref(), Some(&original.focus));
             assert_eq!(snapshot.records, 0);
             assert!(absent.records.is_empty());

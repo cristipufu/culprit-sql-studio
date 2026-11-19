@@ -66,11 +66,30 @@ async fn a_native_timeout_discards_the_interrupted_client_and_preserves_known_sh
         CollectionBudget { statement_timeout_ms: 200, ..Default::default() },
         Scope::Server,
     );
-    // A standalone SLEEP returns 1, rather than an error, when MySQL interrupts it. Put the delay in a predicate
-    // so this exercises an interrupted statement: https://dev.mysql.com/doc/refman/8.0/en/miscellaneous-functions.html
-    let error = reader.read("SELECT 1 AS value FROM DUAL WHERE SLEEP(30)=0", vec![], 1).await.err().unwrap();
+    // A constant derived singleton can collapse to SLEEP's special no-error interruption path. Read one real
+    // catalog row with a column-dependent, bounded delay to exercise an interrupted statement instead.
+    // https://dev.mysql.com/doc/refman/8.4/en/miscellaneous-functions.html#function_sleep
+    let result = reader
+        .read(
+            "SELECT 1 FROM information_schema.COLLATIONS WHERE SLEEP(IF(COLLATION_NAME='',29,30))=0 LIMIT 1",
+            vec![],
+            1,
+        )
+        .await;
+    let shutdown = reader.close().await;
+    assert_eq!(shutdown, SourceShutdown::Quiescent);
+    assert_eq!(connector.source_shutdown(), SourceShutdown::Quiescent);
+    let Err(error) = result else {
+        panic!("the bounded native catalog statement must reach its execution timeout");
+    };
     assert_eq!(error.code, culprit_core::ErrorCode::Timeout);
-    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+
+    // A new owner may continue only after the interrupted request and its source have confirmed shutdown.
+    let mut continued = ReadSession::new(connector.clone(), CollectionBudget::default(), Scope::Server);
+    let next = continued.read("SELECT 42 AS answer", vec![], 1).await;
+    let shutdown = continued.close().await;
+    assert_eq!(shutdown, SourceShutdown::Quiescent);
+    assert_eq!(next.unwrap()[0].unsigned("answer").unwrap(), Some(42));
     assert_eq!(connector.source_shutdown(), SourceShutdown::Quiescent);
 }
 

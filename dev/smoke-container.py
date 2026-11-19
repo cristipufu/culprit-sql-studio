@@ -11,6 +11,24 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 OWNER_LABEL = "dev.culprit.image-smoke"
+ANALYTICAL_TABLES = frozenset({
+    "CulpritQueryRuntimeV1", "CulpritQueryWaitsV1", "CulpritQueryDefinitionsV1", "CulpritPlanDefinitionsV1",
+    "CulpritResourceSamplesV1", "CulpritActivityV1", "CulpritDeadlocksV1", "CulpritOperationalV1",
+    "CulpritWaitCountersV1", "CulpritReplicationV1", "CulpritSettingsV1", "CulpritTuningV1", "CulpritObjectsV1",
+    "CulpritPublishedRangesV1",
+})
+
+
+def verify_schema(assets):
+    routes = assets.get("routes")
+    if not isinstance(routes, list) or not all(isinstance(route, dict) for route in routes):
+        raise ValueError("The container must expose native analytical routes and publication")
+    expected = [{"table": table, "mapping": f"{table}Mapping", "format": "json",
+                 "blob_prefix": f"ready/{table}/", "blob_suffix": ".ndjson"}
+                for table in sorted(ANALYTICAL_TABLES)]
+    if sorted(routes, key=lambda route: str(route.get("table", ""))) != expected:
+        raise ValueError("The container must expose each native analytical stream and publication exactly once "
+                         "with its canonical mapping and ready-file route")
 
 
 def platform(binary):
@@ -104,9 +122,7 @@ def run(binary, licenses, keep_image):
                     print(result.stderr, end="")
                     result.check_returncode()
                 if command[1:2] == ["schema"]:
-                    assets = json.loads(result.stdout)
-                    if len(assets["routes"]) != 16:
-                        raise ValueError("The container must expose all native analytical streams and publication")
+                    verify_schema(json.loads(result.stdout))
                 if (mounted / "state").exists():
                     raise ValueError("Offline validation created runtime state")
             print(f"Collector image passed non-root, read-only, network-disabled checks: {selected_platform}")

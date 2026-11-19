@@ -434,9 +434,10 @@ class Database:
             self.test("culprit-postgres", "wire::tests::live_ysql_")
             self.test("culprit-engine", "services::live_native_", library=False)
 
-    def owns_container(self):
+    def owns_container(self, *, timeout=COMMAND_BUDGET):
         status, owner = self.commands.run(["docker", "inspect", "--format",
-                                          '{{index .Config.Labels "' + OWNER_LABEL + '"}}', self.name], check=False)
+                                          '{{index .Config.Labels "' + OWNER_LABEL + '"}}', self.name],
+                                          check=False, timeout=timeout)
         if status:
             return False
         if owner.strip() != self.owner:

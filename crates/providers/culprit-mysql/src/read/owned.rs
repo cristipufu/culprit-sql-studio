@@ -9,7 +9,8 @@ use std::{
     sync::atomic::AtomicBool,
 };
 
-const ACKNOWLEDGEMENT_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const ACKNOWLEDGEMENT_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const PREVIEW_EXECUTION_GRACE: Duration = Duration::from_millis(250);
 
 pub(super) struct Request {
     pub sql: String,
@@ -292,7 +293,7 @@ impl Operation for Preview {
         let (_, limits) = mpsc::channel(1);
         let sql = format!("{} {}", phase.marker, self.sql);
         // Setup has its own allowance; this phase starts the short preview execution budget after setup settles.
-        let budget = culprit_core::limits::PREVIEW_TIMEOUT + Duration::from_millis(250);
+        let budget = culprit_core::limits::PREVIEW_TIMEOUT + PREVIEW_EXECUTION_GRACE;
         let accounting = phase.accounting;
         let result = {
             let preview_accounting = Accounting {
