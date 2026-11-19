@@ -93,6 +93,8 @@ pub fn from_value(value: &Value, kind: PlanKind, statement: Option<&str>) -> Res
 pub(crate) fn native(mut plan: Plan) -> Result<Plan> {
     let raw = plan.raw.as_deref().ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.no_plan_text")))?;
     let mut native = parse(raw, plan.kind, plan.statement.as_deref())?;
+    // Native JSON describes the plan; the shared execution owner alone confirms its transaction settlement.
+    native.facts_mut().execution_protection = plan.facts().execution_protection;
     let virtual_indexes = plan.facts().virtual_indexes.clone();
     if !virtual_indexes.is_empty() {
         native.facts_mut().virtual_indexes = virtual_indexes;
@@ -121,6 +123,25 @@ pub(crate) fn redacted_constants(plan: &mut Plan) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_enrichment_retains_confirmed_execution_protection_without_inventing_it_from_plan_json() {
+        use culprit_core::plan_facts::ExecutionProtection;
+        let raw = include_str!("../tests/data/scan.json");
+        for (kind, protection) in [
+            (PlanKind::Actual, Some(ExecutionProtection::RolledBackTransaction)),
+            (PlanKind::Actual, None),
+            (PlanKind::Estimated, None),
+        ] {
+            let mut executed =
+                culprit_postgres::plan_json::parse(raw, kind, Some("SELECT * FROM public.orders")).unwrap();
+            executed.facts_mut().execution_protection = protection;
+            let enriched = native(executed).unwrap();
+            assert_eq!(enriched.facts().execution_protection, protection);
+            assert_eq!(enriched.engine, Engine::Yugabyte);
+            assert_eq!(enriched.facts().docdb.as_ref().unwrap().rows_scanned, Some(19_492.0));
+        }
+    }
 
     #[test]
     fn retained_qpm_plans_keep_redaction_and_missing_estimates() {
