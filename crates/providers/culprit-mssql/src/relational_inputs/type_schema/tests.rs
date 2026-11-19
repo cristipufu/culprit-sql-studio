@@ -159,6 +159,64 @@ fn malformed_json_length_and_native_identity_do_not_become_available_schema() {
 }
 
 #[test]
+fn native_heap_type_requires_an_explicit_empty_index_array_without_loosening_the_decoder() {
+    let row = row();
+    let context = crate::cached_statements::context(&row).unwrap();
+    let original = crate::relational_inputs::parameters(&row, &context).unwrap();
+    // SQL Server 16.0.4325.4 returned this heap shape with the indexes member omitted. Native identity/time
+    // remains supplied by the shared fixture; the column facts and absence match the owned native payload.
+    let mut native = body(&row);
+    native["types"][0]["memory_optimized"] = false.into();
+    native["types"][0]["columns"] = json!([{
+        "column_id":1,"name":"id","user_type_id":56,"system_type_id":56,
+        "type_schema":"sys","type_name":"int","max_length":4,"precision":10,"scale":0,
+        "nullable":false,"identity":false,"computed":false,"collation":null
+    }]);
+    native["types"][0].as_object_mut().unwrap().remove("indexes").unwrap();
+    assert!(decode(&with_body(&row, native.clone()), &context, original.as_ref()).is_err());
+    native["types"][0]["indexes"] = json!([]);
+    let corrected = with_body(&row, native);
+    let schema = read(&corrected);
+    assert_eq!(schema.status, MssqlCurrentTypeSchemaStatus::Available);
+    assert!(schema.is_valid_for(&context, original.as_ref()));
+    assert!(!schema.types[0].memory_optimized);
+    assert!(schema.types[0].indexes.is_empty());
+    assert_eq!(schema.types[0].columns[0].name, "id");
+    assert_eq!(schema.types[0].columns[0].max_length, 4);
+    assert_eq!(schema.types[0].columns[0].precision, 10);
+    assert_eq!(schema.types[0].columns[0].collation, None);
+    let cached = crate::cached_definitions::decode(
+        &corrected,
+        &crate::cached_definitions::Limits { sql: 128 * 1024, plan: 128 * 1024 },
+        None,
+    )
+    .unwrap();
+    let retained = crate::actual::retained::decode(&corrected, 128 * 1024, 128 * 1024).unwrap();
+    assert_eq!(cached.current_type_schema.as_ref(), Some(&schema));
+    assert_eq!(retained.current_type_schema.as_ref(), Some(&schema));
+}
+
+#[test]
+fn every_required_native_array_stays_strict_when_missing_null_or_not_an_array() {
+    let row = row();
+    let context = crate::cached_statements::context(&row).unwrap();
+    let original = crate::relational_inputs::parameters(&row, &context).unwrap();
+    for pointer in ["/parameters", "/types", "/types/0/columns", "/types/0/indexes", "/types/0/indexes/0/columns"] {
+        for replacement in [None, Some(Value::Null), Some(json!({}))] {
+            let mut native = body(&row);
+            let (parent, member) = pointer.rsplit_once('/').unwrap();
+            let object = native.pointer_mut(parent).unwrap().as_object_mut().unwrap();
+            if let Some(value) = replacement {
+                *object.get_mut(member).unwrap() = value;
+            } else {
+                object.remove(member).unwrap();
+            }
+            assert!(decode(&with_body(&row, native), &context, original.as_ref()).is_err(), "{pointer}");
+        }
+    }
+}
+
+#[test]
 fn catalog_projection_bounds_every_nested_population_before_json_aggregation() {
     let sql = relation("native_text");
     for required in [
@@ -178,6 +236,10 @@ fn catalog_projection_bounds_every_nested_population_before_json_aggregation() {
     for forbidden in ["COUNT(", "OPENJSON", "default_value", "definition", "dm_db_index_usage_stats", "GROUP BY"] {
         assert!(!sql.contains(forbidden), "{forbidden}");
     }
+    assert_eq!(sql.matches("JSON_QUERY(ISNULL((").count(), 5, "every bounded array has one explicit empty result");
+    assert_eq!(sql.matches(",N'[]'))").count(), 5);
+    assert!(!sql.contains("COALESCE("), "a metadata subquery must not be evaluated twice");
+    assert!(sql.contains("FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)) AS module"), "missing module stays null");
     assert!(columns().contains(&format!("<={NATIVE_JSON_BYTES}")));
     let planned = crate::cached_statements::detail_sql(true, true);
     assert!(planned.contains(&relation("st")));

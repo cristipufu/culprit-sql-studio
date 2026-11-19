@@ -4,6 +4,7 @@ use culprit_core::{
     telemetry::{MssqlModuleParameters, NativeReadContext},
 };
 
+mod derived;
 mod expressions;
 mod loops;
 
@@ -181,94 +182,102 @@ fn a_proven_tvp_does_not_suppress_native_cartesian_evidence_or_establish_full_in
 #[test]
 fn pre_redaction_bindings_restore_cached_and_retained_named_joins_without_current_namespace_inference() {
     use culprit_core::telemetry::*;
-    let sql = "SELECT r.id FROM @Rows r CROSS JOIN dbo.Items i";
-    let raw = join(sql, &scan(1, ROWS), &scan(2, ITEMS), "")
-        .replace("<NestedLoops>", "<Warnings NoJoinPredicate=\"true\" /><NestedLoops>");
-    for retained in [false, true] {
-        let xml = if retained {
-            raw.clone()
-        } else {
-            raw.lines().filter(|line| !line.contains("<RunTimeInformation>")).collect::<Vec<_>>().join("\n")
-        };
-        let row = crate::cached_definitions::tests::module_row(sql, &xml);
-        let source = crate::plan_xml::test_source(if retained {
-            SnapshotDataset::RetainedPlans
-        } else {
-            SnapshotDataset::CachedDefinitions
-        });
-        let (plan, proof, without) = if retained {
-            let layout = crate::retained_definitions::Layout {
-                maximum_bytes: 32 * 1024,
-                maximum_statement_bytes: 4096,
-                database_setting: Some(true),
+    for sql in [
+        "SELECT r.id FROM @Rows r CROSS JOIN dbo.Items i",
+        "SELECT d.id FROM (SELECT * FROM @Rows AS r) AS d CROSS JOIN dbo.Items AS i",
+    ] {
+        let raw = join(sql, &scan(1, ROWS), &scan(2, ITEMS), "")
+            .replace("<NestedLoops>", "<Warnings NoJoinPredicate=\"true\" /><NestedLoops>");
+        for retained in [false, true] {
+            let xml = if retained {
+                raw.clone()
+            } else {
+                raw.lines().filter(|line| !line.contains("<RunTimeInformation>")).collect::<Vec<_>>().join("\n")
             };
-            let native = crate::retained_definitions::decode(&row, &layout, Some(&source)).unwrap();
-            let proof = native.relational_input_proof.clone().expect("original namespace is retained before redaction");
-            let plan = crate::plan_xml::parse_retained_definition(&native, &source).unwrap();
-            let mut missing = native.clone();
-            missing.relational_input_proof = None;
-            (plan, proof, crate::plan_xml::parse_retained_definition(&missing, &source).unwrap())
-        } else {
-            let limits = crate::cached_definitions::Limits::from_budget(&CollectionBudget::default()).unwrap();
-            let native = crate::cached_definitions::decode(&row, &limits, Some(&source)).unwrap();
-            let proof = native.relational_input_proof.clone().expect("original namespace is retained before redaction");
-            let plan = crate::plan_xml::parse_cached_definition(&native, &source).unwrap();
-            let mut missing = native.clone();
-            missing.relational_input_proof = None;
-            (plan, proof, crate::plan_xml::parse_cached_definition(&missing, &source).unwrap())
-        };
-        assert_eq!(proof.bindings.len(), 1);
-        assert_eq!(proof.bindings[0].node_id, 1);
-        assert_eq!(kinds(&plan), vec![Kind::TableValuedParameter]);
-        assert_eq!(kinds(&without), vec![Kind::Unknown]);
-        assert_eq!(
-            plan.kind,
-            if retained { culprit_core::PlanKind::Actual } else { culprit_core::PlanKind::Estimated }
-        );
-        let insights = culprit_core::insights::insights(&plan);
-        assert!(insights.iter().any(|insight| insight.rule == "no-join-predicate"));
-        assert!(insights.iter().all(|insight| !insight.detail.contains(&culprit_core::t!(
-            "insight.relational_input.completed_input_counts",
-            estimated = "100",
-            actual = "20K"
-        ))));
-        let encoded = serde_json::to_string(&proof).unwrap();
-        assert!(!encoded.contains("app") && !encoded.contains("Items") && !encoded.contains("RowsType"));
+            let row = crate::cached_definitions::tests::module_row(sql, &xml);
+            let source = crate::plan_xml::test_source(if retained {
+                SnapshotDataset::RetainedPlans
+            } else {
+                SnapshotDataset::CachedDefinitions
+            });
+            let (plan, proof, without) = if retained {
+                let layout = crate::retained_definitions::Layout {
+                    maximum_bytes: 32 * 1024,
+                    maximum_statement_bytes: 4096,
+                    database_setting: Some(true),
+                };
+                let native = crate::retained_definitions::decode(&row, &layout, Some(&source)).unwrap();
+                let proof =
+                    native.relational_input_proof.clone().expect("original namespace is retained before redaction");
+                let plan = crate::plan_xml::parse_retained_definition(&native, &source).unwrap();
+                let mut missing = native.clone();
+                missing.relational_input_proof = None;
+                (plan, proof, crate::plan_xml::parse_retained_definition(&missing, &source).unwrap())
+            } else {
+                let limits = crate::cached_definitions::Limits::from_budget(&CollectionBudget::default()).unwrap();
+                let native = crate::cached_definitions::decode(&row, &limits, Some(&source)).unwrap();
+                let proof =
+                    native.relational_input_proof.clone().expect("original namespace is retained before redaction");
+                let plan = crate::plan_xml::parse_cached_definition(&native, &source).unwrap();
+                let mut missing = native.clone();
+                missing.relational_input_proof = None;
+                (plan, proof, crate::plan_xml::parse_cached_definition(&missing, &source).unwrap())
+            };
+            assert_eq!(proof.bindings.len(), 1);
+            assert_eq!(proof.bindings[0].node_id, 1);
+            assert_eq!(kinds(&plan), vec![Kind::TableValuedParameter]);
+            assert_eq!(kinds(&without), vec![Kind::Unknown]);
+            assert_eq!(
+                plan.kind,
+                if retained { culprit_core::PlanKind::Actual } else { culprit_core::PlanKind::Estimated }
+            );
+            let insights = culprit_core::insights::insights(&plan);
+            assert!(insights.iter().any(|insight| insight.rule == "no-join-predicate"));
+            assert!(insights.iter().all(|insight| !insight.detail.contains(&culprit_core::t!(
+                "insight.relational_input.completed_input_counts",
+                estimated = "100",
+                actual = "20K"
+            ))));
+            let encoded = serde_json::to_string(&proof).unwrap();
+            assert!(!encoded.contains("app") && !encoded.contains("Items") && !encoded.contains("RowsType"));
+        }
     }
 }
 
 #[test]
 fn present_binding_for_a_different_source_or_native_node_is_an_integrity_failure() {
     use culprit_core::telemetry::*;
-    let source = crate::plan_xml::test_source(SnapshotDataset::CachedDefinitions);
-    let row = crate::cached_definitions::tests::module_row(SQL, &join(SQL, &scan(1, ROWS), &scan(2, ITEMS), ""));
-    let limits = crate::cached_definitions::Limits::from_budget(&CollectionBudget::default()).unwrap();
-    let original = crate::cached_definitions::decode(&row, &limits, Some(&source)).unwrap();
-    assert!(original.relational_input_proof.is_some());
-    let mut other = source.clone();
-    other.source = "another-capture-source".into();
-    for (value, scope) in [(&original, &other), (&original, &source)] {
-        let mut value = value.clone();
-        if scope == &source {
-            value.relational_input_proof = None;
-            value.relational_input_proof = Some(
-                MssqlRelationalInputProof::for_cached(
-                    scope,
-                    &value,
-                    vec![MssqlRelationalInputBinding {
-                        node_id: 999,
-                        input: RelationalInput {
-                            kind: Kind::TableValuedParameter,
-                            provenance: Provenance::NativeParameterMetadata,
-                        },
-                    }],
-                )
-                .unwrap(),
-            );
-            assert!(value.is_valid(), "the native parser must reject a self-consistent but false NodeId claim");
+    for sql in [SQL, derived::SQL] {
+        let source = crate::plan_xml::test_source(SnapshotDataset::CachedDefinitions);
+        let row = crate::cached_definitions::tests::module_row(sql, &join(sql, &scan(1, ROWS), &scan(2, ITEMS), ""));
+        let limits = crate::cached_definitions::Limits::from_budget(&CollectionBudget::default()).unwrap();
+        let original = crate::cached_definitions::decode(&row, &limits, Some(&source)).unwrap();
+        assert!(original.relational_input_proof.is_some());
+        let mut other = source.clone();
+        other.source = "another-capture-source".into();
+        for (value, scope) in [(&original, &other), (&original, &source)] {
+            let mut value = value.clone();
+            if scope == &source {
+                value.relational_input_proof = None;
+                value.relational_input_proof = Some(
+                    MssqlRelationalInputProof::for_cached(
+                        scope,
+                        &value,
+                        vec![MssqlRelationalInputBinding {
+                            node_id: 999,
+                            input: RelationalInput {
+                                kind: Kind::TableValuedParameter,
+                                provenance: Provenance::NativeParameterMetadata,
+                            },
+                        }],
+                    )
+                    .unwrap(),
+                );
+                assert!(value.is_valid(), "the native parser must reject a self-consistent but false NodeId claim");
+            }
+            let error = crate::plan_xml::parse_cached_definition(&value, scope).unwrap_err();
+            assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
         }
-        let error = crate::plan_xml::parse_cached_definition(&value, scope).unwrap_err();
-        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
     }
 }
 
@@ -276,30 +285,32 @@ fn present_binding_for_a_different_source_or_native_node_is_an_integrity_failure
 fn unsupported_namespace_scope_keeps_payloads_and_does_not_mint_a_retained_binding() {
     use culprit_core::telemetry::*;
     let limits = crate::cached_definitions::Limits::from_budget(&CollectionBudget::default()).unwrap();
-    for scenario in ["foreign-object", "missing-member", "missing-epoch", "nested-function", "missing-module"] {
-        let mut source = crate::plan_xml::test_source(SnapshotDataset::CachedDefinitions);
-        let mut xml = join(SQL, &scan(1, ROWS), &scan(2, ITEMS), "");
-        if scenario == "foreign-object" {
-            xml = xml.replace("Database=\"[app]\"", "Database=\"[other]\"");
+    for sql in [SQL, derived::SQL] {
+        for scenario in ["foreign-object", "missing-member", "missing-epoch", "nested-function", "missing-module"] {
+            let mut source = crate::plan_xml::test_source(SnapshotDataset::CachedDefinitions);
+            let mut xml = join(sql, &scan(1, ROWS), &scan(2, ITEMS), "");
+            if scenario == "foreign-object" {
+                xml = xml.replace("Database=\"[app]\"", "Database=\"[other]\"");
+            }
+            if scenario == "nested-function" {
+                xml = xml.replace("<QueryPlan>", "<QueryPlan ContainsInlineScalarTsqlUdfs=\"true\">");
+            }
+            if scenario == "missing-member" {
+                let SourcePartition::InstanceLocal { member, .. } = &mut source.partition else { panic!() };
+                *member = None;
+            }
+            if scenario == "missing-epoch" {
+                let SourcePartition::InstanceLocal { epoch, .. } = &mut source.partition else { panic!() };
+                *epoch = None;
+            }
+            let mut row = crate::cached_definitions::tests::module_row(sql, &xml);
+            if scenario == "missing-module" {
+                row = crate::resources::test_support::replace(&row, &[("module_object_id", crate::value::Val::Null)]);
+            }
+            let value = crate::cached_definitions::decode(&row, &limits, Some(&source)).unwrap();
+            assert!(value.relational_input_proof.is_none(), "{scenario}");
+            assert!(value.statement.payload.is_available() && value.estimated_plan.payload.is_available());
         }
-        if scenario == "nested-function" {
-            xml = xml.replace("<QueryPlan>", "<QueryPlan ContainsInlineScalarTsqlUdfs=\"true\">");
-        }
-        if scenario == "missing-member" {
-            let SourcePartition::InstanceLocal { member, .. } = &mut source.partition else { panic!() };
-            *member = None;
-        }
-        if scenario == "missing-epoch" {
-            let SourcePartition::InstanceLocal { epoch, .. } = &mut source.partition else { panic!() };
-            *epoch = None;
-        }
-        let mut row = crate::cached_definitions::tests::module_row(SQL, &xml);
-        if scenario == "missing-module" {
-            row = crate::resources::test_support::replace(&row, &[("module_object_id", crate::value::Val::Null)]);
-        }
-        let value = crate::cached_definitions::decode(&row, &limits, Some(&source)).unwrap();
-        assert!(value.relational_input_proof.is_none(), "{scenario}");
-        assert!(value.statement.payload.is_available() && value.estimated_plan.payload.is_available());
     }
 }
 

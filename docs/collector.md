@@ -402,8 +402,11 @@ collations and index keys. This catalog context has its own collection clock and
 it is separate from the original parameter declaration and does not establish the schema used at compilation.
 Missing visibility, changed associations and collection limits remain explicit. Culprit reads no live parameter
 contents, defaults or application rows. The plan details and collected SDK/CLI/MCP output preserve this distinction.
+Types without indexes retain an explicit empty index list; omitted or malformed catalog collections are rejected.
 Bounded built-in aggregate/scalar expressions and grouping preserve this binding, including `COUNT_BIG` over a
-filtered input. Unknown or qualified functions, nested queries and ambiguous lexical modes remain unresolved.
+filtered input. One closed parameter passthrough, `(SELECT * FROM @Rows AS r) AS d`, can retain the original physical
+input alias `r`; native objects and every alias still require exact independent binding. Other nested queries,
+changed inner projections or populations, unknown functions and ambiguous lexical modes remain unresolved.
 For a qualified TVP, a complete serial native table scan can distinguish consumed input, rows kept by its filter and
 statement output. Every aggregate, compute or sort ancestor needs its own exact native serial-execution proof.
 Missing end-of-scan counters, repeated or parallel execution, seeks and early-stop paths retain
@@ -425,6 +428,8 @@ An actual SQL Server plan can also preserve the engine's verdict that unstable a
 feedback. The shared insight keeps prior-execution granted memory separate from current grants, spills and pressure;
 healthy feedback states and plans without matching runtime evidence do not produce this diagnosis. It requires no
 additional source query and does not establish harmful parameter reuse.
+Spill explanations distinguish a statement's memory request from its received grant in the same actual plan.
+Receiving the requested amount, or more, establishes neither sufficient operator memory nor the spill's cause.
 Add `--with-recovery-payloads` to either `read` or `analyze` to permit bounded native recovery reads. For example:
 
 ```sh

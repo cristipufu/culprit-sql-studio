@@ -1,5 +1,7 @@
 use super::*;
 
+mod derived;
+
 fn parameter(name: &str, alias: Option<&str>) -> MssqlRelationReference {
     MssqlRelationReference { name: MssqlRelationName::Parameter(name.into()), alias: alias.map(str::to_owned) }
 }

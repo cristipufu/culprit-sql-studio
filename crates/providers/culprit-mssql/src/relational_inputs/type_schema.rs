@@ -32,7 +32,7 @@ pub(crate) fn relation(text_alias: &str) -> String {
  FROM sys.objects m JOIN sys.schemas s ON s.schema_id=m.schema_id
  WHERE {text_alias}.dbid=DB_ID() AND m.object_id={text_alias}.objectid AND m.type='P'
  FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)) AS module,
- JSON_QUERY(({parameters})) AS parameters,JSON_QUERY(({types})) AS types
+ {parameters} AS parameters,{types} AS types
  FOR JSON PATH,WITHOUT_ARRAY_WRAPPER,INCLUDE_NULL_VALUES) AS payload
  WHERE {text_alias}.dbid=DB_ID() AND {text_alias}.objectid>0) {ALIAS}"#
     )
@@ -40,45 +40,70 @@ pub(crate) fn relation(text_alias: &str) -> String {
 
 fn parameters(text_alias: &str) -> String {
     let limit = MAX_MSSQL_CURRENT_TYPE_PARAMETERS + 1;
-    format!(
+    json_array(&format!(
         "SELECT TOP({limit}) p.parameter_id,p.name,p.user_type_id FROM sys.parameters p JOIN sys.table_types tt ON tt.user_type_id=p.user_type_id WHERE {text_alias}.dbid=DB_ID() AND p.object_id={text_alias}.objectid AND p.is_readonly=1 ORDER BY p.parameter_id FOR JSON PATH"
-    )
+    ))
 }
 
 fn types(text_alias: &str) -> String {
     let parameter_limit = MAX_MSSQL_CURRENT_TYPE_PARAMETERS + 1;
     let type_limit = MAX_MSSQL_CURRENT_TYPES + 1;
-    let column_limit = MAX_MSSQL_CURRENT_TYPE_COLUMNS + 1;
-    let index_limit = MAX_MSSQL_CURRENT_TYPE_INDEXES + 1;
-    let index_column_limit = MAX_MSSQL_CURRENT_TYPE_INDEX_COLUMNS + 1;
-    format!(
+    let columns = type_columns();
+    let indexes = indexes();
+    json_array(&format!(
         r#"SELECT TOP({type_limit}) tt.schema_id,tt.user_type_id,s.name AS [schema],tt.name,
  DB_ID() AS [backing_object.database_id],o.object_id AS [backing_object.object_id],
  CONVERT(varchar(40),o.create_date,126) AS [backing_object.created_without_offset],
  CONVERT(varchar(40),o.modify_date,126) AS modified_without_offset,tt.is_memory_optimized AS memory_optimized,
- JSON_QUERY((SELECT TOP({column_limit}) c.column_id,c.name,c.user_type_id,c.system_type_id,
- cs.name AS type_schema,ct.name AS type_name,c.max_length,c.precision,c.scale,
- c.is_nullable AS nullable,c.is_identity AS [identity],c.is_computed AS computed,c.collation_name AS collation
- FROM sys.columns c JOIN sys.types ct ON ct.user_type_id=c.user_type_id
- JOIN sys.schemas cs ON cs.schema_id=ct.schema_id WHERE c.object_id=tt.type_table_object_id
- ORDER BY c.column_id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS columns,
- JSON_QUERY((SELECT TOP({index_limit}) i.index_id,i.name,i.type AS type_code,i.type_desc AS native_type,
- i.is_unique AS [unique],i.is_primary_key AS primary_key,i.is_unique_constraint AS unique_constraint,
- i.is_disabled AS disabled,i.is_hypothetical AS hypothetical,
- JSON_QUERY((SELECT TOP({index_column_limit}) ic.index_column_id,ic.column_id,c.name,ic.key_ordinal,
- ic.is_descending_key AS descending,ic.is_included_column AS included
- FROM sys.index_columns ic JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
- WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id
- ORDER BY ic.index_column_id FOR JSON PATH)) AS columns
- FROM sys.indexes i WHERE i.object_id=tt.type_table_object_id AND i.index_id>0
- ORDER BY i.index_id FOR JSON PATH)) AS indexes
+ {columns} AS columns,{indexes} AS indexes
  FROM sys.table_types tt JOIN sys.schemas s ON s.schema_id=tt.schema_id
  JOIN sys.objects o ON o.object_id=tt.type_table_object_id
  WHERE {text_alias}.dbid=DB_ID() AND tt.user_type_id IN
  (SELECT TOP({parameter_limit}) p.user_type_id FROM sys.parameters p
  WHERE p.object_id={text_alias}.objectid AND p.is_readonly=1 ORDER BY p.parameter_id)
  ORDER BY tt.user_type_id FOR JSON PATH"#
-    )
+    ))
+}
+
+fn type_columns() -> String {
+    let column_limit = MAX_MSSQL_CURRENT_TYPE_COLUMNS + 1;
+    json_array(&format!(
+        r#"SELECT TOP({column_limit}) c.column_id,c.name,c.user_type_id,c.system_type_id,
+ cs.name AS type_schema,ct.name AS type_name,c.max_length,c.precision,c.scale,
+ c.is_nullable AS nullable,c.is_identity AS [identity],c.is_computed AS computed,c.collation_name AS collation
+ FROM sys.columns c JOIN sys.types ct ON ct.user_type_id=c.user_type_id
+ JOIN sys.schemas cs ON cs.schema_id=ct.schema_id WHERE c.object_id=tt.type_table_object_id
+ ORDER BY c.column_id FOR JSON PATH,INCLUDE_NULL_VALUES"#
+    ))
+}
+
+fn indexes() -> String {
+    let index_limit = MAX_MSSQL_CURRENT_TYPE_INDEXES + 1;
+    let columns = index_columns();
+    json_array(&format!(
+        r#"SELECT TOP({index_limit}) i.index_id,i.name,i.type AS type_code,i.type_desc AS native_type,
+ i.is_unique AS [unique],i.is_primary_key AS primary_key,i.is_unique_constraint AS unique_constraint,
+ i.is_disabled AS disabled,i.is_hypothetical AS hypothetical,
+ {columns} AS columns
+ FROM sys.indexes i WHERE i.object_id=tt.type_table_object_id AND i.index_id>0
+ ORDER BY i.index_id FOR JSON PATH"#
+    ))
+}
+
+fn index_columns() -> String {
+    let index_column_limit = MAX_MSSQL_CURRENT_TYPE_INDEX_COLUMNS + 1;
+    json_array(&format!(
+        r#"SELECT TOP({index_column_limit}) ic.index_column_id,ic.column_id,c.name,ic.key_ordinal,
+ ic.is_descending_key AS descending,ic.is_included_column AS included
+ FROM sys.index_columns ic JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
+ WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id
+ ORDER BY ic.index_column_id FOR JSON PATH"#
+    ))
+}
+
+fn json_array(select: &str) -> String {
+    // Empty catalog populations stay arrays. ISNULL keeps each bounded subquery a single evaluation.
+    format!("JSON_QUERY(ISNULL(({select}),N'[]'))")
 }
 
 pub(crate) fn decode(

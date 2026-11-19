@@ -255,6 +255,7 @@ async fn redacted_join_namespaces_cannot_be_reconstructed_from_an_authenticated_
 #[cfg(feature = "mssql")]
 #[tokio::test]
 async fn retained_native_input_proofs_restore_exact_archived_join_kinds_and_independent_warnings() {
+    let mut originals = std::collections::BTreeSet::new();
     for (source, records) in object_definition_bound_join_evidence() {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let reads_before = fixture.recovery_object_reads();
@@ -277,6 +278,7 @@ async fn retained_native_input_proofs_restore_exact_archived_join_kinds_and_inde
         let plan = entry.plan.as_ref().unwrap();
         match &definition(&records[0]).fact {
             ObjectDefinitionFact::MssqlRetainedPlan(native) => {
+                assert!(originals.insert(native.relational_input_proof.as_ref().unwrap().input_sha256.clone()));
                 assert_eq!(native.statement_executions.as_deref(), Some("9007199254740993"));
                 assert_eq!(plan.kind, PlanKind::Actual);
                 assert_eq!(plan.root.children[0].facts().access_rows.unwrap().actual_total, Some(20000.0));
@@ -289,7 +291,8 @@ async fn retained_native_input_proofs_restore_exact_archived_join_kinds_and_inde
                 assert_eq!(plan.facts().last_run_at, None);
                 assert_eq!(plan.facts().elapsed_ms, None);
             }
-            ObjectDefinitionFact::MssqlCachedDefinition(_) => {
+            ObjectDefinitionFact::MssqlCachedDefinition(native) => {
+                assert!(originals.insert(native.relational_input_proof.as_ref().unwrap().input_sha256.clone()));
                 assert_eq!(plan.kind, PlanKind::Estimated);
                 assert!(plan.nodes().iter().all(|node| node.act_rows.is_none()));
             }
@@ -297,10 +300,12 @@ async fn retained_native_input_proofs_restore_exact_archived_join_kinds_and_inde
         }
         assert_join_proof_explanation(plan, entry);
     }
+    assert_eq!(originals.len(), 4, "cached and retained direct/derived statements retain distinct original proofs");
 }
 
 #[cfg(feature = "mssql")]
 fn assert_join_proof_explanation(plan: &culprit_core::Plan, entry: &culprit_core::CachedPlanEntry) {
+    assert_eq!(plan.root.children[0].facts().table_alias.as_deref(), Some("r"));
     assert_eq!(
         plan.root.children[0].facts().relational_input.unwrap().qualified_kind(),
         RelationalInputKind::TableValuedParameter

@@ -13,6 +13,8 @@ enum Probe {
     Counted,
     Absolute,
     Healthy,
+    DerivedCounted,
+    DerivedHealthy,
 }
 impl Probe {
     fn name(self) -> &'static str {
@@ -20,6 +22,8 @@ impl Probe {
             Self::Counted => "count_probe",
             Self::Absolute => "abs_probe",
             Self::Healthy => "healthy_probe",
+            Self::DerivedCounted => "derived_count_probe",
+            Self::DerivedHealthy => "derived_healthy_probe",
         }
     }
     fn statement(self) -> &'static str {
@@ -27,7 +31,16 @@ impl Probe {
             Self::Counted => "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM @Rows r WHERE (r.id > 10000)",
             Self::Absolute => "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM @Rows r WHERE (ABS(r.id) > 10000)",
             Self::Healthy => "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM @Rows r",
+            Self::DerivedCounted => {
+                "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM (SELECT * FROM @Rows AS r) AS d WHERE (d.id > 10000)"
+            }
+            Self::DerivedHealthy => {
+                "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM (SELECT * FROM @Rows AS r) AS d"
+            }
         }
+    }
+    fn is_healthy(self) -> bool {
+        matches!(self, Self::Healthy | Self::DerivedHealthy)
     }
     fn execution(self, rows: usize) -> String {
         assert!(matches!(rows, 1 | LARGE_INPUT));
@@ -69,23 +82,33 @@ pub(super) fn has_statement(xml: &str, hash: &str) -> bool {
 fn assert_native_evidence(case: Probe, plan: &Plan) {
     assert_eq!(plan.kind, PlanKind::Actual);
     assert_eq!(plan.root.act_rows, Some(1.0), "COUNT_BIG returns one result row, not the TVP population");
-    let inputs = plan
-        .nodes()
-        .into_iter()
-        .filter(|node| {
-            node.facts()
-                .relational_input
-                .is_some_and(|input| input.qualified_kind() == RelationalInputKind::TableValuedParameter)
-        })
-        .collect::<Vec<_>>();
-    let [input] = inputs.as_slice() else { panic!("one positively bound original TVP in {case:?}") };
+    let inputs = plan.nodes().into_iter().filter(|node| node.facts().relational_input.is_some()).collect::<Vec<_>>();
+    let [input] = inputs.as_slice() else { panic!("one native variable input in {case:?}: {inputs:?}") };
+    eprintln!(
+        "owned TVP {case:?}: native node={},alias={:?},kind={:?}",
+        input.id,
+        input.facts().table_alias,
+        input.facts().relational_input
+    );
+    if matches!(case, Probe::DerivedCounted | Probe::DerivedHealthy) {
+        assert_eq!(
+            input.facts().table_alias.as_deref(),
+            Some("r"),
+            "native derived input must preserve the original inner alias; the outer alias cannot substitute"
+        );
+    }
+    assert_eq!(
+        input.facts().relational_input.unwrap().qualified_kind(),
+        RelationalInputKind::TableValuedParameter,
+        "only the original module and exact native access can establish TVP provenance"
+    );
     assert_eq!(input.kind, NodeKind::Scan);
     let access = input.facts().access_rows.expect("native rows-read must be present, never substituted from output");
     assert_eq!(access.actual_total, Some(LARGE_INPUT as f64));
     assert!(input.facts().scan_completion.as_ref().unwrap().is_single_completed_serial_scan());
     assert_eq!(input.facts().serial_execution_count.as_deref(), Some("1"));
     let insights = culprit_core::insights::insights(plan);
-    if case == Probe::Healthy {
+    if case.is_healthy() {
         assert_eq!(
             access.estimated_per_execution,
             Some(LARGE_INPUT as f64),
@@ -116,7 +139,7 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
             .expect("measured native input estimate discrepancy");
         assert!(concern.fix_sql.is_none());
         assert!(concern.fix.contains("table-valued parameter"));
-        if case == Probe::Counted {
+        if matches!(case, Probe::Counted | Probe::DerivedCounted) {
             assert_eq!(input.act_rows, Some(FILTERED_ROWS));
             let counts = culprit_core::t!(
                 "insight.relational_input.completed_input_counts",
@@ -140,7 +163,7 @@ async fn capture_probe(application: &mut MsClient, pool: &Arc<Pool>, case: Probe
         &format!("CREATE PROCEDURE dbo.{} @Rows dbo.RowsType READONLY AS {}", case.name(), case.statement()),
     )
     .await;
-    batch(application, &case.execution(if case == Probe::Healthy { LARGE_INPUT } else { 1 })).await;
+    batch(application, &case.execution(if case.is_healthy() { LARGE_INPUT } else { 1 })).await;
     let object = crate::conn::query_one(
         application,
         &format!("SELECT /* culprit fixture */ OBJECT_ID(N'dbo.{}') AS object_id", case.name()),
@@ -157,6 +180,14 @@ async fn capture_probe(application: &mut MsClient, pool: &Arc<Pool>, case: Probe
     let detail = &details[&hash];
     assert_eq!(detail.context.identity, original.context.identity);
     assert!(detail.module_parameters.as_ref().unwrap().input(&detail.context, "@Rows").is_some());
+    for schema in [&original.current_type_schema, &detail.current_type_schema] {
+        let schema = schema.as_ref().expect("the owned declared TVP must retain its current heap type metadata");
+        assert_eq!(schema.status, culprit_core::telemetry::MssqlCurrentTypeSchemaStatus::Available);
+        let [data_type] = schema.types.as_slice() else { panic!("one owned current TVP type") };
+        assert!(data_type.indexes.is_empty(), "a native heap has an explicit empty index array");
+        let [column] = data_type.columns.as_slice() else { panic!("one native input column") };
+        assert_eq!((column.name.as_str(), column.type_name.as_str(), column.max_length), ("id", "int", 4));
+    }
 
     let plans = actual_plans(application, &case.execution(LARGE_INPUT), vec![]).await;
     let current = definition(&mut reader, object).await;
@@ -181,7 +212,7 @@ async fn capture_probe(application: &mut MsClient, pool: &Arc<Pool>, case: Probe
     assert_native_evidence(case, &plan);
 }
 
-async fn capture_probes(fixture: &OwnedSourceFixture, database: &str) {
+async fn capture_cases(fixture: &OwnedSourceFixture, database: &str, cases: &[Probe]) {
     let mut application = crate::test_support::connect(
         &config(fixture.port, database, fixture.password(), "tvp-expression-actor"),
         SessionKind::User,
@@ -196,14 +227,28 @@ async fn capture_probes(fixture: &OwnedSourceFixture, database: &str) {
     )
     .await;
     let pool = Arc::new(Pool::new(config(fixture.port, database, fixture.password(), "culprit"), None));
-    for case in [Probe::Counted, Probe::Absolute, Probe::Healthy] {
+    for &case in cases {
         capture_probe(&mut application, &pool, case).await;
     }
     application.close().await.unwrap();
+}
+
+async fn capture_probes(fixture: &OwnedSourceFixture, database: &str) {
+    capture_cases(fixture, database, &[Probe::Counted, Probe::Absolute, Probe::Healthy]).await;
+}
+
+async fn capture_derived_probes(fixture: &OwnedSourceFixture, database: &str) {
+    capture_cases(fixture, database, &[Probe::DerivedCounted, Probe::DerivedHealthy]).await;
 }
 
 #[tokio::test]
 #[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
 async fn owned_count_and_abs_actual_plans_bind_tvp_input_and_preserve_a_healthy_large_control() {
     super::fixture::run("count", capture_probes).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
+async fn owned_derived_count_actual_plans_preserve_the_original_inner_alias_and_a_healthy_large_control() {
+    super::fixture::run("derived", capture_derived_probes).await;
 }

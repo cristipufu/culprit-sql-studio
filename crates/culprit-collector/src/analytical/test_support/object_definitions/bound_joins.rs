@@ -4,7 +4,18 @@ use culprit_core::plan_facts::{RelationalInput, RelationalInputKind, RelationalI
 
 pub fn object_definition_bound_join_evidence() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
     let [_, (sql, raw_xml)] = hydration_native_inputs();
-    [false, true].into_iter().map(|retained| bound_join(&sql, &raw_xml, retained)).collect()
+    let derived = sql.replacen(
+        "SELECT r.value, o.id FROM @Rows AS r",
+        "SELECT d.value, o.id FROM (SELECT * FROM @Rows AS r) AS d",
+        1,
+    );
+    assert_ne!(derived, sql, "the closed wrapper must exercise a different original statement");
+    let derived_xml = raw_xml.replace(&sql, &derived);
+    assert_ne!(derived_xml, raw_xml, "the native statement and original payload must describe the same wrapper");
+    [(sql, raw_xml), (derived, derived_xml)]
+        .into_iter()
+        .flat_map(|(sql, xml)| [false, true].into_iter().map(move |retained| bound_join(&sql, &xml, retained)))
+        .collect()
 }
 
 fn bound_join(sql: &str, raw_xml: &str, retained: bool) -> (CollectionDescription, Vec<TelemetryRecord>) {

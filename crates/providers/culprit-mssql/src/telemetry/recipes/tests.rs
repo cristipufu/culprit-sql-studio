@@ -34,8 +34,8 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.shared-operational", 5),
             ("mssql.settings", 3),
             ("mssql.query-compilation", 3),
-            ("mssql.cached-definitions", 2),
-            ("mssql.retained-plans", 3),
+            ("mssql.cached-definitions", 3),
+            ("mssql.retained-plans", 4),
         ])
     );
 }

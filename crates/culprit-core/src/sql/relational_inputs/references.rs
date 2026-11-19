@@ -3,6 +3,7 @@ use super::{Engine, Token, readings};
 const MAX_RELATIONAL_REFERENCES: usize = 64;
 const MAX_RELATIONAL_SQL_BYTES: usize = 64 * 1024;
 
+mod derived;
 mod expressions;
 
 /// An original SQL reference, retaining spelling and case. A named relation is not proof of its resolved object.
@@ -20,8 +21,8 @@ pub struct MssqlRelationReference {
 }
 
 /// Recognize a deliberately small SELECT/JOIN grammar, with agreement under every supported lexical mode.
-/// Only bounded grouping and recognized built-in expressions are admitted. Nested statements, unknown functions,
-/// derived tables, CTEs, APPLY, implicit joins and table hints are not resolved.
+/// Only bounded grouping, recognized built-ins and one closed parameter passthrough are admitted. Other nested
+/// statements, unknown functions, CTEs, APPLY, implicit joins and table hints are not resolved.
 /// Multiple relations require distinct explicit aliases. Nothing here infers variable kind or default schema.
 pub fn mssql_relational_references(text: &str) -> Option<Vec<MssqlRelationReference>> {
     if text.len() > MAX_RELATIONAL_SQL_BYTES {
@@ -37,22 +38,19 @@ fn references(tokens: &[Token<'_>]) -> Option<Vec<MssqlRelationReference>> {
     let start = tokens.iter().take_while(|token| matches!(token, Token::Semicolon(_))).count();
     let end = tokens.iter().rposition(|token| !matches!(token, Token::Semicolon(_)))? + 1;
     let tokens = &tokens[start..end];
-    if !word(tokens.first(), "SELECT") || tokens.iter().skip(1).any(unsupported) || !expressions::closed(tokens) {
+    if !word(tokens.first(), "SELECT") {
         return None;
     }
-    let mut from = tokens.iter().enumerate().filter(|(_, token)| word(Some(token), "FROM"));
-    let (at, _) = from.next()?;
-    if from.next().is_some() {
-        return None;
-    }
+    let at = tokens.iter().position(|token| word(Some(token), "FROM"))?;
     let mut at = at + 1;
-    let mut relations = vec![relation(tokens, &mut at)?];
+    let mut derived = None;
+    let mut relations = vec![input(tokens, &mut at, &mut derived)?];
     while at < tokens.len() && !tail_clause(&tokens[at]) {
         let predicate = join(tokens, &mut at)?;
         if relations.len() == MAX_RELATIONAL_REFERENCES {
             return None;
         }
-        relations.push(relation(tokens, &mut at)?);
+        relations.push(input(tokens, &mut at, &mut derived)?);
         if predicate {
             if !word(tokens.get(at), "ON") {
                 return None;
@@ -68,18 +66,62 @@ fn references(tokens: &[Token<'_>]) -> Option<Vec<MssqlRelationReference>> {
     if tokens[at..].iter().any(|token| join_start(token) || word(Some(token), "ON")) {
         return None;
     }
-    if relations.len() > 1
-        && relations.iter().enumerate().any(|(at, relation)| {
-            relation.alias.as_ref().is_none_or(|alias| {
-                relations[..at]
-                    .iter()
-                    .any(|previous| previous.alias.as_ref().is_some_and(|other| alias.eq_ignore_ascii_case(other)))
-            })
-        })
-    {
+    if !closed_scope(tokens, derived.as_ref()) || !distinct_aliases(&relations, derived.as_ref()) {
         return None;
     }
     Some(relations)
+}
+
+fn input(
+    tokens: &[Token<'_>],
+    at: &mut usize,
+    derived: &mut Option<derived::DerivedRelation>,
+) -> Option<MssqlRelationReference> {
+    if tokens.get(*at) != Some(&Token::Punct('(')) {
+        return relation(tokens, at);
+    }
+    if derived.is_some() {
+        return None;
+    }
+    let (reference, scope) = derived::DerivedRelation::read(tokens, at)?;
+    *derived = Some(scope);
+    Some(reference)
+}
+
+fn closed_scope(tokens: &[Token<'_>], derived: Option<&derived::DerivedRelation>) -> bool {
+    // Only the completely parsed relation may be excluded. Arbitrary nested SELECTs still fail the outer grammar.
+    let outer;
+    let tokens = if let Some(derived) = derived {
+        outer = tokens
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| !derived.contains(*at))
+            .map(|(_, token)| *token)
+            .collect::<Vec<_>>();
+        outer.as_slice()
+    } else {
+        tokens
+    };
+    !tokens.iter().skip(1).any(unsupported)
+        && expressions::closed(tokens)
+        && tokens.iter().filter(|token| word(Some(token), "FROM")).count() == 1
+}
+
+fn distinct_aliases(relations: &[MssqlRelationReference], derived: Option<&derived::DerivedRelation>) -> bool {
+    if relations.len() == 1 && derived.is_none() {
+        return true;
+    }
+    let mut aliases: Vec<&str> = Vec::new();
+    for alias in
+        relations.iter().map(|relation| relation.alias.as_deref()).chain(derived.map(|scope| Some(scope.alias())))
+    {
+        let Some(alias) = alias else { return false };
+        if aliases.iter().any(|previous| alias.eq_ignore_ascii_case(previous)) {
+            return false;
+        }
+        aliases.push(alias);
+    }
+    true
 }
 
 fn relation(tokens: &[Token<'_>], at: &mut usize) -> Option<MssqlRelationReference> {
