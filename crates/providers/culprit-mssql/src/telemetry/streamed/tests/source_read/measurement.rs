@@ -150,6 +150,148 @@ async fn capture_measurement(source: MeasurementSource) -> CollectionManifest {
     .unwrap()
 }
 
+fn native_interval(manifest: &mut CollectionManifest) -> &mut MssqlSessionReadInterval {
+    let NativeSessionReadWork::MssqlSession(work) =
+        manifest.read_metrics.as_mut().unwrap().native_session_work.as_deref_mut().unwrap();
+    work.interval.as_deref_mut().unwrap()
+}
+
+fn qualification_gaps(manifest: &CollectionManifest, source: &CollectionDescription) -> Vec<RecipeQualificationGap> {
+    let RecipeQualificationAssessment::Refuse(gaps) = crate::assess_recipe_qualification(manifest, source).unwrap()
+    else {
+        panic!("a complete numerical window cannot supply missing grant or cancellation evidence")
+    };
+    assert!(gaps.contains(&RecipeQualificationGap::NativeGrantEvidenceUnavailable));
+    assert!(gaps.contains(&RecipeQualificationGap::ActiveCancellationUnproved));
+    gaps
+}
+
+#[tokio::test]
+async fn only_the_exact_original_query_window_can_avoid_the_partial_measurement_gap() {
+    let manifest = capture_measurement(measured(
+        measured_authority(FIRST, 10),
+        measured_authority(LAST, 17),
+        SourceShutdown::Quiescent,
+    ))
+    .await;
+    let source = manifest.description.as_ref().unwrap();
+    for (first, last, partial) in [(0, 8, false), (1, 8, true), (2, 8, true), (0, 7, true), (0, 9, true)] {
+        let mut changed = manifest.clone();
+        let interval = native_interval(&mut changed);
+        interval.initial.query_ordinal = first;
+        interval.latest.as_mut().unwrap().query_ordinal = last;
+        assert_eq!(
+            qualification_gaps(&changed, source).contains(&RecipeQualificationGap::PartialNativeMeasurementWindow),
+            partial,
+            "{first} to {last} versus eight original capture queries"
+        );
+    }
+}
+
+#[tokio::test]
+async fn malformed_foreign_or_unsettled_proof_cannot_acquire_native_measurement_availability() {
+    let mut manifest = capture_measurement(measured(
+        measured_authority(FIRST, 10),
+        measured_authority(LAST, 17),
+        SourceShutdown::Quiescent,
+    ))
+    .await;
+    native_interval(&mut manifest).initial.query_ordinal = 0;
+    let source = manifest.description.as_ref().unwrap().clone();
+    for invalid in
+        ["database", "namespace", "counter", "decrease", "unconfirmed", "active", "tracked-active", "description"]
+    {
+        let mut changed = manifest.clone();
+        match invalid {
+            "description" => changed.description.as_mut().unwrap().source.push_str("-another-source"),
+            "tracked-active" => changed.read_metrics.as_mut().unwrap().active_tasks = 1,
+            "active" => {
+                let NativeSessionReadWork::MssqlSession(work) =
+                    changed.read_metrics.as_mut().unwrap().native_session_work.as_deref_mut().unwrap();
+                work.settlement = NativeReadSettlement::Pending;
+            }
+            "unconfirmed" => {
+                let NativeSessionReadWork::MssqlSession(work) =
+                    changed.read_metrics.as_mut().unwrap().native_session_work.as_deref_mut().unwrap();
+                work.settlement = NativeReadSettlement::Unconfirmed;
+            }
+            "counter" => native_interval(&mut changed).latest.as_mut().unwrap().cpu_ms = Some("-1".into()),
+            "decrease" => native_interval(&mut changed).latest.as_mut().unwrap().cpu_ms = Some("1".into()),
+            change => {
+                let CollectionTarget::Database(database) = &mut native_interval(&mut changed).context.target else {
+                    unreachable!()
+                };
+                if change == "database" {
+                    database.incarnation = Some("another-native-database".into());
+                } else {
+                    database.incarnation = None;
+                }
+            }
+        }
+        assert!(
+            qualification_gaps(&changed, &source).contains(&RecipeQualificationGap::NativeMeasurementsUnavailable),
+            "{invalid}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn endpoint_fallback_cannot_replace_missing_native_database_namespaces() {
+    let mut manifest = capture_measurement(measured(
+        measured_authority(FIRST, 10),
+        measured_authority(LAST, 17),
+        SourceShutdown::Quiescent,
+    ))
+    .await;
+    native_interval(&mut manifest).initial.query_ordinal = 0;
+    for namespace in ["", " ", "\t\n"] {
+        let mut changed = manifest.clone();
+        let CollectionTarget::Database(database) = &mut changed.description.as_mut().unwrap().target else {
+            unreachable!()
+        };
+        database.incarnation = Some(namespace.into());
+        let CollectionTarget::Database(database) = &mut native_interval(&mut changed).context.target else {
+            unreachable!()
+        };
+        database.incarnation = Some(namespace.into());
+        assert!(
+            qualification_gaps(&changed, changed.description.as_ref().unwrap())
+                .contains(&RecipeQualificationGap::NativeMeasurementsUnavailable),
+            "{namespace:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn native_counter_clocks_must_bracket_the_original_acquisition() {
+    let mut manifest = capture_measurement(measured(
+        measured_authority(FIRST, 10),
+        measured_authority(LAST, 17),
+        SourceShutdown::Quiescent,
+    ))
+    .await;
+    native_interval(&mut manifest).initial.query_ordinal = 0;
+    let source = manifest.description.as_ref().unwrap();
+    for (from, until, available) in [
+        (FIRST, LAST, true),
+        ("2020-01-01T08:00:59Z", "2020-01-01T08:01:02Z", true),
+        ("2020-01-01T07:00:00Z", "2020-01-01T07:00:01Z", false),
+        ("2020-01-01T09:00:00Z", "2020-01-01T09:00:01Z", false),
+        ("2020-01-01T08:01:00.000000001Z", LAST, false),
+        (FIRST, "2020-01-01T08:01:00.999999999Z", false),
+    ] {
+        let mut changed = manifest.clone();
+        let context = &mut native_interval(&mut changed).context;
+        context.observed_from = from.into();
+        context.observed_until = until.into();
+        assert_eq!(
+            qualification_gaps(&changed, source).contains(&RecipeQualificationGap::NativeMeasurementsUnavailable),
+            !available,
+            "{from} to {until}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn optional_self_counters_never_break_source_data_or_mint_native_measurements() {
     let manifest = capture_measurement(measured(authority(FIRST), authority(LAST), SourceShutdown::Quiescent)).await;

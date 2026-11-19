@@ -168,7 +168,7 @@ async fn unavailable_tempdb_log_keeps_the_independent_data_population_and_does_n
         let mut replies = replies(metadata());
         replies[LOG_LAYOUT_REPLY] =
             Ok(vec![replace(&crate::operations::native::test_support::temp_log_layout_row(), &[(field, value)])]);
-        replies.remove(LOG_LAYOUT_REPLY + 1);
+        replies.remove(LOG_LAYOUT_REPLY + 1).expect("the omitted log-usage reply must be a successful native read");
         let mut source =
             StateSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
         let description = source.describe().await.unwrap();
