@@ -99,9 +99,7 @@ async fn bounded(
                 .as_ref()
                 .is_some_and(|metrics| metrics.templates.iter().any(|metric| metric.timeouts > 0))
     );
-    receipt["byte_limit_exercised"] =
-        json!(matches!(case, Case::ByteCeiling) && stop == Some(CollectionStop::ByteLimit));
-    receipt["row_limit_exercised"] = json!(matches!(case, Case::RowCeiling) && stop == Some(CollectionStop::RowLimit));
+    record_limit_requests(&mut receipt, case, stop, &settlement);
     receipt["limits"] = json!(
         "row/byte ceilings bound retained response; a charged over-limit row may be recorded before rejection; no returned prefix is a successful observation"
     );
@@ -149,6 +147,32 @@ async fn bounded(
         assert_eq!(settlement.shutdown, SourceShutdown::Quiescent);
     }
     Ok(())
+}
+
+fn record_limit_requests(receipt: &mut Value, case: Case, stop: Option<CollectionStop>, settlement: &Settlement) {
+    let metrics = settlement.metrics.as_ref().filter(|metrics| metrics.is_valid());
+    let template_id = digest(sql().as_bytes());
+    let metric = metrics.and_then(|metrics| metrics.templates.iter().find(|metric| metric.template_id == template_id));
+    // Only a positive original typed request establishes this evidence. Missing causes remain unknown.
+    let requested = |reason| {
+        metric
+            .and_then(|metric| metric.stop_causes.iter().find(|cause| cause.reason == reason).map(|cause| cause.tasks))
+    };
+    let byte_requests = requested(CollectionStop::ByteLimit);
+    let row_requests = requested(CollectionStop::RowLimit);
+    let settled = settlement.shutdown == SourceShutdown::Quiescent
+        && metrics.is_some_and(|metrics| !metrics.has_unconfirmed_work());
+    receipt["byte_limit_requested_tasks"] = json!(byte_requests);
+    receipt["row_limit_requested_tasks"] = json!(row_requests);
+    receipt["byte_limit_exercised"] = json!(
+        matches!(case, Case::ByteCeiling)
+            && byte_requests.is_some()
+            && stop == Some(CollectionStop::ByteLimit)
+            && settled
+    );
+    receipt["row_limit_exercised"] = json!(
+        matches!(case, Case::RowCeiling) && row_requests.is_some() && stop == Some(CollectionStop::RowLimit) && settled
+    );
 }
 
 enum CancellationAttempt {
@@ -222,4 +246,75 @@ async fn caller_cancellation(
         _ => (),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn metrics(sql: &str, outcome: ReadTaskOutcome) -> ReadWorkMetrics {
+        let recorder = ReadMetricsRecorder::new(culprit_core::Engine::Mssql);
+        let template = recorder.begin(sql);
+        recorder.finish(template.as_deref(), Duration::ZERO, &ReadProgress::default(), &outcome);
+        recorder.snapshot().unwrap()
+    }
+
+    fn receipt(metrics: Option<ReadWorkMetrics>, shutdown: SourceShutdown, stop: Option<CollectionStop>) -> Value {
+        let settlement = Settlement { shutdown, quiet: Ok(true), queries: 1, metrics, accounting: Value::Null };
+        let mut receipt = settlement.receipt();
+        record_limit_requests(&mut receipt, Case::ByteCeiling, stop, &settlement);
+        receipt
+    }
+
+    #[test]
+    fn original_byte_request_survives_unconfirmed_close_without_claiming_a_successful_limit_experiment() {
+        let outcome = ReadTaskOutcome { unconfirmed: true, ..ReadTaskOutcome::stopped(CollectionStop::ByteLimit) };
+        let receipt = receipt(
+            Some(metrics(sql().as_str(), outcome)),
+            SourceShutdown::Unconfirmed,
+            Some(CollectionStop::CancellationUnconfirmed),
+        );
+        assert_eq!(receipt["byte_limit_requested_tasks"], 1);
+        assert!(receipt["row_limit_requested_tasks"].is_null());
+        assert_eq!(receipt["byte_limit_exercised"], false);
+        assert_eq!(receipt["shutdown"], "unconfirmed");
+        assert_eq!(receipt["independently_observed_quiet"], true);
+        assert_eq!(receipt["production_admission"], "unqualified");
+        assert_eq!(receipt["native_cpu_io_cost_qualified"], false);
+    }
+
+    #[test]
+    fn missing_foreign_invalid_or_unknown_original_causes_are_never_guessed_from_the_final_error() {
+        let unknown = ReadTaskOutcome { failed: true, ..Default::default() };
+        let mut invalid = metrics(sql().as_str(), ReadTaskOutcome::stopped(CollectionStop::ByteLimit));
+        invalid.templates[0].stop_causes[0].tasks = 0;
+        for metrics in [
+            None,
+            Some(metrics(sql().as_str(), unknown)),
+            Some(metrics("SELECT another_template", ReadTaskOutcome::stopped(CollectionStop::ByteLimit))),
+            Some(invalid),
+        ] {
+            let receipt = receipt(metrics, SourceShutdown::Quiescent, Some(CollectionStop::ByteLimit));
+            assert!(receipt["byte_limit_requested_tasks"].is_null());
+            assert_eq!(receipt["byte_limit_exercised"], false);
+        }
+    }
+
+    #[test]
+    fn a_limit_experiment_requires_the_original_request_matching_final_stop_and_same_owner_quiescence() {
+        for (shutdown, stop, expected) in [
+            (SourceShutdown::Quiescent, Some(CollectionStop::ByteLimit), true),
+            (SourceShutdown::Unconfirmed, Some(CollectionStop::ByteLimit), false),
+            (SourceShutdown::Quiescent, Some(CollectionStop::CancellationUnconfirmed), false),
+        ] {
+            let receipt = receipt(
+                Some(metrics(sql().as_str(), ReadTaskOutcome::stopped(CollectionStop::ByteLimit))),
+                shutdown,
+                stop,
+            );
+            assert_eq!(receipt["byte_limit_requested_tasks"], 1);
+            assert_eq!(receipt["byte_limit_exercised"], expected);
+            assert_eq!(receipt["native_cpu_io_cost_qualified"], false);
+        }
+    }
 }

@@ -2,8 +2,8 @@
 use crate::{
     Engine,
     telemetry::{
-        DefinitionPayload, MAX_READ_TEMPLATE_PREVIEW_BYTES, MAX_READ_TEMPLATE_TEXT_BYTES, MAX_READ_TEMPLATES,
-        PayloadUnavailable, ReadQueryMetrics, ReadWorkMetrics, digest,
+        CollectionStop, DefinitionPayload, MAX_READ_TEMPLATE_PREVIEW_BYTES, MAX_READ_TEMPLATE_TEXT_BYTES,
+        MAX_READ_TEMPLATES, PayloadUnavailable, ReadQueryMetrics, ReadStopCount, ReadWorkMetrics, digest,
     },
 };
 use std::{
@@ -35,6 +35,7 @@ struct Accumulator {
     timeouts: u32,
     cancelled: u32,
     unconfirmed: u32,
+    stop_causes: Vec<ReadStopCount>,
     rows: u64,
     bytes: u64,
     elapsed_ms: f64,
@@ -75,6 +76,7 @@ impl ReadMetricsRecorder {
                     timeouts: 0,
                     cancelled: 0,
                     unconfirmed: 0,
+                    stop_causes: vec![],
                     rows: 0,
                     bytes: 0,
                     elapsed_ms: 0.0,
@@ -92,6 +94,12 @@ impl ReadMetricsRecorder {
         metric.timeouts = metric.timeouts.saturating_add(u32::from(outcome.timed_out));
         metric.cancelled = metric.cancelled.saturating_add(u32::from(outcome.cancelled));
         metric.unconfirmed = metric.unconfirmed.saturating_add(u32::from(outcome.unconfirmed));
+        if let Some(reason) = outcome.stop_cause {
+            match metric.stop_causes.iter_mut().find(|cause| cause.reason == reason) {
+                Some(cause) => cause.tasks = cause.tasks.saturating_add(1),
+                None => metric.stop_causes.push(ReadStopCount { reason, tasks: 1 }),
+            }
+        }
         metric.rows = metric.rows.saturating_add(progress.rows.load(Ordering::Relaxed));
         metric.bytes = metric.bytes.saturating_add(progress.bytes.load(Ordering::Relaxed));
         metric.elapsed_ms += elapsed.as_secs_f64() * 1000.0;
@@ -122,6 +130,7 @@ impl ReadMetricsRecorder {
                     timeouts: value.timeouts,
                     cancellations: value.cancelled,
                     unconfirmed_cancellations: value.unconfirmed,
+                    stop_causes: value.stop_causes.clone(),
                     rows_decoded: value.rows.to_string(),
                     charged_value_bytes: value.bytes.to_string(),
                     client_elapsed_ms: value.elapsed_ms,
@@ -142,6 +151,20 @@ pub struct ReadTaskOutcome {
     pub timed_out: bool,
     pub cancelled: bool,
     pub unconfirmed: bool,
+    /// Supplied only by the original owner request; a generic error classification cannot supply this evidence.
+    pub stop_cause: Option<CollectionStop>,
+}
+impl ReadTaskOutcome {
+    /// Record the original request only; its native owner records final acknowledgement separately.
+    pub fn stopped(reason: CollectionStop) -> Self {
+        Self {
+            failed: true,
+            timed_out: reason == CollectionStop::TimedOut,
+            cancelled: reason == CollectionStop::Cancelled,
+            unconfirmed: false,
+            stop_cause: ReadStopCount::valid_reason(reason).then_some(reason),
+        }
+    }
 }
 #[cfg(test)]
 mod tests {

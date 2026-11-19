@@ -97,6 +97,11 @@ async fn run(fixture: &OwnedSourceFixture, directory: &Path, cancellation: &Coll
         point.query_store_enabled.is_some(),
         "actual supported column must not disappear behind capability projection"
     );
+    assert!(
+        point.last_good_checkdb_without_offset.is_some(),
+        "this owned supported native version exposes the property; a sentinel is retained as metadata"
+    );
+    assert!(point.has_recorded_checkdb().is_some());
     assert_eq!(io.queries(), 1, "ordinary settings and Operational detail reuse this exact one-dispatch reader");
     let metrics = io.read_metrics().unwrap();
     let phase = metrics.templates.iter().find(|phase| phase.template_id == template).expect("actual changed template");

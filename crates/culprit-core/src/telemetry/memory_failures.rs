@@ -1,6 +1,5 @@
 //! Retained native memory-failure rows are observations, not an exactly-once event history or query attribution.
 use super::*;
-use chrono::{Datelike, NaiveDateTime, Timelike};
 use serde::de::IgnoredAny;
 use std::collections::BTreeSet;
 
@@ -101,7 +100,7 @@ impl MssqlOutOfMemoryObservation {
 
     pub fn is_valid(&self) -> bool {
         (self.position as usize) < MAX_MEMORY_FAILURE_OBSERVATIONS
-            && native_datetime(&self.event_time_without_offset)
+            && super::catalog::mssql_datetime(&self.event_time_without_offset).is_some()
             && [&self.oom_cause_desc, &self.oom_factor_desc]
                 .into_iter()
                 .all(|value| bounded_utf16(value, MAX_NATIVE_DESCRIPTION_UTF16))
@@ -115,14 +114,6 @@ impl MssqlOutOfMemoryObservation {
             .flatten()
             .all(MemoryFailureJsonDocument::is_valid)
     }
-}
-
-fn native_datetime(value: &str) -> bool {
-    if !(19..=23).contains(&value.len()) || !value.is_ascii() {
-        return false;
-    }
-    let Ok(time) = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f") else { return false };
-    (1753..=9999).contains(&time.year()) && time.nanosecond() < 1_000_000_000
 }
 
 impl MemoryFailureSnapshot {

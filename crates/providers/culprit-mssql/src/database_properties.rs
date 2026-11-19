@@ -6,7 +6,7 @@ use crate::{
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 
 const PREFIX: &str = "SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,CAST(0 AS int) AS property_error_number,DB_ID() AS selected_database_id,DB_NAME() AS selected_database,d.database_id,d.name AS database_name,d.state,d.state_desc,d.user_access,d.user_access_desc,CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(128)) AS updateability,d.is_read_only,d.collation_name,d.compatibility_level,d.snapshot_isolation_state,d.snapshot_isolation_state_desc,d.is_read_committed_snapshot_on,d.is_auto_create_stats_on,d.is_auto_update_stats_on,d.is_auto_update_stats_async_on,d.is_parameterization_forced,";
-const SUFFIX: &str = ",d.page_verify_option,d.page_verify_option_desc,d.recovery_model,d.recovery_model_desc,d.target_recovery_time_in_seconds FROM (VALUES(1)) AS selected_database(only_row) LEFT JOIN sys.databases AS d ON d.database_id=DB_ID() OPTION(MAXDOP 1)";
+const SUFFIX: &str = ",d.page_verify_option,d.page_verify_option_desc,d.recovery_model,d.recovery_model_desc,d.target_recovery_time_in_seconds,CONVERT(varchar(23),CONVERT(datetime,DATABASEPROPERTYEX(DB_NAME(),'LastGoodCheckDbTime')),126) AS last_good_checkdb_without_offset FROM (VALUES(1)) AS selected_database(only_row) LEFT JOIN sys.databases AS d ON d.database_id=DB_ID() OPTION(MAXDOP 1)";
 const FALLBACK: &str = "SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,DB_NAME() AS selected_database,ERROR_NUMBER() AS property_error_number";
 
 /// Fixed SQL only. Dynamic compilation keeps pre-2016 servers and hidden columns out of an invalid binding;
@@ -76,6 +76,7 @@ fn decode(row: &Rec, at: &str) -> Result<DatabasePropertiesObservation> {
         query_store_enabled: optional_boolean(row, "is_query_store_on")?,
         page_verify: code(row, "page_verify_option", "page_verify_option_desc")?,
         recovery_model: code(row, "recovery_model", "recovery_model_desc")?,
+        last_good_checkdb_without_offset: optional_text(row, "last_good_checkdb_without_offset")?,
         target_recovery_time_seconds: optional_integer(row, "target_recovery_time_in_seconds")?
             .map(|value| u32::try_from(value).map_err(|_| invalid_data()))
             .transpose()?,

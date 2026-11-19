@@ -108,3 +108,47 @@ fn malformed_native_identity_finer_clock_and_negative_configuration_cannot_be_re
         assert!(point.key().is_err());
     }
 }
+
+#[test]
+fn last_checkdb_keeps_raw_local_datetime_and_distinguishes_the_native_no_record_sentinel_from_unknown() {
+    let mut point = point();
+    for (value, recorded) in [
+        (None, None),
+        (Some("1900-01-01T00:00:00"), Some(false)),
+        (Some("1900-01-01T00:00:00.000"), Some(false)),
+        (Some("1900-01-01T00:00:00.0"), Some(false)),
+        (Some("2019-12-28T23:10:00.003"), Some(true)),
+    ] {
+        point.last_good_checkdb_without_offset = value.map(str::to_owned);
+        assert!(point.is_valid());
+        assert_eq!(point.has_recorded_checkdb(), recorded);
+        let restored: DatabasePropertiesObservation =
+            serde_json::from_value(serde_json::to_value(&point).unwrap()).unwrap();
+        assert_eq!(restored.last_good_checkdb_without_offset.as_deref(), value);
+    }
+    for value in
+        ["2020-01-01T12:00:00Z", "2020-01-01T12:00:00+02:00", "2020-02-30T12:00:00", "2020-01-01T12:00:00.0001"]
+    {
+        point.last_good_checkdb_without_offset = Some(value.into());
+        assert!(!point.is_valid(), "{value}");
+    }
+}
+
+#[test]
+fn an_integrity_history_fact_cannot_be_borrowed_by_another_engine_or_a_missing_native_body() {
+    for engine in crate::Engine::ALL {
+        let mut read = read();
+        read.context = ObservationReadContext::Collector {
+            observed_from: "2020-01-01T12:00:00Z".into(),
+            observed_until: "2020-01-01T12:00:01Z".into(),
+        };
+        let CollectionTarget::Database(database) = &mut read.target else { panic!() };
+        database.engine = engine;
+        assert_eq!(read.is_valid(), engine == crate::Engine::Mssql, "{engine:?}");
+    }
+    let mut missing = read();
+    missing.observation = None;
+    missing.read_complete = false;
+    assert!(missing.is_valid());
+    assert_eq!(missing.source.records, 1);
+}

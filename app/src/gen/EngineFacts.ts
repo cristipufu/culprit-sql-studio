@@ -25,4 +25,4 @@ limitations: Array<string>,
 /**
  * The reason for every ability it lacks, by ability.
  */
-refusals: { [key in string]: Refusal }, sql_syntax: SqlSyntax, statement_metrics: StatementMetrics, constraint_validation: ConstraintValidation, cleanup_evidence: CleanupEvidence, wait_sampling: WaitSampling | null, connection_security: ConnectionSecuritySpec | null, };
+refusals: { [key in string]: Refusal }, sql_syntax: SqlSyntax, statement_metrics: StatementMetrics, constraint_validation: ConstraintValidation, cleanup_evidence: CleanupEvidence, integrity_history_note: string | null, wait_sampling: WaitSampling | null, connection_security: ConnectionSecuritySpec | null, };

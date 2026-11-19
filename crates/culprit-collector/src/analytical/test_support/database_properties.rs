@@ -5,16 +5,18 @@ pub enum DatabasePropertiesCase {
     Exact,
     ReadOnlyConnection,
     UnknownValues,
+    NoRecordedCheckDb,
     UnknownCodes,
     NativePartial,
     Denied,
     NotApplicable,
 }
 impl DatabasePropertiesCase {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Exact,
         Self::ReadOnlyConnection,
         Self::UnknownValues,
+        Self::NoRecordedCheckDb,
         Self::UnknownCodes,
         Self::NativePartial,
         Self::Denied,
@@ -32,6 +34,7 @@ pub fn database_properties_evidence(case: DatabasePropertiesCase) -> (Collection
     match case {
         DatabasePropertiesCase::ReadOnlyConnection => point.updateability = Some("READ_ONLY".into()),
         DatabasePropertiesCase::UnknownValues => {
+            point.last_good_checkdb_without_offset = None;
             point.collation = None;
             point.compatibility_level = None;
             point.query_store_enabled = None;
@@ -39,6 +42,9 @@ pub fn database_properties_evidence(case: DatabasePropertiesCase) -> (Collection
             point.auto_update_statistics = None;
             point.auto_update_statistics_async = None;
             point.target_recovery_time_seconds = None;
+        }
+        DatabasePropertiesCase::NoRecordedCheckDb => {
+            point.last_good_checkdb_without_offset = Some("1900-01-01T00:00:00.000".into())
         }
         DatabasePropertiesCase::UnknownCodes => {
             point.catalog_state.code = Some(255);

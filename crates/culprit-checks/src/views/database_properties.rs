@@ -42,6 +42,9 @@ pub fn explain(read: &DatabasePropertiesRead) -> Result<DatabasePropertiesReport
     report.native_database_id = Some(point.native_database_id.clone());
     report.summary = t!("view.database_properties.summary.recorded");
     report.fields = fields(point);
+    if let Some(note) = read.target.engine().spec().integrity_history_note() {
+        report.limitations.push(culprit_core::i18n::t(note, &[]));
+    }
     Ok(report)
 }
 
@@ -95,6 +98,17 @@ fn fields(point: &DatabasePropertiesObservation) -> Vec<DatabasePropertyField> {
             "catalog_read_only",
             t!("view.database_properties.field.catalog_read_only"),
             yes_no(point.catalog_read_only),
+            None,
+            None,
+        ),
+        field(
+            "last_good_checkdb_without_offset",
+            t!("view.database_properties.field.last_good_checkdb"),
+            match point.has_recorded_checkdb() {
+                Some(true) => point.last_good_checkdb_without_offset.clone(),
+                Some(false) => Some(t!("view.database_properties.checkdb_not_recorded")),
+                None => None,
+            },
             None,
             None,
         ),

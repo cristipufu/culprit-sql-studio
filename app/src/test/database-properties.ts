@@ -13,8 +13,9 @@ export function databasePropertiesReport(): DatabasePropertiesReport {
       { key: "catalog_state", label: t("view.database_properties.field.catalog_state"), value: null, native_code: "255", native_description: "ONLINE" },
       { key: "updateability", label: t("view.database_properties.field.updateability"), value: t("view.database_properties.read_only"), native_code: null, native_description: "READ_ONLY" },
       { key: "catalog_read_only", label: t("view.database_properties.field.catalog_read_only"), value: t("view.database_properties.no"), native_code: null, native_description: null },
+      { key: "last_good_checkdb_without_offset", label: t("view.database_properties.field.last_good_checkdb"), value: "2019-12-28T23:10:00.003", native_code: null, native_description: null },
       { key: "target_recovery_time_seconds", label: t("view.database_properties.field.target_recovery_time_seconds"), value: "0", native_code: null, native_description: null },
-    ], limitations: [t("view.database_properties.limit.scope"), t("view.database_properties.limit.state"), t("view.database_properties.limit.read")],
+    ], limitations: [t("view.database_properties.limit.scope"), t("view.database_properties.limit.state"), t("view.database_properties.limit.read"), t("core.engines.mssql.integrity_history")],
   });
 }
 export function databasePropertiesHealthReport(view: DatabasePropertiesReport | null = databasePropertiesReport()): Report {

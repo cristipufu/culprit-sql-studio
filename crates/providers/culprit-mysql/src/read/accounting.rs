@@ -84,3 +84,23 @@ impl Drop for ControlQuery {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abandoning_a_control_guard_retains_unknown_original_cause_and_unconfirmed_accounting() {
+        let accounting = Accounting::new(CollectionBudget::default());
+        drop(accounting.control_query("SELECT private_control_guard_canary"));
+        let metrics = accounting.metrics.snapshot().unwrap();
+        assert!(metrics.is_valid());
+        assert!(metrics.has_unconfirmed_work());
+        assert_eq!(metrics.active_tasks, 0);
+        assert_eq!(accounting.queries.load(Ordering::Acquire), 1);
+        let metric = &metrics.templates[0];
+        assert_eq!((metric.completed_tasks, metric.failures), (1, 1));
+        assert_eq!((metric.cancellations, metric.unconfirmed_cancellations), (1, 1));
+        assert!(metric.stop_causes.is_empty());
+    }
+}

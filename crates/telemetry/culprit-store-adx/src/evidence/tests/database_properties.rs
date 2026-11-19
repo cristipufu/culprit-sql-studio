@@ -36,6 +36,13 @@ async fn genuine_collected_sealed_published_property_points_retain_all_original_
             assert_eq!(point.native_database_id, "5");
             assert_eq!(point.database, "sample");
             assert_eq!(point.catalog_read_only, Some(false));
+            let expected = match case {
+                DatabasePropertiesCase::UnknownValues => None,
+                DatabasePropertiesCase::NoRecordedCheckDb => Some("1900-01-01T00:00:00.000"),
+                _ => Some("2019-12-28T23:10:00.003"),
+            };
+            assert_eq!(point.last_good_checkdb_without_offset.as_deref(), expected);
+            assert_eq!(point.observed_at, "2020-01-01T12:00:00.0000001Z");
         }
         assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
         assert_eq!(capture.metrics().recovery_objects, 0);
@@ -72,6 +79,8 @@ async fn native_code_clock_database_flag_and_null_projection_tampering_never_bor
         ("/catalog_read_only", json!(true)),
         ("/query_store_enabled", Value::Null),
         ("/native_database_id", json!("6")),
+        ("/last_good_checkdb_without_offset", Value::Null),
+        ("/last_good_checkdb_without_offset", json!("2019-12-28T23:10:00.007")),
     ] {
         let (fixture, _, _) = collected(DatabasePropertiesCase::Exact).await;
         let column = fixture

@@ -33,7 +33,7 @@ async fn database_properties_replay_keeps_original_native_namespace_codes_unknow
         assert_eq!(serde_json::to_value(&analysis.report).unwrap(), serde_json::to_value(expected).unwrap());
         assert_eq!(fixture.recovery_object_reads(), opened);
         if case == DatabasePropertiesCase::Exact {
-            assert_eq!(analysis.report.fields.len(), 16);
+            assert_eq!(analysis.report.fields.len(), 17);
             assert_eq!(analysis.report.native_database_id.as_deref(), Some("5"));
             assert_eq!(
                 analysis
@@ -46,6 +46,26 @@ async fn database_properties_replay_keeps_original_native_namespace_codes_unknow
                     .as_deref(),
                 Some("0")
             );
+        }
+        if let Some(point) = &read.observation {
+            let expected_native = match case {
+                DatabasePropertiesCase::UnknownValues => None,
+                DatabasePropertiesCase::NoRecordedCheckDb => Some("1900-01-01T00:00:00.000"),
+                _ => Some("2019-12-28T23:10:00.003"),
+            };
+            assert_eq!(point.last_good_checkdb_without_offset.as_deref(), expected_native);
+            let field =
+                analysis.report.fields.iter().find(|field| field.key == "last_good_checkdb_without_offset").unwrap();
+            let expected_display = match case {
+                DatabasePropertiesCase::UnknownValues => None,
+                DatabasePropertiesCase::NoRecordedCheckDb => {
+                    Some(culprit_core::t!("view.database_properties.checkdb_not_recorded"))
+                }
+                _ => expected_native.map(str::to_owned),
+            };
+            assert_eq!(field.value, expected_display);
+            assert!(analysis.report.limitations.contains(&culprit_core::t!("core.engines.mssql.integrity_history")));
+            assert_eq!(analysis.report.observed_at.as_deref(), Some("2020-01-01T12:00:00.0000001Z"));
         }
         if case == DatabasePropertiesCase::UnknownCodes {
             let state = analysis.report.fields.iter().find(|field| field.key == "catalog_state").unwrap();

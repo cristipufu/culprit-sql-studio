@@ -122,6 +122,10 @@ pub trait EngineSpec: Send + Sync {
     ) -> Option<crate::ConnectionOutcomeProfile> {
         None
     }
+    /// Native provenance of a recorded integrity-check result, where this engine exposes one.
+    fn integrity_history_note(&self) -> Option<&'static str> {
+        None
+    }
     fn evidence_presentation(&self) -> EvidencePresentation;
     /// TLS policy and native option names; file engines have no network security settings.
     fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
@@ -514,6 +518,7 @@ pub struct EngineFacts {
     pub statement_metrics: StatementMetrics,
     pub constraint_validation: ConstraintValidation,
     pub cleanup_evidence: CleanupEvidence,
+    pub integrity_history_note: Option<String>,
     pub wait_sampling: Option<WaitSampling>,
     pub connection_security: Option<crate::ConnectionSecuritySpec>,
 }
@@ -573,6 +578,7 @@ impl Engine {
             statement_metrics: spec.statement_metrics(),
             constraint_validation: spec.constraint_validation(),
             cleanup_evidence: spec.cleanup_evidence(),
+            integrity_history_note: spec.integrity_history_note().map(str::to_owned),
             wait_sampling: spec.wait_sampling(),
             sql_syntax: spec.sql_syntax(),
             label: spec.label().into(),

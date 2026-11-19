@@ -1,7 +1,7 @@
 //! Synthetic source-task accounting for metadata replay; no SQL is sent or native cost qualified.
 use culprit_core::{
     Engine,
-    telemetry::{ReadMetricsRecorder, ReadProgress, ReadTaskOutcome, ReadWorkMetrics, digest},
+    telemetry::{CollectionStop, ReadMetricsRecorder, ReadProgress, ReadTaskOutcome, ReadWorkMetrics, digest},
 };
 use std::{sync::atomic::Ordering, time::Duration};
 
@@ -15,7 +15,8 @@ pub fn source_overhead_read_metrics() -> ReadWorkMetrics {
     for index in 0..SOURCE_OVERHEAD_QUERY_COUNT {
         let id = recorder
             .begin(&format!("/* culprit */ SELECT native_value FROM overhead_preview_canary WHERE native_id={index}"));
-        let outcome = ReadTaskOutcome { failed: index == 3, timed_out: index == 3, ..Default::default() };
+        let outcome =
+            if index == 3 { ReadTaskOutcome::stopped(CollectionStop::TimedOut) } else { ReadTaskOutcome::default() };
         recorder.finish(id.as_deref(), Duration::from_micros(u64::from(index + 1) * 1_000 + 125), &progress, &outcome);
     }
     let metrics = recorder.snapshot().expect("synthetic recorder lock is not poisoned");
@@ -97,4 +98,6 @@ pub fn assert_native_source_overhead_summary(public: &serde_json::Value, private
     assert_eq!(public["native_session_work"]["interval"]["reads"], "3");
     assert_eq!(public["native_session_work"]["interval"]["memory_pages_initial"], "30");
     assert_eq!(public["native_session_work"]["interval"]["memory_pages_latest"], "20");
+    let stopped = public["templates"].as_array().unwrap().iter().find(|metric| metric["timeouts"] == 1).unwrap();
+    assert_eq!(stopped["stop_causes"], serde_json::json!([{"reason":"timed-out","tasks":1}]));
 }

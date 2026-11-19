@@ -1,8 +1,8 @@
-use super::{SourceQualification, Summary, render_summary};
+use super::{SourceQualification, Summary, append_remaining_limitations, render_summary};
 use culprit_core::{DatabasePropertiesReport, t};
 
 pub(crate) fn database_properties(report: &DatabasePropertiesReport) -> String {
-    render_summary(
+    let mut text = render_summary(
         Summary {
             title: &report.title,
             summary: &report.summary,
@@ -39,7 +39,9 @@ pub(crate) fn database_properties(report: &DatabasePropertiesReport) -> String {
                 }
             }
         },
-    )
+    );
+    append_remaining_limitations(&mut text, &report.limitations);
+    text
 }
 
 #[cfg(test)]

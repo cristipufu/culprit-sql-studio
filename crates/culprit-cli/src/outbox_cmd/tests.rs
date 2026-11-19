@@ -68,6 +68,7 @@ fn local_overhead_uses_the_shared_safe_json_and_human_formatter_without_exportin
                 timeouts: 0,
                 cancellations: 1,
                 unconfirmed_cancellations: 1,
+                stop_causes: vec![],
                 rows_decoded: "9007199254740993".into(),
                 charged_value_bytes: "18446744073709551615".into(),
                 client_elapsed_ms: 125.0,

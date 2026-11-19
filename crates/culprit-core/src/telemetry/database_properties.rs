@@ -91,6 +91,9 @@ pub struct DatabasePropertiesObservation {
     pub page_verify: DatabasePropertyCode,
     pub recovery_model: DatabasePropertyCode,
     pub target_recovery_time_seconds: Option<u32>,
+    /// Native DATABASEPROPERTYEX LastGoodCheckDbTime datetime, without an established offset.
+    /// The 1900 sentinel remains original data. Availability groups report the primary's successful check.
+    pub last_good_checkdb_without_offset: Option<String>,
 }
 impl DatabasePropertiesObservation {
     pub fn is_valid(&self) -> bool {
@@ -111,6 +114,18 @@ impl DatabasePropertiesObservation {
             && self.updateability.as_deref().is_none_or(valid_native_text)
             && self.collation.as_deref().is_none_or(valid_native_text)
             && self.target_recovery_time_seconds.is_none_or(|value| i32::try_from(value).is_ok())
+            && self
+                .last_good_checkdb_without_offset
+                .as_deref()
+                .is_none_or(|value| super::catalog::mssql_datetime(value).is_some())
+    }
+
+    /// Distinguish the documented no-record sentinel from a recorded native time and unavailable metadata.
+    /// A recorded success is historical metadata, not a current integrity assessment.
+    pub fn has_recorded_checkdb(&self) -> Option<bool> {
+        let time = super::catalog::mssql_datetime(self.last_good_checkdb_without_offset.as_deref()?)?;
+        let sentinel = chrono::NaiveDate::from_ymd_opt(1900, 1, 1)?.and_hms_opt(0, 0, 0)?;
+        Some(time != sentinel)
     }
 
     pub fn key(&self) -> Result<String> {

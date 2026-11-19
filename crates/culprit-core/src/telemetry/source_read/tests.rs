@@ -443,6 +443,7 @@ fn recipe(original: &Original) -> (RecipeDescriptor, crate::ComponentVersion) {
                 timeouts: 0,
                 cancellations: 0,
                 unconfirmed_cancellations: 0,
+                stop_causes: vec![],
                 rows_decoded: "1".into(),
                 charged_value_bytes: "100".into(),
                 client_elapsed_ms: 1.0,

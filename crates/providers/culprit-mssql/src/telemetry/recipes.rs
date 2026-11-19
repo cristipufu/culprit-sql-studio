@@ -239,7 +239,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(crate::task_space::bounded_budget)
     .version(2),
-    state!("mssql.operational", Operational).baseline().version(5),
+    state!("mssql.operational", Operational).baseline().version(6),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
@@ -260,7 +260,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(replication::bounded_budget)
     .baseline(),
-    state!("mssql.settings", Settings).baseline().version(2),
+    state!("mssql.settings", Settings).baseline().version(3),
     streamed!("mssql.statement-grants", StatementGrants, grants::Grants),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations),
     streamed!("mssql.tables", Tables, tables::Tables),

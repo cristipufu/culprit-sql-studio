@@ -144,6 +144,7 @@ pub fn investigation_fixture() -> InvestigationFixture {
                 timeouts: 0,
                 cancellations: 0,
                 unconfirmed_cancellations: 0,
+                stop_causes: vec![],
                 rows_decoded: "2".into(),
                 charged_value_bytes: "4096".into(),
                 client_elapsed_ms: 1.25,

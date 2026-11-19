@@ -35,6 +35,7 @@ pub(crate) fn row(at: &str) -> Rec {
         ("recovery_model", Val::Int(1)),
         ("recovery_model_desc", Val::Text("FULL".into())),
         ("target_recovery_time_in_seconds", Val::Int(0)),
+        ("last_good_checkdb_without_offset", Val::Text("2019-12-28T23:10:00.003".into())),
     ])
 }
 fn at() -> &'static str {
@@ -134,4 +135,51 @@ fn optional_columns_bind_only_inside_fixed_native_sql_and_the_default_authority_
     assert!(sql.contains("IF ERROR_NUMBER() NOT IN(207,208,229,297,300) THROW"));
     assert!(!sql.contains("sys.database_query_store_options"), "independent Query Store modes keep their own source");
     assert!(!sql.contains("sys.dm_hadr_database_replica_states"), "catalog state is not a guessed member health read");
+}
+
+#[tokio::test]
+async fn recorded_checkdb_sentinel_and_null_are_independent_of_utc_acquisition_and_connected_role() {
+    for (value, recorded) in [
+        (Some("2019-12-28T23:10:00.003"), Some(true)),
+        (Some("1900-01-01T00:00:00"), Some(false)),
+        (Some("1900-01-01T00:00:00.000"), Some(false)),
+        (None, None),
+    ] {
+        let native = replace(
+            &row(at()),
+            &[
+                ("last_good_checkdb_without_offset", value.map(|value| Val::Text(value.into())).unwrap_or(Val::Null)),
+                ("metadata_visibility", Val::Int(i64::from(value.is_some()))),
+                ("updateability", Val::Text("READ_ONLY".into())),
+            ],
+        );
+        let mut io = FakeRead::new(vec![Ok(vec![native])]);
+        let point = read(&mut io).await.unwrap().properties.unwrap();
+        assert_eq!(point.last_good_checkdb_without_offset.as_deref(), value);
+        assert_eq!(point.has_recorded_checkdb(), recorded);
+        assert_eq!(point.observed_at, at());
+        assert_eq!(point.writable(), Some(false), "a reported primary check is not local writeability");
+        assert_eq!(io.calls.len(), 1);
+        assert!(io.calls[0].sql.contains("DATABASEPROPERTYEX(DB_NAME(),''LastGoodCheckDbTime'')"));
+        assert!(!io.calls[0].sql.contains("DBCC "));
+    }
+}
+
+#[tokio::test]
+async fn malformed_or_offset_bearing_checkdb_metadata_cannot_borrow_a_valid_catalog_clock() {
+    for value in [
+        "2026-11-13T10:00:00Z",
+        "2026-11-13T10:00:00+02:00",
+        "2026-02-30T10:00:00",
+        "2026-11-13T10:00:00.1234",
+        "1752-12-31T23:59:59",
+        "",
+    ] {
+        let native = replace(&row(at()), &[("last_good_checkdb_without_offset", Val::Text(value.into()))]);
+        let mut io = FakeRead::new(vec![Ok(vec![native])]);
+        let result = read(&mut io).await.unwrap();
+        assert_eq!(result.observed_at, at());
+        assert!(result.properties.is_err(), "{value}");
+        assert_eq!(io.calls.len(), 1, "invalid metadata never starts a repair query");
+    }
 }

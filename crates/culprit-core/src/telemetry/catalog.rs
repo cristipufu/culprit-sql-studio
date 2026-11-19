@@ -1,5 +1,6 @@
 //! Versioned native catalog facts are definitions, independent of counters and rendered messages.
 use super::*;
+use chrono::{Datelike, NaiveDateTime, Timelike};
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
@@ -19,6 +20,16 @@ impl MssqlObjectIdentity {
 }
 pub(super) fn local_time(at: &str) -> bool {
     at.len() <= 64 && chrono::NaiveDateTime::parse_from_str(at, "%Y-%m-%dT%H:%M:%S%.f").is_ok()
+}
+
+/// SQL Server datetime facts carry no offset and at most native millisecond text precision.
+/// The caller keeps their source meaning; parsing supplies no UTC instant or physical owner.
+pub(super) fn mssql_datetime(value: &str) -> Option<NaiveDateTime> {
+    if !(19..=23).contains(&value.len()) || !value.is_ascii() {
+        return None;
+    }
+    let time = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f").ok()?;
+    ((1753..=9999).contains(&time.year()) && time.nanosecond() < 1_000_000_000).then_some(time)
 }
 
 pub const MAX_CATALOG_EXPRESSION_BYTES: usize = 16 * 1024;

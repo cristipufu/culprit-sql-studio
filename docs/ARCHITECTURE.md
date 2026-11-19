@@ -392,6 +392,10 @@ gap before the next periodic deadline. A fresh baseline binds the selected saved
 and population. Authentication uses the same frozen saved metadata and cannot start native work after admission
 expires. The capture owner returns native settlement independently of success or failure; interrupted ownership
 remains unconfirmed after restart. Built-in recipes remain cost-unqualified and do not enable automatic extra reads.
+Per-template read accounting retains the original owner's typed stop request separately from final native settlement.
+For example, a byte limit remains visible when cancellation is unconfirmed. Native errors and abandoned guards do
+not establish an original stop request; an unknown cause stays absent. Unconfirmed ownership keeps admission fenced
+even when the stop cause is known.
 
 `Workspace::monitor_activity` owns a single-target loop, cancellation and bounded failure backoff. It schedules the
 next poll after completion, at least one minute later. It invokes that same worker and reports active and uncertain

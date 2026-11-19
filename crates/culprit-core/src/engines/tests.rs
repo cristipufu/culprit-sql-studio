@@ -721,3 +721,12 @@ fn evidence_presentation_has_explicit_native_semantics_for_every_engine() {
         }
     }
 }
+
+#[test]
+fn integrity_history_provenance_is_native_and_other_engines_have_no_sql_server_fallback() {
+    for engine in Engine::ALL {
+        let expected = (engine == Engine::Mssql).then_some(key!("core.engines.mssql.integrity_history"));
+        assert_eq!(engine.spec().integrity_history_note(), expected, "{engine:?}");
+        assert_eq!(engine.facts().integrity_history_note.as_deref(), expected, "{engine:?}");
+    }
+}

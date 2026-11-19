@@ -34,7 +34,7 @@ fn one_interpretation_preserves_native_codes_zero_unknown_and_independent_connec
     point.catalog_state.code = Some(255);
     point.auto_update_statistics_async = None;
     let report = explain(&read).unwrap();
-    assert_eq!(report.fields.len(), 16);
+    assert_eq!(report.fields.len(), 17);
     assert_eq!(field(&report, "catalog_read_only").value.as_deref(), Some(t!("view.database_properties.no").as_str()));
     assert_eq!(
         field(&report, "updateability").value.as_deref(),
@@ -89,4 +89,26 @@ fn body_read_gaps_and_unavailable_or_inapplicable_sources_never_become_measured_
     }
     read.source = StateSourceCoverage::collected(DATABASE_PROPERTIES_SOURCE.into(), 1);
     assert!(explain(&read).is_err(), "read-complete must not hide a missing original body");
+}
+
+#[test]
+fn last_recorded_checkdb_is_informational_primary_reported_metadata_with_unknown_offset() {
+    for (native, expected) in [
+        (Some("2019-12-28T23:10:00.003"), Some("2019-12-28T23:10:00.003".to_owned())),
+        (Some("1900-01-01T00:00:00.000"), Some(t!("view.database_properties.checkdb_not_recorded"))),
+        (None, None),
+    ] {
+        let mut read = read();
+        let point = read.observation.as_mut().unwrap();
+        point.last_good_checkdb_without_offset = native.map(str::to_owned);
+        point.updateability = Some("READ_ONLY".into());
+        let report = explain(&read).unwrap();
+        let check = field(&report, "last_good_checkdb_without_offset");
+        assert_eq!(check.value, expected);
+        assert_eq!(check.label, t!("view.database_properties.field.last_good_checkdb"));
+        assert!(report.limitations.contains(&t!("core.engines.mssql.integrity_history")));
+        assert_eq!(report.observed_at.as_deref(), Some("2020-01-01T12:00:00.0000001Z"));
+        assert_eq!(read.observation.as_ref().unwrap().last_good_checkdb_without_offset.as_deref(), native);
+        assert!(!serde_json::to_string(&report).unwrap().contains("age_seconds"));
+    }
 }

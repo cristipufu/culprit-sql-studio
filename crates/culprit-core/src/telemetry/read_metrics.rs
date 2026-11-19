@@ -5,6 +5,18 @@ pub use native_session::*;
 pub const MAX_READ_TEMPLATES: usize = 32;
 pub const MAX_READ_TEMPLATE_TEXT_BYTES: usize = 8 * 1024;
 pub const MAX_READ_TEMPLATE_PREVIEW_BYTES: usize = 64 * 1024;
+/// Original requests to stop owned native work. These counts never establish native shutdown.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct ReadStopCount {
+    pub reason: CollectionStop,
+    pub tasks: u32,
+}
+impl ReadStopCount {
+    pub(crate) fn valid_reason(reason: CollectionStop) -> bool {
+        !matches!(reason, CollectionStop::Pending | CollectionStop::CancellationUnconfirmed)
+    }
+}
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct ReadQueryMetrics {
@@ -15,11 +27,30 @@ pub struct ReadQueryMetrics {
     pub timeouts: u32,
     pub cancellations: u32,
     pub unconfirmed_cancellations: u32,
+    /// At most one original owner request per failed task; native errors without a known request stay absent.
+    pub stop_causes: Vec<ReadStopCount>,
     pub rows_decoded: String,
     /// Decoded values charged by the reader, not bytes read from disk or the network.
     pub charged_value_bytes: String,
     /// Includes transport and decoding after connection acquisition; it does not measure database CPU.
     pub client_elapsed_ms: f64,
+}
+impl ReadQueryMetrics {
+    fn valid_stop_causes(&self) -> bool {
+        let mut total = 0u64;
+        self.stop_causes.iter().enumerate().all(|(index, cause)| {
+            total += u64::from(cause.tasks);
+            ReadStopCount::valid_reason(cause.reason)
+                && cause.tasks > 0
+                && !self.stop_causes[..index].iter().any(|before| before.reason == cause.reason)
+                && total <= u64::from(self.failures)
+                && match cause.reason {
+                    CollectionStop::TimedOut => cause.tasks <= self.timeouts,
+                    CollectionStop::Cancelled => cause.tasks <= self.cancellations,
+                    _ => true,
+                }
+        })
+    }
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
@@ -104,8 +135,12 @@ impl ReadWorkMetrics {
                     && metric.timeouts <= metric.failures
                     && metric.cancellations <= metric.failures
                     && metric.unconfirmed_cancellations <= metric.failures
+                    && metric.valid_stop_causes()
                     && count(&metric.rows_decoded)
                     && count(&metric.charged_value_bytes)
             })
     }
 }
+
+#[cfg(test)]
+mod tests;

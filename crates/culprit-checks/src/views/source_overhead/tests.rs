@@ -16,6 +16,7 @@ fn metric(seed: &str, elapsed: f64) -> ReadQueryMetrics {
         timeouts: 1,
         cancellations: 0,
         unconfirmed_cancellations: 0,
+        stop_causes: vec![],
         rows_decoded: "18446744073709551615".into(),
         charged_value_bytes: "9007199254740993".into(),
         client_elapsed_ms: elapsed,

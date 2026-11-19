@@ -93,6 +93,7 @@ fn public_summary_retains_an_opaque_original_proof_receipt_and_no_private_identi
             timeouts: 0,
             cancellations: 0,
             unconfirmed_cancellations: 0,
+            stop_causes: vec![],
             rows_decoded: "1".into(),
             charged_value_bytes: "9007199254740993".into(),
             client_elapsed_ms: 2.0,

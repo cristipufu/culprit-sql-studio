@@ -19,7 +19,8 @@ test("properties stay compact until disclosed and preserve partial unknown nativ
   await expect(region).toBeVisible(); await expect(region.locator("article")).toHaveCount(0);
   await region.screenshot({ path: testInfo.outputPath("properties-folded.png") });
   await region.getByText(english["view.database_properties.details"], { exact: true }).click();
-  await expect(region.locator("article")).toHaveCount(4);
+  await expect(region.locator("article")).toHaveCount(5);
+  await expect(region.getByText("2019-12-28T23:10:00.003", { exact: true })).toBeVisible();
   await expect(region.getByText("255", { exact: true })).toBeVisible();
   await expect(region.getByText("0", { exact: true })).toBeVisible();
   await expect(region.getByText("2020-01-01T12:00:00.0000001Z", { exact: true })).toBeVisible();

@@ -260,6 +260,11 @@ Catalog and DMV sources provide tables, columns, constraints, statistics, index 
 
 Background catalog capture shares the scan readers. Exports preserve native object IDs, local metadata timestamps, exact integer counters and versioned, redacted expressions. Missing statistics properties and unsupported index usage remain explicit. Full catalog coverage requires database-wide metadata visibility before and after the read.
 
+Database properties include the last recorded successful integrity check, read in the existing metadata query.
+The native time has no UTC offset; availability groups report the primary's check. A missing value stays unknown,
+and a recorded success does not establish current integrity. Collection never runs `DBCC CHECKDB`.
+[Native property and supported versions](https://learn.microsoft.com/en-us/sql/t-sql/functions/databasepropertyex-transact-sql#arguments).
+
 `--collection objects` records versioned table, view, procedure, function and trigger metadata through the shared change reader. Native object IDs, creation generations, parent references and local modification dates remain facts. These observations do not establish an exact UTC change time or record dropped objects.
 
 `--collection triggers` records user DML triggers on tables and views, including disabled and CLR triggers, native creation/parent identities, modification dates, timing and replication flags. It shares its bounded catalog query and decoder with the app's active-table trigger list. Missing event metadata remains unknown and makes scope partial; complete catalog visibility is checked before and after export. Trigger bodies are neither read nor executed. Database/server DDL triggers are outside this dataset.

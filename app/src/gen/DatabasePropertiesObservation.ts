@@ -14,4 +14,9 @@ updateability: string | null, catalog_read_only: boolean | null, collation: stri
 /**
  * The native catalog enablement flag, not Query Store's actual/desired capture mode or retention.
  */
-query_store_enabled: boolean | null, page_verify: DatabasePropertyCode, recovery_model: DatabasePropertyCode, target_recovery_time_seconds: number | null, };
+query_store_enabled: boolean | null, page_verify: DatabasePropertyCode, recovery_model: DatabasePropertyCode, target_recovery_time_seconds: number | null, 
+/**
+ * Native DATABASEPROPERTYEX LastGoodCheckDbTime datetime, without an established offset.
+ * The 1900 sentinel remains original data. Availability groups report the primary's successful check.
+ */
+last_good_checkdb_without_offset: string | null, };

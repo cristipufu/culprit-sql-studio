@@ -195,15 +195,12 @@ impl Phase<'_> {
                 } else {
                     result.map_err(map_error).and_then(|result| result)
                 };
-                let outcome = ReadTaskOutcome {
-                    failed: result.is_err(),
-                    timed_out: result
-                        .as_ref()
-                        .err()
-                        .is_some_and(|error| error.code == culprit_core::ErrorCode::Timeout),
-                    unconfirmed: *self.shutdown == SourceShutdown::Unconfirmed,
-                    ..Default::default()
-                };
+                // A limit can be signalled during this same final poll, before a later protocol error returns.
+                let mut outcome = limits.try_recv().ok().map(ReadTaskOutcome::stopped).unwrap_or_default();
+                outcome.failed = result.is_err();
+                outcome.timed_out |=
+                    result.as_ref().err().is_some_and(|error| error.code == culprit_core::ErrorCode::Timeout);
+                outcome.unconfirmed = *self.shutdown == SourceShutdown::Unconfirmed;
                 (result, outcome)
             }
             Err(reason) => {
@@ -219,15 +216,7 @@ impl Phase<'_> {
                 }
                 let unconfirmed = *self.shutdown == SourceShutdown::Unconfirmed;
                 let error = if unconfirmed { CollectionStop::CancellationUnconfirmed } else { reason };
-                (
-                    Err(error.error()),
-                    ReadTaskOutcome {
-                        failed: true,
-                        timed_out: reason == CollectionStop::TimedOut,
-                        cancelled: reason == CollectionStop::Cancelled,
-                        unconfirmed,
-                    },
-                )
+                (Err(error.error()), ReadTaskOutcome { unconfirmed, ..ReadTaskOutcome::stopped(reason) })
             }
         };
         self.accounting.metrics.finish(template.as_deref(), started_at.elapsed(), progress, &outcome);

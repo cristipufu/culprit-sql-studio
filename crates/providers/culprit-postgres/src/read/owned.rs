@@ -65,7 +65,11 @@ impl ReadTask {
             result = &mut query => {
                 let confirmed = progress.counters.drained.load(Ordering::Acquire);
                 let timed_out = result.as_ref().err().is_some_and(|error| error.code == culprit_core::ErrorCode::Timeout);
-                let outcome = ReadTaskOutcome { failed: result.is_err(), timed_out, unconfirmed: !confirmed, ..Default::default() };
+                // A limit can be signalled during this same final poll, before a later protocol error returns.
+                let mut outcome = limit_reached.try_recv().ok().map(ReadTaskOutcome::stopped).unwrap_or_default();
+                outcome.failed = result.is_err();
+                outcome.timed_out |= timed_out;
+                outcome.unconfirmed = !confirmed;
                 return TaskResult { result, confirmed, interrupted: false, outcome };
             }
         };
@@ -87,12 +91,7 @@ impl ReadTask {
             .await
             .unwrap_or(false)
         };
-        let outcome = ReadTaskOutcome {
-            failed: true,
-            timed_out: reason == CollectionStop::TimedOut,
-            cancelled: reason == CollectionStop::Cancelled,
-            unconfirmed: !confirmed,
-        };
+        let outcome = ReadTaskOutcome { unconfirmed: !confirmed, ..ReadTaskOutcome::stopped(reason) };
         TaskResult {
             result: Err(if confirmed { reason.error() } else { CollectionStop::CancellationUnconfirmed.error() }),
             confirmed,

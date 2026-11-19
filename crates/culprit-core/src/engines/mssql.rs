@@ -18,6 +18,9 @@ impl EngineSpec for Mssql {
     fn cleanup_evidence(&self) -> CleanupEvidence {
         CleanupEvidence::LoggedAndVersionedTransactions
     }
+    fn integrity_history_note(&self) -> Option<&'static str> {
+        Some(key!("core.engines.mssql.integrity_history"))
+    }
     fn evidence_presentation(&self) -> EvidencePresentation {
         EvidencePresentation {
             storage_about: key!("ui.beyond_time.storage.about").into(),

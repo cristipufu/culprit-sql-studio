@@ -848,4 +848,35 @@ mod tests {
         assert!(matches!(outcome, ReadOutcome::NeedsAttention(ReadError::Stopped(CollectionStop::Cancelled))));
         assert_eq!(started.elapsed(), Duration::from_millis(10) + CANCELLATION_DRAIN_GRACE);
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_protocol_error_preserves_an_earlier_owner_cancellation_without_inventing_one() {
+        for request_cancellation in [false, true] {
+            let (owner, cancelled) = tokio::sync::oneshot::channel();
+            let mut owner = Some(owner);
+            let cancellation = if request_cancellation {
+                let owner = owner.take().unwrap();
+                Some(tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    drop(owner);
+                }))
+            } else {
+                None
+            };
+            let work = async {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Err(ReadError::Source(Error::new(ErrorCode::QueryFailed, "private-late-protocol-error-canary")))
+            };
+            let outcome =
+                finish_or_interrupt(work, Duration::from_secs(5), cancelled, culprit_read::RetentionControl::default())
+                    .await;
+            let accounting = crate::read_metrics::requested(&outcome);
+            assert_eq!(accounting.stop_cause, request_cancellation.then_some(CollectionStop::Cancelled));
+            assert_eq!(accounting.cancelled, request_cancellation);
+            if let Some(cancellation) = cancellation {
+                cancellation.await.unwrap();
+            }
+            drop(owner);
+        }
+    }
 }

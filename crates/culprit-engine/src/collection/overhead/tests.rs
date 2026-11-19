@@ -49,6 +49,7 @@ impl TelemetrySource for FailingSource {
                 timeouts: 0,
                 cancellations: u32::from(self.unconfirmed),
                 unconfirmed_cancellations: u32::from(self.unconfirmed),
+                stop_causes: vec![],
                 rows_decoded: "9007199254740993".into(),
                 charged_value_bytes: "18446744073709551615".into(),
                 client_elapsed_ms: 1.0,

@@ -103,6 +103,7 @@ mod tests {
             timeouts: 0,
             cancellations: 0,
             unconfirmed_cancellations: 0,
+            stop_causes: vec![],
             rows_decoded: "0".into(),
             charged_value_bytes: "0".into(),
             client_elapsed_ms: 0.5,
