@@ -130,17 +130,15 @@ fn locations(
 
 fn executable(path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else { return false };
-    if !metadata.is_file() {
-        return false;
-    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o111 == 0 {
-            return false;
-        }
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
     }
-    true
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
 }
 
 fn build(cli: Cli, platform: Platform, inherited: Option<&OsStr>, extra: &[PathBuf]) -> Result<Command> {

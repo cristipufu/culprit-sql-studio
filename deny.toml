@@ -7,8 +7,8 @@ all-features = true
 [advisories]
 # Vulnerabilities, unsound code and unmaintained crates anywhere in the graph (cargo-deny reports unsound code only in
 # direct dependencies by default), and yanked versions, fail the check, except the advisories below.
-# Each is a crate this workspace doesn't depend on directly and that has no fixed release reachable from here; drop the
-# entry when the crate that pulls it in moves on.
+# Each exception names its reason. Remove transitive exceptions when their owner updates; maintenance-only
+# exceptions do not waive future vulnerability or unsoundness advisories.
 yanked = "deny"
 unsound = "all"
 ignore = [
@@ -17,6 +17,7 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant (unmaintained): keyring's Linux Secret Service backend, through zbus" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names (unmaintained): keyring's Linux Secret Service backend, through zbus" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive (unmaintained): keyring's Linux Secret Service backend, through zbus" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono (unmaintained, no patched version): retain the pinned native timestamp semantics pending a separately validated move to a maintained date library; maintenance-only exception" },
 ]
 
 [licenses]
