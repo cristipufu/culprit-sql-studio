@@ -3,18 +3,19 @@ use crate::{
     activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::{MsClient, Pool, SessionKind, map_error},
     index_operations,
-    read::{Parameter, ReadError, ReadSession},
+    read::ReadSession,
     test_support::config,
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 use futures_util::{FutureExt, future::BoxFuture};
 use std::{collections::BTreeMap, future::Future, panic::AssertUnwindSafe, sync::Arc, time::Duration};
 
-const MAX_OWNED_DATABASE_INDEX_ROWS: usize = 256;
+mod index_measurement;
+pub(super) use index_measurement::{IndexWindow, same_index_target};
+
 const WORKER_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 const HOLDER_GATE_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 const DATABASE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(8);
-const MEASURED_OBJECTS: [&str; 3] = ["page_fixture_hot", "page_fixture_split", "page_fixture_select"];
 
 struct HolderGate {
     client: Option<MsClient>,
@@ -31,6 +32,7 @@ pub(super) struct Fixture {
     setup_started: std::time::Instant,
     admin: Option<MsClient>,
     holder_gate: Option<HolderGate>,
+    index_measurement: Option<index_measurement::IndexMeasurement<ReadSession>>,
     owned_host: bool,
 }
 impl Fixture {
@@ -53,6 +55,7 @@ impl Fixture {
             setup_started,
             admin: Some(admin),
             holder_gate: None,
+            index_measurement: None,
             owned_host: false,
         })
     }
@@ -159,6 +162,9 @@ impl Fixture {
     }
 
     pub async fn reset(&self) -> Result<()> {
+        if self.index_measurement.is_some() || !self.workers.is_empty() {
+            return Err(invalid("owned fixture reset cannot change an active measurement or workload"));
+        }
         let mut client = self.client("page-fixture-reset").await?;
         execute(&mut client,"TRUNCATE TABLE dbo.page_fixture_hot; TRUNCATE TABLE dbo.page_fixture_split; INSERT dbo.page_fixture_hot(marker) VALUES(0); INSERT dbo.page_fixture_split(marker) VALUES(0); CHECKPOINT").await
     }
@@ -205,34 +211,7 @@ impl Fixture {
         );
         let result = async {
             let layout = index_operations::Layout::read(&mut reader).await?;
-            let rows = reader
-                .query(
-                    &index_operations::select_sql(&layout),
-                    vec![Parameter::Integer((MAX_OWNED_DATABASE_INDEX_ROWS + 1) as i64)],
-                    MAX_OWNED_DATABASE_INDEX_ROWS + 1,
-                )
-                .await
-                .map_err(ReadError::into_error)?;
-            if rows.len() > MAX_OWNED_DATABASE_INDEX_ROWS {
-                return Err(invalid("owned native index population exceeded its explicit bound"));
-            }
-            let mut measured = BTreeMap::new();
-            for row in &rows {
-                let native = index_operations::decode(row, &layout)?;
-                if native.schema.as_deref() != Some("dbo") {
-                    continue;
-                }
-                let Some(name) = native.object.as_deref().filter(|name| MEASURED_OBJECTS.contains(name)) else {
-                    continue;
-                };
-                if measured.insert(name.to_owned(), native).is_some() {
-                    return Err(invalid("owned fixture unexpectedly has multiple native index rows per object"));
-                }
-            }
-            if measured.len() != MEASURED_OBJECTS.len() {
-                return Err(invalid("owned native index population omitted a required fixture object"));
-            }
-            Ok(measured)
+            index_measurement::read_indexes(&mut reader, &layout).await
         }
         .await;
         let shutdown = reader.close().await;
@@ -240,6 +219,40 @@ impl Fixture {
             Err(CollectionStop::CancellationUnconfirmed.error())
         } else {
             result
+        }
+    }
+    pub async fn begin_index_measurement(&mut self) -> Result<()> {
+        if !self.owned_host || self.index_measurement.is_some() || !self.workers.is_empty() {
+            return Err(invalid("an owned index measurement requires an idle fixture"));
+        }
+        let pool = self.pool.as_ref().ok_or_else(|| invalid("owned index measurement has no source pool"))?.clone();
+        // Retain the reader before acquisition, so cancellation of any phase still leaves cleanup its owner.
+        self.index_measurement = Some(index_measurement::IndexMeasurement::new(
+            ReadSession::new(pool, index_measurement::budget()),
+            self.port,
+            self.name.clone(),
+        ));
+        self.index_measurement.as_mut().ok_or_else(|| invalid("owned index measurement was retired"))?.begin().await
+    }
+    pub async fn finish_index_measurement(&mut self) -> Result<IndexWindow> {
+        let result = self
+            .index_measurement
+            .as_mut()
+            .ok_or_else(|| invalid("owned index measurement was not started"))?
+            .finish()
+            .await;
+        // finish has awaited close even on error. Cancellation before that await returns keeps the owner here.
+        self.index_measurement.take();
+        result
+    }
+    async fn close_index_measurement(&mut self) -> Result<()> {
+        let Some(measurement) = self.index_measurement.as_mut() else { return Ok(()) };
+        let shutdown = measurement.close().await;
+        self.index_measurement.take();
+        if shutdown == SourceShutdown::Quiescent {
+            Ok(())
+        } else {
+            Err(CollectionStop::CancellationUnconfirmed.error())
         }
     }
     pub async fn qualify_index_point(&self, point: &PageIndexOperations) -> Result<()> {
@@ -313,12 +326,13 @@ impl Fixture {
         Ok(())
     }
     async fn close(&mut self) -> Result<()> {
+        let measurement = self.close_index_measurement().await;
         let gate = self.close_holder_gate().await;
         let workers = self.stop_workers().await;
         self.pool.take();
         let database = self.drop_owned_database().await;
         let mut first_error = None;
-        for result in [gate, workers, database] {
+        for result in [measurement, gate, workers, database] {
             if let Err(error) = result {
                 if first_error.is_some() {
                     eprintln!("owned page fixture cleanup also failed: {error}");
@@ -377,6 +391,7 @@ impl Drop for Fixture {
         // Close the gate first, including cancellation during cleanup. Drop requests cancellation; only
         // acknowledged control, joined workers and exact database cleanup establish their own settlement.
         self.holder_gate.take();
+        self.index_measurement.take();
         for task in self.workers.iter().flatten() {
             task.abort();
         }
@@ -450,6 +465,7 @@ mod cleanup_tests {
             setup_started: std::time::Instant::now(),
             admin: None,
             holder_gate: None,
+            index_measurement: None,
             owned_host: false,
         }
     }
