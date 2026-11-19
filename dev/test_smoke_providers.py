@@ -459,6 +459,23 @@ class NativeSelection(unittest.TestCase):
         database.test.assert_called_once_with("culprit-postgres", "jobs::limits::", library=True, skip=None)
 
 
+    def test_mssql_default_verification_runs_the_exact_owned_history_route_once_on_the_same_fixture(self):
+        database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql"))
+        database.test = Mock()
+        history = "telemetry::native_history::owned_boxed_history_keeps_native_acquisition_separate_from_data_identity_and_replays_canonically"
+        self.assertNotIn("native_tests::", history)
+        database.verify()
+        selections = [call.args for call in database.test.call_args_list]
+        self.assertEqual(selections.count(("culprit-mssql", "native_tests::")), 1)
+        self.assertEqual(selections.count(("culprit-mssql", history)), 1)
+        self.assertEqual(selections[-2:], [("culprit-mssql", "native_tests::"), ("culprit-mssql", history)])
+        database.test.reset_mock()
+        database.verify([("culprit-mssql", history)])
+        database.test.assert_called_once_with("culprit-mssql", history, library=True, skip=None)
+        database.test.reset_mock()
+        database.verify([("culprit-mssql", "native_tests::")])
+        database.test.assert_called_once_with("culprit-mssql", "native_tests::", library=True, skip=None)
+
     def test_agent_metadata_success_cannot_hide_a_failed_history_selection(self):
         database = smoke.AgentDatabase(smoke.replace(
             next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql"), name="mssql-agent"))

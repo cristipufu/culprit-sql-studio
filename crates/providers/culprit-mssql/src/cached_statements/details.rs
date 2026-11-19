@@ -146,7 +146,7 @@ fn accept_rows(
     }
     Ok(deferred)
 }
-fn selectors_per_read(budget: &CollectionBudget, with_plan: bool) -> Result<usize> {
+pub(crate) fn selectors_per_read(budget: &CollectionBudget, with_plan: bool) -> Result<usize> {
     let bytes = budget.max_sql_bytes as usize + if with_plan { budget.max_plan_bytes as usize } else { 0 };
     let maximum_payload = bytes.saturating_mul(ENCODING_ALLOWANCE);
     let metadata_budget = (budget.page_bytes as usize).saturating_sub(maximum_payload);
@@ -179,7 +179,7 @@ fn decode(row: &Rec, with_plan: bool, budget: &CollectionBudget) -> Result<Detai
         module_parameters,
     })
 }
-fn sql(with_plan: bool) -> String {
+pub(crate) fn sql(with_plan: bool) -> String {
     let (plan, plan_read) = if with_plan {
         (
             "CAST(DATALENGTH(qp.query_plan) AS bigint) AS plan_bytes,qp.query_plan AS plan_value,",

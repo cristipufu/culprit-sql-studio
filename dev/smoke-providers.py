@@ -425,6 +425,8 @@ class Database:
             self.test("culprit-mssql", "memory_clerks::tests::live_")
             # Includes scheduler fields, telemetry and protocol/cancellation native tests, without a duplicate run.
             self.test("culprit-mssql", "native_tests::")
+            # This exact owned history route is outside native_tests::; use the same fixture once.
+            self.test("culprit-mssql", "telemetry::native_history::owned_boxed_history_keeps_native_acquisition_separate_from_data_identity_and_replays_canonically")
         else:
             self.test("culprit-engine", "live_providers::native_telemetry_", library=False)
             self.test("culprit-yugabyte", "telemetry::native_tests::")

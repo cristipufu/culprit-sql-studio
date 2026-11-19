@@ -1,5 +1,6 @@
 //! Native cache identity and application/export parity on an owned disposable database.
 use super::*;
+mod accounting;
 use crate::{
     conn::{Pool, SessionKind},
     read::ReadSession,
@@ -93,12 +94,35 @@ async fn native_cache_grants_share_exact_rows_with_app_observations_and_preserve
     assert_eq!(native.close().await, SourceShutdown::Quiescent);
     let options = culprit_core::SnapshotOptions { top_queries: 50, plans: 2, ..Default::default() };
     let mut workload_reader = ReadSession::application(pool.clone());
-    let workload = crate::workload::from_plan_cache(&mut workload_reader, &options).await.unwrap();
-    assert!(
-        workload_reader.queries() <= 3,
-        "small cached plans and text need only one summary and one read per payload shape"
+    let workload = crate::workload::from_plan_cache(&mut workload_reader, &options).await;
+    // Settle this original owner before inspecting a native error, result or accounting assertion.
+    let workload_shutdown = workload_reader.close().await;
+    let workload_metrics = workload_reader.read_metrics();
+    let summary = workload_metrics.as_ref().map(|metrics| metrics.summary(None)).transpose();
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "fixture_phase":"cache-workload-dispatch-roster",
+            "source_queries":workload_reader.queries(),
+            "expected_reads":accounting::expected_reads(),
+            "read_work":summary.as_ref().ok(),
+            "metrics_error_code":summary.as_ref().err().map(|error|error.code),
+            "source_error_code":workload.as_ref().err().map(|error|error.code),
+            "source_error_detail":workload.as_ref().err().and_then(|error|error.detail.as_ref()),
+            "shutdown":crate::read::measurement::shutdown_state(workload_shutdown),
+            "selected_queries":workload.as_ref().ok().map(|workload|workload.workload.queries.len()),
+            "native_cost_qualified":false,
+        })
     );
-    assert_eq!(workload_reader.close().await, SourceShutdown::Quiescent);
+    assert_eq!(workload_shutdown, SourceShutdown::Quiescent);
+    let workload = workload.expect("the original bounded cache workload must succeed");
+    accounting::validate(
+        workload_metrics.as_ref(),
+        workload_reader.queries(),
+        workload.workload.queries.len(),
+        &options,
+    )
+    .expect("one summary, one read per bounded payload shape and the independent native binding check");
     assert!(workload.plans_parsed > 0, "requested cached plans are bounded and parsed");
     assert!(
         workload.workload.queries.iter().any(|query| query.text.contains("application_literal_marker")),

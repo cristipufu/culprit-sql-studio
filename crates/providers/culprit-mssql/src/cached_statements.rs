@@ -7,6 +7,8 @@ use crate::{
 };
 use culprit_core::{Result, telemetry::*};
 pub(crate) use details::read as details;
+#[cfg(test)]
+pub(crate) use details::{selectors_per_read as detail_selectors_per_read, sql as detail_sql};
 pub(crate) use statement::{native_statement_from_prefix, statement_from_prefix};
 
 pub(crate) fn relation() -> &'static str {

@@ -21,6 +21,11 @@ use std::collections::{BTreeMap, BTreeSet};
 /// row ceiling; higher requested captures keep unadmitted plan/type enrichment explicitly unavailable.
 pub(crate) const MAX_BINDINGS: usize = 500;
 
+#[cfg(test)]
+pub(crate) fn binding_check_sql() -> &'static str {
+    sql::VERIFY
+}
+
 /// Native text is already selected from qs.sql_handle by both existing payload readers. Reuse its bounded prefix,
 /// source length and module identifiers; never read today's sys.parameters or serialize the SQL header/defaults.
 pub(crate) fn module_columns(text_alias: &str) -> String {
