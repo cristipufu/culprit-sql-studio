@@ -3,6 +3,9 @@ use super::relational_inputs::{AccessComparison, exact_count, serial_executions}
 use super::*;
 use crate::plan_facts::{PlanParameter, PlanParameterComparison};
 
+mod lookup;
+pub(super) use lookup::LookupWork;
+
 const MAX_PARAMETER_EXAMPLES: usize = 4;
 
 pub(super) fn context(cx: &Cx) -> Vec<Draft> {

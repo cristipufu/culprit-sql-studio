@@ -4,6 +4,8 @@ use crate::plan_facts::{
     PlanParameterValueState as State,
 };
 
+mod lookup;
+
 fn parameter(name: &str) -> PlanParameter {
     PlanParameter {
         integer_values_equal: None,

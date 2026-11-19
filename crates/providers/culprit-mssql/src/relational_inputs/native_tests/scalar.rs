@@ -164,3 +164,90 @@ async fn healthy(fixture: &OwnedSourceFixture, database: &str) {
 async fn owned_healthy_scalar_same_plan_different_values_input_volume_and_call_count_never_gain_a_causal_verdict() {
     super::fixture::run("scalar_ok", healthy).await;
 }
+
+async fn counted_lookup(fixture: &OwnedSourceFixture, database: &str) {
+    let mut probe = Probe::counted(fixture, database, IndexCoverage::LookupRequired).await;
+    let original = probe.record(2, CacheExpectation::New).await;
+    let affected = probe.record(1, CacheExpectation::Reused(&original.context)).await;
+    assert_context(&affected, ParameterValues::Different);
+    let seek = affected.operator("Index Seek");
+    let lookup = affected.operator("Key Lookup");
+    let parameter_context = affected.plan.facts().parameter_context.as_ref().unwrap();
+    let [parameter] = parameter_context.parameters.as_slice() else { panic!("one native integer parameter") };
+    let usage = parameter_context.uses.iter().find(|usage| usage.node_id == seek.id).unwrap();
+    assert_eq!(parameter_context.parameter(usage), Some(parameter));
+    let rows = seek.act_rows.unwrap();
+    assert_eq!(rows, affected.result as f64, "the native COUNT reads the seeded nonnull input population");
+    assert_eq!(lookup.act_rows, Some(rows));
+    assert_eq!(lookup.facts().serial_execution_count.as_deref(), Some(rows.to_string().as_str()));
+    let reads = affected.logical_reads("Key Lookup");
+    assert!(reads >= 1000.0, "the native lookup must record material reads");
+    let public = culprit_core::insights::insights(&affected.plan)
+        .into_iter()
+        .find(|insight| insight.rule == "key-lookups")
+        .unwrap();
+    let mut ordinary = affected.plan.clone();
+    ordinary.facts_mut().parameter_context = None;
+    let ordinary =
+        culprit_core::insights::insights(&ordinary).into_iter().find(|insight| insight.rule == "key-lookups").unwrap();
+    assert_eq!(
+        public.fix,
+        culprit_core::t!("insight.parameter_lookup.fix", covering = &ordinary.fix),
+        "native scope: {:?}",
+        affected
+            .plan
+            .nodes()
+            .into_iter()
+            .take(16)
+            .map(|node| (
+                node.id,
+                node.kind,
+                node.act_rows,
+                node.act_executions,
+                node.facts().serial_execution_count.as_deref(),
+                node.facts().parallel_operator,
+                node.facts().estimated_rows_without_goal,
+            ))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(public.verify, culprit_core::t!("insight.parameter_lookup.verify"));
+    assert!(public.nodes.contains(&lookup.id) && public.nodes.contains(&seek.id));
+    let output = culprit_core::t!(
+        "insight.parameter_lookup.detail",
+        parameter = culprit_core::t!(
+            "insight.parameter_context.named_type",
+            parameter = parameter.name.as_deref().unwrap(),
+            data_type = parameter.data_type.as_deref().unwrap()
+        ),
+        estimated = culprit_core::format::count(seek.est_rows),
+        actual = culprit_core::format::count(rows),
+        node = culprit_core::format::digits(lookup.id.to_string()),
+        executions = culprit_core::format::count(rows),
+        reads = culprit_core::format::count(reads)
+    );
+    assert!(public.detail.contains(&output), "the public observation names the actual lookup and its native counts");
+
+    let mut retained = retained::Original::capture(&probe, &affected).await;
+    batch(&mut probe.application, "EXEC sys.sp_recompile N'dbo.scalar_probe'").await;
+    let fresh = probe.record(1, CacheExpectation::New).await;
+    assert_ne!(affected.context.identity.key().unwrap(), fresh.context.identity.key().unwrap());
+    assert_eq!(affected.result, fresh.result);
+    assert_context(&fresh, ParameterValues::Same);
+    assert!(fresh.plan.nodes().iter().all(|node| node.kind != culprit_core::NodeKind::Lookup));
+    let fresh_reads = fresh.logical_reads("Clustered Index Scan");
+    assert!(fresh_reads < reads, "the same-input native intervention must actually reduce this access work");
+    eprintln!(
+        "owned counted scalar: lookup node={} executions={rows} logical_reads={reads}; fresh scan reads={fresh_reads}; identical result={}",
+        lookup.id, affected.result
+    );
+    let actor = probe.actor();
+    batch(&mut probe.application, "DROP PROCEDURE dbo.scalar_probe").await;
+    probe.application.close().await.unwrap();
+    retained.verify_after_actor_disappears(fixture, database, actor).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SQL2022 nonce-owned loopback fixture; exact cached lookup and same-input fresh/retained controls"]
+async fn owned_parameterized_lookup_work_uses_exact_native_counts_and_preserves_original_retained_history() {
+    super::fixture::run("scalar_lookup", counted_lookup).await;
+}

@@ -116,6 +116,9 @@ pub(super) fn key_lookups(cx: &Cx) -> Vec<Draft> {
             (None, false) => t!("insight.key_lookups.fix.cover", named = named, columns = &columns),
         };
         d.verify = t!("insight.key_lookups.verify", op = &n.op, indexed = indexed, index = &index_name);
+        if let Some(parameterized) = parameters::LookupWork::from_plan(cx, n) {
+            parameterized.enrich(&mut d);
+        }
         out.push(d);
     }
     out

@@ -11,6 +11,7 @@ pub(super) struct Original {
     position: usize,
     statement: CachedStatementIdentity,
     original_parameter_context: Box<culprit_core::plan_facts::PlanParameterContext>,
+    original_lookup_insights: Vec<culprit_core::insights::PlanInsight>,
 }
 impl Original {
     pub async fn capture(probe: &Probe, run: &RecordedRun) -> Self {
@@ -33,6 +34,7 @@ impl Original {
         let position = *position;
         let plan = explain(&capture, position, &run.context.identity);
         let retained = plan.facts().parameter_context.as_ref().unwrap().clone();
+        let original_lookup_insights = lookup_insights(&plan);
         // The executed STATISTICS XML and this retained native source are independent evidence. Presence and
         // unavailable states were checked against the retained payload itself; neither source repairs the other.
         eprintln!(
@@ -47,6 +49,7 @@ impl Original {
             position,
             statement: run.context.identity.clone(),
             original_parameter_context: Box::new(retained),
+            original_lookup_insights,
         }
     }
     fn explain(&self) -> Plan {
@@ -67,6 +70,11 @@ impl Original {
             self.original_parameter_context.as_ref(),
             "the exact source-owned retained facts survive actor removal"
         );
+        assert_eq!(
+            serde_json::to_value(lookup_insights(&plan)).unwrap(),
+            serde_json::to_value(&self.original_lookup_insights).unwrap(),
+            "resolved history keeps its own original lookup evidence, without borrowing the executed plan's parameter facts"
+        );
         assert!(
             culprit_core::insights::insights(&plan)
                 .iter()
@@ -74,6 +82,10 @@ impl Original {
                 .all(|insight| insight.severity == Severity::Low && insight.impact == 0.0 && insight.fix_sql.is_none())
         );
     }
+}
+
+fn lookup_insights(plan: &Plan) -> Vec<culprit_core::insights::PlanInsight> {
+    culprit_core::insights::insights(plan).into_iter().filter(|insight| insight.rule == "key-lookups").collect()
 }
 
 /// Only authenticated original records enter the native retained parser. This is shared by the scalar and PSP
