@@ -8,6 +8,7 @@ mod cte;
 mod derived;
 mod expressions;
 mod loops;
+mod projection;
 
 const SQL: &str = "SELECT r.id FROM @Rows r JOIN dbo.Items i ON r.id=i.id";
 const ROWS: &str = r#"Table="[@Rows]" Alias="[r]""#;
@@ -188,6 +189,8 @@ fn pre_redaction_bindings_restore_cached_and_retained_named_joins_without_curren
         "SELECT d.id FROM (SELECT * FROM @Rows AS r) AS d CROSS JOIN dbo.Items AS i",
         "WITH input AS (SELECT * FROM @Rows AS r) SELECT d.id FROM input AS d CROSS JOIN dbo.Items AS i",
         "WITH [入力] AS (SELECT * FROM @Rows AS r) SELECT [外].id FROM [入力] AS [外] CROSS JOIN dbo.Items AS i",
+        "SELECT d.id FROM (SELECT r.id,r.Code FROM @Rows AS r) AS d CROSS JOIN dbo.Items AS i",
+        "WITH input AS (SELECT r.id,r.Code FROM @Rows AS r) SELECT d.id FROM input AS d CROSS JOIN dbo.Items AS i",
     ] {
         let raw = join(sql, &scan(1, ROWS), &scan(2, ITEMS), "")
             .replace("<NestedLoops>", "<Warnings NoJoinPredicate=\"true\" /><NestedLoops>");
@@ -250,7 +253,7 @@ fn pre_redaction_bindings_restore_cached_and_retained_named_joins_without_curren
 #[test]
 fn present_binding_for_a_different_source_or_native_node_is_an_integrity_failure() {
     use culprit_core::telemetry::*;
-    for sql in [SQL, derived::SQL, cte::SQL] {
+    for sql in [SQL, derived::SQL, cte::SQL, projection::DERIVED_SQL, projection::CTE_SQL] {
         let source = crate::plan_xml::test_source(SnapshotDataset::CachedDefinitions);
         let row = crate::cached_definitions::tests::module_row(sql, &join(sql, &scan(1, ROWS), &scan(2, ITEMS), ""));
         let limits = crate::cached_definitions::Limits::from_budget(&CollectionBudget::default()).unwrap();
@@ -288,7 +291,7 @@ fn present_binding_for_a_different_source_or_native_node_is_an_integrity_failure
 fn unsupported_namespace_scope_keeps_payloads_and_does_not_mint_a_retained_binding() {
     use culprit_core::telemetry::*;
     let limits = crate::cached_definitions::Limits::from_budget(&CollectionBudget::default()).unwrap();
-    for sql in [SQL, derived::SQL, cte::SQL] {
+    for sql in [SQL, derived::SQL, cte::SQL, projection::DERIVED_SQL, projection::CTE_SQL] {
         for scenario in ["foreign-object", "missing-member", "missing-epoch", "nested-function", "missing-module"] {
             let mut source = crate::plan_xml::test_source(SnapshotDataset::CachedDefinitions);
             let mut xml = join(sql, &scan(1, ROWS), &scan(2, ITEMS), "");

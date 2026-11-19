@@ -6,6 +6,7 @@ const MAX_RELATIONAL_SQL_BYTES: usize = 64 * 1024;
 mod cte;
 mod derived;
 mod expressions;
+mod projection;
 
 /// An original SQL reference, retaining spelling and case. A named relation is not proof of its resolved object.
 #[derive(Clone, Debug, PartialEq, Eq)]

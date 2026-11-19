@@ -2,7 +2,7 @@ use super::*;
 
 const COUNTED: &str = "SELECT COUNT_BIG(*) FROM @Rows r WHERE (r.id > 9264)";
 
-fn counted(sql: &str) -> String {
+pub(super) fn counted(sql: &str) -> String {
     let filtered = scan(1, ROWS).replace("</TableScan>", r#"<Predicate><ScalarOperator ScalarString="[r].[id]&gt;(9264)"><Compare CompareOp="GT"><ScalarOperator><Identifier><ColumnReference Table="[@Rows]" Alias="[r]" Column="id" /></Identifier></ScalarOperator><ScalarOperator><Const ConstValue="(9264)" /></ScalarOperator></Compare></ScalarOperator></Predicate></TableScan>"#);
     document(&format!(
         r#"<StmtSimple StatementText="{sql}" QueryHash="0x0123456789ABCDEF" StatementSubTreeCost="2"><QueryPlan>
@@ -14,7 +14,7 @@ fn counted(sql: &str) -> String {
     ))
 }
 
-fn completed_counts() -> String {
+pub(super) fn completed_counts() -> String {
     culprit_core::t!("insight.relational_input.completed_input_counts", estimated = "100", actual = "20K")
 }
 

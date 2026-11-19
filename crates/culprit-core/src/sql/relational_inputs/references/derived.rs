@@ -1,5 +1,5 @@
 //! One fully consumed passthrough relation. It contributes the original physical alias, never the outer alias.
-use super::{MssqlRelationName, MssqlRelationReference, Token, identifier, relation, unsupported, word};
+use super::{MssqlRelationName, MssqlRelationReference, Token, identifier, projection, relation, unsupported, word};
 use std::ops::Range;
 
 pub(super) struct DerivedRelation {
@@ -31,21 +31,21 @@ impl DerivedRelation {
 /// The complete body shared by a derived relation and a single CTE. It cannot hide another relation or operation.
 pub(super) fn read_body(tokens: &[Token<'_>], at: &mut usize) -> Option<MssqlRelationReference> {
     let start = *at;
-    if tokens.get(start) != Some(&Token::Punct('('))
-        || !word(tokens.get(start + 1), "SELECT")
-        || tokens.get(start + 2) != Some(&Token::Punct('*'))
-        || !word(tokens.get(start + 3), "FROM")
-        || !word(tokens.get(start + 5), "AS")
-    {
+    if tokens.get(start) != Some(&Token::Punct('(')) || !word(tokens.get(start + 1), "SELECT") {
         return None;
     }
-    let mut inner = start + 4;
+    let projection_start = start + 2;
+    let from = tokens.iter().enumerate().skip(projection_start).find(|(_, token)| word(Some(token), "FROM"))?.0;
+    if !word(tokens.get(from + 2), "AS") {
+        return None;
+    }
+    let mut inner = from + 1;
     let source = relation(tokens, &mut inner)?;
     if !matches!(&source.name, MssqlRelationName::Parameter(_))
-        || inner != start + 7
-        || source.alias.is_none()
-        || unsupported(tokens.get(start + 6)?)
+        || inner != from + 4
+        || unsupported(tokens.get(inner - 1)?)
         || tokens.get(inner) != Some(&Token::Punct(')'))
+        || !projection::is_direct(&tokens[projection_start..from], source.alias.as_deref()?)
     {
         return None;
     }
