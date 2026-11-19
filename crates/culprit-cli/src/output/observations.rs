@@ -9,6 +9,8 @@ const OBSERVATION_DETAIL_CHARS: usize = 1024;
 #[cfg(test)]
 mod compilation_tests;
 mod completed_spills;
+#[cfg(test)]
+mod task_space_tests;
 pub(crate) use completed_spills::completed_spills;
 mod page_server_reads;
 pub(crate) use page_server_reads::collected_page_server_reads;
@@ -524,14 +526,14 @@ pub(crate) fn participants(report: &MemoryParticipantsReport) -> String {
 }
 
 pub(crate) fn task_space(report: &TaskSpaceReport) -> String {
-    render(
+    render_explanations(
         Summary {
             title: &report.title,
             summary: &report.summary,
             source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
-        report.entries.iter().map(|entry| entry.title.as_str()),
+        report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
     )
 }
 
@@ -1135,7 +1137,7 @@ mod tests {
     }
 
     #[test]
-    fn task_space_summaries_preserve_source_limits_and_bound_titles_without_native_payload_copies() {
+    fn task_space_summaries_preserve_source_limits_and_bound_details_without_native_payload_copies() {
         let report = TaskSpaceReport {
             source_state: Some(SourceState::Partial),
             source_reason: Some("request context was incomplete".into()),
@@ -1152,7 +1154,7 @@ mod tests {
                         execution_context_id: index.to_string(),
                     },
                     title: "x".repeat(1000),
-                    explanation: "private detailed native context".into(),
+                    explanation: "Recorded allocation activity. ".repeat(1000),
                     investigation: "bounded native investigation".into(),
                     verify: "equivalent useful work".into(),
                 })
@@ -1169,9 +1171,15 @@ mod tests {
                 .flat_map(str::chars)
                 .filter(|character| *character == 'x')
                 .count(),
-            super::super::BRIEF_FINDING_LIMIT * super::super::BRIEF_TITLE_CHARS
+            super::super::BRIEF_FINDING_LIMIT * 1000
         );
-        assert!(!text.contains("private-proof") && !text.contains("private detailed native context"));
+        assert!(
+            text.lines()
+                .filter(|line| line.starts_with('•'))
+                .all(|line| { line.strip_prefix("• ").unwrap().chars().count() <= OBSERVATION_DETAIL_CHARS + 1 })
+        );
+        assert!(text.contains("Recorded allocation"));
+        assert!(!text.contains("private-proof"));
     }
 
     #[test]
