@@ -1,4 +1,5 @@
 use super::*;
+mod insert_hotspot;
 
 fn reference(key: NativeRecordIdentity, stream: TelemetryStream, ordinal: u32) -> DiagnosticEvidenceRef {
     let capture = CaptureIdentity {

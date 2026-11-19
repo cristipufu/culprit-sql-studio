@@ -1,6 +1,6 @@
 use super::*;
 
-fn with_point(kind: WaitResourceKind) -> PageWaitObservation {
+pub(super) fn with_point(kind: WaitResourceKind) -> PageWaitObservation {
     let mut row = observation("61", kind);
     let target = row.target.as_ref().unwrap();
     row.index_operations = Some(PageIndexOperations::Observed {

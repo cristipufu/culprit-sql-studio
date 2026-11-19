@@ -361,7 +361,7 @@ fn parallel_observation(session: &str, kind: WaitResourceKind, page: u32, contex
     row
 }
 
-fn index_point(target: &MappedPageTarget, relation: PageIndexOperationRelation) -> PageIndexOperations {
+pub(super) fn index_point(target: &MappedPageTarget, relation: PageIndexOperationRelation) -> PageIndexOperations {
     let verified_catalog = relation != PageIndexOperationRelation::UnverifiedTarget;
     PageIndexOperations::Observed {
         observed_at: "2020-01-01T12:00:00.500000000Z".into(),

@@ -9,6 +9,65 @@ use culprit_engine::collected_resources;
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
 
 #[tokio::test]
+async fn original_writer_replay_keeps_end_leaf_insert_candidates_separate_from_later_nonterminal_links() {
+    for terminal in [true, false] {
+        let (source, mut records) = page_writer_evidence(PageWriterCase::EndOfLeafInsert);
+        if !terminal {
+            let TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::PageWaitWriters(row),
+                ..
+            }) = &mut records[0]
+            else {
+                unreachable!()
+            };
+            let header = &mut row.page.as_mut().unwrap().target.as_mut().unwrap().header;
+            header.next_file_id = Some(1);
+            header.next_page_id = Some(55);
+        }
+        let focus = native(&source, &records).0.clone();
+        let fixture = Fixture::new(source.clone(), records).await;
+        let capture = fixture.read_families_with_recovery(FAMILY, RecoveryPayloadBudget::default()).await;
+        let result = collected_resources::page_wait_writers(&capture).unwrap();
+        assert!(result.context.read_gaps.is_empty());
+        assert_eq!(result.report.original_page, focus.page);
+        assert_eq!(result.report.entries[0].parent, focus.candidates[0].parent);
+        assert_eq!(result.report.entries[0].relation, PageWriterRelation::TargetObjectWrite);
+        assert_eq!(
+            result.report.entries[0]
+                .explanation
+                .contains(&culprit_core::t!("view.page_writers.insert_hotspot.candidate")),
+            terminal
+        );
+        assert!(
+            !result.report.entries[1]
+                .explanation
+                .contains(&culprit_core::t!("view.page_writers.insert_hotspot.candidate"))
+        );
+        assert_eq!(result.report.entries[1].relation, PageWriterRelation::ReadOnlyPlan);
+        assert_eq!(focus.target.header.next_file_id, Some(0));
+        assert_eq!(focus.target.header.next_page_id, Some(0));
+        if terminal {
+            assert_eq!(
+                result.report.entries[0].investigation,
+                culprit_core::t!("view.page_writers.insert_hotspot.investigate")
+            );
+            assert!(
+                result.report.entries[0]
+                    .explanation
+                    .contains(&culprit_core::t!("view.page_writers.insert_hotspot.identity"))
+            );
+        } else {
+            assert_eq!(
+                result.report.entries[0].investigation,
+                culprit_core::t!("view.page_writers.investigate.target")
+            );
+        }
+        let content = writer_content(&result.report);
+        assert!(!content.contains("9264") && !content.contains("<ShowPlanXML") && !content.contains("\"binding\""));
+    }
+}
+
+#[tokio::test]
 async fn authenticated_writer_rosters_replay_the_same_native_access_relationships_without_latch_or_cost_ownership() {
     for case in PageWriterCase::ALL {
         let (source, records) = page_writer_evidence(case);

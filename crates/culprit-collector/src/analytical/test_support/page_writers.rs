@@ -13,6 +13,7 @@ const UNTIL: &str = "2020-01-01T12:00:02.900000000Z";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageWriterCase {
     TargetWriter,
+    EndOfLeafInsert,
     ReportedBlockingSession,
     ReadOnly,
     OtherTarget,
@@ -26,8 +27,9 @@ pub enum PageWriterCase {
 }
 
 impl PageWriterCase {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::TargetWriter,
+        Self::EndOfLeafInsert,
         Self::ReportedBlockingSession,
         Self::ReadOnly,
         Self::OtherTarget,
@@ -78,6 +80,16 @@ pub fn page_writer_fixture(case: PageWriterCase) -> PageWriterFixture {
             vec![ActivityWaitOwner::Session { id: "73".into(), generation: Some("original-writer-login".into()) }];
     }
     qualify_target(page.target.as_mut().unwrap());
+    if case == PageWriterCase::EndOfLeafInsert {
+        let target = page.target.as_mut().unwrap();
+        target.header.next_file_id = Some(0);
+        target.header.next_page_id = Some(0);
+        let mut point = super::page_waits::index_point(target, PageIndexOperationRelation::CheckedTarget);
+        let PageIndexOperations::Observed { counters, .. } = &mut point else { unreachable!() };
+        counters.leading_key_is_identity = Some(true);
+        counters.optimize_for_sequential_key = Some(false);
+        page.index_operations = Some(point);
+    }
     let (parent_source, originals) = original_activity(&page_source, &page, case);
     page_source.partition = parent_source.partition.clone();
     let parent_recovery = retained(&parent_source, &originals, PARENT_SEQUENCE);
@@ -353,6 +365,9 @@ fn move_page_point(page: &mut PageWaitObservation) {
     page.observed_until = "2020-01-01T12:00:02.800000000Z".into();
     page.before_check.as_mut().unwrap().observed_at = "2020-01-01T12:00:02.200000000Z".into();
     page.after_check.as_mut().unwrap().observed_at = "2020-01-01T12:00:02.700000000Z".into();
+    if let Some(PageIndexOperations::Observed { observed_at, .. }) = &mut page.index_operations {
+        *observed_at = "2020-01-01T12:00:02.500000000Z".into();
+    }
 }
 
 fn operational(page: PageWaitObservation) -> TelemetryRecord {
