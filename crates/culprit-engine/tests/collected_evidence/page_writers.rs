@@ -35,6 +35,7 @@ async fn authenticated_writer_rosters_replay_the_same_native_access_relationship
         );
         assert_eq!(serde_json::to_value(&result.report).unwrap(), serde_json::to_value(expected).unwrap(), "{case:?}");
         assert_eq!(result.report.original_page, focus.page);
+        assert_eq!(result.report.original_target, focus.target);
         assert_eq!(result.report.focus_key, focus.key().unwrap());
         assert_eq!(result.report.target_state, Some(native.target_state));
         assert_eq!(result.report.entries.len(), 2, "every original MARS request stays separate");
@@ -45,6 +46,7 @@ async fn authenticated_writer_rosters_replay_the_same_native_access_relationship
             assert_eq!(entry.relation, candidate.relation);
             assert_eq!(entry.request_state, candidate.request_state);
             assert_eq!(entry.plan_identity, candidate.plan_identity);
+            assert_eq!(entry.client, candidate.request.as_ref().and_then(|request| request.client.clone()));
             assert_eq!(
                 entry.accesses,
                 candidate.binding.as_ref().map_or_else(Vec::new, |proof| proof.accesses.clone())
@@ -57,18 +59,30 @@ async fn authenticated_writer_rosters_replay_the_same_native_access_relationship
                 [MssqlPageWriteAccess { node_id: 1, operation: PageWriteOperation::Insert }]
             );
             assert_eq!(result.report.entries[1].relation, PageWriterRelation::ReadOnlyPlan);
+            let Some(DefinitionPayload::Available { text, .. }) = &result.report.entries[0].sql else {
+                panic!("authenticated current writer SQL must survive offline projection")
+            };
+            assert!(text.contains("INSERT INTO dbo.orders"));
+            let Some(DefinitionPayload::Available { text, .. }) = &result.report.entries[1].sql else {
+                panic!("the separate read-only request retains its own qualified SQL")
+            };
+            assert!(text.contains("SELECT customer_id FROM dbo.orders"));
+        }
+        if matches!(
+            case,
+            PageWriterCase::MissingRequest | PageWriterCase::ChangedRequest | PageWriterCase::PermissionUnavailable
+        ) {
+            assert!(result.report.entries.iter().all(|entry| entry.sql.is_none() && entry.client.is_none()));
         }
         assert_eq!(result.report.source_state, Some(coverage.state));
         let encoded = serde_json::to_string(&result.report).unwrap();
         for body in [
             "<ShowPlanXML",
-            "INSERT INTO",
-            "SELECT customer_id",
+            "9264",
             "private-writer-machine-canary",
             "private-writer-instance-canary",
             "\"session_counters\"",
             "\"request_counters\"",
-            "collector-name",
             "\"binding\"",
         ] {
             assert!(!encoded.contains(body), "{case:?}: {body}");

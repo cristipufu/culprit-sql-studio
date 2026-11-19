@@ -3,6 +3,7 @@ use culprit_core::{
     MaintenanceClassification, MaintenanceClassificationIssue, PageWaitWriterExplanation, PageWaitWriterReport, Result,
     SourceOutcome, SourceState, classify_maintenance, format, t, telemetry::*,
 };
+use std::collections::BTreeSet;
 
 pub fn explain_writers(
     focus: &PageWaitWriterFocus,
@@ -39,10 +40,15 @@ pub fn explain_writers(
     } else if source.is_some_and(|source| source.state == SourceState::Partial) {
         limitations.push(t!("view.page_writers.limit.partial"));
     }
+    let disqualified = ActivityEvidence::disqualified_session_generations(
+        observation
+            .into_iter()
+            .flat_map(|row| row.candidates.iter().filter_map(|candidate| candidate.request.as_ref())),
+    )?;
     let entries = observation
         .into_iter()
         .flat_map(|row| focus.candidates.iter().zip(&row.candidates))
-        .map(|(original, current)| render(original, current, context.target.engine()))
+        .map(|(original, current)| render(original, current, context.target.engine(), &disqualified))
         .collect::<Vec<_>>();
     let writers = entries.iter().filter(|entry| entry.relation == PageWriterRelation::TargetObjectWrite).count();
     Ok(PageWaitWriterReport {
@@ -55,6 +61,7 @@ pub fn explain_writers(
         }),
         source_reason: source.and_then(|source| source.reason.clone()),
         original_page: focus.page.clone(),
+        original_target: focus.target.clone(),
         focus_key: focus.key()?,
         target_state: observation.map(|row| row.target_state),
         title: t!("view.page_writers.title"),
@@ -81,12 +88,27 @@ fn render(
     original: &PageWaitWriterRequest,
     current: &PageWaitWriterCandidate,
     engine: culprit_core::Engine,
+    disqualified: &BTreeSet<NativeActivityIdentity>,
 ) -> PageWaitWriterExplanation {
-    let maintenance = current.request.as_ref().map_or(
+    let request = current
+        .request
+        .as_ref()
+        .filter(|request| request.has_session_generation_authority() && !disqualified.contains(&request.key.session));
+    let request_state = if current.request.is_some() && request.is_none() {
+        PageWaitRequestState::Unverified
+    } else {
+        current.request_state
+    };
+    let relation = if request_state == PageWaitRequestState::SameStatement {
+        current.relation
+    } else {
+        PageWriterRelation::Unavailable
+    };
+    let maintenance = request.map_or(
         MaintenanceClassification::Unresolved { reason: MaintenanceClassificationIssue::NoCurrentRequest },
         |request| classify_maintenance(engine, request),
     );
-    let (explanation, investigation) = match current.request_state {
+    let (explanation, investigation) = match request_state {
         PageWaitRequestState::Missing => {
             (t!("view.page_writers.request.missing"), t!("view.page_writers.investigate.missing"))
         }
@@ -96,7 +118,7 @@ fn render(
         PageWaitRequestState::Unverified => {
             (t!("view.page_writers.request.unverified"), t!("view.page_writers.investigate.unavailable"))
         }
-        PageWaitRequestState::SameStatement => match current.relation {
+        PageWaitRequestState::SameStatement => match relation {
             PageWriterRelation::TargetObjectWrite => {
                 (t!("view.page_writers.relation.target"), t!("view.page_writers.investigate.target"))
             }
@@ -123,10 +145,15 @@ fn render(
         parent: original.parent.clone(),
         request: original.key.clone(),
         statement: original.statement_identity.clone(),
-        request_state: current.request_state,
-        relation: current.relation,
-        plan_identity: current.plan_identity.clone(),
-        accesses: current.binding.as_ref().map_or_else(Vec::new, |binding| binding.accesses.clone()),
+        request_state,
+        relation,
+        sql: request.map(|request| match &request.statement {
+            DefinitionPayload::Available { text, .. } => DefinitionPayload::sql(text, engine),
+            unavailable => unavailable.clone(),
+        }),
+        client: request.and_then(|request| request.client.clone()),
+        plan_identity: request.and(current.plan_identity.as_ref()).cloned(),
+        accesses: request.and(current.binding.as_ref()).map_or_else(Vec::new, |binding| binding.accesses.clone()),
         maintenance,
         title: t!(
             "view.page_writers.entry.title",

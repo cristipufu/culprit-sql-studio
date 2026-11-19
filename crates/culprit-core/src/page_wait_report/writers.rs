@@ -9,6 +9,8 @@ pub struct PageWaitWriterReport {
     pub source_state: Option<SourceState>,
     pub source_reason: Option<String>,
     pub original_page: DiagnosticEvidenceRef,
+    /// Checked target from the original page observation, separate from the later target-state verdict.
+    pub original_target: Box<MappedPageTarget>,
     pub focus_key: String,
     pub target_state: Option<PageWriterTargetState>,
     pub title: String,
@@ -23,6 +25,9 @@ pub struct PageWaitWriterExplanation {
     pub parent: DiagnosticEvidenceRef,
     pub request: ActivityKey,
     pub statement: NativeIdentity,
+    /// Fresh redacted payload and client labels only when exact request and native generation are qualified.
+    pub sql: Option<DefinitionPayload>,
+    pub client: Option<ActivityClient>,
     pub request_state: PageWaitRequestState,
     pub relation: PageWriterRelation,
     pub plan_identity: Option<NativeIdentity>,

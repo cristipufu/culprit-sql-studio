@@ -36,6 +36,9 @@ pub(crate) use counter_ratios::counter_ratios;
 pub(crate) use wait_counters::wait_counters;
 mod maintenance_blocking;
 pub(crate) use maintenance_blocking::maintenance_blocking;
+mod page_writers;
+mod statement;
+pub(crate) use page_writers::page_wait_writers;
 mod page_task_holders;
 pub(crate) use page_task_holders::page_task_holders;
 
@@ -331,18 +334,6 @@ pub(crate) fn compiler_admission(report: &culprit_core::CompilerAdmissionReport)
             .iter()
             .map(|entry| (entry.title.as_str(), entry.explanation.as_str()))
             .chain(report.gateways.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str()))),
-    )
-}
-
-pub(crate) fn page_wait_writers(report: &culprit_core::PageWaitWriterReport) -> String {
-    render_explanations(
-        Summary {
-            title: &report.title,
-            summary: &report.summary,
-            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
-            limitations: &report.limitations,
-        },
-        report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
     )
 }
 

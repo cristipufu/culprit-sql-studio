@@ -1,11 +1,10 @@
 //! Native endpoints and the final mapping stay independent; this renderer adds no relationship or verdict.
-use super::{blocking::line, *};
+use super::{blocking::line, statement::sql, *};
 use culprit_core::{
     page_wait_report::{PageTaskHolderExplanation, PageTaskHolderReport},
-    telemetry::{DefinitionPayload, PageTaskHolderTargetCheck, PayloadUnavailable},
+    telemetry::PageTaskHolderTargetCheck,
 };
 
-const SQL_PREVIEW_CHARS: usize = 100;
 const MAX_HOLDER_LIMITATIONS: usize = 8;
 
 pub(crate) fn page_task_holders(report: &PageTaskHolderReport) -> String {
@@ -81,33 +80,6 @@ fn native_number(value: Option<u32>) -> String {
 
 fn native_identifier(value: Option<&str>) -> String {
     value.map_or_else(|| t!("evidence.cli.page_holders.not_recorded"), |value| format::digits(value.to_owned()))
-}
-
-fn sql(payload: Option<&DefinitionPayload>) -> String {
-    match payload {
-        Some(DefinitionPayload::Available { text, .. }) => {
-            t!("evidence.cli.page_holders.sql", sql = sql_preview(text))
-        }
-        Some(DefinitionPayload::Unavailable { reason }) => match reason {
-            PayloadUnavailable::Missing => t!("evidence.cli.page_holders.sql_missing"),
-            PayloadUnavailable::Restricted => t!("evidence.cli.page_holders.sql_restricted"),
-            PayloadUnavailable::Encrypted => t!("evidence.cli.page_holders.sql_encrypted"),
-            PayloadUnavailable::Oversized => t!("evidence.cli.page_holders.sql_oversized"),
-            PayloadUnavailable::RedactionFailed => t!("evidence.cli.page_holders.sql_redaction_failed"),
-            PayloadUnavailable::NotCollected => t!("evidence.cli.page_holders.sql_not_collected"),
-            PayloadUnavailable::SourceUnavailable => t!("evidence.cli.page_holders.sql_source_unavailable"),
-        },
-        None => t!("evidence.cli.page_holders.sql_not_retained"),
-    }
-}
-
-fn sql_preview(text: &str) -> String {
-    let mut characters = text.chars().flat_map(char::escape_debug);
-    let mut preview = characters.by_ref().take(SQL_PREVIEW_CHARS).collect::<String>();
-    if characters.next().is_some() {
-        preview.push('…');
-    }
-    preview
 }
 
 #[cfg(test)]
