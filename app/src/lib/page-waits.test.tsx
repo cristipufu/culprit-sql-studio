@@ -176,6 +176,47 @@ test("native counters and signed metadata IDs stay exact while SQL NULL and zero
   expect(html).toContain("000001:000002:0003");
 });
 
+test("the local tempdb primary-file basis shows native file ID 1 without inventing a file GUID or LSN", () => {
+  const row = pageWait();
+  row.resource.native.id = "2:1:1";
+  row.request.wait!.identified_resources = [structuredClone(row.resource)];
+  row.observed_address = { database_id: 2, file_id: 1, page_id: 1 };
+  const target = row.target!;
+  const shared = {
+    engine: "mssql" as const, kind: "instance" as const,
+    namespace: { id: "native-machine", qualifiers: {} }, native: { id: "native-instance", qualifiers: {} },
+  };
+  target.scope = { kind: "shared-resource", context: {
+    target: { scope: "shared", identity: shared },
+    partition: { kind: "instance-local", member: shared, epoch: "native-process-epoch" },
+    observed_from: PAGE_BEFORE, observed_until: PAGE_AFTER, database_writable: null,
+  } };
+  target.identity_basis = "local-tempdb-primary-file-epoch";
+  target.database = { id: "2", qualifiers: {
+    kind: "sql-server-shared-tempdb", instance_epoch: "native-process-epoch",
+    database_created_without_offset: "2026-11-13T09:00:00", database_guid: "native-tempdb-guid", recovery_fork_guid: "native-tempdb-fork",
+  } };
+  target.file = { id: "1", qualifiers: { kind: "sql-server-tempdb-primary-file", file_type: "0", file_state: "0" } };
+  target.header.database_id = 2;
+  target.header.page_id = 1;
+  target.header.page_type = 11;
+  target.header.object_id = null;
+  target.header.index_id = null;
+  target.header.partition_id = null;
+  target.header.lsn = null;
+  target.header.next_file_id = null;
+  target.header.next_page_id = null;
+  target.kind = "pfs";
+  target.object = null;
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={pageReport([row])} />);
+  expect(html).toContain(t("ui.page_waits.basis.tempdb_primary"));
+  expect(html).toContain(`${t("ui.page_waits.file_identity")}</dt><dd><code>1</code>`);
+  expect(html).toContain(`${t("ui.page_waits.header.lsn")}</dt><dd>${t("ui.memory_failures.not_reported")}`);
+  expect(html).not.toContain("native-file-epoch");
+  expect(html).not.toContain("create_lsn");
+  expect(html).not.toContain("000001:000002:0003");
+});
+
 test("page observations start collapsed and remain bounded by the shared ten-row page", () => {
   const rows = Array.from({ length: 12 }, (_, index) => pageWait(String(42 + index), 42 + index));
   const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence(rows)} report={pageReport(rows)} />);

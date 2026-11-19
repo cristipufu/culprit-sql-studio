@@ -10,7 +10,7 @@ use crate::{
 
 const AT: &str = "2020-01-01T06:00:00Z";
 
-async fn resource() -> SharedResourceIdentity {
+pub(in crate::activity::page_targets) async fn resource() -> SharedResourceIdentity {
     crate::instance::read(&mut FakeRead::new(vec![Ok(vec![metadata()]), Ok(vec![epoch(100)])]))
         .await
         .unwrap()
@@ -27,7 +27,7 @@ fn native_reader(replies: Vec<ReadResult<Vec<Rec>>>) -> ActivityReader<FakeRead>
     )
 }
 
-fn tempdb(file: Option<u32>) -> Rec {
+pub(in crate::activity::page_targets) fn tempdb(file: Option<u32>) -> Rec {
     Rec::of(&[
         ("observed_at", Val::Text(AT.into())),
         ("tempdb_database_id", Val::Int(2)),
@@ -48,7 +48,7 @@ fn wait() -> Rec {
     replace(&page_wait(42, "PAGELATCH_EX", "2:1:4144"), &[("edition", Val::Int(3))])
 }
 
-fn tempdb_header(ordinal: usize) -> Rec {
+pub(in crate::activity::page_targets) fn tempdb_header(ordinal: usize) -> Rec {
     replace(
         &header(ordinal, 4144),
         &[
@@ -64,7 +64,7 @@ fn tempdb_header(ordinal: usize) -> Rec {
     )
 }
 
-fn replies() -> Vec<ReadResult<Vec<Rec>>> {
+pub(in crate::activity::page_targets) fn replies() -> Vec<ReadResult<Vec<Rec>>> {
     let wait = wait();
     vec![
         Ok(vec![metadata()]),
@@ -173,6 +173,69 @@ async fn shared_permission_gaps_keep_observed_waits_without_running_a_header_fun
     assert!(captured.snapshot.observations[0].target.is_none());
     assert!(reader.io.calls.iter().all(|call| !call.sql.contains("OUTER APPLY sys.dm_db_page_info")));
     assert_eq!(reader.query_count(), 10);
+}
+
+#[tokio::test]
+async fn missing_tempdb_database_identity_keeps_the_application_wait_without_reading_headers() {
+    let resource = resource().await;
+    for field in ["tempdb_created_without_offset", "tempdb_database_guid", "tempdb_recovery_fork_guid"] {
+        let missing = replace(&tempdb(None), &[(field, Val::Null)]);
+        let mut reader = native_reader(vec![
+            Ok(vec![metadata()]),
+            Ok(vec![epoch(100)]),
+            Ok(vec![boxed_context()]),
+            Ok(vec![missing.clone()]),
+            Ok(vec![wait()]),
+            Ok(vec![details(42, "INSERT dbo.work VALUES(1)")]),
+            Ok(vec![metadata()]),
+            Ok(vec![epoch(100)]),
+            Ok(vec![boxed_context()]),
+            Ok(vec![missing]),
+        ]);
+        let captured = reader.capture_shared_tempdb_page_wait_targets(&resource).await;
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+        let captured = captured.unwrap();
+        let row = &captured.snapshot.observations[0];
+        assert_eq!(row.request.database.as_deref(), Some("shop"), "{field}");
+        assert_eq!(row.resolution, PageWaitResolution::UnverifiedSource, "{field}");
+        assert!(row.target.is_none(), "{field}");
+        assert!(reader.io.calls.iter().all(|call| !call.sql.contains("OUTER APPLY sys.dm_db_page_info")), "{field}");
+        assert_eq!(reader.query_count(), 10, "{field}");
+    }
+}
+
+#[tokio::test]
+async fn missing_tempdb_file_identity_cannot_map_a_page_or_verify_a_previously_mapped_file() {
+    let resource = resource().await;
+    for missing_at in [vec![6], vec![8], vec![6, 8]] {
+        let mut scripted = replies();
+        for index in missing_at {
+            scripted[index] = Ok(vec![replace(&tempdb_header(0), &[("file_guid", Val::Null)])]);
+        }
+        let mut reader = native_reader(scripted);
+        let captured = reader.capture_shared_tempdb_page_wait_targets(&resource).await;
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+        let captured = captured.unwrap();
+        let row = &captured.snapshot.observations[0];
+        assert_eq!(row.request.database.as_deref(), Some("shop"));
+        assert_eq!(row.resolution, PageWaitResolution::UnverifiedSource);
+        assert!(row.target.is_none());
+        assert_eq!(reader.query_count(), 14);
+    }
+    let mut scripted = replies();
+    scripted.extend([
+        Ok(vec![metadata()]),
+        Ok(vec![epoch(100)]),
+        Ok(vec![boxed_context()]),
+        Ok(vec![replace(&tempdb(Some(1)), &[("file_guid", Val::Null)])]),
+    ]);
+    let mut reader = native_reader(scripted);
+    let captured = reader.capture_shared_tempdb_page_wait_targets(&resource).await.unwrap();
+    let verified = reader.verify_page_wait_context(&captured.guard).await;
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    assert!(captured.snapshot.observations[0].target.is_some());
+    assert!(!verified.unwrap());
+    assert_eq!(reader.query_count(), 18);
 }
 
 #[tokio::test]

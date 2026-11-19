@@ -244,6 +244,7 @@ const TARGET_KIND: Record<PageWaitTargetKind, string> = {
 const IDENTITY_BASIS: Record<PageTargetIdentityBasis, string> = {
   "database-incarnation": key("ui.page_waits.basis.database"),
   "local-database-file-epoch": key("ui.page_waits.basis.local"),
+  "local-tempdb-primary-file-epoch": key("ui.page_waits.basis.tempdb_primary"),
 };
 const HEADER_FIELDS = [
   ["database_id", key("ui.page_waits.header.database_id")],

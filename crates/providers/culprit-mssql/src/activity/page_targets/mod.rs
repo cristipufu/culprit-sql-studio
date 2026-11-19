@@ -5,6 +5,7 @@
 //! https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-page-info-transact-sql
 mod context;
 mod fields;
+mod file_epoch;
 mod focus;
 pub(crate) mod holders;
 #[cfg(test)]
@@ -81,7 +82,7 @@ struct Candidate {
 enum LookupState {
     Pending,
     Unresolved(PageWaitResolution),
-    Observed { target: Box<MappedPageTarget> },
+    Observed { target: Box<MappedPageTarget>, file_epoch: Box<file_epoch::FileEpoch> },
 }
 impl Candidate {
     fn is_pending(&self) -> bool {
@@ -324,7 +325,7 @@ impl<R: NativeRead> ActivityReader<R> {
                 candidate.withhold(PageWaitResolution::Unavailable);
                 continue;
             }
-            if header_before.catalog.file_guid.is_none() || header_after.catalog.file_guid.is_none() {
+            if header_before.file_epoch.is_none() || header_after.file_epoch.is_none() {
                 candidate.withhold(PageWaitResolution::UnverifiedSource);
                 continue;
             }
@@ -337,7 +338,10 @@ impl<R: NativeRead> ActivityReader<R> {
                     if let Some(point) = &mut candidate.index_operations {
                         index_context::qualify(point, Some(&target), header_before, header_after);
                     }
-                    candidate.state = LookupState::Observed { target: Box::new(target) };
+                    candidate.state = LookupState::Observed {
+                        target: Box::new(target),
+                        file_epoch: Box::new(header_after.file_epoch.clone().ok_or_else(invalid_data)?),
+                    };
                 }
                 Err(_) => candidate.withhold(PageWaitResolution::UnverifiedSource),
             }
@@ -441,7 +445,8 @@ impl<R: NativeRead> ActivityReader<R> {
         let expected: Vec<_> = addresses.iter().copied().collect();
         let mut headers = BTreeMap::new();
         for row in &rows {
-            let header = HeaderRecord::decode(row)?;
+            let mut header = HeaderRecord::decode(row)?;
+            header.file_epoch = file_epoch::FileEpoch::select(context, &header);
             if expected.get(header.ordinal) != Some(&header.address) || headers.insert(header.address, header).is_some()
             {
                 return Err(invalid_data());
@@ -559,10 +564,10 @@ fn finish(
         frame.records.into_iter().enumerate().map(|(index, row)| (index, row.into_redacted_observation())).collect();
     if let Some(shared) = &mut guard.shared {
         for candidate in &candidates {
-            if let LookupState::Observed { target } = &candidate.state
+            if let LookupState::Observed { target, file_epoch } = &candidate.state
                 && matches!(target.scope, PageTargetScope::SharedResource { .. })
             {
-                shared.retain_file(target)?;
+                shared.retain_file(file_epoch)?;
             }
         }
     }
@@ -572,7 +577,7 @@ fn finish(
             let (resolution, target) = match candidate.state {
                 LookupState::Pending => (PageWaitResolution::Unavailable, None),
                 LookupState::Unresolved(resolution) => (resolution, None),
-                LookupState::Observed { target } => (PageWaitResolution::ObservedAtBothBounds, Some(target)),
+                LookupState::Observed { target, .. } => (PageWaitResolution::ObservedAtBothBounds, Some(target)),
             };
             let mut request = records.get(&candidate.record).ok_or_else(invalid_data)?.clone();
             if candidate.task_wait.is_some()
@@ -621,13 +626,29 @@ fn chronological(instants: &[&str]) -> bool {
 }
 
 fn mapped_target(context: &context::LookupContext, record: &HeaderRecord) -> Result<MappedPageTarget> {
-    let (basis, database) = context.database_identity(record.address)?;
-    let guid = record.catalog.file_guid.as_ref().ok_or_else(invalid_data)?;
-    if record.catalog.file_state != Some(0) || record.catalog.file_type != Some(0) {
-        return Err(invalid_data());
-    }
+    let (_, database) = context.database_identity(record.address)?;
+    let epoch = file_epoch::FileEpoch::select(context, record).ok_or_else(invalid_data)?;
+    let facts = header_facts(record)?;
+    let object = object(record);
+    let scope = match context.shared_for(record.address) {
+        Some(shared) => PageTargetScope::SharedResource { context: Box::new(shared.read_context()?) },
+        None => PageTargetScope::RequestDatabase,
+    };
+    let (database, file) = scope.bind_identities(database, epoch.identity())?;
+    let target = MappedPageTarget {
+        scope,
+        identity_basis: epoch.basis(),
+        database,
+        file,
+        kind: target_kind(&facts, record.catalog.index_type),
+        header: facts,
+        object,
+    };
+    if target.is_valid() { Ok(target) } else { Err(invalid_data()) }
+}
+fn header_facts(record: &HeaderRecord) -> Result<PageHeaderFacts> {
     let header = &record.header;
-    let facts = PageHeaderFacts {
+    Ok(PageHeaderFacts {
         database_id: record.address.database,
         file_id: record.address.file,
         page_id: record.address.page,
@@ -641,27 +662,7 @@ fn mapped_target(context: &context::LookupContext, record: &HeaderRecord) -> Res
         lsn: header.lsn.clone(),
         next_file_id: nonnegative(header.next_file_id)?,
         next_page_id: nonnegative(header.next_page_id)?,
-    };
-    let object = object(record);
-    let mut file = NativeIdentity::new(guid).qualified("kind", "sql-server-database-file");
-    if let Some(created) = &record.catalog.file_create_lsn {
-        file = file.qualified("create_lsn", created);
-    }
-    let scope = match context.shared_for(record.address) {
-        Some(shared) => PageTargetScope::SharedResource { context: Box::new(shared.read_context()?) },
-        None => PageTargetScope::RequestDatabase,
-    };
-    let (database, file) = scope.bind_identities(database, file)?;
-    let target = MappedPageTarget {
-        scope,
-        identity_basis: basis,
-        database,
-        file,
-        kind: target_kind(&facts, record.catalog.index_type),
-        header: facts,
-        object,
-    };
-    if target.is_valid() { Ok(target) } else { Err(invalid_data()) }
+    })
 }
 fn nonnegative(value: Option<i32>) -> Result<Option<u32>> {
     value.map(|value| u32::try_from(value).map_err(|_| invalid_data())).transpose()

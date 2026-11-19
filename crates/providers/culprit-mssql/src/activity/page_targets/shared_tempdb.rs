@@ -18,19 +18,11 @@ struct Database {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-struct File {
-    guid: Option<String>,
-    created_lsn: Option<String>,
-    kind: Option<i64>,
-    state: Option<i64>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
 pub(super) struct Context {
     resource: SharedResourceIdentity,
     epoch: String,
     database: Option<Database>,
-    files: BTreeMap<u32, File>,
+    files: BTreeMap<u32, super::file_epoch::ObservedFile>,
     permission: bool,
     unavailable: Option<PageWaitResolution>,
     observed_from: String,
@@ -157,17 +149,7 @@ impl Context {
             }
             let selected: u32 = selected.ok_or_else(invalid_data)?.try_into().map_err(|_| invalid_data())?;
             if !self.files.contains_key(&selected)
-                || files
-                    .insert(
-                        selected,
-                        File {
-                            guid: optional_text(row, "file_guid")?,
-                            created_lsn: optional_text(row, "file_create_lsn")?,
-                            kind: crate::read::optional_integer(row, "file_type")?,
-                            state: crate::read::optional_integer(row, "file_state")?,
-                        },
-                    )
-                    .is_some()
+                || files.insert(selected, super::file_epoch::ObservedFile::decode(row)?).is_some()
             {
                 return Err(invalid_data());
             }
@@ -224,7 +206,7 @@ impl Context {
     pub(super) fn database_identity(&self) -> Result<NativeIdentity> {
         let database = self.database.as_ref().ok_or_else(invalid_data)?;
         let identity = NativeIdentity::new(TEMPDB_DATABASE_ID.to_string())
-            .qualified("kind", "sql-server-shared-tempdb")
+            .qualified("kind", MSSQL_SHARED_TEMPDB_DATABASE_KIND)
             .qualified("database_created_without_offset", &database.created)
             .qualified("database_guid", &database.guid)
             .qualified("recovery_fork_guid", &database.recovery_fork)
@@ -232,19 +214,15 @@ impl Context {
         if identity.is_valid() { Ok(identity) } else { Err(invalid_data()) }
     }
 
-    pub(super) fn retain_file(&mut self, target: &MappedPageTarget) -> Result<()> {
-        let file = File {
-            guid: Some(target.file.id.clone()),
-            created_lsn: target.file.qualifiers.get("create_lsn").cloned(),
-            kind: Some(0),
-            state: Some(0),
-        };
-        if (!self.files.contains_key(&target.header.file_id) && self.files.len() == MAX_PAGES)
-            || self.files.get(&target.header.file_id).is_some_and(|previous| previous != &file)
+    pub(super) fn retain_file(&mut self, epoch: &super::file_epoch::FileEpoch) -> Result<()> {
+        let file = epoch.observed_file();
+        let file_id = epoch.file_id();
+        if (!self.files.contains_key(&file_id) && self.files.len() == MAX_PAGES)
+            || self.files.get(&file_id).is_some_and(|previous| previous != &file)
         {
             return Err(invalid_data());
         }
-        self.files.insert(target.header.file_id, file);
+        self.files.insert(file_id, file);
         Ok(())
     }
 
@@ -283,4 +261,4 @@ fn unsupported() -> Error {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

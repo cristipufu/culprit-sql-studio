@@ -13,6 +13,8 @@ mod writers;
 pub use writers::*;
 
 pub const MAX_PAGE_WAIT_OBSERVATIONS: usize = 64;
+pub const MSSQL_TEMPDB_PRIMARY_FILE_KIND: &str = "sql-server-tempdb-primary-file";
+pub const MSSQL_SHARED_TEMPDB_DATABASE_KIND: &str = "sql-server-shared-tempdb";
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -72,6 +74,9 @@ impl PageWaitRecheck {
 pub enum PageTargetIdentityBasis {
     DatabaseIncarnation,
     LocalDatabaseFileEpoch,
+    /// The nondroppable tempdb primary file inside one verified native instance/process and database epoch.
+    /// This is not a persistent file GUID, continuous page identity, latch owner or cause attribution.
+    LocalTempdbPrimaryFileEpoch,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -324,6 +329,10 @@ impl MappedPageTarget {
             && self.database.is_valid()
             && self.file.is_valid()
             && self.scope.matches_identities(&self.database, &self.file)
+            && match self.identity_basis {
+                PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch => self.has_tempdb_primary_allocation_identity(),
+                _ => !self.file.qualifiers.get("kind").is_some_and(|kind| kind == MSSQL_TEMPDB_PRIMARY_FILE_KIND),
+            }
             && self.header.is_valid()
             && (self.kind == PageWaitTargetKind::Unclassified
                 || self.kind == classify_sql_server_page_header(&self.header))
@@ -333,6 +342,34 @@ impl MappedPageTarget {
                     && identifier(&object.name)
                     && object.index_name.as_deref().is_none_or(identifier)
             })
+    }
+
+    fn has_tempdb_primary_allocation_identity(&self) -> bool {
+        let PageTargetScope::SharedResource { context } = &self.scope else { return false };
+        let CollectionTarget::Shared(resource) = &context.target else { return false };
+        let SourcePartition::InstanceLocal { epoch: Some(epoch), .. } = &context.partition else { return false };
+        resource.engine == crate::Engine::Mssql
+            && resource.kind == SharedResourceKind::Instance
+            && self.database.id == "2"
+            && self.database.qualifiers.get("kind").is_some_and(|kind| kind == MSSQL_SHARED_TEMPDB_DATABASE_KIND)
+            && self.database.qualifiers.get("instance_epoch") == Some(epoch)
+            && self
+                .database
+                .qualifiers
+                .get("database_created_without_offset")
+                .is_some_and(|at| super::catalog::local_time(at))
+            && self.database.qualifiers.contains_key("database_guid")
+            && self.database.qualifiers.contains_key("recovery_fork_guid")
+            && self.file.id == "1"
+            && self.file.qualifiers.get("kind").is_some_and(|kind| kind == MSSQL_TEMPDB_PRIMARY_FILE_KIND)
+            && self.file.qualifiers.get("file_type").is_some_and(|kind| kind == "0")
+            && self.file.qualifiers.get("file_state").is_some_and(|state| state == "0")
+            && ["file_guid", "create_lsn", "drop_lsn"].iter().all(|key| !self.file.qualifiers.contains_key(*key))
+            && self.header.database_id == 2
+            && self.header.file_id == 1
+            && self.header.object_id.is_none()
+            && self.object.is_none()
+            && matches!(self.kind, PageWaitTargetKind::Pfs | PageWaitTargetKind::Gam | PageWaitTargetKind::Sgam)
     }
 }
 

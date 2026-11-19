@@ -138,6 +138,10 @@ impl Context {
     pub(crate) fn connection_changed(&self, other: &Self) -> bool {
         self.connection_generation != other.connection_generation
     }
+
+    pub(crate) fn connection_generation(&self) -> Option<u64> {
+        self.connection_generation
+    }
 }
 
 #[derive(Clone, Copy)]

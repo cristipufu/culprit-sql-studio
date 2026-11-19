@@ -232,7 +232,50 @@ pub fn shared_page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<Tele
             wait: PageWaitRelation::OriginalObserved,
         }),
     };
-    vec![(source, vec![record(first.clone())]), (empty, vec![]), (unavailable, vec![]), (focused, vec![record(first)])]
+    let mut cases = vec![
+        (source.clone(), vec![record(first.clone())]),
+        (empty, vec![]),
+        (unavailable, vec![]),
+        (focused, vec![record(first.clone())]),
+    ];
+    cases.extend([1, 2, 3].into_iter().map(|page| (source.clone(), vec![record(primary_tempdb_map(&first, page))])));
+    cases
+}
+
+fn primary_tempdb_map(original: &PageWaitObservation, page: u32) -> PageWaitObservation {
+    let mut row = original.clone();
+    row.resource.native.id = format!("2:1:{page}");
+    row.request.wait.as_mut().unwrap().identified_resources = vec![row.resource.clone()];
+    row.observed_address.as_mut().unwrap().page_id = page;
+    let target = row.target.as_mut().unwrap();
+    let PageTargetScope::SharedResource { context } = &target.scope else { panic!("qualified shared context") };
+    let SourcePartition::InstanceLocal { epoch: Some(epoch), .. } = &context.partition else {
+        panic!("native process epoch")
+    };
+    let database = NativeIdentity::new("2")
+        .qualified("kind", MSSQL_SHARED_TEMPDB_DATABASE_KIND)
+        .qualified("database_guid", target.database.qualifiers.get("database_guid").unwrap())
+        .qualified("recovery_fork_guid", "native-tempdb-recovery-fork")
+        .qualified("database_created_without_offset", "2020-01-01T04:00:00.0000000")
+        .qualified("instance_epoch", epoch);
+    let file = NativeIdentity::new("1")
+        .qualified("kind", MSSQL_TEMPDB_PRIMARY_FILE_KIND)
+        .qualified("file_type", "0")
+        .qualified("file_state", "0");
+    (target.database, target.file) = target.scope.bind_identities(database, file).unwrap();
+    target.identity_basis = PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch;
+    target.header.page_id = page;
+    target.header.page_type = Some(match page {
+        1 => 11,
+        2 => 8,
+        3 => 9,
+        _ => unreachable!(),
+    });
+    target.header.lsn = None;
+    target.header.next_file_id = None;
+    target.header.next_page_id = None;
+    target.kind = classify_sql_server_page_header(&target.header);
+    row
 }
 
 fn task_wait_cases() -> Vec<(Vec<TelemetryRecord>, culprit_core::SourceState)> {
@@ -355,6 +398,12 @@ fn index_point(target: &MappedPageTarget, relation: PageIndexOperationRelation) 
 
 pub fn page_wait_tamper_cases(original: &serde_json::Value) -> Vec<serde_json::Value> {
     use serde_json::json;
+    let changed_basis = if original.pointer("/target/identity_basis") == Some(&json!("local-tempdb-primary-file-epoch"))
+    {
+        json!("local-database-file-epoch")
+    } else {
+        json!("local-tempdb-primary-file-epoch")
+    };
     let changed_wait = if original.pointer("/after_check/wait") == Some(&json!("no-longer-observed")) {
         json!("original-observed")
     } else {
@@ -369,6 +418,12 @@ pub fn page_wait_tamper_cases(original: &serde_json::Value) -> Vec<serde_json::V
         if original.pointer("/task_wait/blocking_session_id") == Some(&json!(91)) { json!(-4) } else { json!(91) };
     [
         ("/target/header/page_id", json!(999)),
+        ("/target/identity_basis", changed_basis),
+        ("/target/file/id", json!("99")),
+        ("/target/file/qualifiers/kind", json!("unverified-file-kind")),
+        ("/target/file/qualifiers/file_type", json!("1")),
+        ("/target/file/qualifiers/file_state", json!("6")),
+        ("/target/database/qualifiers/instance_epoch", json!("wrong-native-process-epoch")),
         ("/target/scope/context/target/key", json!(digest(b"wrong shared owner"))),
         ("/target/scope/context/partition/key", json!(digest(b"wrong native epoch"))),
         ("/target/scope/context/observed_from", json!("2020-01-01T11:59:59Z")),

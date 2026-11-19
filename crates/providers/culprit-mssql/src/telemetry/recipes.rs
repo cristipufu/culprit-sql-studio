@@ -163,7 +163,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
     .bounded(crate::page_waits::bounded_budget)
-    .version(2),
+    .version(3),
     Registration::database("mssql.focused-page-wait", RecipeSelector::FocusedPageWait, |pool, request, host, port| {
         Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?))
     })
@@ -190,7 +190,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
     .bounded(page_waits::focused_budget)
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.focused-compiler-admission",
         RecipeSelector::FocusedCompilationAdmission,

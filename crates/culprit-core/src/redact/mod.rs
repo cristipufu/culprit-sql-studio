@@ -97,6 +97,43 @@ fn redact_native_qualifiers(identity: &mut crate::telemetry::NativeIdentity) {
     }
 }
 
+fn redact_page_target(target: &mut crate::telemetry::MappedPageTarget) -> bool {
+    use crate::telemetry::{PageTargetIdentityBasis, PageTargetScope};
+    if !target.is_valid() {
+        return false;
+    }
+    // Fixed system coordinates, native kinds and the creation clock are structural facts. Preserve them only
+    // after validating this narrow basis; physical identifiers and the native process epoch remain opaque.
+    let primary = target.identity_basis == PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch;
+    if let PageTargetScope::SharedResource { context } = &mut target.scope {
+        redact_read_context(context);
+    }
+    if primary {
+        redact_qualifiers_except(&mut target.database, &["kind", "database_created_without_offset"]);
+        redact_qualifiers_except(&mut target.file, &["kind", "file_type", "file_state"]);
+    } else {
+        redact_native_identity(&mut target.database);
+        redact_native_identity(&mut target.file);
+    }
+    if let Some(object) = &mut target.object {
+        redact_native_qualifiers(&mut object.native);
+    }
+    let Ok((database, file)) = target.scope.bind_identities(target.database.clone(), target.file.clone()) else {
+        return false;
+    };
+    target.database = database;
+    target.file = file;
+    target.is_valid()
+}
+
+fn redact_qualifiers_except(identity: &mut crate::telemetry::NativeIdentity, structural: &[&str]) {
+    for (key, value) in &mut identity.qualifiers {
+        if !structural.contains(&key.as_str()) {
+            *value = opaque(value);
+        }
+    }
+}
+
 fn redact_target(target: &mut crate::telemetry::CollectionTarget) {
     match target {
         crate::telemetry::CollectionTarget::Database(identity) => redact_identity(identity),
@@ -479,31 +516,17 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         for observation in &mut evidence.observations {
             observation.redact(engine);
             observation.request.client = None;
-            if let Some(target) = &mut observation.target {
-                if let crate::telemetry::PageTargetScope::SharedResource { context } = &mut target.scope {
-                    redact_read_context(context);
-                }
-                redact_native_identity(&mut target.database);
-                redact_native_identity(&mut target.file);
-                if let Some(object) = &mut target.object {
-                    redact_native_qualifiers(&mut object.native);
-                }
-                match target.scope.bind_identities(target.database.clone(), target.file.clone()) {
-                    Ok((database, file)) => {
-                        target.database = database;
-                        target.file = file;
-                    }
-                    Err(_) => {
-                        observation.target = None;
-                        observation.resolution = crate::telemetry::PageWaitResolution::UnverifiedSource;
-                        observation.statement_identity = None;
-                        observation.plan_identity = None;
-                        if let Some(crate::telemetry::PageIndexOperations::Observed { relation, .. }) =
-                            &mut observation.index_operations
-                        {
-                            *relation = crate::telemetry::PageIndexOperationRelation::UnverifiedTarget;
-                        }
-                    }
+            if let Some(target) = &mut observation.target
+                && !redact_page_target(target)
+            {
+                observation.target = None;
+                observation.resolution = crate::telemetry::PageWaitResolution::UnverifiedSource;
+                observation.statement_identity = None;
+                observation.plan_identity = None;
+                if let Some(crate::telemetry::PageIndexOperations::Observed { relation, .. }) =
+                    &mut observation.index_operations
+                {
+                    *relation = crate::telemetry::PageIndexOperationRelation::UnverifiedTarget;
                 }
             }
             if let Some(crate::telemetry::PageIndexOperations::Observed { object: Some(object), .. }) =

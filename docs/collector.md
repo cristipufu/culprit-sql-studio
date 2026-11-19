@@ -379,6 +379,16 @@ requires its authenticated original participant, a separately captured shared ow
 The captured waiter population remains partial; an empty result cannot establish that the whole instance had no
 tempdb contention.
 
+On a qualified boxed SQL Server, PFS/GAM/SGAM maps in tempdb's primary data file can use an explicit process-lifetime
+identity when the runtime file GUID and creation LSN are unavailable. The reader verifies the same native member,
+process, connection and tempdb generation, with online data-file observations through the final check. This is a
+bounded inference from the primary file's non-removability and tempdb's startup lifetime; it preserves missing file
+GUID/LSN values. Application-database files, secondary tempdb files and ordinary object pages retain the GUID guard.
+It establishes neither continuous page allocation nor a latch holder or cause. Managed variants and production
+overhead need separate qualification. See Microsoft's [primary-file rules](https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-master-files-transact-sql?view=sql-server-ver17),
+[file removal restriction](https://learn.microsoft.com/en-us/sql/relational-databases/databases/database-properties-files-page?view=sql-server-ver17)
+and [tempdb lifecycle](https://learn.microsoft.com/en-us/sql/relational-databases/databases/tempdb-database?view=sql-server-ver17).
+
 `cached-plans` analyzes `cached-definitions` or `retained-plans` captures from `object-definitions`. It reuses the native
 plan parsers and existing plan insights. SQL Server statement selection requires one matching native hash, or one
 unambiguous statement when the hash is unavailable. Original module metadata can establish a cached or retained TVP input;
@@ -1334,7 +1344,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **50** (delivery schema **4**, preparation **25**). New contracts require new collector/recovery state; there is no migration of
+The current export format is **51** (delivery schema **4**, preparation **25**). New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 [pvs-fields]: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-persistent-version-store-stats

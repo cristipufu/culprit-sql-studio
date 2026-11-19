@@ -21,6 +21,14 @@ pub(super) struct LookupContext {
     page_info_available: bool,
 }
 impl LookupContext {
+    pub(super) fn supports_primary_tempdb_file(&self) -> bool {
+        matches!(self.authority.activity.edition, 2..=4)
+            && self.authority.activity.major >= 15
+            && self.page_info_available
+            && self.authority.is_qualified()
+            && self.authority.connection_generation().is_some()
+            && self.unavailable().is_none()
+    }
     pub(super) fn matches_initial(&self, frame: &ActivityFrame) -> bool {
         self.authority.matches_frame(&frame.context)
     }

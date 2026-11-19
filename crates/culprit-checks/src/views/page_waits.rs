@@ -200,6 +200,9 @@ fn render(
     }
     if let Some(target) = &observation.target {
         details.push(culprit_core::i18n::t(kind_message(target.kind), &[]));
+        if target.identity_basis == culprit_core::telemetry::PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch {
+            details.push(t!("view.page_waits.target.primary_file_epoch"));
+        }
         if let Some(object) = &target.object {
             details.push(if let Some(index) = &object.index_name {
                 t!(

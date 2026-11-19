@@ -43,6 +43,44 @@ fn shared_observation() -> PageWaitObservation {
     row
 }
 
+fn primary_file_observation(kind: PageWaitTargetKind) -> PageWaitObservation {
+    let (page_id, page_type) = match kind {
+        PageWaitTargetKind::Pfs => (1, 11),
+        PageWaitTargetKind::Gam => (2, 8),
+        PageWaitTargetKind::Sgam => (3, 9),
+        _ => panic!("a primary-file witness is limited to intrinsic allocation maps"),
+    };
+    let mut row = shared_observation();
+    row.resource.native.id = format!("2:1:{page_id}");
+    row.request.wait.as_mut().unwrap().identified_resources = vec![row.resource.clone()];
+    row.observed_address.as_mut().unwrap().page_id = page_id;
+    let target = row.target.as_mut().unwrap();
+    target.identity_basis = PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch;
+    target.header.page_id = page_id;
+    target.header.page_type = Some(page_type);
+    target.header.header_version = None;
+    target.header.allocation_unit_id = None;
+    target.kind = kind;
+    target.database = NativeIdentity::new("2")
+        .qualified("kind", MSSQL_SHARED_TEMPDB_DATABASE_KIND)
+        .qualified("instance_epoch", "native-process-epoch")
+        .qualified("database_created_without_offset", "2026-11-13T09:00:00.0000000")
+        .qualified("database_guid", "native-tempdb-guid")
+        .qualified("recovery_fork_guid", "native-tempdb-fork");
+    target.file = NativeIdentity::new("1")
+        .qualified("kind", MSSQL_TEMPDB_PRIMARY_FILE_KIND)
+        .qualified("file_type", "0")
+        .qualified("file_state", "0");
+    bind_target(target);
+    row
+}
+
+fn bind_target(target: &mut MappedPageTarget) {
+    let (database, file) = target.scope.bind_identities(target.database.clone(), target.file.clone()).unwrap();
+    target.database = database;
+    target.file = file;
+}
+
 fn source(row: &PageWaitObservation) -> CollectionDescription {
     let PageTargetScope::SharedResource { context } = &row.target.as_ref().unwrap().scope else { panic!() };
     CollectionDescription {
@@ -214,4 +252,256 @@ fn sharing_a_shared_page_snapshot_redacts_resource_authority_and_rebinds_identit
     }
     let twice = crate::redact::redact_snapshot(&shared);
     assert_eq!(twice.operations.page_waits.as_ref(), Some(public));
+}
+
+#[test]
+fn a_tempdb_primary_epoch_maps_only_native_intrinsic_pages_without_a_file_guid_or_header_version() {
+    for kind in [PageWaitTargetKind::Pfs, PageWaitTargetKind::Gam, PageWaitTargetKind::Sgam] {
+        for header_version in [None, Some(1)] {
+            let mut row = primary_file_observation(kind);
+            row.target.as_mut().unwrap().header.header_version = header_version;
+            let target = row.target.as_ref().unwrap();
+            assert!(target.is_valid());
+            assert!(row.is_valid());
+            assert!(row.fits_source_scope(&source(&row)));
+            assert_eq!(target.file.id, "1");
+            assert!(!target.file.qualifiers.contains_key("file_guid"));
+            assert!(!target.file.qualifiers.contains_key("create_lsn"));
+            assert!(target.object.is_none());
+            assert!(
+                row.request
+                    .wait
+                    .as_ref()
+                    .unwrap()
+                    .owners
+                    .iter()
+                    .all(|owner| { matches!(owner, ActivityWaitOwner::Unknown { .. }) })
+            );
+            let encoded = serde_json::to_string(&row).unwrap();
+            assert!(encoded.contains("local-tempdb-primary-file-epoch"));
+            assert_eq!(serde_json::from_str::<PageWaitObservation>(&encoded).unwrap(), row);
+            let record = TelemetryRecord::Operational(OperationalObservation {
+                source: SOURCE.into(),
+                key: row.key().unwrap(),
+                fact: OperationalFact::PageWait(Box::new(row.clone())),
+            });
+            let capture = CaptureIdentity { observation_id: "tempdb-primary-epoch".into(), revision: None };
+            assert!(ExportedRecord::new(&source(&row), &capture, record).is_ok());
+        }
+    }
+    assert!(shared_observation().is_valid(), "the original GUID-based contract remains unchanged");
+}
+
+#[test]
+fn primary_file_identity_requires_each_native_qualifier_even_after_content_rebinding() {
+    for key in ["kind", "instance_epoch", "database_created_without_offset", "database_guid", "recovery_fork_guid"] {
+        let mut row = primary_file_observation(PageWaitTargetKind::Pfs);
+        let target = row.target.as_mut().unwrap();
+        target.database.qualifiers.remove(key);
+        bind_target(target);
+        assert!(!target.is_valid(), "missing database {key}");
+    }
+    for key in ["kind", "file_type", "file_state"] {
+        let mut row = primary_file_observation(PageWaitTargetKind::Pfs);
+        let target = row.target.as_mut().unwrap();
+        target.file.qualifiers.remove(key);
+        bind_target(target);
+        assert!(!target.is_valid(), "missing file {key}");
+    }
+    for change in [
+        "database",
+        "file",
+        "database-kind",
+        "file-kind",
+        "epoch",
+        "created",
+        "file-type",
+        "file-state",
+        "file_guid",
+        "create_lsn",
+        "drop_lsn",
+        "header-database",
+        "header-file",
+        "header-kind",
+        "unclassified",
+        "object",
+        "native-object",
+        "version",
+    ] {
+        let mut row = primary_file_observation(PageWaitTargetKind::Pfs);
+        let target = row.target.as_mut().unwrap();
+        match change {
+            "database" => target.database.id = "5".into(),
+            "file" => target.file.id = "2".into(),
+            "database-kind" => {
+                target.database.qualifiers.insert("kind".into(), "ordinary-database".into());
+            }
+            "file-kind" => {
+                target.file.qualifiers.insert("kind".into(), "sql-server-database-file".into());
+            }
+            "epoch" => {
+                target.database.qualifiers.insert("instance_epoch".into(), "another-epoch".into());
+            }
+            "created" => {
+                target
+                    .database
+                    .qualifiers
+                    .insert("database_created_without_offset".into(), "2026-11-13T09:00:00Z".into());
+            }
+            "file-type" => {
+                target.file.qualifiers.insert("file_type".into(), "1".into());
+            }
+            "file-state" => {
+                target.file.qualifiers.insert("file_state".into(), "6".into());
+            }
+            "file_guid" | "create_lsn" | "drop_lsn" => {
+                target.file.qualifiers.insert(change.into(), "native-file-epoch-value".into());
+            }
+            "header-database" => target.header.database_id = 5,
+            "header-file" => target.header.file_id = 2,
+            "header-kind" => {
+                target.kind = PageWaitTargetKind::Iam;
+                target.header.page_type = Some(10);
+            }
+            "unclassified" => target.kind = PageWaitTargetKind::Unclassified,
+            "object" => target.object = observation().target.unwrap().object,
+            "native-object" => target.header.object_id = Some("128".into()),
+            _ => target.header.header_version = Some(2),
+        }
+        bind_target(target);
+        assert!(!target.is_valid(), "{change}");
+    }
+}
+
+#[test]
+fn primary_file_witness_cannot_swap_basis_owner_scope_or_native_clock() {
+    for change in [
+        "database-basis",
+        "file-basis",
+        "app-scope",
+        "engine",
+        "node",
+        "epoch",
+        "missing-epoch",
+        "clock",
+        "clock-regression",
+    ] {
+        let mut row = primary_file_observation(PageWaitTargetKind::Pfs);
+        let target = row.target.as_mut().unwrap();
+        match change {
+            "database-basis" => target.identity_basis = PageTargetIdentityBasis::DatabaseIncarnation,
+            "file-basis" => target.identity_basis = PageTargetIdentityBasis::LocalDatabaseFileEpoch,
+            "app-scope" => {
+                target.scope = PageTargetScope::RequestDatabase;
+                target.database.qualifiers.remove("page_target_scope");
+                target.file.qualifiers.remove("page_target_scope");
+                target.file.qualifiers.remove("page_target_database");
+            }
+            _ => {
+                let PageTargetScope::SharedResource { context } = &mut target.scope else { panic!() };
+                match change {
+                    "engine" | "node" => {
+                        let CollectionTarget::Shared(resource) = &mut context.target else { panic!() };
+                        if change == "engine" {
+                            resource.engine = Engine::Postgres;
+                        } else {
+                            resource.kind = SharedResourceKind::Node;
+                        }
+                        let SourcePartition::InstanceLocal { member, .. } = &mut context.partition else { panic!() };
+                        *member = Some(resource.clone());
+                    }
+                    "epoch" => {
+                        let SourcePartition::InstanceLocal { epoch, .. } = &mut context.partition else { panic!() };
+                        *epoch = Some("replacement-process".into());
+                    }
+                    "missing-epoch" => {
+                        let SourcePartition::InstanceLocal { epoch, .. } = &mut context.partition else { panic!() };
+                        *epoch = None;
+                    }
+                    "clock" => context.observed_from = "2026-11-13T10:00:00".into(),
+                    _ => context.observed_until = "2026-11-13T09:00:00Z".into(),
+                }
+            }
+        }
+        if target.scope.is_valid() {
+            bind_target(target);
+        }
+        assert!(!target.is_valid(), "{change}");
+    }
+    let mut swapped = shared_observation();
+    swapped.target.as_mut().unwrap().identity_basis = PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch;
+    assert!(!swapped.is_valid(), "a GUID-based identity cannot be relabelled as a primary-file witness");
+}
+
+#[test]
+fn primary_file_database_epoch_qualifiers_cannot_be_substituted_without_rebinding_its_native_scope() {
+    for key in ["database_guid", "recovery_fork_guid", "database_created_without_offset"] {
+        let mut row = primary_file_observation(PageWaitTargetKind::Pfs);
+        let target = row.target.as_mut().unwrap();
+        target.database.qualifiers.insert(key.into(), "substituted-native-value".into());
+        assert!(!target.is_valid(), "{key}");
+    }
+    let row = primary_file_observation(PageWaitTargetKind::Pfs);
+    let mut changed = source(&row);
+    let SourcePartition::InstanceLocal { epoch, .. } = &mut changed.partition else { panic!() };
+    *epoch = Some("replacement-process".into());
+    assert!(!row.fits_source_scope(&changed));
+}
+
+#[test]
+fn sharing_primary_file_witnesses_keeps_structural_facts_and_redacts_native_authority_idempotently() {
+    let mut original: crate::Snapshot =
+        serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/mssql-demo.json")))
+            .unwrap();
+    let mut pages = snapshot();
+    pages.observations = [PageWaitTargetKind::Pfs, PageWaitTargetKind::Gam, PageWaitTargetKind::Sgam]
+        .into_iter()
+        .map(primary_file_observation)
+        .collect();
+    original.operations.page_waits = Some(pages.clone());
+    let shared = crate::redact::redact_snapshot(&original);
+    let public = shared.operations.page_waits.as_ref().unwrap();
+    assert!(public.is_valid());
+    assert_eq!(original.operations.page_waits.as_ref(), Some(&pages));
+    for row in &public.observations {
+        let target = row.target.as_ref().unwrap();
+        assert_eq!(target.identity_basis, PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch);
+        assert_eq!(target.database.id, "2");
+        assert_eq!(target.file.id, "1");
+        assert_eq!(target.database.qualifiers["kind"], MSSQL_SHARED_TEMPDB_DATABASE_KIND);
+        assert_eq!(target.file.qualifiers["kind"], MSSQL_TEMPDB_PRIMARY_FILE_KIND);
+        assert_eq!(target.file.qualifiers["file_type"], "0");
+        assert_eq!(target.file.qualifiers["file_state"], "0");
+        assert_eq!(target.database.qualifiers["database_created_without_offset"], "2026-11-13T09:00:00.0000000");
+        assert!(target.is_valid());
+    }
+    let encoded = serde_json::to_string(public).unwrap();
+    for canary in
+        ["native-machine", "native-instance", "native-process-epoch", "native-tempdb-guid", "native-tempdb-fork"]
+    {
+        assert!(!encoded.contains(canary), "{canary}");
+    }
+    assert_eq!(crate::redact::redact_snapshot(&shared).operations.page_waits.as_ref(), Some(public));
+}
+
+#[test]
+fn sharing_cannot_launder_a_primary_file_witness_after_its_basis_was_swapped() {
+    for basis in [PageTargetIdentityBasis::DatabaseIncarnation, PageTargetIdentityBasis::LocalDatabaseFileEpoch] {
+        let mut original: crate::Snapshot =
+            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/mssql-demo.json")))
+                .unwrap();
+        let mut row = primary_file_observation(PageWaitTargetKind::Pfs);
+        row.target.as_mut().unwrap().identity_basis = basis;
+        assert!(!row.target.as_ref().unwrap().is_valid());
+        let mut pages = snapshot();
+        pages.observations = vec![row];
+        original.operations.page_waits = Some(pages);
+        let shared = crate::redact::redact_snapshot(&original);
+        let row = &shared.operations.page_waits.as_ref().unwrap().observations[0];
+        assert!(row.target.is_none());
+        assert_eq!(row.resolution, PageWaitResolution::UnverifiedSource);
+        assert!(row.statement_identity.is_none());
+        assert!(row.plan_identity.is_none());
+        assert!(row.is_valid());
+    }
 }

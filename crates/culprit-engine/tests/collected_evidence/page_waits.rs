@@ -457,6 +457,64 @@ async fn explicit_shared_snapshots_and_focus_retain_actual_resource_authority_an
 }
 
 #[tokio::test]
+async fn archived_primary_tempdb_maps_retain_the_guarded_basis_without_manufacturing_a_file_guid_or_lsn() {
+    let mut pages = std::collections::BTreeSet::new();
+    for (source, rows) in shared_page_wait_evidence_cases().into_iter().filter(|(_, rows)| {
+        observations(rows).iter().any(|row| {
+            row.target
+                .as_ref()
+                .is_some_and(|target| target.identity_basis == PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch)
+        })
+    }) {
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let reads_before = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+        let analyzed = collected_resources::page_waits(&capture, None).unwrap();
+        assert_eq!(fixture.recovery_object_reads(), reads_before, "the inline schema needs no extra recovery object");
+        assert_eq!(analyzed.context.records[0].row.record, rows[0]);
+        let restored = observations(std::slice::from_ref(&analyzed.context.records[0].row.record))[0];
+        let target = restored.target.as_ref().unwrap();
+        assert_eq!(target.identity_basis, PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch);
+        assert_eq!(target.header.database_id, 2);
+        assert_eq!(target.header.file_id, 1);
+        assert_eq!(target.database.id, "2");
+        assert_eq!(target.database.qualifiers["kind"], MSSQL_SHARED_TEMPDB_DATABASE_KIND);
+        assert_eq!(target.file.id, "1");
+        assert_eq!(target.file.qualifiers["kind"], MSSQL_TEMPDB_PRIMARY_FILE_KIND);
+        assert_eq!(target.file.qualifiers["file_type"], "0");
+        assert_eq!(target.file.qualifiers["file_state"], "0");
+        for field in ["file_guid", "create_lsn", "drop_lsn"] {
+            assert!(!target.file.qualifiers.contains_key(field), "missing native {field} stays unknown");
+        }
+        assert!(target.header.lsn.is_none());
+        assert!(target.object.is_none());
+        assert_eq!(restored.request.database.as_deref(), Some("db"));
+        let PageTargetScope::SharedResource { context } = &target.scope else { panic!("shared native scope") };
+        assert_eq!(context.target, source.target);
+        assert_eq!(context.partition, source.partition);
+        assert_eq!(context.database_writable, None);
+        assert!(analyzed.report.limitations.contains(&culprit_core::t!("view.page_waits.limit.ownership")));
+        assert!(analyzed.report.limitations.contains(&culprit_core::t!("view.page_waits.limit.bounds")));
+        assert_eq!(analyzed.report.entries.len(), 1);
+        assert!(
+            analyzed.report.entries[0]
+                .explanation
+                .contains(&culprit_core::t!("view.page_waits.target.primary_file_epoch")),
+            "the same qualified basis reaches the compact CLI and MCP explanations"
+        );
+        assert!(
+            serde_json::to_string(&analyzed)
+                .unwrap()
+                .contains("\"identity_basis\":\"local-tempdb-primary-file-epoch\""),
+            "the SDK and CLI JSON keep the original typed identity basis"
+        );
+        pages.insert(target.header.page_id);
+    }
+    assert_eq!(pages, [1, 2, 3].into(), "all three native allocation-map kinds exercise the shared replay path");
+}
+
+#[tokio::test]
 async fn an_empty_shared_focused_result_still_requires_the_original_native_member_and_captured_source_scope() {
     let (mut source, _) = shared_page_wait_evidence_cases()
         .into_iter()

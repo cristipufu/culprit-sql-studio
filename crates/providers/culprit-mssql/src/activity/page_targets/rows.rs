@@ -21,6 +21,7 @@ pub(super) struct HeaderRecord {
     pub observed_at: String,
     pub header: super::fields::Header,
     pub catalog: Catalog,
+    pub file_epoch: Option<super::file_epoch::FileEpoch>,
 }
 impl HeaderRecord {
     pub(super) fn decode(row: &Rec) -> Result<Self> {
@@ -34,15 +35,20 @@ impl HeaderRecord {
             observed_at: canonical_time(&text(row, "observed_at")?)?,
             header: super::fields::Header::decode(row)?,
             catalog: Catalog::decode(row)?,
+            file_epoch: None,
         })
     }
 
     /// Equal endpoint observations are only a bounded mapping guard. They never prove continuous allocation,
     /// eliminate ABA reuse, identify a latch holder, or turn page-content changes into a different resource owner.
     pub(super) fn same_mapping(&self, other: &Self) -> bool {
+        let same_file = match (&self.file_epoch, &other.file_epoch) {
+            (Some(before), Some(after)) => before == after,
+            (None, None) => self.catalog.file_guid.is_some() && self.catalog.file_guid == other.catalog.file_guid,
+            _ => false,
+        };
         self.address == other.address
-            && self.catalog.file_guid.is_some()
-            && self.catalog.file_guid == other.catalog.file_guid
+            && same_file
             && self.catalog == other.catalog
             && self.header.database_id == other.header.database_id
             && self.header.file_id == other.header.file_id

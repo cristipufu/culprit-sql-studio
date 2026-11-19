@@ -4,6 +4,7 @@ mod durable_capture;
 mod fixture;
 mod focused;
 mod holders;
+mod shared_tempdb;
 mod workload;
 use super::*;
 use crate::activity::{IdentityDetail, ReadOptions};
