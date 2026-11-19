@@ -124,6 +124,26 @@ fn sql_server_shapes() {
 }
 
 #[test]
+fn native_grant_increase_is_statement_context_without_replacing_the_spilling_operators_allocation() {
+    let plan = load("mssql-sort-spill.sqlplan");
+    assert_eq!(plan.kind, culprit_core::PlanKind::Actual);
+    assert_eq!(plan.facts().memory_requested_kb, Some(3232.0));
+    assert_eq!(plan.facts().memory_granted_kb, Some(7328.0));
+    assert_eq!(plan.facts().memory_grant_warning.as_deref(), Some("Grant Increase"));
+    let spill = insights(&plan).into_iter().find(|insight| insight.rule == "spill").unwrap();
+    assert!(spill.detail.contains(&culprit_core::t!(
+        "insight.spill.tempdb.grant.above",
+        requested = culprit_core::format::bytes(3232.0 * 1024.0),
+        granted = culprit_core::format::bytes(7328.0 * 1024.0)
+    )));
+    assert!(spill.detail.contains(&culprit_core::t!("insight.spill.tempdb.grant.scope")));
+    let operator = plan.nodes().into_iter().find(|node| spill.nodes.contains(&node.id)).unwrap();
+    assert_eq!(operator.runtime.as_ref().and_then(|runtime| runtime.spill_pages), Some(696.0));
+    assert!(spill.fix_sql.is_none());
+    assert!(!rules("mssql-grant.sqlplan").contains(&"spill".into()), "a fulfilled request alone creates no spill");
+}
+
+#[test]
 fn postgres_shapes() {
     assert_eq!(find("pg-seqscan-filter.json", "scan-filter").title, "Reads 2.0M rows of orders to keep 14");
     // A parallel scan's Plan Rows are one process's share (4,167 of 2 workers and the leader): scaled to the ~10K the

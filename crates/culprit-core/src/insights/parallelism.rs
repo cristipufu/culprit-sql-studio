@@ -105,6 +105,7 @@ pub(super) fn spill(cx: &Cx) -> Vec<Draft> {
                 if underestimated {
                     detail.push(t!("insight.spill.tempdb.underestimated"));
                 }
+                detail.extend(statement_grant_detail(cx.plan));
                 d.detail = detail.join(" ");
                 d.fix = t!("insight.spill.tempdb.fix");
                 d.verify = t!("insight.spill.tempdb.verify");
@@ -116,6 +117,29 @@ pub(super) fn spill(cx: &Cx) -> Vec<Draft> {
         out.push(d);
     }
     out
+}
+
+/// The selected actual plan owns these statement-level values. Never divide them among spilling operators or use
+/// requested/granted equality to infer adequate operator memory or the absence of concurrent demand.
+fn statement_grant_detail(plan: &Plan) -> Option<String> {
+    if plan.kind != PlanKind::Actual {
+        return None;
+    }
+    let facts = plan.facts();
+    let requested = facts.memory_requested_kb.and_then(crate::plan_facts::nonnegative).filter(|value| *value > 0.0)?;
+    let granted = facts.memory_granted_kb.and_then(crate::plan_facts::nonnegative)?;
+    let message = match granted.total_cmp(&requested) {
+        std::cmp::Ordering::Less => key!("insight.spill.tempdb.grant.below"),
+        std::cmp::Ordering::Equal => key!("insight.spill.tempdb.grant.equal"),
+        std::cmp::Ordering::Greater => key!("insight.spill.tempdb.grant.above"),
+    };
+    let requested = format::bytes(crate::plan_facts::nonnegative(requested * 1024.0)?);
+    let granted = format::bytes(crate::plan_facts::nonnegative(granted * 1024.0)?);
+    Some(format!(
+        "{} {}",
+        crate::i18n::t(message, &[("requested", requested.into()), ("granted", granted.into())]),
+        t!("insight.spill.tempdb.grant.scope")
+    ))
 }
 
 pub(super) fn parallelism_blocked(cx: &Cx) -> Vec<Draft> {

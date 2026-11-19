@@ -158,7 +158,7 @@ note: Estimated plan: misestimates, spills, unused memory grants and uneven thre
   verify: Run with actual rows: each thread handles a similar share.
 == tests/insights/mssql-sort-spill.sqlplan
 [spill] Sort spilled 5.4 MB to tempdb
-  detail: Sort used tempdb for part of this execution’s work. The spill alone does not establish its elapsed cost or underlying cause.
+  detail: Sort used tempdb for part of this execution’s work. The spill alone does not establish its elapsed cost or underlying cause. This actual plan records a statement memory grant of 7.2 MB, above the request of 3.2 MB. Statement memory values do not establish this operator’s allocation, sufficient memory or the spill’s cause.
   fix: Compare input rows and width with estimates, then inspect requested, granted and used memory, applicable limits and concurrent demand. Reduce unnecessary input work where possible; check native memory grant feedback eligibility and status before relying on it. For this sort, test whether an access path can supply the required order.
   verify: Compare representative runs under equivalent load: spill warnings or volume, elapsed time, CPU and grant waiting. Fewer spills alone do not establish a better result; a larger grant can increase concurrency pressure.
 [memory-grant] Waited 3.0 s for memory before it could start
