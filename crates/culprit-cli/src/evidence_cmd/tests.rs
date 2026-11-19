@@ -772,3 +772,28 @@ fn wait_counter_analysis_selects_only_the_existing_wait_family_without_payload_h
 mod session_census;
 
 mod instance_resources;
+
+#[test]
+fn paired_page_tasks_use_the_explicit_activity_range_and_the_existing_shared_archive_budget() {
+    use culprit_core::telemetry::*;
+    let range = digest(b"original native activity range");
+    let args = analyze_args("page-waits", &["--activity-range", &range, "--max-queries", "7"]);
+    let selected = selection::EvidenceSelection::from_command(EvidenceCommand::Analyze(args)).unwrap();
+    assert_eq!(selected.plan.companions.activity.as_deref(), Some(range.as_str()));
+    assert_eq!(selected.plan.families, [EvidenceFamily::OperationalSamples]);
+    let request = selected.common.request(selected.plan.families, Format::Json).unwrap();
+    assert_eq!(request.budget.max_queries, 7);
+    assert!(request.budget.recovery_payloads.is_none());
+    let (mut source, _) = culprit_collector::analytical::test_support::page_wait_evidence_cases().remove(0);
+    assert!(culprit_core::PageWaitActivityEvidence::declared_parent(&source).is_none());
+    let original = DiagnosticCaptureRef {
+        capture: CaptureIdentity { observation_id: "original-native-activity".into(), revision: None },
+        manifest_sha256: digest(b"original manifest"),
+        source_scope_id: digest(b"original source scope"),
+    };
+    let SourceObservation::PageWaitTargets { original_activity, .. } = &mut source.observation else { unreachable!() };
+    *original_activity = Some(original.clone());
+    assert_eq!(culprit_core::PageWaitActivityEvidence::declared_parent(&source), Some(original));
+    source.observation = SourceObservation::Snapshot(source.observation.snapshot().unwrap().clone());
+    assert!(culprit_core::PageWaitActivityEvidence::declared_parent(&source).is_none());
+}

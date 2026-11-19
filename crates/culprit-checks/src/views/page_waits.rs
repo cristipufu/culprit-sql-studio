@@ -3,12 +3,13 @@ use culprit_core::{
     Error, PageWaitActivityEvidence, PageWaitBlockingIssue, PageWaitBlockingParticipation, PageWaitExplanation,
     PageWaitReport, Result, SourceOutcome, SourceState, WaitResourceKind, format, key,
     page_wait_blocking_participation,
-    page_wait_report::PageWaitRecordedIncident,
+    page_wait_report::{PageWaitRecordedIncident, PageWaitRecordedRequest},
     t,
     telemetry::{
-        DefinitionPayload, MAX_PAGE_WAIT_OBSERVATIONS, MssqlIndexCounter, PageIndexOperationRelation,
-        PageIndexOperations, PageWaitObservation, PageWaitRecheck, PageWaitRelation, PageWaitRequestState,
-        PageWaitResolution, PageWaitTargetKind, SourceObservation,
+        ActivityEvidence, ActivityFrameEvidence, ActivityFrameRow, DefinitionPayload, MAX_PAGE_WAIT_OBSERVATIONS,
+        MssqlIndexCounter, NativeActivityIdentity, PageIndexOperationRelation, PageIndexOperations,
+        PageWaitObservation, PageWaitRecheck, PageWaitRelation, PageWaitRequestState, PageWaitResolution,
+        PageWaitTargetKind, SourceObservation,
     },
 };
 use std::collections::BTreeSet;
@@ -29,7 +30,13 @@ pub fn explain(
     }
     let cases = validate(observations, source)?;
     let recorded_incident = activity.map(recorded_incident).transpose()?.flatten();
-    let entries = cases.into_iter().map(|case| render(case, activity)).collect::<Result<Vec<_>>>()?;
+    let refused_generations = if matches!(activity, Some(PageWaitActivityEvidence::Tasks { .. })) {
+        ActivityEvidence::observed_session_generation_refusals(observations.iter().map(|page| &page.request))?
+    } else {
+        BTreeSet::new()
+    };
+    let entries =
+        cases.into_iter().map(|case| render(case, activity, &refused_generations)).collect::<Result<Vec<_>>>()?;
     Ok(PageWaitReport {
         source_state: source.map(|source| source.state),
         source_reason: source.and_then(|source| source.reason.clone()),
@@ -50,30 +57,35 @@ pub fn explain(
 }
 
 fn recorded_incident(activity: PageWaitActivityEvidence<'_>) -> Result<Option<PageWaitRecordedIncident>> {
-    let SourceObservation::FocusedPageWait { result, .. } = &activity.source.observation else { return Ok(None) };
-    let frame = activity.frame;
-    if !frame.read_complete()
-        || !frame.native().coverage.complete_scope
-        || !frame.context().has_qualified_local_owner()
-        || !frame.has_session_generation_authority(&activity.original.original.key.session)
-    {
-        return Ok(None);
-    }
-    let Some(row) = frame.row(&activity.original.original.key) else { return Ok(None) };
-    // explain validated this actual row against the original parent. A focus copy never supplies its body.
+    let PageWaitActivityEvidence::Focused { source, .. } = activity else { return Ok(None) };
+    let SourceObservation::FocusedPageWait { result, .. } = &source.observation else { return Ok(None) };
+    let Some(row) = activity.recorded_original()? else { return Ok(None) };
+    let PageWaitRecordedRequest { original, observed_at, request, sql, client } =
+        recorded_request(activity.frame(), row)?;
+    Ok(Some(PageWaitRecordedIncident {
+        original,
+        observed_at,
+        request,
+        resource: result.focus.resource.clone(),
+        sql,
+        client,
+    }))
+}
+
+fn recorded_request(frame: &ActivityFrameEvidence<'_>, row: ActivityFrameRow<'_>) -> Result<PageWaitRecordedRequest> {
+    // The evidence owner selected this actual canonical row. Neither a focus copy nor a later requester lends SQL.
     let original = row.reference.ok_or_else(invalid)?.clone();
     let sql = match &row.observation.statement {
         DefinitionPayload::Available { text, .. } => DefinitionPayload::sql(text, frame.source().target.engine()),
         unavailable @ DefinitionPayload::Unavailable { .. } => unavailable.clone(),
     };
-    Ok(Some(PageWaitRecordedIncident {
+    Ok(PageWaitRecordedRequest {
         original,
         observed_at: frame.native().at.clone(),
         request: row.observation.key.clone(),
-        resource: result.focus.resource.clone(),
         sql,
         client: row.observation.client.clone(),
-    }))
+    })
 }
 
 struct ObservedPage<'a> {
@@ -169,7 +181,11 @@ fn limitations(source: Option<&SourceOutcome>, has_index_points: bool) -> Vec<St
     limits
 }
 
-fn render(case: ObservedPage<'_>, activity: Option<PageWaitActivityEvidence<'_>>) -> Result<PageWaitExplanation> {
+fn render(
+    case: ObservedPage<'_>,
+    activity: Option<PageWaitActivityEvidence<'_>>,
+    refused_generations: &BTreeSet<NativeActivityIdentity>,
+) -> Result<PageWaitExplanation> {
     let observation = case.observation;
     let (title, base) = match (case.wait, observation.task_wait.is_some()) {
         (WaitKind::Memory, false) => (t!("view.page_waits.memory.title"), t!("view.page_waits.memory.explanation")),
@@ -207,9 +223,10 @@ fn render(case: ObservedPage<'_>, activity: Option<PageWaitActivityEvidence<'_>>
         render_index_point(&mut details, point, case.wait);
     }
     let blocking = match activity {
-        Some(activity) => {
-            page_wait_blocking_participation(activity.source, observation, activity.original, activity.frame)?
+        Some(PageWaitActivityEvidence::Focused { source, original, frame }) => {
+            page_wait_blocking_participation(source, observation, original, frame)?
         }
+        Some(PageWaitActivityEvidence::Tasks { .. }) => PageWaitBlockingParticipation::task_unresolved(),
         None => PageWaitBlockingParticipation::unavailable(),
     };
     render_blocking(&blocking, &mut details);
@@ -219,6 +236,16 @@ fn render(case: ObservedPage<'_>, activity: Option<PageWaitActivityEvidence<'_>>
         request_key: observation.request.key.clone(),
         task: observation.task_wait.as_ref().map(Into::into),
         resource: observation.resource.clone(),
+        recorded_request: activity
+            .filter(|_| !refused_generations.contains(&observation.request.key.session))
+            .map(|activity| {
+                activity
+                    .recorded_task_request(observation)?
+                    .map(|row| recorded_request(activity.frame(), row))
+                    .transpose()
+            })
+            .transpose()?
+            .flatten(),
         blocking,
         title,
         explanation: details.join(" "),

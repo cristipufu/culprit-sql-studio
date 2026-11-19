@@ -1,9 +1,12 @@
 import { useState } from "react";
 import type { ActivityScopeBasis } from "../gen/ActivityScopeBasis";
+import type { DefinitionPayload } from "../gen/DefinitionPayload";
+import type { DiagnosticEvidenceRef } from "../gen/DiagnosticEvidenceRef";
 import type { MappedPageTarget } from "../gen/MappedPageTarget";
 import type { PageWaitExplanation } from "../gen/PageWaitExplanation";
 import type { PageWaitObservation } from "../gen/PageWaitObservation";
 import type { PageWaitReport } from "../gen/PageWaitReport";
+import type { PageWaitRecordedRequest } from "../gen/PageWaitRecordedRequest";
 import type { PageWaitRecheck } from "../gen/PageWaitRecheck";
 import type { PageWaitRelation } from "../gen/PageWaitRelation";
 import type { PageWaitRequestState } from "../gen/PageWaitRequestState";
@@ -31,7 +34,7 @@ export function PageWaitTargets({ evidence, report }: { evidence: PageWaitSnapsh
         : <div className="operational-card" key={entry.observation_key}><p>{t("ui.memory_failures.missing_row")}</p></div>;
     }}>
     {report.recorded_incident && <RecordedIncident
-      key={`${report.recorded_incident.original.capture.observation_id}:${report.recorded_incident.original.record_id}:${report.recorded_incident.original.manifest_sha256}:${report.recorded_incident.original.payload_sha256}`}
+      key={recordedContextKey(report.recorded_incident.original)}
       incident={report.recorded_incident} />}
   </ObservationList>;
 }
@@ -39,9 +42,6 @@ export function PageWaitTargets({ evidence, report }: { evidence: PageWaitSnapsh
 const RECORDED_SQL_PREVIEW_CHARACTERS = 512;
 
 function RecordedIncident({ incident }: { incident: NonNullable<PageWaitReport["recorded_incident"]> }) {
-  const [showStatement, setShowStatement] = useState(false);
-  const sql = incident.sql;
-  const excerpt = sql.state === "available" ? recordedSqlPreview(sql.text) : null;
   return <article className="operational-card recorded-page-wait">
     <h4>{t("view.page_waits.recorded.title")}</h4>
     <p className="muted">{t("view.page_waits.recorded.context", {
@@ -49,6 +49,28 @@ function RecordedIncident({ incident }: { incident: NonNullable<PageWaitReport["
       request: incident.request.request?.id ?? t("ui.memory_failures.not_reported"), resource: incident.resource.native.id,
     })}</p>
     <p className="muted">{t("view.page_waits.recorded.qualification")}</p>
+    <RecordedStatement sql={incident.sql} />
+    <RecordedApplication application={incident.client?.application} />
+  </article>;
+}
+
+function RecordedRequest({ request }: { request: PageWaitRecordedRequest }) {
+  return <details className="recorded-page-request">
+    <summary>{t("view.page_waits.recorded_request.title")}</summary>
+    <p className="muted">{t("view.page_waits.recorded_request.context", {
+      at: request.observed_at, session: request.request.session.id,
+      request: request.request.request?.id ?? t("ui.memory_failures.not_reported"),
+    })}</p>
+    <p className="muted">{t("view.page_waits.recorded_request.qualification")}</p>
+    <RecordedStatement sql={request.sql} />
+    <RecordedApplication application={request.client?.application} />
+  </details>;
+}
+
+function RecordedStatement({ sql }: { sql: DefinitionPayload }) {
+  const [showStatement, setShowStatement] = useState(false);
+  const excerpt = sql.state === "available" ? recordedSqlPreview(sql.text) : null;
+  return <>
     {sql.state === "available" && excerpt ? <>
       <pre className="observation-statement">{excerpt.text}</pre>
       {excerpt.truncated && <details onToggle={(event) => setShowStatement(event.currentTarget.open)}>
@@ -56,10 +78,17 @@ function RecordedIncident({ incident }: { incident: NonNullable<PageWaitReport["
         {showStatement && <pre className="observation-statement">{sql.text}</pre>}
       </details>}
     </> : sql.state === "unavailable" && <p className="muted">{t("ui.statement_grants.unavailable", { reason: sql.reason })}</p>}
-    {incident.client?.application && <dl>
-      <NativeValue label={t("ui.memory_participants.application")} value={incident.client.application} />
-    </dl>}
-  </article>;
+  </>;
+}
+
+function RecordedApplication({ application }: { application: string | null | undefined }) {
+  return application && <dl>
+    <NativeValue label={t("ui.memory_participants.application")} value={application} />
+  </dl>;
+}
+
+function recordedContextKey(reference: DiagnosticEvidenceRef): string {
+  return JSON.stringify([reference.capture.observation_id, reference.record_id, reference.manifest_sha256, reference.payload_sha256]);
 }
 
 function recordedSqlPreview(text: string): { text: string; truncated: boolean } {
@@ -83,6 +112,7 @@ function PageWaitCard({ row, entry }: { row: PageWaitObservation; entry: PageWai
     <details>
       <summary>{t("ui.memory_failures.investigation")}</summary>
       <p>{entry.investigation}</p><p>{entry.verify}</p>
+      {entry.recorded_request && <RecordedRequest key={recordedContextKey(entry.recorded_request.original)} request={entry.recorded_request} />}
       <RequestMetadata row={row} />
       {row.task_wait && <TaskWaitMetadata task={row.task_wait} />}
       <RecheckMetadata before={row.before_check} after={row.after_check} />

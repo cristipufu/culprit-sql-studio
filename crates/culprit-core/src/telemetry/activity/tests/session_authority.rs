@@ -183,3 +183,29 @@ fn a_known_unestablished_middle_row_cannot_transfer_blocking_authority_to_anothe
         }
     }
 }
+
+#[test]
+fn borrowed_generation_refusals_preserve_repeated_workers_without_claiming_a_complete_activity_frame() {
+    let positive = request("42");
+    let mut negative = positive.clone();
+    negative.key.request.as_mut().unwrap().id = "1".into();
+    negative.session_context = Some(Box::new(ActivitySessionContext {
+        lifecycle: SessionLifecycle::PoolResetPrelogin,
+        login_age_ms: None,
+        last_request_end_age_ms: None,
+        client_library: None,
+        client_process_id: None,
+        native: None,
+    }));
+    let observed = ActivityEvidence::observed_session_generation_refusals([&positive, &positive, &negative]).unwrap();
+    assert_eq!(observed, BTreeSet::from([positive.key.session.clone()]));
+    negative.key.session.generation.push_str("-other-generation");
+    let other = ActivityEvidence::observed_session_generation_refusals([&positive, &positive, &negative]).unwrap();
+    assert!(!other.contains(&positive.key.session));
+    assert!(other.contains(&negative.key.session));
+    assert!(ActivityEvidence::observed_session_generation_refusals([&positive, &positive]).unwrap().is_empty());
+    assert!(ActivityEvidence::disqualified_session_generations([&positive, &positive]).is_err());
+    let mut invalid = positive.clone();
+    invalid.key.session.id.clear();
+    assert!(ActivityEvidence::observed_session_generation_refusals([&positive, &invalid]).is_err());
+}

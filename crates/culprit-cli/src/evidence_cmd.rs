@@ -519,7 +519,7 @@ async fn read_captures(
     let mut session = service.session(request.budget, cancellation)?;
     let capture = session.read(&request.range_id, &request.families).await?;
     let activity = if let Some(range) = &companions.activity {
-        if !matches!(capture.source().observation, SourceObservation::FocusedPageWait { .. }) {
+        if culprit_core::PageWaitActivityEvidence::declared_parent(capture.source()).is_none() {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
         Some(session.read(range, &[EvidenceFamily::ActivityObservations]).await?)

@@ -6,6 +6,8 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+mod activity;
+pub use activity::*;
 mod participation;
 pub use participation::*;
 mod writers;
@@ -38,6 +40,17 @@ pub struct PageWaitRecordedIncident {
     pub client: Option<ActivityClient>,
 }
 
+/// Earlier authenticated request context. Its clock describes Activity, not the later task wait.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct PageWaitRecordedRequest {
+    pub original: DiagnosticEvidenceRef,
+    pub observed_at: String,
+    pub request: ActivityKey,
+    pub sql: DefinitionPayload,
+    pub client: Option<ActivityClient>,
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct PageWaitExplanation {
@@ -50,6 +63,8 @@ pub struct PageWaitExplanation {
     #[ts(optional)]
     pub task: Option<PageWaitTaskReference>,
     pub resource: ObservedWaitResource,
+    /// Recorded earlier request SQL; it grants no current statement, task continuity or latch ownership.
+    pub recorded_request: Option<PageWaitRecordedRequest>,
     /// Historical engine-reported blocking-session context from the authenticated original Activity frame.
     /// This never identifies the request that acquired a latch, a present owner or a page-writing cause.
     pub blocking: PageWaitBlockingParticipation,

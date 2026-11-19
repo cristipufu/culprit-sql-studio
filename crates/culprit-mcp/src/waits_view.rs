@@ -187,7 +187,7 @@ pub fn report(report: &Report) -> Value {
             "source_reason": pages.source_reason,
             "recorded_incident": pages.recorded_incident.as_ref().map(page_waits::recorded_incident),
             "entries_retained": pages.entries.len(),
-            "entries": pages.entries.iter().take(PARTICIPANT_ENTRIES).collect::<Vec<_>>(),
+            "entries": pages.entries.iter().take(PARTICIPANT_ENTRIES).map(page_waits::entry).collect::<Vec<_>>(),
             "limitations": pages.limitations,
         });
     }
@@ -289,6 +289,7 @@ mod tests {
             limitations: vec!["Task addresses do not establish an owner.".into()],
             entries: (0..PARTICIPANT_ENTRIES + 2)
                 .map(|index| PageWaitExplanation {
+                    recorded_request: None,
                     observation_key: format!("exact-page-proof-{index}"),
                     request_key: key.clone(),
                     task: Some(PageWaitTaskReference {

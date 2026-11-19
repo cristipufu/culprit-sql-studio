@@ -162,7 +162,11 @@ impl OriginalFrame {
         explain(
             &[],
             Some(&source(SourceState::Partial)),
-            Some(PageWaitActivityEvidence { source: page_source, original: result.focus.participant(), frame: &frame }),
+            Some(PageWaitActivityEvidence::Focused {
+                source: page_source,
+                original: result.focus.participant(),
+                frame: &frame,
+            }),
         )
     }
 }
@@ -176,7 +180,7 @@ fn authenticated_original_frame_exposes_all_mars_commands_as_historical_session_
     let report = explain(
         &[&page],
         Some(&source(SourceState::Partial)),
-        Some(PageWaitActivityEvidence { source: &page_source, original: &original.original, frame: &frame }),
+        Some(PageWaitActivityEvidence::Focused { source: &page_source, original: &original.original, frame: &frame }),
     )
     .unwrap();
     let entry = &report.entries[0];
@@ -355,5 +359,208 @@ fn copied_focus_and_foreign_receipts_cannot_replace_the_actual_original_waiter()
             _ => focus.original.statement = DefinitionPayload::sql("SELECT forged_focus_sql", Engine::Mssql),
         }
         assert!(original.empty_report(&changed, &original.borrowed(), true).is_err(), "{field}");
+    }
+}
+
+fn paired_task_context() -> (OriginalFrame, CollectionDescription, PageWaitObservation) {
+    let mut page = observation("61", WaitResourceKind::MemoryPage);
+    let mut original = OriginalFrame::new(&mut page);
+    original.rows[0].statement =
+        DefinitionPayload::sql("SELECT earlier_recorded_request WHERE account=9264", Engine::Mssql);
+    let wait = original.rows[0].wait.as_mut().unwrap();
+    wait.native_type = Some("LCK_M_X".into());
+    wait.identified_resources = vec![culprit_core::ObservedWaitResource {
+        kind: WaitResourceKind::DataLock,
+        native: NativeIdentity::new("earlier-lock-resource"),
+    }];
+    original.rebind();
+    page.resource.native =
+        page.resource.native.clone().qualified("source", "sys.dm_os_waiting_tasks.resource_description");
+    page.task_wait = Some(MssqlPageTaskWait {
+        observed_at: page.observed_from.clone(),
+        session_id: 61,
+        request_id: 0,
+        execution_context_id: 1,
+        task_address: "00000000000000AB".into(),
+        wait_type: "PAGELATCH_EX".into(),
+        wait_duration_ms: Some("0".into()),
+        resource: page.resource.clone(),
+        resource_address: None,
+        blocking_task_address: None,
+        blocking_session_id: None,
+        blocking_execution_context_id: None,
+    });
+    page.statement_identity = None;
+    page.request.statement = DefinitionPayload::Unavailable { reason: PayloadUnavailable::Missing };
+    page.after_check.as_mut().unwrap().request = PageWaitRequestState::Changed;
+    page.after_check.as_mut().unwrap().wait = PageWaitRelation::Unqualified;
+    page.resolution = PageWaitResolution::Unavailable;
+    page.target = None;
+    let mut source = original.page_source(&page);
+    let SourceObservation::PageWaitTargets { original_activity, database_writable, .. } = &mut source.observation
+    else {
+        unreachable!()
+    };
+    *original_activity = Some(original.references[0].capture_ref());
+    *database_writable = Some(true);
+    assert!(page.fits_source_scope(&source));
+    (original, source, page)
+}
+
+fn explain_tasks(
+    original: &OriginalFrame,
+    source_description: &CollectionDescription,
+    pages: &[&PageWaitObservation],
+    rows: &[ActivityFrameRow<'_>],
+    complete: bool,
+) -> Result<PageWaitReport> {
+    let frame = ActivityFrameEvidence::new(&original.source, rows, complete)?;
+    explain(
+        pages,
+        Some(&source(SourceState::Partial)),
+        Some(PageWaitActivityEvidence::Tasks { source: source_description, frame: &frame }),
+    )
+}
+
+#[test]
+fn native_task_context_retains_earlier_lock_wait_sql_without_changing_task_time_resource_or_ownership() {
+    for request_state in [PageWaitRequestState::Changed, PageWaitRequestState::Missing] {
+        let (original, source_description, mut page) = paired_task_context();
+        page.after_check.as_mut().unwrap().request = request_state;
+        let report = explain_tasks(&original, &source_description, &[&page], &original.borrowed(), true).unwrap();
+        assert!(report.recorded_incident.is_none());
+        let entry = &report.entries[0];
+        let recorded = entry.recorded_request.as_ref().unwrap();
+        assert_eq!(recorded.observed_at, original.source.observation.activity().unwrap().at);
+        assert_ne!(recorded.observed_at, page.task_wait.as_ref().unwrap().observed_at);
+        assert_eq!(recorded.original, original.references[0]);
+        assert_eq!(recorded.sql, original.rows[0].statement);
+        assert_eq!(recorded.client, original.rows[0].client);
+        assert_eq!(entry.resource, page.resource);
+        assert!(page.statement_identity.is_none() && page.target.is_none());
+        assert!(entry.blocking.basis.is_none());
+        assert!(entry.blocking.reported_owners.is_empty() && entry.blocking.contexts.is_empty());
+        assert_eq!(entry.blocking.issues, [PageWaitBlockingIssue::ParallelTaskUnresolved]);
+        let encoded = serde_json::to_string(&entry).unwrap();
+        for unrelated in ["earlier-lock-resource", "LCK_M_X", "private owner SQL", "request_counters"] {
+            assert!(!encoded.contains(unrelated), "{unrelated}");
+        }
+        assert!(!encoded.contains("9264"));
+    }
+}
+
+#[test]
+fn parallel_task_contexts_bind_their_own_request_receipts_in_one_original_frame() {
+    let (original, mut source_description, page) = paired_task_context();
+    let mut parallel = page.clone();
+    parallel.task_wait.as_mut().unwrap().execution_context_id = 2;
+    parallel.task_wait.as_mut().unwrap().task_address = "00000000000000AC".into();
+    let mut peer = page.clone();
+    peer.request = original.rows[1].clone();
+    peer.task_wait.as_mut().unwrap().session_id = peer.request.key.session.id.parse().unwrap();
+    peer.task_wait.as_mut().unwrap().request_id = peer.request.key.request.as_ref().unwrap().id.parse().unwrap();
+    peer.task_wait.as_mut().unwrap().task_address = "00000000000000AD".into();
+    let SourceObservation::PageWaitTargets { snapshot, .. } = &mut source_description.observation else {
+        unreachable!()
+    };
+    snapshot.records = 3;
+    snapshot.sources[0].records = 3;
+    let report =
+        explain_tasks(&original, &source_description, &[&page, &parallel, &peer], &original.borrowed(), true).unwrap();
+    assert_eq!(report.entries.len(), 3);
+    for entry in report.entries {
+        let recorded = entry.recorded_request.unwrap();
+        let index = if entry.request_key == page.request.key { 0 } else { 1 };
+        assert_eq!(recorded.original, original.references[index]);
+        assert_eq!(recorded.sql, original.rows[index].statement);
+        assert_eq!(recorded.request, entry.request_key);
+    }
+}
+
+#[test]
+fn task_recorded_sql_preserves_unavailable_reasons_and_never_uses_later_requester_sql() {
+    for reason in [PayloadUnavailable::NotCollected, PayloadUnavailable::Missing, PayloadUnavailable::Oversized] {
+        let (mut original, source_description, mut page) = paired_task_context();
+        original.rows[0].statement = DefinitionPayload::Unavailable { reason };
+        original.rebind();
+        page.request.statement =
+            DefinitionPayload::sql("SELECT later_requester_sql_must_not_be_borrowed", Engine::Mssql);
+        let report = explain_tasks(&original, &source_description, &[&page], &original.borrowed(), true).unwrap();
+        assert_eq!(report.entries[0].recorded_request.as_ref().unwrap().sql, DefinitionPayload::Unavailable { reason });
+        assert!(!serde_json::to_string(&report).unwrap().contains("later_requester_sql_must_not_be_borrowed"));
+    }
+}
+
+#[test]
+fn task_context_requires_the_actual_complete_original_body_and_never_creates_an_incident_for_no_tasks() {
+    let (original, mut source_description, page) = paired_task_context();
+    for rows in [original.borrowed()[..1].to_vec(), original.borrowed()[1..].to_vec(), vec![]] {
+        let report = explain_tasks(&original, &source_description, &[&page], &rows, false).unwrap();
+        assert_eq!(report.entries.len(), 1);
+        assert!(report.entries[0].recorded_request.is_none());
+    }
+    let (mut limited, mut limited_source, limited_page) = paired_task_context();
+    let SourceObservation::Activity(native) = &mut limited.source.observation else { unreachable!() };
+    native.coverage = StateSourceCoverage::observed(limited.source.source.clone(), limited.rows.len() as u32, false);
+    limited.rebind();
+    let SourceObservation::PageWaitTargets { original_activity, .. } = &mut limited_source.observation else {
+        unreachable!()
+    };
+    *original_activity = Some(limited.references[0].capture_ref());
+    let limited_report = explain_tasks(&limited, &limited_source, &[&limited_page], &limited.borrowed(), true).unwrap();
+    assert!(limited_report.entries[0].recorded_request.is_none());
+    let SourceObservation::PageWaitTargets { snapshot, .. } = &mut source_description.observation else {
+        unreachable!()
+    };
+    snapshot.records = 0;
+    snapshot.sources[0].records = 0;
+    let report = explain_tasks(&original, &source_description, &[], &original.borrowed(), true).unwrap();
+    assert!(report.entries.is_empty() && report.recorded_incident.is_none());
+}
+
+#[test]
+fn negative_later_task_peers_withdraw_only_their_observed_session_generation_without_merging_workers() {
+    for peer_context in ["same-negative", "other-generation-negative", "nonnegative-worker"] {
+        let (original, mut source_description, page) = paired_task_context();
+        let mut parallel = page.clone();
+        parallel.task_wait.as_mut().unwrap().task_address = "00000000000000AC".into();
+        parallel.task_wait.as_mut().unwrap().execution_context_id = 2;
+        let mut peer = page.clone();
+        peer.task_wait.as_mut().unwrap().task_address = "00000000000000AD".into();
+        peer.task_wait.as_mut().unwrap().request_id = 1;
+        peer.request.key.request.as_mut().unwrap().id = "1".into();
+        if peer_context != "nonnegative-worker" {
+            peer.request.session_context = Some(Box::new(ActivitySessionContext {
+                lifecycle: SessionLifecycle::Connecting,
+                login_age_ms: None,
+                last_request_end_age_ms: None,
+                client_library: None,
+                client_process_id: None,
+                native: None,
+            }));
+        }
+        if peer_context == "other-generation-negative" {
+            peer.request.key.session.generation.push_str("-other-generation");
+        }
+        let SourceObservation::PageWaitTargets { snapshot, .. } = &mut source_description.observation else {
+            unreachable!()
+        };
+        snapshot.records = 3;
+        snapshot.sources[0].records = 3;
+        let pages = [&page, &parallel, &peer];
+        let report = explain_tasks(&original, &source_description, &pages, &original.borrowed(), true).unwrap();
+        assert_eq!(report.entries.len(), 3);
+        for entry in &report.entries {
+            let retained = pages.iter().find(|page| page.key().unwrap() == entry.observation_key).unwrap();
+            assert_eq!(entry.request_key, retained.request.key);
+            assert_eq!(entry.resource, retained.resource);
+            assert_eq!(entry.task.as_ref().unwrap().task_address, retained.task_wait.as_ref().unwrap().task_address);
+            assert!(entry.blocking.reported_owners.is_empty() && entry.blocking.contexts.is_empty());
+            if entry.request_key == page.request.key {
+                assert_eq!(entry.recorded_request.is_some(), peer_context != "same-negative", "{peer_context}");
+            } else {
+                assert!(entry.recorded_request.is_none());
+            }
+        }
     }
 }

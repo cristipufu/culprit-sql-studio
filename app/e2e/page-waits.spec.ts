@@ -4,7 +4,7 @@ import type { PageWaitReport } from "../src/gen/PageWaitReport";
 import type { PageWaitSnapshot } from "../src/gen/PageWaitSnapshot";
 import type { SourceOutcome } from "../src/gen/SourceOutcome";
 import type { State } from "../src/lib/store";
-import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_SOURCE, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait, recordedPageIncident } from "../src/test/page-waits";
+import { PAGE_AFTER, PAGE_BEFORE, PAGE_EARLIER, PAGE_FROM, PAGE_SOURCE, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait, recordedPageIncident, recordedPageRequest } from "../src/test/page-waits";
 import { openConnection, waitForReport } from "./demo";
 
 const TITLE = english["view.page_waits.title"];
@@ -134,6 +134,54 @@ test("parallel workers retain separate task waits and unverified owner fields be
   const bounds = await region.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
   expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
   await first.screenshot({ path: info.outputPath("parallel-page-task-evidence.png") });
+});
+
+test("earlier task SQL stays behind its own disclosure and never becomes later SQL or a page owner", async ({ page }, info) => {
+  await page.setViewportSize({ width: 900, height: 900 });
+  await openConnection(page, "mssql-demo");
+  const row = pageTaskWait();
+  row.after_check!.request = "changed";
+  row.after_check!.wait = "unqualified";
+  const report = pageReport([row]);
+  report.title = TITLE;
+  const earlier = recordedPageRequest(row);
+  const sql = "SELECT " + "😀".repeat(600) + " FROM earlier_task_tail WHERE tag=N'<script>canary</script>'";
+  earlier.sql = { state: "available", text: sql, sha256: "c".repeat(64), redaction_version: 1 };
+  earlier.client!.application = "earlier-application";
+  report.entries[0]!.recorded_request = earlier;
+  const source = { source: PAGE_SOURCE, state: "collected", reason: null } as const;
+  await inject(page, pageEvidence([row]), report, source);
+  await page.locator('[data-tile="health"]').click();
+  const region = page.getByRole("region", { name: TITLE, exact: true });
+  await region.getByText(english["ui.page_waits.inspect"], { exact: true }).click();
+  const card = region.locator("article").first();
+  await card.getByText(english["ui.memory_failures.investigation"], { exact: true }).click();
+  const context = card.locator(".recorded-page-request");
+  await expect(context).not.toHaveAttribute("open");
+  await context.getByText(english["view.page_waits.recorded_request.title"], { exact: true }).click();
+  await expect(context).toContainText(PAGE_EARLIER);
+  await expect(context).toContainText("earlier-application");
+  await expect(context).toContainText(english["view.page_waits.recorded_request.qualification"]);
+  await expect(card).toContainText(PAGE_FROM);
+  await expect(card).toContainText("5:1:42");
+  await expect(card).not.toContainText("native-statement-handle");
+  await expect(card).not.toContainText("native-plan-handle");
+  await expect(context).not.toContainText("5:1:42");
+  await expect(context).not.toContainText("private-original");
+  await expect(context).not.toContainText("earlier_task_tail");
+  await context.getByText(english["ui.page_waits.recorded.full_statement"], { exact: true }).click();
+  await expect(context.locator("pre").last()).toHaveText(sql);
+  await expect(context.locator("script")).toHaveCount(0);
+  earlier.original.payload_sha256 = "e".repeat(64);
+  await inject(page, pageEvidence([row]), report, source);
+  await expect(context).not.toHaveAttribute("open");
+  await expect(context.locator("pre")).toHaveCount(1);
+  await context.getByText(english["view.page_waits.recorded_request.title"], { exact: true }).click();
+  await expect(context.locator("details[open]")).toHaveCount(0);
+  await page.setViewportSize({ width: 520, height: 900 });
+  const bounds = await region.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+  expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
+  await context.screenshot({ path: info.outputPath("earlier-page-task-request-context.png") });
 });
 
 test("page waits retain the original affected request and qualified metadata in collapsed bounded cards", async ({ page }, info) => {

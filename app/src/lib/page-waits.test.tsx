@@ -4,7 +4,7 @@ import { HealthTab } from "../components/Health";
 import { PageWaitTargets } from "../components/PageWaitTargets";
 import type { Report } from "../gen/Report";
 import { partial } from "../test/fixtures";
-import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait, recordedPageIncident } from "../test/page-waits";
+import { PAGE_AFTER, PAGE_BEFORE, PAGE_EARLIER, PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait, recordedPageIncident, recordedPageRequest } from "../test/page-waits";
 import { t } from "./i18n";
 import { pageWaitReferenceKey } from "./page-wait-reference";
 
@@ -244,4 +244,66 @@ test("a report without an authenticated original does not render recorded contex
   expect(html).not.toContain(t("view.page_waits.recorded.title"));
   expect(html).not.toContain("observed-label");
   expect(html).not.toContain("<pre");
+});
+
+test("task waits keep earlier request SQL and time separate from changed current tokens and the later resource", () => {
+  const row = pageTaskWait();
+  const earlier = recordedPageRequest(row);
+  earlier.sql = { state: "available", text: "SELECT earlier_request FROM dbo.orders WHERE tag=N'<script>canary</script>'", sha256: "c".repeat(64), redaction_version: 1 };
+  earlier.client!.application = "earlier-application";
+  row.request.statement = { state: "available", text: "private_current_statement", sha256: "d".repeat(64), redaction_version: 1 };
+  row.after_check!.request = "changed";
+  row.after_check!.wait = "unqualified";
+  const report = pageReport([row]);
+  report.entries[0]!.recorded_request = earlier;
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={report} />);
+  expect(html).toContain(t("view.page_waits.recorded_request.title"));
+  expect(html).toContain(t("view.page_waits.recorded_request.qualification"));
+  expect(html).toContain(PAGE_EARLIER);
+  expect(html).toContain(PAGE_FROM);
+  expect(html).toContain("earlier-application");
+  expect(html).toContain("earlier_request");
+  expect(html).toContain("&lt;script&gt;canary&lt;/script&gt;");
+  expect(html).toContain("5:1:42");
+  expect(html).toContain("0000000000000001");
+  expect(html).not.toContain("private_current_statement");
+  expect(html).not.toContain("native-statement-handle");
+  expect(html).not.toContain("native-plan-handle");
+  expect(html).not.toContain("private-original");
+  expect(html).not.toContain("a".repeat(64));
+  expect(html).not.toContain("<script>");
+  expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
+});
+
+test("unavailable earlier task SQL never borrows the unqualified later statement", () => {
+  for (const reason of ["missing", "restricted", "encrypted", "oversized", "redaction-failed", "not-collected", "source-unavailable"] as const) {
+    const row = pageTaskWait();
+    row.after_check!.request = "missing";
+    row.after_check!.wait = "unqualified";
+    row.request.statement = { state: "available", text: "SELECT private_current_sql_canary", sha256: "d".repeat(64), redaction_version: 1 };
+    const report = pageReport([row]);
+    report.entries[0]!.recorded_request = recordedPageRequest(row);
+    report.entries[0]!.recorded_request!.sql = { state: "unavailable", reason };
+    const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={report} />);
+    expect(html).toContain(t("ui.statement_grants.unavailable", { reason }));
+    expect(html).not.toContain("<pre");
+    expect(html).not.toContain("private_current_sql_canary");
+  }
+});
+
+test("earlier task statements use the same bounded lazy preview without promoting a recorded page incident", () => {
+  const row = pageTaskWait();
+  row.after_check!.request = "changed";
+  row.after_check!.wait = "unqualified";
+  const report = pageReport([row]);
+  const earlier = recordedPageRequest(row);
+  earlier.sql = { state: "available", text: "SELECT " + "😀".repeat(600) + " FROM hidden_task_tail", sha256: "c".repeat(64), redaction_version: 1 };
+  report.entries[0]!.recorded_request = earlier;
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={report} />);
+  expect(html).toContain("SELECT " + "😀".repeat(505) + "…");
+  expect(html).not.toContain("😀".repeat(506));
+  expect(html).not.toContain("hidden_task_tail");
+  expect(html.match(/<pre\b/g)).toHaveLength(1);
+  expect(html).not.toContain(t("view.page_waits.recorded.title"));
+  expect(html).toContain(t("view.page_waits.recorded_request.title"));
 });

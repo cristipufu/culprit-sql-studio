@@ -1,6 +1,7 @@
 import type { PageWaitObservation } from "../gen/PageWaitObservation";
 import type { PageWaitReport } from "../gen/PageWaitReport";
 import type { PageWaitRecordedIncident } from "../gen/PageWaitRecordedIncident";
+import type { PageWaitRecordedRequest } from "../gen/PageWaitRecordedRequest";
 import type { PageWaitSnapshot } from "../gen/PageWaitSnapshot";
 
 export const PAGE_SOURCE = "page wait targets";
@@ -8,6 +9,7 @@ export const PAGE_FROM = "2026-11-13T10:00:00.200000Z";
 export const PAGE_UNTIL = "2026-11-13T10:00:00.800000Z";
 export const PAGE_BEFORE = "2026-11-13T10:00:00.300000Z";
 export const PAGE_AFTER = "2026-11-13T10:00:00.700000Z";
+export const PAGE_EARLIER = "2026-11-13T10:00:00.050000Z";
 
 /** A bounded original waiter and independently resolved page, shared by rendering and browser fixtures. */
 export function pageWait(session = "42", page = 42): PageWaitObservation {
@@ -59,6 +61,11 @@ export function recordedPageIncident(row = pageWait()): PageWaitRecordedIncident
   };
 }
 
+export function recordedPageRequest(row = pageTaskWait()): PageWaitRecordedRequest {
+  const { original, request, sql, client } = recordedPageIncident(row);
+  return { original, observed_at: PAGE_EARLIER, request, sql, client };
+}
+
 /** Parallel tasks retain their own wait even when the coordinator reports an unrelated native wait. */
 export function pageTaskWait(context = 1): PageWaitObservation {
   const row = pageWait();
@@ -83,6 +90,7 @@ export function pageReport(observations = [pageWait()]): PageWaitReport {
     limitations: ["Matching metadata at two bounds does not establish continuous page identity or a latch owner."],
     entries: observations.map((row, index) => ({
       observation_key: `opaque-backend-page-reference-${index}`, request_key: structuredClone(row.request.key), resource: structuredClone(row.resource),
+      recorded_request: null,
       task: row.task_wait ? { task_address: row.task_wait.task_address, execution_context_id: row.task_wait.execution_context_id } : undefined,
       blocking: { basis: null, reported_owners: [], contexts: [], context_count: 0, issues: ["frame-unavailable"] },
       title: `Affected request ${index}`, explanation: "The request waited on the reported resource; an exclusive cause or owner is not established.",

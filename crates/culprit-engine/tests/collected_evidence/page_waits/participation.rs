@@ -27,6 +27,10 @@ impl Investigation {
     }
 
     async fn with_statement(owner: ActivityWaitOwner, statement: DefinitionPayload) -> Self {
+        Self::with_context(owner, statement, false).await
+    }
+
+    async fn with_context(owner: ActivityWaitOwner, statement: DefinitionPayload, earlier_lock: bool) -> Self {
         let (mut page_source, records) = page_wait_evidence_cases().remove(0);
         let mut page = observations(&records)[0].clone();
         page.request.statement_identity = page.statement_identity.clone();
@@ -34,6 +38,14 @@ impl Investigation {
         page.request.wait.as_mut().unwrap().owners = vec![owner];
         let mut waiter = page.request.clone();
         waiter.statement = statement;
+        if earlier_lock {
+            let wait = waiter.wait.as_mut().unwrap();
+            wait.native_type = Some("LCK_M_X".into());
+            wait.identified_resources = vec![culprit_core::ObservedWaitResource {
+                kind: culprit_core::WaitResourceKind::DataLock,
+                native: NativeIdentity::new("earlier-original-lock"),
+            }];
+        }
         let parent_rows =
             std::iter::once(waiter).chain((0..2).map(owner_context)).map(TelemetryRecord::from).collect::<Vec<_>>();
         let (mut parent_source, _) = activity_evidence_cases().remove(0);
@@ -200,7 +212,11 @@ async fn authentic_original_parent_exposes_every_mars_context_and_exact_receipt_
     let pure = culprit_checks::page_waits::explain(
         &observations(&investigation.page_rows),
         Some(&source),
-        Some(PageWaitActivityEvidence { source: page.source(), original: result.focus.participant(), frame: &frame }),
+        Some(PageWaitActivityEvidence::Focused {
+            source: page.source(),
+            original: result.focus.participant(),
+            frame: &frame,
+        }),
     )
     .unwrap();
     assert_eq!(analysis.report, pure);
@@ -473,4 +489,140 @@ async fn absent_original_warehouse_row_cannot_authorize_a_changed_focus_copy_or_
             );
         }
     }
+}
+
+async fn task_investigation() -> Investigation {
+    let mut investigation = Investigation::with_context(
+        ActivityWaitOwner::Session { id: "57".into(), generation: Some("original-owner-login".into()) },
+        DefinitionPayload::sql("SELECT original_task_request WHERE customer=9264", culprit_core::Engine::Mssql),
+        true,
+    )
+    .await;
+    let TelemetryRecord::Operational(record) = &mut investigation.page_rows[0] else { unreachable!() };
+    let OperationalFact::PageWait(page) = &mut record.fact else { unreachable!() };
+    page.observed_from = "2020-01-01T12:00:00.250000000Z".into();
+    page.resource.native =
+        page.resource.native.clone().qualified("source", "sys.dm_os_waiting_tasks.resource_description");
+    page.task_wait = Some(MssqlPageTaskWait {
+        observed_at: page.observed_from.clone(),
+        session_id: page.request.key.session.id.parse().unwrap(),
+        request_id: page.request.key.request.as_ref().unwrap().id.parse().unwrap(),
+        execution_context_id: 1,
+        task_address: "00000000000000AB".into(),
+        wait_type: "PAGELATCH_EX".into(),
+        wait_duration_ms: Some("0".into()),
+        resource: page.resource.clone(),
+        resource_address: None,
+        blocking_task_address: None,
+        blocking_session_id: None,
+        blocking_execution_context_id: None,
+    });
+    page.before_check.as_mut().unwrap().observed_at = "2020-01-01T12:00:00.300000000Z".into();
+    page.after_check.as_mut().unwrap().observed_at = "2020-01-01T12:00:00.700000000Z".into();
+    page.after_check.as_mut().unwrap().request = PageWaitRequestState::Changed;
+    page.after_check.as_mut().unwrap().wait = PageWaitRelation::Unqualified;
+    page.statement_identity = None;
+    page.plan_identity = None;
+    page.target = None;
+    page.index_operations = None;
+    page.resolution = PageWaitResolution::Unavailable;
+    record.key = page.key().unwrap();
+    let SourceObservation::FocusedPageWait { mut snapshot, .. } = investigation.page_source.observation else {
+        unreachable!()
+    };
+    snapshot.observed_from = page.observed_from.clone();
+    investigation.page_source.observation = SourceObservation::PageWaitTargets {
+        snapshot,
+        database_writable: Some(true),
+        original_activity: Some(reference(&investigation.parent, &investigation.parent.records()[0]).capture_ref()),
+    };
+    assert!(page.fits_source_scope(&investigation.page_source));
+    investigation
+}
+
+#[tokio::test]
+async fn native_task_companion_reuses_original_archive_bodies_without_recovery_or_current_statement_proof() {
+    let investigation = task_investigation().await;
+    let (page_fixture, page) = investigation.page_capture().await;
+    let before = (page_fixture.recovery_object_reads(), investigation.parent_fixture.recovery_object_reads());
+    let analysis = collected_resources::page_waits(&page, Some(&investigation.parent)).unwrap();
+    assert!(analysis.report.recorded_incident.is_none());
+    let entry = &analysis.report.entries[0];
+    let recorded = entry.recorded_request.as_ref().unwrap();
+    let original = original_focus(&investigation.parent);
+    assert_eq!(recorded.original, original.parent);
+    assert_eq!(recorded.sql, original.original.statement);
+    assert_eq!(recorded.observed_at, original.original_observed_at);
+    assert_ne!(recorded.observed_at, observations(&investigation.page_rows)[0].observed_from);
+    assert!(observations(&investigation.page_rows)[0].statement_identity.is_none());
+    assert!(entry.blocking.reported_owners.is_empty() && entry.blocking.contexts.is_empty());
+    assert_eq!(entry.blocking.issues, [PageWaitBlockingIssue::ParallelTaskUnresolved]);
+    assert_eq!(analysis.activity_context.as_ref().unwrap().records.len(), 3);
+    assert_eq!(before, (page_fixture.recovery_object_reads(), investigation.parent_fixture.recovery_object_reads()));
+    let encoded = serde_json::to_string(&analysis.report).unwrap();
+    for foreign in
+        ["earlier-original-lock", "LCK_M_X", "later_waiter_current_sql_canary", "original_owner_context_canary", "9264"]
+    {
+        assert!(!encoded.contains(foreign), "{foreign}");
+    }
+}
+
+#[tokio::test]
+async fn native_task_companion_requires_the_exact_declared_archive_and_native_scope() {
+    let investigation = task_investigation().await;
+    for field in ["capture", "manifest", "scope", "role", "unknown-role", "member", "clock", "unpaired"] {
+        let mut source = investigation.page_source.clone();
+        let SourceObservation::PageWaitTargets { snapshot, original_activity, database_writable } =
+            &mut source.observation
+        else {
+            unreachable!()
+        };
+        match field {
+            "capture" => {
+                original_activity.as_mut().unwrap().capture.revision.as_mut().unwrap().sequence = "999999".into()
+            }
+            "manifest" => original_activity.as_mut().unwrap().manifest_sha256 = digest(b"foreign manifest"),
+            "scope" => original_activity.as_mut().unwrap().source_scope_id = digest(b"foreign scope"),
+            "role" => *database_writable = Some(false),
+            "unknown-role" => *database_writable = None,
+            "member" => {
+                let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut source.partition else {
+                    unreachable!()
+                };
+                member.native.id.push_str("-foreign");
+            }
+            "clock" => snapshot.observed_from = "2019-12-31T23:59:59Z".into(),
+            "unpaired" => *original_activity = None,
+            _ => unreachable!(),
+        }
+        let (_, primary) = page_capture(source, investigation.page_rows.clone()).await;
+        assert!(collected_resources::page_waits(&primary, Some(&investigation.parent)).is_err(), "{field}");
+    }
+}
+
+#[tokio::test]
+async fn native_task_original_sql_is_withheld_for_partial_bodies_or_changed_initial_tokens_and_generations() {
+    let investigation = task_investigation().await;
+    for field in ["token", "missing-token", "login", "request-generation"] {
+        let mut page = observations(&investigation.page_rows)[0].clone();
+        match field {
+            "token" => page.request.statement_identity = Some(NativeIdentity::new("foreign initial statement")),
+            "missing-token" => page.request.statement_identity = None,
+            "login" => page.request.key.session.generation.push_str("-reused"),
+            "request-generation" => page.request.key.request.as_mut().unwrap().generation.push_str("-reused"),
+            _ => unreachable!(),
+        }
+        let (_, capture) = page_capture(investigation.page_source.clone(), vec![page_record(page)]).await;
+        let analysis = collected_resources::page_waits(&capture, Some(&investigation.parent)).unwrap();
+        assert_eq!(analysis.report.entries.len(), 1);
+        assert!(analysis.report.entries[0].recorded_request.is_none(), "{field}");
+    }
+    let (_, page) = investigation.page_capture().await;
+    investigation.parent_fixture.remove_first_row(TelemetryStream::ActivityObservations);
+    let partial = investigation.parent_fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+    assert!(!partial.is_read_complete());
+    let analysis = collected_resources::page_waits(&page, Some(&partial)).unwrap();
+    assert_eq!(analysis.report.entries.len(), 1);
+    assert!(analysis.report.entries[0].recorded_request.is_none());
+    assert_eq!(analysis.activity_context.as_ref().unwrap().records.len(), 2);
 }

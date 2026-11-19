@@ -1,4 +1,5 @@
 //! Historical participation is bound to the original Activity receipt, not a later request with the same ID.
+use super::PageWaitActivityEvidence;
 use crate::{Result, SourceState, telemetry::*};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -7,63 +8,6 @@ use ts_rs::TS;
 /// Leave room in a 256-input diagnostic revision for original/peak/latest, result, admission and owner receipts.
 /// All matching contexts are withheld if they do not fit; a MARS request is never chosen as representative.
 pub const MAX_PAGE_WAIT_BLOCKING_CONTEXTS: usize = 64;
-
-#[derive(Clone, Copy)]
-pub struct PageWaitActivityEvidence<'a> {
-    pub source: &'a CollectionDescription,
-    pub original: &'a ActivityRequestFocus,
-    pub frame: &'a ActivityFrameEvidence<'a>,
-}
-
-impl PageWaitActivityEvidence<'_> {
-    /// Validate original/header consistency even when the page result contains no rows. The caller independently
-    /// authenticates the supplied Activity capture header; no copied focus observation replaces a missing row.
-    pub fn validate(&self) -> Result<()> {
-        let snapshot = self.source.observation.snapshot().ok_or_else(|| CollectionStop::InvalidPage.error())?;
-        if snapshot.dataset != SnapshotDataset::PageWaitTargets
-            || self.original.original.scope != ActivityScopeBasis::RequestDatabase
-            || !self.source.observation.covers_request()
-            || !self.original.matches_capture_scope(self.source)
-            || ObservationBounds::new(&self.original.original_observed_at, &snapshot.observed_until).is_none()
-            || !self.original.matches_parent(self.frame.source(), &self.original.original, &self.original.parent)
-            || self.frame.capture_ref().is_some_and(|capture| capture != self.original.parent.capture_ref())
-        {
-            return Err(CollectionStop::InvalidPage.error());
-        }
-        if let SourceObservation::FocusedPageWait { result, .. } = &self.source.observation {
-            let bounds = ObservationBounds::new(&snapshot.observed_from, &snapshot.observed_until)
-                .ok_or_else(|| CollectionStop::InvalidPage.error())?;
-            if result.focus.participant() != self.original
-                || !bounds.contains(&result.observed_from)
-                || !bounds.contains(&result.observed_until)
-            {
-                return Err(CollectionStop::InvalidPage.error());
-            }
-        }
-        match self.frame.row(&self.original.original.key) {
-            Some(row)
-                if !row.reference.is_some_and(|reference| {
-                    self.original.matches_parent(self.frame.source(), row.observation, reference)
-                }) =>
-            {
-                Err(CollectionStop::InvalidPage.error())
-            }
-            None if self.frame.read_complete() => Err(CollectionStop::InvalidPage.error()),
-            Some(_) => Ok(()),
-            None => self.validate_missing_original_copy(),
-        }
-    }
-
-    fn validate_missing_original_copy(&self) -> Result<()> {
-        let reference = &self.original.parent;
-        if reference.row_ordinal >= self.frame.native().observations {
-            return Err(CollectionStop::InvalidPage.error());
-        }
-        // Only check that the supplied copy is consistent with its declared receipt. It does not become a native
-        // observation, authenticate an unread position, or permit owner context when the original row is absent.
-        reference.validate_canonical_record(self.frame.source(), &TelemetryRecord::from(self.original.original.clone()))
-    }
-}
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -126,6 +70,11 @@ pub struct PageWaitBlockingParticipation {
 }
 
 impl PageWaitBlockingParticipation {
+    /// Earlier coordinator blockers do not identify owners of a later native task wait.
+    pub fn task_unresolved() -> Self {
+        Self { issues: vec![PageWaitBlockingIssue::ParallelTaskUnresolved], ..Self::unavailable() }
+    }
+
     pub fn unavailable() -> Self {
         Self {
             basis: None,
@@ -203,7 +152,7 @@ fn validate_source_binding(
     original: &ActivityRequestFocus,
     frame: &ActivityFrameEvidence<'_>,
 ) -> Result<()> {
-    PageWaitActivityEvidence { source, original, frame }.validate()?;
+    PageWaitActivityEvidence::Focused { source, original, frame }.validate()?;
     if !source
         .observation
         .snapshot()

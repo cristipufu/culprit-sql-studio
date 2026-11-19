@@ -410,7 +410,9 @@ fn absent_original_cannot_have_a_changed_copy_or_an_ordinal_outside_its_authenti
             .unwrap();
     let source = fixture.page_source();
     assert!(
-        PageWaitActivityEvidence { source: &source, original: &fixture.original, frame: &frame }.validate().is_ok()
+        PageWaitActivityEvidence::Focused { source: &source, original: &fixture.original, frame: &frame }
+            .validate()
+            .is_ok()
     );
     for field in ["copy", "ordinal"] {
         let mut changed = fixture.original.clone();
@@ -421,7 +423,9 @@ fn absent_original_cannot_have_a_changed_copy_or_an_ordinal_outside_its_authenti
         }
         assert!(changed.is_valid());
         assert!(
-            PageWaitActivityEvidence { source: &source, original: &changed, frame: &frame }.validate().is_err(),
+            PageWaitActivityEvidence::Focused { source: &source, original: &changed, frame: &frame }
+                .validate()
+                .is_err(),
             "{field}"
         );
         assert!(page_wait_blocking_participation(&source, &fixture.page, &changed, &frame).is_err(), "{field}");
@@ -446,4 +450,143 @@ fn idle_owner_has_session_context_without_previous_statement_or_invented_request
     assert!(result.contexts[0].reference.statement.is_none());
     assert!(result.contexts[0].command.is_none());
     assert_eq!(result.contexts[0].state, "sleeping");
+}
+
+fn paired_task(fixture: &Fixture) -> (CollectionDescription, PageWaitObservation) {
+    let mut page = fixture.page.clone();
+    page.resource.native =
+        page.resource.native.clone().qualified("source", "sys.dm_os_waiting_tasks.resource_description");
+    page.task_wait = Some(MssqlPageTaskWait {
+        observed_at: page.observed_from.clone(),
+        session_id: page.request.key.session.id.parse().unwrap(),
+        request_id: page.request.key.request.as_ref().unwrap().id.parse().unwrap(),
+        execution_context_id: 1,
+        task_address: "00000000000000AB".into(),
+        wait_type: "PAGELATCH_EX".into(),
+        wait_duration_ms: Some("0".into()),
+        resource: page.resource.clone(),
+        resource_address: None,
+        blocking_task_address: None,
+        blocking_session_id: None,
+        blocking_execution_context_id: None,
+    });
+    let mut source = fixture.page_source();
+    let SourceObservation::PageWaitTargets { database_writable, original_activity, .. } = &mut source.observation
+    else {
+        unreachable!()
+    };
+    *database_writable = Some(true);
+    *original_activity = Some(fixture.references[0].capture_ref());
+    assert!(page.fits_source_scope(&source));
+    (source, page)
+}
+
+#[test]
+fn task_recorded_context_uses_the_initial_token_and_full_native_request_generation() {
+    let fixture = Fixture::new(0);
+    let frame =
+        ActivityFrameEvidence::new(&fixture.source, &borrowed(&fixture.rows, &fixture.references), true).unwrap();
+    let (source, page) = paired_task(&fixture);
+    let evidence = PageWaitActivityEvidence::Tasks { source: &source, frame: &frame };
+    assert!(page.statement_identity.is_none());
+    let original = evidence.recorded_task_request(&page).unwrap().unwrap();
+    assert_eq!(original.observation, &fixture.rows[0]);
+    assert_eq!(original.reference, Some(&fixture.references[0]));
+    for field in ["missing-token", "different-token", "login", "request-generation", "negative-initial-session"] {
+        let mut changed = page.clone();
+        match field {
+            "missing-token" => changed.request.statement_identity = None,
+            "different-token" => changed.request.statement_identity = Some(NativeIdentity::new("foreign-statement")),
+            "login" => changed.request.key.session.generation.push_str("-reused"),
+            "request-generation" => changed.request.key.request.as_mut().unwrap().generation.push_str("-reused"),
+            "negative-initial-session" => {
+                changed.request.session_context = Some(Box::new(ActivitySessionContext {
+                    lifecycle: SessionLifecycle::PoolResetPrelogin,
+                    login_age_ms: None,
+                    last_request_end_age_ms: None,
+                    client_library: None,
+                    client_process_id: None,
+                    native: None,
+                }))
+            }
+            _ => unreachable!(),
+        }
+        assert!(evidence.recorded_task_request(&changed).unwrap().is_none(), "{field}");
+    }
+}
+
+#[test]
+fn task_original_frame_requires_the_declared_capture_scope_owner_role_and_ordered_native_clocks() {
+    let fixture = Fixture::new(0);
+    let frame =
+        ActivityFrameEvidence::new(&fixture.source, &borrowed(&fixture.rows, &fixture.references), true).unwrap();
+    let (source, _) = paired_task(&fixture);
+    for field in
+        ["capture", "manifest", "scope", "member", "epoch", "database", "role", "unknown-role", "clock", "unpaired"]
+    {
+        let mut changed = source.clone();
+        let SourceObservation::PageWaitTargets { snapshot, original_activity, database_writable } =
+            &mut changed.observation
+        else {
+            unreachable!()
+        };
+        match field {
+            "capture" => original_activity.as_mut().unwrap().capture.observation_id.push_str("-foreign"),
+            "manifest" => original_activity.as_mut().unwrap().manifest_sha256 = digest(b"foreign manifest"),
+            "scope" => original_activity.as_mut().unwrap().source_scope_id = digest(b"foreign scope"),
+            "member" => {
+                let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut changed.partition else {
+                    unreachable!()
+                };
+                member.native.id.push_str("-foreign");
+            }
+            "epoch" => {
+                let SourcePartition::InstanceLocal { epoch, .. } = &mut changed.partition else { unreachable!() };
+                *epoch = Some("foreign-epoch".into());
+            }
+            "database" => {
+                let CollectionTarget::Database(database) = &mut changed.target else { unreachable!() };
+                database.database.push_str("_foreign");
+            }
+            "role" => *database_writable = Some(false),
+            "unknown-role" => *database_writable = None,
+            "clock" => snapshot.observed_from = "2026-11-13T09:59:59Z".into(),
+            "unpaired" => *original_activity = None,
+            _ => unreachable!(),
+        }
+        assert!(PageWaitActivityEvidence::Tasks { source: &changed, frame: &frame }.validate().is_err(), "{field}");
+    }
+}
+
+#[test]
+fn partial_original_bodies_and_negative_mars_peers_never_supply_recorded_task_sql() {
+    let mut fixture = Fixture::new(1);
+    let (source, page) = paired_task(&fixture);
+    for present in [0, 1] {
+        let rows = borrowed(&fixture.rows[..present], &fixture.references[..present]);
+        let frame = ActivityFrameEvidence::new(&fixture.source, &rows, false).unwrap();
+        let evidence = PageWaitActivityEvidence::Tasks { source: &source, frame: &frame };
+        assert!(evidence.recorded_task_request(&page).unwrap().is_none());
+    }
+    let mut peer = fixture.rows[0].clone();
+    peer.key.request.as_mut().unwrap().id = "1".into();
+    peer.session_context = Some(Box::new(ActivitySessionContext {
+        lifecycle: SessionLifecycle::PoolResetPrelogin,
+        login_age_ms: None,
+        last_request_end_age_ms: None,
+        client_library: None,
+        client_process_id: None,
+        native: None,
+    }));
+    fixture.rows[1] = peer;
+    fixture.references = references(&fixture.source, &fixture.rows);
+    let frame =
+        ActivityFrameEvidence::new(&fixture.source, &borrowed(&fixture.rows, &fixture.references), true).unwrap();
+    assert!(!frame.has_session_generation_authority(&page.request.key.session));
+    assert!(
+        PageWaitActivityEvidence::Tasks { source: &source, frame: &frame }
+            .recorded_task_request(&page)
+            .unwrap()
+            .is_none()
+    );
 }

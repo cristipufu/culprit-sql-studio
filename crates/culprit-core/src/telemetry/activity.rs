@@ -483,6 +483,20 @@ impl ActivityEvidence {
     ) -> Result<BTreeSet<NativeActivityIdentity>> {
         Ok(ActivityIndex::new(rows)?.disqualified_sessions)
     }
+    /// Recorded refusals from borrowed points only. Repeated workers and different observed generations do not
+    /// form a complete Activity frame; absence here supplies no positive generation or population authority.
+    pub fn observed_session_generation_refusals<'a>(
+        rows: impl IntoIterator<Item = &'a ActivityObservation>,
+    ) -> Result<BTreeSet<NativeActivityIdentity>> {
+        let mut refused = BTreeSet::new();
+        for row in rows {
+            if !row.is_valid() {
+                return Err(CollectionStop::InvalidPage.error());
+            }
+            refused.extend(recorded_generation_refusal(row).cloned());
+        }
+        Ok(refused)
+    }
     /// Follow previously observed blockers when current native lock details cannot establish their status.
     pub fn context_for(rows: &[ActivityObservation], roots: &BTreeSet<ActivityKey>) -> Result<BTreeSet<ActivityKey>> {
         let index = ActivityIndex::new(rows)?;
@@ -553,6 +567,10 @@ fn blocking_observations(index: &ActivityIndex<'_>, rows: &[ActivityObservation]
         .into_iter()
         .collect()
 }
+fn recorded_generation_refusal(row: &ActivityObservation) -> Option<&NativeActivityIdentity> {
+    (!row.has_session_generation_authority()).then_some(&row.key.session)
+}
+
 pub(super) struct ActivityIndex<'a> {
     pub(super) by_key: BTreeMap<ActivityKey, &'a ActivityObservation>,
     pub(super) by_session: BTreeMap<NativeActivityIdentity, Vec<&'a ActivityObservation>>,
@@ -575,9 +593,7 @@ impl<'a> ActivityIndex<'a> {
                 return Err(CollectionStop::SourceChanged.error());
             }
             by_session.entry(row.key.session.clone()).or_default().push(row);
-            if !row.has_session_generation_authority() {
-                disqualified_sessions.insert(row.key.session.clone());
-            }
+            disqualified_sessions.extend(recorded_generation_refusal(row).cloned());
         }
         Ok(Self { by_key, by_session, disqualified_sessions })
     }

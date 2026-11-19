@@ -307,17 +307,23 @@ Verified SQL Server headers distinguish PFS, GAM, SGAM and IAM maps from heap an
 address the observed allocation mechanism; page-I/O waits retain storage guidance. These classes do not establish
 which writer caused contention or qualify an application-database reader to inspect shared tempdb.
 
-For a focused page capture, supply its original Activity range to retain historical blocking-session context:
+For a focused page capture or paired native task capture, supply its declared original Activity range:
 
 ```sh
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis page-waits --activity-range "$CULPRIT_ACTIVITY_RANGE" --json
 ```
 
-Both captures share one cumulative read budget and deadline. The original capture, manifest, source scope and native
-generations must match the focused receipt. All matching requests on a reported blocking session remain separate.
-Missing or incomplete original rows stay explicit; a later session or current SQL never replaces them. These
-historical commands do not establish latch acquisition, a current latch holder or the query that wrote the page.
+Both captures share one cumulative read budget and deadline. The original capture, manifest, source scope, member,
+role and native generations must match the declared parent. A focused capture retains its original wait and
+historical blocking-session context; all matching requests on a reported blocking session remain separate.
+
+A paired task capture can retain earlier statement and client context only for the exact request and initial
+statement token in a complete authenticated original frame. That context keeps its earlier observation time;
+the later task keeps its own wait, resource and counters. Earlier blockers or wait resources never transfer to the
+task. Negative session-generation evidence withdraws the affected earlier context while retaining task facts.
+Missing or incomplete original bodies remain unavailable, and later SQL cannot replace them. This context does
+not establish the current statement, latch acquisition, a current holder or the query that wrote the page.
 
 `page-wait-writers` analyzes a separately captured investigation of at most eight original requests. The native
 reader rechecks the waiter, mapped target and request generations, then binds selected write operators to the

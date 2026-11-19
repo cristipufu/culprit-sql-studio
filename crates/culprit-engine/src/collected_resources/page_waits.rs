@@ -10,20 +10,16 @@ pub fn page_waits(capture: &EvidenceCapture, activity: Option<&EvidenceCapture>)
     {
         return Err(invalid());
     }
-    let original = match (activity, &capture.source().observation) {
-        (Some(parent), SourceObservation::FocusedPageWait { result, .. }) => {
-            let focus = result.focus.participant();
-            if parent.capture() != &focus.parent.capture
-                || parent.capture_manifest_sha256() != focus.parent.manifest_sha256
-                || parent.source().captured_range()?.scope_id != focus.parent.source_scope_id
-            {
-                return Err(invalid());
-            }
-            Some(focus)
+    if let Some(parent) = activity {
+        let original = PageWaitActivityEvidence::declared_parent(capture.source())
+            .ok_or_else(|| DeliveryProblem::UnsupportedSchema.error())?;
+        if parent.capture() != &original.capture
+            || parent.capture_manifest_sha256() != original.manifest_sha256
+            || parent.source().captured_range()?.scope_id != original.source_scope_id
+        {
+            return Err(invalid());
         }
-        (Some(_), _) => return Err(DeliveryProblem::UnsupportedSchema.error()),
-        (None, _) => None,
-    };
+    }
     let parent = activity.map(super::activity::CapturedActivity::new).transpose()?;
     let frame = parent.as_ref().map(super::activity::CapturedActivity::frame).transpose()?;
     let observations = input
@@ -44,10 +40,11 @@ pub fn page_waits(capture: &EvidenceCapture, activity: Option<&EvidenceCapture>)
         })
         .collect::<Result<Vec<_>>>()?;
     let source = input.outcome(observations.len())?;
-    let participation = original.zip(frame.as_ref()).map(|(original, frame)| PageWaitActivityEvidence {
-        source: capture.source(),
-        original,
-        frame,
+    let participation = frame.as_ref().map(|frame| match &capture.source().observation {
+        SourceObservation::FocusedPageWait { result, .. } => {
+            PageWaitActivityEvidence::Focused { source: capture.source(), original: result.focus.participant(), frame }
+        }
+        _ => PageWaitActivityEvidence::Tasks { source: capture.source(), frame },
     });
     let report = culprit_checks::page_waits::explain(&observations, Some(&source), participation)?;
     Ok(CollectedPageWaitAnalysis {

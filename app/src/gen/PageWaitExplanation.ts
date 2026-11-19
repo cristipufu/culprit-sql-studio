@@ -2,6 +2,7 @@
 import type { ActivityKey } from "./ActivityKey";
 import type { ObservedWaitResource } from "./ObservedWaitResource";
 import type { PageWaitBlockingParticipation } from "./PageWaitBlockingParticipation";
+import type { PageWaitRecordedRequest } from "./PageWaitRecordedRequest";
 import type { PageWaitTaskReference } from "./PageWaitTaskReference";
 
 export type PageWaitExplanation = { observation_key: string, 
@@ -14,6 +15,10 @@ request_key: ActivityKey,
  * establish a task generation, latch owner or continuity between independently observed task slots.
  */
 task?: PageWaitTaskReference, resource: ObservedWaitResource, 
+/**
+ * Recorded earlier request SQL; it grants no current statement, task continuity or latch ownership.
+ */
+recorded_request: PageWaitRecordedRequest | null, 
 /**
  * Historical engine-reported blocking-session context from the authenticated original Activity frame.
  * This never identifies the request that acquired a latch, a present owner or a page-writing cause.

@@ -1171,6 +1171,7 @@ mod tests {
             recorded_incident: None,
             limitations: vec!["an observed waiter is not a transient latch owner".into()],
             entries: vec![culprit_core::PageWaitExplanation {
+                recorded_request: None,
                 task: None,
                 observation_key: "native-key".into(),
                 request_key: culprit_core::telemetry::ActivityKey {

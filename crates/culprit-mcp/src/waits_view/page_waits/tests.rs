@@ -1,4 +1,7 @@
-use culprit_core::{Engine, PageWaitRecordedIncident, PageWaitReport, Report, SourceState, telemetry::*};
+use culprit_core::{
+    Engine, PageWaitExplanation, PageWaitRecordedIncident, PageWaitRecordedRequest, PageWaitReport,
+    PageWaitTaskReference, Report, SourceState, telemetry::*,
+};
 use serde_json::{Value, json};
 
 fn incident(sql: DefinitionPayload) -> PageWaitRecordedIncident {
@@ -52,6 +55,34 @@ fn report(incident: Option<PageWaitRecordedIncident>) -> Report {
 
 fn compact(report: &Report) -> Value {
     crate::waits_view::report(report)["page_waits"].clone()
+}
+
+fn task_report(sql: DefinitionPayload) -> Report {
+    let original = incident(sql);
+    let mut report = report(None);
+    let view = report.page_waits.as_mut().unwrap();
+    view.entries.push(PageWaitExplanation {
+        observation_key: "later-task-reference".into(),
+        request_key: original.request.clone(),
+        task: Some(PageWaitTaskReference { task_address: "0000000000000001".into(), execution_context_id: 1 }),
+        resource: culprit_core::ObservedWaitResource {
+            kind: culprit_core::WaitResourceKind::MemoryPage,
+            native: NativeIdentity::new("5:1:84"),
+        },
+        recorded_request: Some(PageWaitRecordedRequest {
+            original: original.original,
+            observed_at: original.observed_at,
+            request: original.request,
+            sql: original.sql,
+            client: original.client,
+        }),
+        blocking: culprit_core::PageWaitBlockingParticipation::unavailable(),
+        title: "Observed task wait".into(),
+        explanation: "The later task waited on its recorded resource.".into(),
+        investigation: "Keep current state separate from earlier context.".into(),
+        verify: "Compare the same native evidence.".into(),
+    });
+    report
 }
 
 #[test]
@@ -145,4 +176,70 @@ fn missing_original_context_does_not_become_a_current_request_or_an_invented_rec
     assert_eq!(value["entries_retained"], 0);
     assert_eq!(value["entries"], json!([]));
     assert_eq!(value["summary"], culprit_core::t!("view.page_waits.summary.empty"));
+}
+
+#[test]
+fn task_request_context_has_an_earlier_clock_and_bounded_sql_without_receipts_or_a_wait_resource() {
+    let text = format!("SELECT [{}] FROM private_tail", "界".repeat(600));
+    let report = task_report(DefinitionPayload::sql(&text, Engine::Mssql));
+    let original = report.page_waits.as_ref().unwrap().entries[0].recorded_request.as_ref().unwrap();
+    let value = compact(&report);
+    assert!(value["recorded_incident"].is_null());
+    let entry = &value["entries"][0];
+    assert_eq!(entry["resource"]["native"]["id"], "5:1:84");
+    assert_eq!(entry["task"]["execution_context_id"], 1);
+    let context = &entry["recorded_request"];
+    assert_eq!(context["historical_context"], true);
+    assert_eq!(context["observed_at"], original.observed_at);
+    assert_eq!(context["qualification"], culprit_core::t!("view.page_waits.recorded_request.qualification"));
+    assert_eq!(context["request"], json!(original.request));
+    assert_eq!(context["client"], json!(original.client));
+    assert_eq!(context["statement"]["preview"].as_str().unwrap().chars().count(), 512);
+    assert_eq!(context["statement"]["preview_truncated"], true);
+    for field in ["resource", "original", "capture", "current_state", "owner", "target"] {
+        assert!(context.get(field).is_none(), "{field}");
+    }
+    let encoded = serde_json::to_string(&value).unwrap();
+    for private in [
+        "private_tail",
+        "private-original-capture-canary",
+        original.original.manifest_sha256.as_str(),
+        original.original.source_scope_id.as_str(),
+        original.original.batch_id.as_str(),
+        original.original.record_id.as_str(),
+        original.original.payload_sha256.as_str(),
+    ] {
+        assert!(!encoded.contains(private), "{private}");
+    }
+}
+
+#[test]
+fn every_earlier_task_statement_reason_stays_explicit_without_a_replacement_sql_payload() {
+    for reason in [
+        PayloadUnavailable::Missing,
+        PayloadUnavailable::Restricted,
+        PayloadUnavailable::Encrypted,
+        PayloadUnavailable::Oversized,
+        PayloadUnavailable::RedactionFailed,
+        PayloadUnavailable::NotCollected,
+        PayloadUnavailable::SourceUnavailable,
+    ] {
+        let report = task_report(DefinitionPayload::Unavailable { reason });
+        let value = compact(&report);
+        assert_eq!(
+            value["entries"][0]["recorded_request"]["statement"],
+            json!({"availability":"unavailable","reason":reason})
+        );
+    }
+}
+
+#[test]
+fn an_unbound_task_request_does_not_synthesize_an_earlier_context_or_discard_the_wait() {
+    let mut report = task_report(DefinitionPayload::sql("SELECT earlier_marker", Engine::Mssql));
+    report.page_waits.as_mut().unwrap().entries[0].recorded_request = None;
+    let value = compact(&report);
+    assert!(value["entries"][0]["recorded_request"].is_null());
+    assert_eq!(value["entries"][0]["resource"]["native"]["id"], "5:1:84");
+    assert_eq!(value["entries"][0]["task"]["execution_context_id"], 1);
+    assert!(!serde_json::to_string(&value).unwrap().contains("earlier_marker"));
 }
