@@ -4,8 +4,8 @@ use culprit_core::{
     Engine, Error, MemoryParticipantMechanism, Result, SourceOutcome, t,
     telemetry::{
         ActivityEvidence, ActivityKey, ExecutionGrantObservation, ExecutionGrantState, GrantStatementRelationship,
-        MAX_REQUEST_MEMORY_OBSERVATIONS, NativeIdentity, NativeReadContext, ObservationBounds, SourcePartition,
-        WaitMechanism, canonical_time,
+        MAX_REQUEST_MEMORY_OBSERVATIONS, NativeIdentity, NativeReadContext, ObservationBounds, SharedResourceKind,
+        SourcePartition, WaitMechanism, canonical_time,
     },
 };
 use std::collections::BTreeSet;
@@ -16,6 +16,20 @@ pub(crate) struct Participant<'a> {
     resource: Option<&'a NativeIdentity>,
     mechanism: Option<MemoryParticipantMechanism>,
     qualified_request: Option<&'a ActivityKey>,
+    shared_admission_scope: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum AdmissionShortfall {
+    RequiredAndRequested,
+    Requested,
+}
+
+pub(crate) struct AdmissionRelation<'a> {
+    pub(crate) shortfall: AdmissionShortfall,
+    pub(crate) available: &'a str,
+    pub(crate) required: &'a str,
+    pub(crate) requested: &'a str,
 }
 
 impl<'a> Participant<'a> {
@@ -43,11 +57,52 @@ impl<'a> Participant<'a> {
     pub(crate) fn qualified_request(&self) -> Option<&'a ActivityKey> {
         self.qualified_request
     }
+    pub(crate) fn admission_relation(&self) -> Option<AdmissionRelation<'a>> {
+        self.qualified_request?;
+        self.resource?;
+        if !self.shared_admission_scope {
+            return None;
+        }
+        let observation = self.observation;
+        if observation.state != ExecutionGrantState::Waiting || observation.queue.next_candidate != Some(true) {
+            return None;
+        }
+        if observation
+            .granted_kibibytes
+            .as_deref()
+            .is_some_and(|value| value.parse::<u64>().is_ok_and(|value| value > 0))
+        {
+            return None;
+        }
+        let available = observation.resource_observation.as_ref()?.available_kibibytes.as_deref()?;
+        let required = observation.required_kibibytes.as_deref()?;
+        let requested = observation.requested_kibibytes.as_deref()?;
+        let available_value = i128::from(available.parse::<i64>().ok()?);
+        let required_value = i128::from(required.parse::<u64>().ok()?);
+        let requested_value = i128::from(requested.parse::<u64>().ok()?);
+        if required_value == 0 || requested_value < required_value {
+            return None;
+        }
+        let shortfall = if available_value < required_value {
+            AdmissionShortfall::RequiredAndRequested
+        } else if available_value < requested_value {
+            AdmissionShortfall::Requested
+        } else {
+            return None;
+        };
+        Some(AdmissionRelation { shortfall, available, required, requested })
+    }
     pub(crate) fn shares_admission_resource(&self, other: &Self, database: &str) -> bool {
         self.qualified_request.is_some()
             && other.qualified_request.is_some()
             && self.observation.shares_admission_resource(other.observation, database)
     }
+}
+
+pub(crate) fn has_shared_admission_scope(context: &NativeReadContext) -> bool {
+    context.has_qualified_local_owner()
+        && matches!(&context.partition, SourcePartition::InstanceLocal { member: Some(member), .. }
+            if member.kind == SharedResourceKind::Instance)
 }
 
 pub(crate) fn qualified_participants<'a>(
@@ -68,6 +123,7 @@ pub(crate) fn qualified_participants<'a>(
     let mut keys = BTreeSet::new();
     let bounds = ObservationBounds::new(&context.observed_from, &context.observed_until).ok_or_else(invalid)?;
     let mut point = None;
+    let shared_admission_scope = has_shared_admission_scope(context);
     observations
         .iter()
         .map(|observation| {
@@ -95,7 +151,7 @@ pub(crate) fn qualified_participants<'a>(
                 .map(|request| &request.key);
             let resource = qualified_request.and(observation.resource.as_ref());
             let mechanism = qualified_request.and_then(|_| observed_mechanism(observation, context.target.engine()));
-            Ok(Participant { observation, key, resource, mechanism, qualified_request })
+            Ok(Participant { observation, key, resource, mechanism, qualified_request, shared_admission_scope })
         })
         .collect()
 }

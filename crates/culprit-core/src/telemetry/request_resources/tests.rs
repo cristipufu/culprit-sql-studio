@@ -43,6 +43,7 @@ pub(crate) fn grant() -> ExecutionGrantObservation {
         used_workers: None,
         maximum_used_workers: None,
         resource: Some(NativeIdentity::new("2").qualified("resource_semaphore_id", "0")),
+        resource_observation: None,
         workload_group: None,
         queue: ExecutionGrantQueue::default(),
         native_properties: Default::default(),
@@ -201,6 +202,7 @@ fn sharing_request_memory_removes_client_identity_and_literals_without_changing_
     let mut snapshot: crate::Snapshot =
         serde_json::from_str(include_str!("../../../../../fixtures/mssql-demo.json")).unwrap();
     let mut value = grant();
+    value.resource_observation = Some(resource_observation());
     let raw = "SELECT * FROM t WHERE name=N'private-query-canary'";
     let request = value.request.as_mut().unwrap();
     request.statement = DefinitionPayload::Available {
@@ -228,9 +230,78 @@ fn sharing_request_memory_removes_client_identity_and_literals_without_changing_
     assert_eq!(shared_grant.identity, value.identity);
     assert_eq!(shared_grant.scope, value.scope);
     assert_eq!(shared_grant.requested_kibibytes, value.requested_kibibytes);
+    assert_eq!(shared_grant.resource_observation, value.resource_observation);
     assert_eq!(snapshot.pressure.as_ref().unwrap().request_memory.as_ref().unwrap().observations[0], value);
     assert_eq!(
         serde_json::to_value(&shared).unwrap(),
         serde_json::to_value(crate::redact::redact_snapshot(&shared)).unwrap()
     );
+}
+
+fn resource_observation() -> ExecutionGrantResourceObservation {
+    ExecutionGrantResourceObservation {
+        available_kibibytes: Some("-64".into()),
+        granted_kibibytes: Some("9007199254740993".into()),
+        grantee_count: Some("0".into()),
+        waiter_count: None,
+    }
+}
+
+#[test]
+fn shared_resource_counters_preserve_signed_availability_exact_integers_zero_and_native_null() {
+    let observed = resource_observation();
+    assert!(observed.is_valid());
+    let restored: ExecutionGrantResourceObservation =
+        serde_json::from_value(serde_json::to_value(&observed).unwrap()).unwrap();
+    assert_eq!(restored, observed);
+    for value in [i64::MIN.to_string(), "0".into(), i64::MAX.to_string()] {
+        let mut observed = observed.clone();
+        observed.available_kibibytes = Some(value);
+        assert!(observed.is_valid());
+    }
+    for value in ["9223372036854775808", "-9223372036854775809", "NaN", "1.5", "+1", "-0"] {
+        let mut observed = observed.clone();
+        observed.available_kibibytes = Some(value.into());
+        assert!(!observed.is_valid(), "{value}");
+    }
+    for field in ["granted", "grantees", "waiters"] {
+        let mut observed = observed.clone();
+        match field {
+            "granted" => observed.granted_kibibytes = Some("-1".into()),
+            "grantees" => observed.grantee_count = Some("-1".into()),
+            _ => observed.waiter_count = Some("-1".into()),
+        }
+        assert!(!observed.is_valid(), "{field}");
+    }
+}
+
+#[test]
+fn nullable_resource_acquisition_is_required_and_never_defaults_missing_evidence_to_null() {
+    let row = grant();
+    let encoded = serde_json::to_value(&row).unwrap();
+    assert_eq!(encoded["resource_observation"], serde_json::Value::Null);
+    assert_eq!(serde_json::from_value::<ExecutionGrantObservation>(encoded.clone()).unwrap(), row);
+    let mut missing = encoded;
+    missing.as_object_mut().unwrap().remove("resource_observation");
+    assert!(serde_json::from_value::<ExecutionGrantObservation>(missing).is_err());
+    for field in ["available_kibibytes", "granted_kibibytes", "grantee_count", "waiter_count"] {
+        let mut missing = serde_json::to_value(resource_observation()).unwrap();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<ExecutionGrantResourceObservation>(missing).is_err(), "{field}");
+    }
+}
+
+#[test]
+fn shared_resource_counters_require_the_enclosing_native_resource_but_never_change_the_grant_identity() {
+    let mut row = grant();
+    let original_key = row.key().unwrap();
+    row.resource_observation = Some(resource_observation());
+    assert!(row.is_valid());
+    assert_eq!(row.key().unwrap(), original_key);
+    row.resource_observation.as_mut().unwrap().available_kibibytes = Some("0".into());
+    assert_eq!(row.key().unwrap(), original_key);
+    row.resource = None;
+    assert!(!row.is_valid());
+    row.resource_observation = None;
+    assert!(row.is_valid(), "unavailable resource acquisition retains the original grant");
 }

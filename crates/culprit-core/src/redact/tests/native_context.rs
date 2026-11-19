@@ -128,6 +128,7 @@ fn current_grant(context: &NativeReadContext) -> RequestMemorySnapshot {
             used_workers: None,
             maximum_used_workers: None,
             resource: None,
+            resource_observation: None,
             workload_group: None,
             queue: ExecutionGrantQueue::default(),
             native_properties: Default::default(),

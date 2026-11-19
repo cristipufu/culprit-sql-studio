@@ -16,7 +16,7 @@ fn bound_grant(id: &str, state: ExecutionGrantState) -> ExecutionGrantObservatio
     row
 }
 
-fn output_wait_holder(id: &str) -> ExecutionGrantObservation {
+pub(super) fn output_wait_holder(id: &str) -> ExecutionGrantObservation {
     let mut holder = bound_grant(id, ExecutionGrantState::Granted);
     holder.request.as_mut().unwrap().wait = Some(ActivityWait {
         class: None,

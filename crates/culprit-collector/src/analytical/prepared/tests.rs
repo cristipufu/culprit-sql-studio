@@ -27,6 +27,59 @@ fn resource_projection_distinguishes_subject_usage_from_shared_context_without_c
     assert_eq!(prepared["record"], serde_json::to_value(&record).unwrap());
     assert!(prepared["record"]["data"]["metrics"][0].get("describes_subject").is_none());
 }
+
+#[test]
+fn admission_resource_details_keep_exact_native_counters_and_the_original_receipt_refuses_changed_values() {
+    use crate::{analytical::test_support, delivery::evidence::RowReceipt};
+
+    let (source, records) = test_support::request_memory_evidence_cases()
+        .into_iter()
+        .find(|(_, records)| {
+            records.iter().any(|record| {
+                matches!(record,
+            TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::ExecutionGrant(grant), .. })
+                if grant.resource_observation.is_some())
+            })
+        })
+        .expect("shared both-store corpus includes native admission counters");
+    let record = records
+        .into_iter()
+        .find(|record| {
+            matches!(record,
+        TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::ExecutionGrant(grant), .. })
+            if grant.state == ExecutionGrantState::Waiting)
+        })
+        .unwrap();
+    let (manifest, _) = test_support::fixture();
+    let exported = ExportedRecord::new(&source, &manifest.capture, record.clone()).unwrap();
+    let receipt = RowReceipt::from_export(&exported, 1).unwrap();
+    let mut batch = manifest.batches[0].clone();
+    batch.batch_id = exported.batch_id.clone();
+    batch.stream = TelemetryStream::OperationalSamples;
+    batch.rows = vec![receipt.clone()];
+    assert!(batch.validate_row(&source, &manifest.capture, 1, &exported).is_ok());
+
+    let prepared = input(&record);
+    let projected = wire(schema::facts::operational(&[]).unwrap(), &prepared);
+    let details: Value = serde_json::from_str(projected["Details"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        details["resource_observation"],
+        json!({
+            "available_kibibytes":"-64", "granted_kibibytes":"9007199254740993", "grantee_count":"0", "waiter_count":null,
+        })
+    );
+    let mut changed = record;
+    let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::ExecutionGrant(grant), .. }) =
+        &mut changed
+    else {
+        panic!()
+    };
+    grant.resource_observation.as_mut().unwrap().available_kibibytes = Some("0".into());
+    assert!(changed.is_valid());
+    let changed = ExportedRecord::new(&source, &manifest.capture, changed).unwrap();
+    assert_ne!(RowReceipt::from_export(&changed, 1).unwrap().payload_digest, receipt.payload_digest);
+    assert!(batch.validate_row(&source, &manifest.capture, 1, &changed).is_err());
+}
 #[test]
 fn diagnostic_details_reference_private_scopes_while_native_recovery_evidence_stays_exact() {
     for (source, records) in crate::analytical::test_support::diagnostic_evidence_cases() {

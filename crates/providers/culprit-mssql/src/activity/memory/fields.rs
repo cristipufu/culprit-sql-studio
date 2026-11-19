@@ -60,24 +60,28 @@ fn read_cost(row: &Rec, name: &str) -> Result<Option<String>> {
 
 pub(super) struct Layout {
     available: BTreeSet<String>,
+    resource: resource::Layout,
 }
-pub(super) fn inventory_sql() -> String {
+pub(super) fn inventory_sql(shared_scope: bool) -> String {
     let names = names().map(|name| format!("N'{name}'")).collect::<Vec<_>>().join(",");
     format!(
-        "SELECT /* culprit */ name FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{OBJECT}') AND name IN ({names}) {}",
+        "SELECT /* culprit */ name FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{OBJECT}') AND name IN ({names}) UNION ALL {} {}",
+        resource::inventory_sql(shared_scope),
         super::super::sql::QueryPolicy::MemoryDiagnostic.hints()
     )
 }
 impl Layout {
-    pub async fn read<R: NativeRead>(reader: &mut R) -> Result<Self> {
+    pub async fn read<R: NativeRead>(reader: &mut R, shared_scope: bool) -> Result<Self> {
         let rows = reader
-            .query(&inventory_sql(), vec![], FIELDS.len() + PROPERTIES.len() + 1)
+            .query(&inventory_sql(shared_scope), vec![], FIELDS.len() + PROPERTIES.len() + resource::COLUMN_COUNT + 1)
             .await
             .map_err(ReadError::into_error)?;
         let mut available = BTreeSet::new();
         for row in &rows {
             let name = crate::read::text(row, "name")?;
-            if !self::names().any(|field| field == name) || !available.insert(name) {
+            if !(self::names().any(|field| field == name) || resource::is_inventory_name(&name))
+                || !available.insert(name)
+            {
                 return Err(invalid_data());
             }
         }
@@ -86,17 +90,21 @@ impl Layout {
         {
             return Err(CollectionStop::SourceUnavailable.error());
         }
-        Ok(Self { available })
+        Ok(Self { resource: resource::Layout::from_inventory(&available, shared_scope), available })
     }
     pub fn projection(&self) -> String {
-        names()
+        let counters = names()
             .map(|name| {
                 let expression =
                     if self.available.contains(name) { format!("mg.[{name}]") } else { "CAST(NULL AS bigint)".into() };
                 format!("{expression} AS grant_{name}")
             })
             .collect::<Vec<_>>()
-            .join(",")
+            .join(",");
+        format!("{counters},{}", self.resource.projection())
+    }
+    pub fn resource_join(&self) -> &'static str {
+        self.resource.join()
     }
     pub fn decode(&self, row: &Rec, grant: &mut ExecutionGrantObservation) -> Result<()> {
         for field in FIELDS {
@@ -130,18 +138,21 @@ impl Layout {
                 grant.native_null_columns.push(name.into());
             }
         }
-        Ok(())
+        self.resource.decode(row, grant)
     }
 }
 
 #[cfg(test)]
 pub(super) fn columns() -> Vec<Rec> {
-    names().map(|name| Rec::of(&[("name", crate::value::Val::Text(name.into()))])).collect()
+    names().map(|name| Rec::of(&[("name", crate::value::Val::Text(name.into()))])).chain(resource::columns()).collect()
 }
 
 #[cfg(test)]
 pub(super) fn observed_layout(columns: &[String]) -> Layout {
-    Layout {
-        available: names().filter(|name| columns.iter().any(|column| column == name)).map(str::to_owned).collect(),
-    }
+    let available = names()
+        .map(str::to_owned)
+        .filter(|name| columns.contains(name))
+        .chain(columns.iter().filter(|name| resource::is_inventory_name(name)).cloned())
+        .collect();
+    Layout { resource: resource::Layout::from_inventory(&available, true), available }
 }

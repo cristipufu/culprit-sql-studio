@@ -22,11 +22,13 @@ pub(super) fn observation(
  LEFT JOIN sys.dm_exec_requests r ON r.session_id=mg.session_id AND r.request_id=mg.request_id
  LEFT JOIN sys.dm_exec_sessions s ON s.session_id=mg.session_id
  LEFT JOIN sys.dm_exec_sessions b ON b.session_id=r.blocking_session_id
+ {resource_join}
  WHERE mg.session_id>0 AND mg.session_id<>@@SPID
   AND (s.is_user_process=1 OR s.session_id IS NULL)
   AND (r.database_id=DB_ID() OR NULLIF(r.database_id,0) IS NULL)"#,
         request = super::super::sql::request_columns(availability),
         counters = layout.projection(),
+        resource_join = layout.resource_join(),
     );
     // No ranking, grouping, plans or full text in the current-grant probe. Those could add a memory grant to the
     // diagnostic itself. The row cap still does not bound all work of native DMV/session/request joins.

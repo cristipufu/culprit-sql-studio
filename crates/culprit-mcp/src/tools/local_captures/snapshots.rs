@@ -212,6 +212,7 @@ fn request_memory(analysis: &LocalSnapshotAnalysis, report: &culprit_core::Memor
                 "granted_kibibytes":grant.granted_kibibytes,"used_kibibytes":grant.used_kibibytes,
                 "maximum_used_kibibytes":grant.maximum_used_kibibytes,"ideal_kibibytes":grant.ideal_kibibytes,
                 "wait_ms":grant.wait_ms,
+                "resource_observation":native_grant_resource(grant),
             },
             "participant_context":participant,
         }))
@@ -232,6 +233,17 @@ fn request_memory(analysis: &LocalSnapshotAnalysis, report: &culprit_core::Memor
     }
     value["original_participant_context"] = json!(super::context::focused_original(source));
     Ok(value)
+}
+
+fn native_grant_resource(grant: &culprit_core::telemetry::ExecutionGrantObservation) -> Value {
+    grant.resource_observation.as_ref().map_or(Value::Null, |resource| {
+        json!({
+            "qualification":culprit_core::t!("view.request_memory.resource.limit"),
+            "available_kibibytes":resource.available_kibibytes,
+            "granted_kibibytes":resource.granted_kibibytes,
+            "grantee_count":resource.grantee_count,"waiter_count":resource.waiter_count,
+        })
+    })
 }
 
 fn task_space(analysis: &LocalSnapshotAnalysis, report: &culprit_core::TaskSpaceReport) -> Result<Value> {

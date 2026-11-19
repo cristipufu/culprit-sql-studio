@@ -23,6 +23,7 @@ pub(super) async fn prove(fixture: &mut Fixture) -> Result<()> {
             "intervention": "only the original holder's unchanged result stream will be drained",
         }),
     )?;
+    require_original_resource_shortfall(&pair.point, &pair.waiter)?;
     let holder_rows = fixture.drain_original_holder().await?;
     if holder_rows != FIXTURE_ROWS {
         return Err(invalid_data());
@@ -58,12 +59,41 @@ pub(super) async fn prove(fixture: &mut Fixture) -> Result<()> {
                 "intervention_count": 1,
                 "waiter_sql_or_input_replaced": false,
                 "disappearance_used_as_recovery": false,
+                "original_resource_condition_retained": true,
                 "causal_scope": "owned comparable-load control; production observations alone do not establish an exclusive cause",
                 "native_cost_approval": false,
             }),
         );
     }
     Err(fixture.observation_stop())
+}
+
+fn require_original_resource_shortfall(
+    point: &super::observations::NativePoint,
+    waiter: &ExecutionGrantObservation,
+) -> Result<()> {
+    let resource = waiter.resource_observation.as_ref().ok_or_else(invalid_data)?;
+    let available =
+        resource.available_kibibytes.as_deref().ok_or_else(invalid_data)?.parse::<i64>().map_err(|_| invalid_data())?;
+    let required =
+        waiter.required_kibibytes.as_deref().ok_or_else(invalid_data)?.parse::<u64>().map_err(|_| invalid_data())?;
+    let requested =
+        waiter.requested_kibibytes.as_deref().ok_or_else(invalid_data)?.parse::<u64>().map_err(|_| invalid_data())?;
+    if waiter.queue.next_candidate != Some(true)
+        || required == 0
+        || required > requested
+        || i128::from(available) >= i128::from(requested)
+    {
+        return Err(invalid_data());
+    }
+    let key = waiter.key()?;
+    let entry = point.report.entries.iter().find(|entry| entry.observation_key == key).ok_or_else(invalid_data)?;
+    if entry.investigation != culprit_core::t!("view.request_memory.resource.investigation")
+        || !entry.explanation.contains(&culprit_core::t!("view.request_memory.resource.limit"))
+    {
+        return Err(invalid_data());
+    }
+    Ok(())
 }
 
 fn same_original_waiter(before: &ExecutionGrantObservation, after: &ExecutionGrantObservation) -> bool {

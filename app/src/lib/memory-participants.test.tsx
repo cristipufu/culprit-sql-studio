@@ -28,7 +28,7 @@ function grant(): ExecutionGrantObservation {
     used_kibibytes: "0", maximum_used_kibibytes: "16", ideal_kibibytes: null,
     wait_ms: "18446744073709551615", timeout_seconds: "25", degree_of_parallelism: "1",
     reserved_workers: "4", used_workers: "0", maximum_used_workers: "3",
-    resource: { id: "2", qualifiers: { resource_semaphore_id: "0" } }, workload_group: null, native_properties: {},
+    resource: { id: "2", qualifiers: { resource_semaphore_id: "0" } }, resource_observation: null, workload_group: null, native_properties: {},
     queue: { identity: null, position: null, next_candidate: null, small: null },
     request: {
       key: { session: { id: "42", generation: "native-login-1" }, request: { id: "0", generation: "native-request-1" } },
@@ -122,6 +122,43 @@ test("native queue metadata preserves zero, false, exact integers and unavailabl
   expect(html).toContain(`${t("ui.memory_participants.queue_position")}</dt><dd>0</dd>`);
   expect(html).toContain(`${t("ui.memory_participants.next_candidate")}</dt><dd>${t("ui.memory_failures.not_reported")}`);
   expect(html).toContain(`${t("ui.memory_participants.small_grant")}</dt><dd>${t("ui.memory_failures.not_reported")}`);
+});
+
+test("shared admission resource stays collapsed with signed native values, exact counts and its acquisition qualification", () => {
+  const row = grant();
+  row.resource_observation = { available_kibibytes: "-64", granted_kibibytes: "9007199254740993", grantee_count: "0", waiter_count: null };
+  const html = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={report()} />);
+  expect(html).toContain(`<details><summary>${t("ui.memory_participants.resource.title")}</summary>`);
+  expect(html).toContain(t("view.request_memory.resource.limit"));
+  expect(html).toContain(`${t("ui.memory_participants.resource.available")}</dt><dd>-64 KiB</dd>`);
+  expect(html).toContain(`${t("ui.memory_participants.resource.granted")}</dt><dd>9007199254740993 KiB</dd>`);
+  expect(html).toContain(`${t("ui.memory_participants.resource.grantees")}</dt><dd>0</dd>`);
+  expect(html).toContain(`${t("ui.memory_participants.resource.waiters")}</dt><dd>${t("ui.memory_failures.not_reported")}</dd>`);
+  expect(html).not.toContain("9007199254740992");
+  expect(html).not.toContain("<details open");
+});
+
+test("missing and malformed resource values remain unknown and cannot add unbounded or executable input", () => {
+  const row = grant();
+  let html = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={report()} />);
+  expect(html).toContain(`${t("ui.memory_participants.resource.available")}</dt><dd>${t("ui.memory_failures.not_reported")}</dd>`);
+  row.resource_observation = { available_kibibytes: "<script>private-canary</script>", granted_kibibytes: "1".repeat(2000), grantee_count: "-1", waiter_count: "0" };
+  html = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={report()} />);
+  expect(html).not.toContain("private-canary");
+  expect(html).not.toContain("1".repeat(2000));
+  expect(html).toContain(`${t("ui.memory_participants.resource.grantees")}</dt><dd>${t("ui.memory_failures.not_reported")}</dd>`);
+  expect(html).toContain(`${t("ui.memory_participants.resource.waiters")}</dt><dd>0</dd>`);
+});
+
+test("a resource observation stays with its exact native grant reference when rows are reordered", () => {
+  const row = grant();
+  row.resource_observation = { available_kibibytes: "17", granted_kibibytes: "1024", grantee_count: "2", waiter_count: "1" };
+  const other = grant();
+  other.identity = identity("other-native-grant");
+  other.resource_observation = { available_kibibytes: "999", granted_kibibytes: "999", grantee_count: "999", waiter_count: "999" };
+  const html = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([other, row])} report={report()} />);
+  expect(html).toContain(`${t("ui.memory_participants.resource.available")}</dt><dd>17 KiB</dd>`);
+  expect(html).not.toContain("999 KiB");
 });
 
 test("different native generations, duplicate identities and wrong sources cannot borrow another row's counters", () => {

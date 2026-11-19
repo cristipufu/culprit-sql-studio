@@ -7,7 +7,7 @@ fn original_grant() -> ExecutionGrantObservation {
         "observed_at":"2020-01-01T12:00:00Z", "state":"granted", "request_association":"generation-checked",
         "statement_relationship":"observed-current-statement", "scope":"database",
         "requested_without_offset":"2020-01-01T10:00:00.003", "granted_without_offset":"2020-01-01T10:00:00.006",
-        "queue":ExecutionGrantQueue::default(),"native_properties":{},"available_columns":[],"native_null_columns":[],
+        "resource_observation":null, "queue":ExecutionGrantQueue::default(),"native_properties":{},"available_columns":[],"native_null_columns":[],
         "request":{
             "key":{"session":{"id":"42","generation":"native-login"},"request":{"id":"0","generation":"native-request"}},
             "blocking_status":"known","idle":false,"scope":"request-database","state":"running","database":"db",
@@ -68,6 +68,33 @@ fn a_qualified_reference_cannot_select_another_session_request_transaction_or_na
     let mut missing = grant;
     missing.request = None;
     assert!(qualified_grant_request(&entry, &missing).is_err());
+}
+
+#[test]
+fn compact_shared_admission_resource_keeps_signed_exact_zero_and_unknown_values_without_native_payloads() {
+    let mut grant = original_grant();
+    assert_eq!(native_grant_resource(&grant), Value::Null);
+    grant.resource = Some(NativeIdentity::new("private-resource-id"));
+    grant.resource_observation = Some(ExecutionGrantResourceObservation {
+        available_kibibytes: Some("-64".into()),
+        granted_kibibytes: Some("9007199254740993".into()),
+        grantee_count: Some("0".into()),
+        waiter_count: None,
+    });
+    assert!(grant.is_valid());
+    let original = grant.clone();
+    let value = native_grant_resource(&grant);
+    assert_eq!(
+        value,
+        json!({
+            "qualification":culprit_core::t!("view.request_memory.resource.limit"),
+            "available_kibibytes":"-64", "granted_kibibytes":"9007199254740993", "grantee_count":"0", "waiter_count":null,
+        })
+    );
+    assert!(!value.to_string().contains("private-resource-id"));
+    assert_eq!(grant, original);
+    grant.resource_observation.as_mut().unwrap().available_kibibytes = None;
+    assert_eq!(native_grant_resource(&grant)["available_kibibytes"], Value::Null);
 }
 
 #[test]

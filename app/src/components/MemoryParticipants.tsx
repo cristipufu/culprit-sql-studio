@@ -110,11 +110,35 @@ function RequestMetadata({ row, entry }: { row: ExecutionGrantObservation; entry
       <NativeValue label={t("ui.memory_participants.small_grant")} value={row.queue.small == null ? null : t(row.queue.small ? "ui.common.yes" : "ui.common.no")} />
     </dl>
     <NativeProperties properties={row.native_properties} />
+    {row.resource && <SharedGrantResource row={row} />}
     {row.request_association === "generation-checked" && row.statement_relationship === "observed-current-statement" && request?.statement.state === "available" && <details>
       <summary>{t("ui.memory_participants.current_statement")}</summary>
       <pre className="observation-statement">{request.statement.text}</pre>
     </details>}
   </>;
+}
+
+function SharedGrantResource({ row }: { row: ExecutionGrantObservation }) {
+  const resource = row.resource_observation;
+  const memory = (value: unknown, signed = false) => {
+    const native = resourceNumber(value, signed);
+    return native == null ? null : t("common.bytes.kib", { n: native });
+  };
+  return <details>
+    <summary>{t("ui.memory_participants.resource.title")}</summary>
+    <p>{t("view.request_memory.resource.limit")}</p>
+    <dl>
+      <NativeValue label={t("ui.memory_participants.resource.available")} value={memory(resource?.available_kibibytes, true)} />
+      <NativeValue label={t("ui.memory_participants.resource.granted")} value={memory(resource?.granted_kibibytes)} />
+      <NativeValue label={t("ui.memory_participants.resource.grantees")} value={resourceNumber(resource?.grantee_count)} />
+      <NativeValue label={t("ui.memory_participants.resource.waiters")} value={resourceNumber(resource?.waiter_count)} />
+    </dl>
+  </details>;
+}
+
+function resourceNumber(value: unknown, signed = false): string | null {
+  if (typeof value !== "string" || !(signed ? /^-?[0-9]{1,20}$/ : /^[0-9]{1,20}$/).test(value)) return null;
+  return digits(value);
 }
 
 const SESSION_FIELDS = [

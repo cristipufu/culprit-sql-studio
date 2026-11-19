@@ -82,6 +82,33 @@ impl ExecutionGrantQueue {
     }
 }
 
+/// Shared local-instance semaphore context from this grant row's acquisition interval. These values neither
+/// describe database demand nor establish an atomic relationship with the request or other resource rows.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct ExecutionGrantResourceObservation {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub available_kibibytes: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub granted_kibibytes: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub grantee_count: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub waiter_count: Option<String>,
+}
+
+impl ExecutionGrantResourceObservation {
+    pub fn is_valid(&self) -> bool {
+        self.available_kibibytes
+            .as_deref()
+            .is_none_or(|value| value.parse::<i64>().is_ok_and(|parsed| parsed.to_string() == value))
+            && [&self.granted_kibibytes, &self.grantee_count, &self.waiter_count]
+                .into_iter()
+                .flatten()
+                .all(|value| valid_counter(value))
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct ExecutionGrantObservation {
@@ -112,6 +139,9 @@ pub struct ExecutionGrantObservation {
     pub maximum_used_workers: Option<String>,
     /// Native resource identifiers, such as Resource Governor pools, are not cloud elastic-pool identities.
     pub resource: Option<NativeIdentity>,
+    /// Nullable but required in the serialized contract. A missing acquisition never becomes zero capacity.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub resource_observation: Option<ExecutionGrantResourceObservation>,
     pub workload_group: Option<NativeIdentity>,
     pub queue: ExecutionGrantQueue,
     /// Exact native identifiers and other properties can remain useful when they are insufficient to prove a shared
@@ -170,6 +200,7 @@ impl ExecutionGrantObservation {
         valid_key(&self.source)
             && self.identity.is_valid()
             && self.resource.as_ref().is_none_or(NativeIdentity::is_valid)
+            && self.resource_observation.as_ref().is_none_or(|resource| self.resource.is_some() && resource.is_valid())
             && self.workload_group.as_ref().is_none_or(NativeIdentity::is_valid)
             && self.queue.is_valid()
             && native_properties_valid(&self.native_properties)

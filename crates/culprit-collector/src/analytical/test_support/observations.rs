@@ -105,6 +105,7 @@ pub fn request_memory_evidence(
         used_workers: None,
         maximum_used_workers: None,
         resource: None,
+        resource_observation: None,
         workload_group: None,
         queue: ExecutionGrantQueue { identity: Some(NativeIdentity::new("3")), ..Default::default() },
         native_properties: [("resource_semaphore_id".into(), "0".into())].into(),

@@ -4,6 +4,7 @@
 //! https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-exec-query-memory-grants-transact-sql
 mod fields;
 pub(crate) mod focus;
+mod resource;
 mod sql;
 
 use super::{ActivityContext, ActivityFrame, ActivityReader, ActivityRecord, IdentityDetail, rows};
@@ -100,7 +101,7 @@ impl<R: NativeRead> ActivityReader<R> {
         if let Some(focus) = focus {
             focus::matches_owner(focus, &initial)?;
         }
-        let layout = fields::Layout::read(&mut self.io).await?;
+        let layout = fields::Layout::read(&mut self.io, resource::qualified_scope(&initial)).await?;
         let limit = (self.options.budget.max_snapshot_rows as usize).min(MAX_REQUEST_MEMORY_OBSERVATIONS);
         let native = self
             .io
@@ -286,6 +287,7 @@ fn decode(
         used_workers: None,
         maximum_used_workers: None,
         resource,
+        resource_observation: None,
         workload_group: optional_counter(row, "grant_group_id")?
             .map(|group| NativeIdentity::new(group).qualified("kind", "sql-server-resource-governor-group")),
         queue: ExecutionGrantQueue::default(),

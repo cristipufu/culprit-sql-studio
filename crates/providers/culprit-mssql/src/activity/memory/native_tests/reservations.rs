@@ -143,7 +143,7 @@ async fn verify_metadata(fixture: &mut Fixture, pair: &ReservationPair) -> Resul
         // These independent fixture plan probes preserve the old no-grant assertions. They are not source
         // acquisition queries, nor cost evidence for the boxed/MI/Azure production profiles.
         let inventory_plans =
-            assert_no_execution_grant(&mut client, &crate::activity::memory::fields::inventory_sql(), vec![])
+            assert_no_execution_grant(&mut client, &crate::activity::memory::fields::inventory_sql(true), vec![])
                 .await
                 .len();
         let observation_plans = assert_no_execution_grant(

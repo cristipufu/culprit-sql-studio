@@ -1,6 +1,8 @@
 //! Current execution reservations identify participants, never the statement that acquired them or a causal owner.
 use super::memory_participants;
-use crate::support::request_memory::{Participant, qualified_participants};
+use crate::support::request_memory::{
+    AdmissionShortfall, Participant, has_shared_admission_scope, qualified_participants,
+};
 use culprit_core::{
     MemoryGrantAdmission, MemoryParticipantExplanation, MemoryParticipantMechanism, MemoryParticipantReference,
     MemoryParticipantsReport, Result, SourceOutcome, format, t,
@@ -88,6 +90,12 @@ fn limitations(evidence: &RequestMemoryEvidence<'_>, source: Option<&SourceOutco
     if !evidence.context.has_qualified_local_owner() {
         limits.push(t!("view.request_memory.limit.owner"));
     }
+    if !has_shared_admission_scope(evidence.context)
+        || observations.is_empty()
+        || observations.iter().any(|observation| observation.resource_observation.is_none())
+    {
+        limits.push(t!("view.request_memory.resource.unqualified"));
+    }
     limits.extend(memory_participants::source_limitation(source));
     limits
 }
@@ -137,7 +145,27 @@ fn participant_words(participant: &Participant<'_>) -> ParticipantWords {
             t!("view.request_memory.granted.investigation"),
         ),
     };
-    ParticipantWords { title, explanation, investigation, verify: t!("view.request_memory.verify") }
+    let mut words = ParticipantWords { title, explanation, investigation, verify: t!("view.request_memory.verify") };
+    if let Some(relation) = participant.admission_relation() {
+        let detail = match relation.shortfall {
+            AdmissionShortfall::RequiredAndRequested => t!(
+                "view.request_memory.resource.below_required",
+                available = format::digits(relation.available.into()),
+                required = format::digits(relation.required.into()),
+                requested = format::digits(relation.requested.into())
+            ),
+            AdmissionShortfall::Requested => t!(
+                "view.request_memory.resource.below_requested",
+                available = format::digits(relation.available.into()),
+                required = format::digits(relation.required.into()),
+                requested = format::digits(relation.requested.into())
+            ),
+        };
+        words.explanation = format!("{} {detail} {}", words.explanation, t!("view.request_memory.resource.limit"));
+        words.investigation = t!("view.request_memory.resource.investigation");
+        words.verify = t!("view.request_memory.resource.verify");
+    }
+    words
 }
 
 fn render(participant: Participant<'_>, resources: &[MemoryGrantAdmission]) -> MemoryParticipantExplanation {

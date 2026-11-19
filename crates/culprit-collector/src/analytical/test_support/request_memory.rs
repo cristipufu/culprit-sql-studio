@@ -28,7 +28,7 @@ pub fn request_memory_evidence_cases() -> Vec<(CollectionDescription, Vec<Teleme
     let known = vec![record(holder.as_ref().clone()), record(waiter)];
     let mut partial = known.clone();
     partial.push(record(unowned));
-    [
+    let mut cases: Vec<_> = [
         (known, culprit_core::SourceState::Collected),
         (partial, culprit_core::SourceState::Partial),
         (vec![], culprit_core::SourceState::Empty),
@@ -47,7 +47,37 @@ pub fn request_memory_evidence_cases() -> Vec<(CollectionDescription, Vec<Teleme
         }];
         (source, rows)
     })
-    .collect()
+    .collect();
+    let (mut source, mut rows) = cases[0].clone();
+    let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut source.partition else {
+        panic!("native fixture owner")
+    };
+    member.kind = SharedResourceKind::Instance;
+    for record in &mut rows {
+        let TelemetryRecord::Operational(OperationalObservation {
+            fact: OperationalFact::ExecutionGrant(grant), ..
+        }) = record
+        else {
+            panic!("shared request-memory fixture")
+        };
+        grant.request.as_mut().unwrap().statement_identity =
+            Some(NativeIdentity::new(format!("native-statement-{}", grant.identity.id)));
+        grant.resource = Some(NativeIdentity::new("2").qualified("resource_semaphore_id", "0"));
+        grant.required_kibibytes = Some("64".into());
+        grant.requested_kibibytes = Some("1024".into());
+        grant.resource_observation = Some(ExecutionGrantResourceObservation {
+            available_kibibytes: Some(if grant.state == ExecutionGrantState::Waiting { "-64" } else { "1024" }.into()),
+            granted_kibibytes: Some("9007199254740993".into()),
+            grantee_count: Some("0".into()),
+            waiter_count: None,
+        });
+        if grant.state == ExecutionGrantState::Waiting {
+            grant.queue.next_candidate = Some(true);
+        }
+        assert!(grant.is_valid());
+    }
+    cases.push((source, rows));
+    cases
 }
 
 fn record(grant: ExecutionGrantObservation) -> TelemetryRecord {

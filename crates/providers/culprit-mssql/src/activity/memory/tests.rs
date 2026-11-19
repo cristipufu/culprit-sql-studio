@@ -45,6 +45,12 @@ pub(crate) fn row() -> Rec {
         ("grant_is_next_candidate", Val::Null),
         ("grant_is_small", Val::Int(0)),
         ("grant_query_cost", Val::Float(1.25)),
+        ("resource_pool_id", Val::Null),
+        ("resource_resource_semaphore_id", Val::Null),
+        ("resource_available_memory_kb", Val::Null),
+        ("resource_granted_memory_kb", Val::Null),
+        ("resource_grantee_count", Val::Null),
+        ("resource_waiter_count", Val::Null),
     ] {
         values.push((name.into(), value));
     }
@@ -77,6 +83,170 @@ pub(crate) fn set_shutdown(reader: &mut ActivityReader<FakeRead>, shutdown: Sour
 }
 pub(crate) fn closed(reader: &ActivityReader<FakeRead>) -> u32 {
     reader.io.closed
+}
+
+fn resource_row() -> Rec {
+    replace(
+        &row(),
+        &[
+            ("resource_pool_id", Val::Int(2)),
+            ("resource_resource_semaphore_id", Val::Int(0)),
+            ("resource_available_memory_kb", Val::Int(-64)),
+            ("resource_granted_memory_kb", Val::Int(9_007_199_254_740_993)),
+            ("resource_grantee_count", Val::Int(0)),
+            ("resource_waiter_count", Val::Null),
+        ],
+    )
+}
+
+fn resource_reader(columns: Vec<Rec>, rows: Vec<Rec>) -> ActivityReader<FakeRead> {
+    let rows = rows.iter().map(|row| replace(row, &[("edition", Val::Int(3))])).collect();
+    reader(vec![
+        Ok(vec![crate::instance::test_support::metadata()]),
+        Ok(vec![crate::instance::test_support::epoch(100)]),
+        Ok(vec![crate::activity::database_context::tests::row(3)]),
+        Ok(columns),
+        Ok(rows),
+    ])
+}
+
+#[tokio::test]
+async fn shared_resource_projection_preserves_native_units_and_uses_the_original_grant_reader_once() {
+    let mut reader = resource_reader(columns(), vec![resource_row()]);
+    let captured = reader.observe_memory().await;
+    let shutdown = reader.close().await;
+    assert_eq!(shutdown, SourceShutdown::Quiescent);
+    let rows = captured.unwrap().into_observations().unwrap();
+    let resource = rows[0].resource_observation.as_ref().unwrap();
+    assert_eq!(resource.available_kibibytes.as_deref(), Some("-64"));
+    assert_eq!(resource.granted_kibibytes.as_deref(), Some("9007199254740993"));
+    assert_eq!(resource.grantee_count.as_deref(), Some("0"));
+    assert!(resource.waiter_count.is_none());
+    assert!(rows[0].native_null_columns.iter().any(|name| name == "resource.waiter_count"));
+    assert_eq!(reader.query_count(), 5);
+    assert_eq!(reader.io.closed, 1);
+    let sql = &reader.io.calls[4].sql;
+    assert!(sql.contains("LEFT JOIN sys.dm_exec_query_resource_semaphores rs ON rs.pool_id=mg.pool_id AND rs.resource_semaphore_id=mg.resource_semaphore_id"));
+    assert!(reader.io.calls[3].sql.contains("HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER PERFORMANCE STATE')=1"));
+    assert!(reader.io.calls[3].sql.contains("TRY_CONVERT(int,SERVERPROPERTY('ProductMajorVersion'))<16"));
+}
+
+#[tokio::test]
+async fn unavailable_or_incomplete_semaphore_capability_preserves_original_grants_without_a_fallback_query() {
+    for missing in ["all", "waiter_count"] {
+        let inventory = columns()
+            .into_iter()
+            .filter(|row| {
+                let name = row.string("name");
+                if missing == "all" { !name.starts_with("resource.") } else { name != "resource.waiter_count" }
+            })
+            .collect();
+        let mut reader = resource_reader(inventory, vec![row()]);
+        let captured = reader.observe_memory().await;
+        let shutdown = reader.close().await;
+        assert_eq!(shutdown, SourceShutdown::Quiescent);
+        let rows = captured.unwrap().into_observations().unwrap();
+        assert_eq!(rows[0].granted_kibibytes.as_deref(), Some("65536"));
+        assert!(rows[0].resource_observation.is_none());
+        assert!(!reader.io.calls[4].sql.contains("JOIN sys.dm_exec_query_resource_semaphores"));
+        assert!(reader.io.calls[4].sql.contains("CAST(NULL AS bigint) AS resource_available_memory_kb"));
+        assert_eq!(reader.query_count(), 5);
+    }
+}
+
+#[tokio::test]
+async fn missing_resource_rows_native_nulls_and_zero_remain_three_different_observations() {
+    let nulls = replace(&row(), &[("resource_pool_id", Val::Int(2)), ("resource_resource_semaphore_id", Val::Int(0))]);
+    let zeros = replace(
+        &nulls,
+        &[
+            ("resource_available_memory_kb", Val::Int(0)),
+            ("resource_granted_memory_kb", Val::Int(0)),
+            ("resource_grantee_count", Val::Int(0)),
+            ("resource_waiter_count", Val::Int(0)),
+        ],
+    );
+    for (native, present, value) in [(row(), false, None), (nulls, true, None), (zeros, true, Some("0"))] {
+        let mut reader = resource_reader(columns(), vec![native]);
+        let captured = reader.observe_memory().await;
+        let shutdown = reader.close().await;
+        assert_eq!(shutdown, SourceShutdown::Quiescent);
+        let rows = captured.unwrap().into_observations().unwrap();
+        assert_eq!(rows[0].resource_observation.is_some(), present);
+        assert_eq!(
+            rows[0].resource_observation.as_ref().and_then(|sample| sample.available_kibibytes.as_deref()),
+            value
+        );
+        assert_eq!(reader.query_count(), 5);
+    }
+}
+
+#[tokio::test]
+async fn resource_key_mismatch_or_unbound_values_refuse_the_original_read_without_replacement() {
+    for changed in [
+        vec![("resource_pool_id", Val::Int(3))],
+        vec![("resource_resource_semaphore_id", Val::Int(1))],
+        vec![("resource_pool_id", Val::Null)],
+        vec![("resource_pool_id", Val::Null), ("resource_resource_semaphore_id", Val::Null)],
+        vec![("resource_granted_memory_kb", Val::Int(-1))],
+        vec![("resource_available_memory_kb", Val::Float(64.5))],
+    ] {
+        let mut reader = resource_reader(columns(), vec![replace(&resource_row(), &changed)]);
+        let captured = reader.observe_memory().await;
+        let shutdown = reader.close().await;
+        assert_eq!(shutdown, SourceShutdown::Quiescent);
+        assert_eq!(CollectionStop::from_error(&captured.err().unwrap()), CollectionStop::InvalidPage);
+        assert_eq!(reader.query_count(), 5);
+        assert_eq!(reader.io.closed, 1);
+    }
+}
+
+#[tokio::test]
+async fn same_resource_values_may_change_across_rows_without_becoming_one_atomic_capacity_sample() {
+    let first = resource_row();
+    let second = replace(
+        &first,
+        &[
+            ("session_id", Val::Int(43)),
+            ("grant_session_id", Val::Int(43)),
+            ("resource_available_memory_kb", Val::Int(64)),
+        ],
+    );
+    let mut reader = resource_reader(columns(), vec![first, second]);
+    let captured = reader.observe_memory().await;
+    let shutdown = reader.close().await;
+    assert_eq!(shutdown, SourceShutdown::Quiescent);
+    let rows = captured.unwrap().into_observations().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].resource, rows[1].resource);
+    assert_ne!(rows[0].resource_observation, rows[1].resource_observation);
+    assert_ne!(rows[0].key().unwrap(), rows[1].key().unwrap());
+}
+
+#[tokio::test]
+async fn tenant_authority_and_zero_resource_identifiers_do_not_qualify_shared_instance_availability() {
+    let native = replace(
+        &resource_row(),
+        &[
+            ("grant_pool_id", Val::Int(0)),
+            ("grant_semaphore_id", Val::Int(0)),
+            ("resource_pool_id", Val::Int(0)),
+            ("resource_resource_semaphore_id", Val::Int(0)),
+        ],
+    );
+    let mut reader =
+        reader(vec![Ok(vec![crate::grants::tests::platform()]), Ok(vec![context()]), Ok(columns()), Ok(vec![native])]);
+    let captured = reader.observe_memory().await;
+    let shutdown = reader.close().await;
+    assert_eq!(shutdown, SourceShutdown::Quiescent);
+    let frame = captured.unwrap();
+    assert!(frame.complete_scope, "the original Azure grant qualification remains intact");
+    let rows = frame.into_observations().unwrap();
+    assert!(rows[0].resource_observation.is_none());
+    assert_eq!(rows[0].granted_kibibytes.as_deref(), Some("65536"));
+    assert!(!reader.io.calls[3].sql.contains("JOIN sys.dm_exec_query_resource_semaphores"));
+    assert!(reader.io.calls[2].sql.contains("AND 0=1"));
+    assert_eq!(reader.query_count(), 4);
 }
 
 #[tokio::test]

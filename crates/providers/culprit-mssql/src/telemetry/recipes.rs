@@ -216,14 +216,14 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(request_memory::MemorySource::new(pool, request, host, port)?)),
     )
     .bounded(crate::request_memory::bounded_budget)
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.focused-request-memory",
         RecipeSelector::FocusedRequestMemory,
         |pool, request, host, port| Ok(Box::new(request_memory::MemorySource::new(pool, request, host, port)?)),
     )
     .bounded(crate::request_memory::bounded_budget)
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.cache-entry-memory",
         RecipeSelector::CacheEntryMemory,

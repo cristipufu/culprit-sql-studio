@@ -99,6 +99,51 @@ async fn authenticated_request_memory_reuses_scan_explanations_and_keeps_native_
 }
 
 #[tokio::test]
+async fn authenticated_admission_condition_keeps_original_shared_counters_and_acquisition_context() {
+    let (source, rows) = request_memory_evidence_cases()
+        .into_iter()
+        .find(|(_, rows)| observations(rows).iter().any(|row| row.resource_observation.is_some()))
+        .expect("native shared-resource corpus");
+    let context = NativeReadContext::from_snapshot(&source).unwrap();
+    assert!(context.has_qualified_local_owner());
+    assert!(matches!(&context.partition, SourcePartition::InstanceLocal { member: Some(member), .. }
+        if member.kind == SharedResourceKind::Instance));
+    let database = source.target.database().unwrap();
+    assert!(observations(&rows).iter().all(|row| row.is_admission_participant(&database.database)));
+    let original_waiter =
+        observations(&rows).into_iter().find(|row| row.state == ExecutionGrantState::Waiting).unwrap();
+    let fixture = Fixture::new(source.clone(), rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(capture.is_read_complete());
+    let result = collected_resources::request_memory(&capture).unwrap();
+    let entry =
+        result.report.entries.iter().find(|entry| entry.observation_identity == original_waiter.identity).unwrap();
+    assert!(entry.explanation.contains(&culprit_core::t!(
+        "view.request_memory.resource.below_required",
+        available = "-64",
+        required = "64",
+        requested = "1024"
+    )));
+    assert!(entry.explanation.contains(&culprit_core::t!("view.request_memory.resource.limit")));
+    assert!(entry.mechanism.is_none());
+    let original = result
+        .context
+        .records
+        .iter()
+        .find_map(|row| match &row.row.record {
+            TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::ExecutionGrant(grant),
+                ..
+            }) if grant.identity == original_waiter.identity => Some(grant.as_ref()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(original, original_waiter);
+    assert_eq!(result.report, culprit_checks::analyze(scan(&source, &rows)).request_memory.unwrap());
+    assert!(result.report.limitations.contains(&culprit_core::t!("view.request_memory.limit.population")));
+}
+
+#[tokio::test]
 async fn a_missing_focused_subject_or_peer_remains_partial_without_completing_the_sealed_roster() {
     for missing_subject in [true, false] {
         let (source, mut rows) = focused_request_memory_evidence_with_peers(3);
