@@ -57,7 +57,7 @@ async fn one_canonical_local_capture_reuses_the_archive_view_and_preserves_every
                 if reference.is_informational()));
         }
         if name == "single_fragment_with_definitions" {
-            assert_eq!(report.entries[0].statement.as_ref().unwrap().binding, QueryStoreStatementBinding::Matched);
+            assert_eq!(report.entries[0].statement.as_ref().unwrap().binding, QueryStoreStatementBinding::Captured);
         }
     }
 }
@@ -86,7 +86,7 @@ async fn only_an_exact_original_definition_binding_may_provide_a_bounded_redacte
             .unwrap();
     let result = read(&reader, &fixture.manifest.capture.observation_id).await.unwrap();
     let statement = result.report().entries[0].statement.as_ref().unwrap();
-    assert_eq!(statement.binding, QueryStoreStatementBinding::Matched);
+    assert_eq!(statement.binding, QueryStoreStatementBinding::Captured);
     let preview = statement.preview.as_deref().unwrap();
     assert!(preview.chars().count() <= 512);
     assert!(statement.preview_truncated);

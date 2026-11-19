@@ -51,14 +51,20 @@ async fn boxed_history_sdk_keeps_query_global_data_local_acquisition_and_origina
     let entry = &analysis.report.entries[0];
     assert_eq!(entry.executions, "9007199254740993");
     let statement = entry.statement.as_ref().unwrap();
-    assert_eq!(
-        statement.binding,
-        culprit_core::query_store_statement_report::QueryStoreStatementBinding::SourceUnverified
-    );
+    assert_eq!(statement.binding, culprit_core::query_store_statement_report::QueryStoreStatementBinding::Captured);
     assert!(
-        statement.definition.is_none() && statement.preview.is_none(),
-        "an independently acquired local owner cannot qualify the global DATA namespace or lend companion SQL"
+        statement.definition.is_some() && statement.preview.as_deref().is_some_and(|sql| !sql.is_empty()),
+        "one original capture may bind its own SQL without qualifying a global DATA namespace"
     );
+    let original_definition = &definitions.records()[0];
+    let reference = DiagnosticEvidenceRef::from_export(
+        definitions.source(),
+        definitions.capture_manifest_sha256(),
+        original_definition.row(),
+        original_definition.row_ordinal() - 1,
+    )
+    .unwrap();
+    assert_eq!(statement.definition.as_ref(), Some(&reference));
     let definition_read = analysis.report.definition_read.as_ref().unwrap();
     assert_eq!(
         definition_read.namespace,
@@ -87,4 +93,43 @@ async fn an_archived_missing_boxed_runtime_body_keeps_the_original_owner_and_exp
     assert!(!report.report.read_complete);
     assert_eq!(report.context.source, source);
     assert_eq!(fixture.recovery_object_reads(), opens);
+}
+
+#[tokio::test]
+async fn an_independently_captured_boxed_companion_cannot_borrow_sql_from_a_qualified_local_owner() {
+    let (source, records) = boxed_query_history_evidence();
+    let runtime_fixture = Fixture::with_sequence(source.clone(), records.clone(), 956_000).await;
+    let definition_fixture = Fixture::with_sequence(source.clone(), records, 956_001).await;
+    let runtime_opens = runtime_fixture.recovery_object_reads();
+    let definition_opens = definition_fixture.recovery_object_reads();
+    let runtime = runtime_fixture.read_families(&[EvidenceFamily::QueryRuntime]).await;
+    let definitions = definition_fixture.read_families(&[EvidenceFamily::QueryDefinitions]).await;
+    assert_eq!(runtime.source(), definitions.source());
+    assert_ne!(runtime.capture(), definitions.capture());
+    let analysis = collected_resources::page_server_reads(&runtime, Some(&definitions)).unwrap();
+    let statement = analysis.report.entries[0].statement.as_ref().unwrap();
+    assert_eq!(
+        statement.binding,
+        culprit_core::query_store_statement_report::QueryStoreStatementBinding::SourceUnverified
+    );
+    assert!(statement.preview.is_none() && statement.definition.is_none());
+    assert_eq!(
+        analysis.report.definition_read.as_ref().unwrap().namespace,
+        culprit_core::query_store_statement_report::QueryStoreDefinitionNamespace::Unverified
+    );
+    assert_eq!(analysis.context.source, source);
+    assert!(
+        analysis
+            .context
+            .source
+            .query_history()
+            .unwrap()
+            .acquisition_owner
+            .as_ref()
+            .unwrap()
+            .has_qualified_local_owner()
+    );
+    assert!(query_store_database_namespace(&source.target, &source.partition).is_none());
+    assert_eq!(runtime_fixture.recovery_object_reads(), runtime_opens);
+    assert_eq!(definition_fixture.recovery_object_reads(), definition_opens);
 }

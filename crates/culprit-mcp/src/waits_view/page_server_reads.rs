@@ -3,7 +3,6 @@ use culprit_core::{
     Report, Result, SourceState,
     i18n::Message,
     page_server_read_report::{PageServerReadEntry, PageServerReadReport},
-    query_store_statement_report::QueryStoreStatementBinding,
     telemetry::{CapturedReadRef, DeliveryProblem, digest},
 };
 use serde::Serialize;
@@ -94,8 +93,7 @@ fn point(origin: &Origin<'_>, entry: &PageServerReadEntry) -> Option<Value> {
         "limitations": entry.explanation.limitations, "investigate": entry.explanation.investigate, "verify": entry.explanation.verify,
     });
     if matches!(origin, Origin::Capture(_)) {
-        let statement =
-            entry.statement.as_ref().filter(|statement| statement.binding == QueryStoreStatementBinding::Matched);
+        let statement = entry.statement.as_ref();
         // The original binder owns SQL redaction and its shared 512-character preview limit.
         value["sql_preview"] = json!(statement.and_then(|statement| statement.preview.as_ref()));
         value["sql_preview_truncated"] = json!(statement.is_some_and(|statement| statement.preview_truncated));

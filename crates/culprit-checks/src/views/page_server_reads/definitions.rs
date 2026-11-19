@@ -5,6 +5,7 @@ use culprit_core::query_store_statement_report::*;
 
 pub(super) fn statement(binding: QueryStoreDefinitionBinding<'_>) -> Box<QueryStoreStatementExplanation> {
     let qualification = match &binding {
+        QueryStoreDefinitionBinding::Captured(_) => t!("view.page_server_reads.statement.captured"),
         QueryStoreDefinitionBinding::Matched(_) => t!("view.page_server_reads.statement.matched"),
         QueryStoreDefinitionBinding::NotObserved => t!("view.page_server_reads.statement.not_observed"),
         QueryStoreDefinitionBinding::SourceUnverified => t!("view.page_server_reads.statement.unverified"),
@@ -16,7 +17,7 @@ pub(super) fn statement(binding: QueryStoreDefinitionBinding<'_>) -> Box<QuerySt
         reason: culprit_core::telemetry::PayloadUnavailable::NotCollected,
     };
     let evidence = match binding {
-        QueryStoreDefinitionBinding::Matched(row) => StatementEvidence {
+        QueryStoreDefinitionBinding::Captured(row) | QueryStoreDefinitionBinding::Matched(row) => StatementEvidence {
             binding: state,
             payload: &row.definition.sql,
             origin: row.definition.origin,
@@ -47,19 +48,25 @@ pub(super) fn statement(binding: QueryStoreDefinitionBinding<'_>) -> Box<QuerySt
     Box::new(evidence.explanation(format!("{qualification} {origin}")))
 }
 
-pub(super) fn append_limitations(read: &QueryStoreDefinitionRead, limitations: &mut Vec<String>) {
-    limitations.extend([
-        t!("view.page_server_reads.statement.limit.selection"),
-        t!("view.page_server_reads.statement.limit.continuity"),
-    ]);
-    match read.namespace {
-        QueryStoreDefinitionNamespace::Matched => (),
-        QueryStoreDefinitionNamespace::Unverified => {
-            limitations.push(t!("view.page_server_reads.statement.unverified"))
+pub(super) fn append_limitations(read: &QueryStoreDefinitionRead, same_capture: bool, limitations: &mut Vec<String>) {
+    limitations.push(t!("view.page_server_reads.statement.limit.selection"));
+    if same_capture {
+        limitations.push(t!("view.page_server_reads.statement.limit.captured"));
+    } else {
+        limitations.push(t!("view.page_server_reads.statement.limit.continuity"));
+        match read.namespace {
+            QueryStoreDefinitionNamespace::Matched => (),
+            QueryStoreDefinitionNamespace::Unverified => {
+                limitations.push(t!("view.page_server_reads.statement.unverified"))
+            }
+            QueryStoreDefinitionNamespace::Changed => limitations.push(t!("view.page_server_reads.statement.changed")),
         }
-        QueryStoreDefinitionNamespace::Changed => limitations.push(t!("view.page_server_reads.statement.changed")),
     }
     if !read.read_complete {
-        limitations.push(t!("view.page_server_reads.statement.limit.partial"));
+        limitations.push(if same_capture {
+            t!("view.page_server_reads.statement.limit.captured_partial")
+        } else {
+            t!("view.page_server_reads.statement.limit.partial")
+        });
     }
 }

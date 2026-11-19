@@ -118,11 +118,30 @@ fn explained(
 ) -> Result<CompilationReport> {
     let outcome =
         SourceOutcome { source: row.source.clone(), state: SourceState::Collected, reason: None, reason_message: None };
+    let read = CapturedReadRef::new(
+        source,
+        CaptureIdentity {
+            observation_id: "original-compiler-definition-capture".into(),
+            revision: Some(CaptureRevision {
+                outbox_id: digest(b"owned-compiler-definition-outbox"),
+                owner_epoch: "1".into(),
+                sequence: "3".into(),
+            }),
+        },
+        digest(b"original-compiler-definition-manifest"),
+        vec![CapturedStreamRows { stream: TelemetryStream::QueryDefinitions, rows: selected_rows }],
+    )?;
     super::super::explain(CompilationEvidence {
         context,
         observations: &[row],
         source: Some(&outcome),
-        definitions: Some(QueryStoreDefinitionEvidence { source, rows: definitions, selected_rows, read_complete }),
+        definitions: Some(QueryStoreDefinitionEvidence {
+            source,
+            read: &read,
+            rows: definitions,
+            selected_rows,
+            read_complete,
+        }),
     })
 }
 

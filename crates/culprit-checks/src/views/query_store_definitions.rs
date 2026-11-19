@@ -14,6 +14,8 @@ pub struct QueryStoreDefinitionRecord<'a> {
 #[derive(Clone, Copy)]
 pub struct QueryStoreDefinitionEvidence<'a> {
     pub source: &'a CollectionDescription,
+    /// The caller authenticates this original parent; analysis checks only its structural bindings.
+    pub read: &'a CapturedReadRef,
     pub rows: &'a [QueryStoreDefinitionRecord<'a>],
     pub selected_rows: u32,
     pub read_complete: bool,
@@ -22,7 +24,7 @@ pub struct QueryStoreDefinitionEvidence<'a> {
 /// These are borrowed original carriers. A history interval never becomes a native acquisition clock.
 pub(crate) enum QueryStoreStatementScope<'a> {
     NativeRead(Option<&'a NativeReadContext>),
-    History(&'a CollectionDescription),
+    CapturedHistory { source: &'a CollectionDescription, read: &'a CapturedReadRef },
 }
 impl QueryStoreStatementScope<'_> {
     fn namespace(&self) -> Result<Option<String>> {
@@ -34,23 +36,42 @@ impl QueryStoreStatementScope<'_> {
                 }
                 namespace(&context.target, &context.partition)
             }
-            Self::History(source) => {
+            Self::CapturedHistory { source, read } => {
                 validate_history(source)?;
+                read.validate_source(source)?;
                 namespace(&source.target, &source.partition)
             }
         }
+    }
+
+    fn shares_capture(&self, input: &QueryStoreDefinitionEvidence<'_>) -> Result<bool> {
+        let Self::CapturedHistory { source, read } = self else { return Ok(false) };
+        if read.capture != input.read.capture {
+            return Ok(false);
+        }
+        if read.manifest_sha256 != input.read.manifest_sha256
+            || read.source_sha256 != input.read.source_sha256
+            || *source != input.source
+        {
+            return Err(invalid());
+        }
+        Ok(true)
     }
 }
 
 pub(crate) struct QueryStoreDefinitions<'a> {
     input: QueryStoreDefinitionEvidence<'a>,
     namespace: QueryStoreDefinitionNamespace,
+    same_capture: bool,
     rows: BTreeMap<String, &'a QueryStoreDefinitionRecord<'a>>,
 }
 impl<'a> QueryStoreDefinitions<'a> {
     pub(crate) fn new(original: QueryStoreStatementScope<'_>, input: QueryStoreDefinitionEvidence<'a>) -> Result<Self> {
         validate_history(input.source)?;
-        if input.rows.len() > MAX_DEFINITION_RECORDS
+        let original_definitions = input.read.bind(input.source)?;
+        if input.read.streams.len() != 1
+            || input.read.captured_rows(TelemetryStream::QueryDefinitions) != Some(input.selected_rows)
+            || input.rows.len() > MAX_DEFINITION_RECORDS
             || input.rows.len() > input.selected_rows as usize
             || input.read_complete && input.rows.len() != input.selected_rows as usize
         {
@@ -59,7 +80,6 @@ impl<'a> QueryStoreDefinitions<'a> {
         let mut rows = BTreeMap::new();
         let mut records = BTreeSet::new();
         let mut ordinals = BTreeSet::new();
-        let mut capture = None;
         for row in input.rows {
             let native = TelemetryRecord::QueryDefinition(row.definition.clone());
             if row.reference.stream != TelemetryStream::QueryDefinitions
@@ -69,15 +89,13 @@ impl<'a> QueryStoreDefinitions<'a> {
             {
                 return Err(invalid());
             }
-            row.reference.validate_canonical_record(input.source, &native).map_err(|_| invalid())?;
-            let original_capture = row.reference.capture_ref();
-            if capture.as_ref().is_some_and(|capture| capture != &original_capture)
-                || !records.insert(&row.reference.record_id)
-                || !ordinals.insert(row.reference.row_ordinal)
-            {
+            original_definitions.validate_canonical_record(
+                &CapturedRecordReference::Diagnostic { reference: Box::new(row.reference.clone()) },
+                &native,
+            )?;
+            if !records.insert(&row.reference.record_id) || !ordinals.insert(row.reference.row_ordinal) {
                 return Err(invalid());
             }
-            capture = Some(original_capture);
             let key = query_store_query_incarnation_key(&row.definition.identity).map_err(|_| invalid())?;
             if rows.insert(key, row).is_some() {
                 return Err(invalid());
@@ -88,7 +106,12 @@ impl<'a> QueryStoreDefinitions<'a> {
             (Some(_), Some(_)) => QueryStoreDefinitionNamespace::Changed,
             _ => QueryStoreDefinitionNamespace::Unverified,
         };
-        Ok(Self { input, namespace, rows })
+        let same_capture = original.shares_capture(&input)?;
+        Ok(Self { input, namespace, same_capture, rows })
+    }
+
+    pub(crate) fn shares_original_capture(&self) -> bool {
+        self.same_capture
     }
 
     pub(crate) fn report(&self) -> QueryStoreDefinitionRead {
@@ -100,26 +123,43 @@ impl<'a> QueryStoreDefinitions<'a> {
         }
     }
 
-    pub(crate) fn resolve(&self, identity: Option<&NativeQueryIdentity>) -> QueryStoreDefinitionBinding<'a> {
+    pub(crate) fn resolve(
+        &self,
+        identity: Option<&NativeQueryIdentity>,
+        recorded_definition_id: Option<&str>,
+    ) -> Result<QueryStoreDefinitionBinding<'a>> {
         let Some(identity) = identity.filter(|identity| query_store_query_identity_is_complete(identity)) else {
-            return QueryStoreDefinitionBinding::IdentityUnavailable;
+            return Ok(QueryStoreDefinitionBinding::IdentityUnavailable);
         };
-        match self.namespace {
-            QueryStoreDefinitionNamespace::Unverified => return QueryStoreDefinitionBinding::SourceUnverified,
-            QueryStoreDefinitionNamespace::Changed => return QueryStoreDefinitionBinding::SourceChanged,
-            QueryStoreDefinitionNamespace::Matched => (),
+        if self.same_capture {
+            if recorded_definition_id.is_none() {
+                return Ok(QueryStoreDefinitionBinding::IdentityUnavailable);
+            }
+        } else {
+            match self.namespace {
+                QueryStoreDefinitionNamespace::Unverified => return Ok(QueryStoreDefinitionBinding::SourceUnverified),
+                QueryStoreDefinitionNamespace::Changed => return Ok(QueryStoreDefinitionBinding::SourceChanged),
+                QueryStoreDefinitionNamespace::Matched => (),
+            }
         }
         let Ok(key) = query_store_query_incarnation_key(identity) else {
-            return QueryStoreDefinitionBinding::IdentityUnavailable;
+            return Ok(QueryStoreDefinitionBinding::IdentityUnavailable);
         };
-        match self.rows.get(&key) {
+        Ok(match self.rows.get(&key) {
+            Some(row) if self.same_capture => {
+                if recorded_definition_id != Some(row.definition.id.as_str()) {
+                    return Err(invalid());
+                }
+                QueryStoreDefinitionBinding::Captured(row)
+            }
             Some(row) => QueryStoreDefinitionBinding::Matched(row),
             None => QueryStoreDefinitionBinding::NotObserved,
-        }
+        })
     }
 }
 
 pub(crate) enum QueryStoreDefinitionBinding<'a> {
+    Captured(&'a QueryStoreDefinitionRecord<'a>),
     Matched(&'a QueryStoreDefinitionRecord<'a>),
     NotObserved,
     SourceUnverified,
@@ -129,6 +169,7 @@ pub(crate) enum QueryStoreDefinitionBinding<'a> {
 impl QueryStoreDefinitionBinding<'_> {
     pub(crate) fn state(&self) -> QueryStoreStatementBinding {
         match self {
+            Self::Captured(_) => QueryStoreStatementBinding::Captured,
             Self::Matched(_) => QueryStoreStatementBinding::Matched,
             Self::NotObserved => QueryStoreStatementBinding::NotObserved,
             Self::SourceUnverified => QueryStoreStatementBinding::SourceUnverified,

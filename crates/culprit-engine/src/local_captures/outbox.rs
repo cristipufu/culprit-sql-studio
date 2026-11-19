@@ -222,6 +222,7 @@ fn explain_page_server_reads(capture: CompletedQueryHistory) -> Result<LocalPage
         read_complete: true,
         definitions: Some(QueryStoreDefinitionEvidence {
             source: &source,
+            read: &definition_read,
             rows: &definitions,
             selected_rows: selected_definitions,
             read_complete: true,

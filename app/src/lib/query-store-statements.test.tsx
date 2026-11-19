@@ -11,14 +11,17 @@ test("the shared statement disclosure is folded, historical, text-only and expli
   const statement = queryStoreStatement();
   statement.preview = '<script>statement_canary()</script><img src=x onerror="statement_canary()">';
   statement.preview_truncated = true;
-  const html = renderToStaticMarkup(<QueryStoreStatement statement={statement} />);
-  expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
-  expect(html).toContain("&lt;script&gt;");
-  expect(html).not.toContain("<script");
-  expect(html).not.toContain("<img");
-  expect(html).toContain(t("view.query_store_statement.shortened"));
-  expect(html).toContain(t("ui.query_store_statement.reference", { reference: "opaque-original-definition" }));
-  expect(html).not.toMatch(/<(?:a|button|input|textarea)(?:\s|>)/);
+  for (const binding of ["captured", "matched"] as const) {
+    statement.binding = binding;
+    const html = renderToStaticMarkup(<QueryStoreStatement statement={statement} />);
+    expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("<img");
+    expect(html).toContain(t("view.query_store_statement.shortened"));
+    expect(html).toContain(t("ui.query_store_statement.reference", { reference: "opaque-original-definition" }));
+    expect(html).not.toMatch(/<(?:a|button|input|textarea)(?:\s|>)/);
+  }
 });
 
 test("runtime SQL and an independent partial definition selection cannot hide original native counts or gaps", () => {

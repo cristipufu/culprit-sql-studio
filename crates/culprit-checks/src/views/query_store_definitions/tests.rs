@@ -169,14 +169,31 @@ impl Fixture {
             })
             .collect()
     }
+    fn definition_read(&self, selected: u32) -> Result<CapturedReadRef> {
+        CapturedReadRef::new(
+            &self.definition_source,
+            CaptureIdentity {
+                observation_id: digest(self.definition_source.source.as_bytes()),
+                revision: Some(CaptureRevision {
+                    outbox_id: digest(b"original-definition-conformance-outbox"),
+                    owner_epoch: "1".into(),
+                    sequence: "1".into(),
+                }),
+            },
+            digest(self.definition_source.source.as_bytes()),
+            vec![CapturedStreamRows { stream: TelemetryStream::QueryDefinitions, rows: selected }],
+        )
+    }
     fn evidence<'a>(
         &'a self,
+        read: &'a CapturedReadRef,
         rows: &'a [QueryStoreDefinitionRecord<'a>],
         selected: u32,
         complete: bool,
     ) -> QueryStoreDefinitionEvidence<'a> {
         QueryStoreDefinitionEvidence {
             source: &self.definition_source,
+            read,
             rows,
             selected_rows: selected,
             read_complete: complete,
@@ -201,15 +218,24 @@ impl Fixture {
             capture,
             digest(self.runtime_source.source.as_bytes()),
             vec![CapturedStreamRows { stream: TelemetryStream::QueryRuntime, rows: 1 }],
-        )
-        .unwrap();
+        )?;
+        let definitions = self.definition_read(selected)?;
+        self.runtime_report_with_reads(rows, selected, complete, &read, &definitions)
+    }
+    fn runtime_report_with_reads(
+        &self,
+        rows: &[QueryStoreDefinitionRecord<'_>],
+        selected: u32,
+        complete: bool,
+        read: &CapturedReadRef,
+        definition_read: &CapturedReadRef,
+    ) -> Result<culprit_core::page_server_read_report::PageServerReadReport> {
         let exported = ExportedRecord::new(
             &self.runtime_source,
             &read.capture,
             TelemetryRecord::QueryRuntime(self.runtime.clone()),
-        )
-        .unwrap();
-        let reference = CapturedRecordReference::from_export(&read, &self.runtime_source, &exported, 0).unwrap();
+        )?;
+        let reference = CapturedRecordReference::from_export(read, &self.runtime_source, &exported, 0)?;
         let query = self.runtime.key.references.query.as_ref().is_some_and(NativeDefinitionReference::is_resolved);
         let plan = self.runtime.key.references.plan.as_ref();
         let coverage = ReferenceCoverage {
@@ -225,12 +251,12 @@ impl Fixture {
         };
         crate::page_server_reads::explain_archive(crate::page_server_reads::PageServerReadEvidence {
             source: &self.runtime_source,
-            read: &read,
+            read,
             reference_coverage: &coverage,
             rows: &[crate::page_server_reads::RuntimeEvidence { reference, runtime: &self.runtime }],
             selected_rows: 1,
             read_complete: true,
-            definitions: Some(self.evidence(rows, selected, complete)),
+            definitions: Some(self.evidence(definition_read, rows, selected, complete)),
         })
     }
     fn compiler_report(
@@ -245,11 +271,12 @@ impl Fixture {
             reason: None,
             reason_message: None,
         };
+        let read = self.definition_read(selected)?;
         crate::compilation::explain(crate::compilation::CompilationEvidence {
             context: Some(&self.compiler_context),
             observations: &[&self.compilation],
             source: Some(&outcome),
-            definitions: Some(self.evidence(rows, selected, complete)),
+            definitions: Some(self.evidence(&read, rows, selected, complete)),
         })
     }
     fn assert_binding(&self, expected: QueryStoreStatementBinding) {
@@ -521,3 +548,5 @@ fn incomplete_native_identity_with_a_supplied_conflicting_definition_id_is_integ
         "even an incomplete identity cannot suppress a present contradictory source-scoped reference"
     );
 }
+
+mod captured;

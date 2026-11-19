@@ -215,3 +215,35 @@ fn partial_unverified_statement_evidence_stays_visible_with_native_counts_and_no
     assert_eq!(json["entries"][0]["statement"]["binding"], "source-unverified");
     assert!(json["entries"][0]["statement"]["preview"].is_null());
 }
+
+#[test]
+fn captured_statement_text_and_json_keep_the_binders_preview_while_namespace_remains_unverified() {
+    use culprit_core::query_store_statement_report::*;
+    let mut report = report();
+    report.definition_read = Some(Box::new(QueryStoreDefinitionRead {
+        namespace: QueryStoreDefinitionNamespace::Unverified,
+        selected_rows: 1,
+        observed_rows: 1,
+        read_complete: true,
+    }));
+    let preview = "SELECT [original] FROM dbo.orders";
+    report.entries[0].statement = Some(Box::new(QueryStoreStatementExplanation {
+        binding: QueryStoreStatementBinding::Captured,
+        definition: None,
+        origin: StatementOrigin::Application,
+        monitoring_template_id: None,
+        preview: Some(preview.into()),
+        preview_truncated: true,
+        unavailable: None,
+        unavailable_explanation: None,
+        explanation: t!("view.page_server_reads.statement.captured"),
+    }));
+    let text = page_server_reads(&report);
+    assert!(text.contains(preview));
+    assert!(text.contains(&t!("view.query_store_statement.shortened")));
+    assert!(text.contains("9007199254740993"));
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(json["definition_read"]["namespace"], "unverified");
+    assert_eq!(json["entries"][0]["statement"]["binding"], "captured");
+    assert_eq!(json["entries"][0]["statement"]["preview"], preview);
+}

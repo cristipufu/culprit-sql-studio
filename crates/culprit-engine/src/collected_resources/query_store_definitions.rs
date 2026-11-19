@@ -1,9 +1,31 @@
 //! QueryDefinitions-only archive adapter shared by compiler and runtime statement links.
 use super::*;
-use culprit_checks::query_store_definitions::QueryStoreDefinitionRecord;
+use culprit_checks::query_store_definitions::{QueryStoreDefinitionEvidence, QueryStoreDefinitionRecord};
 
-pub(super) fn rows(capture: &EvidenceCapture) -> Result<Vec<QueryStoreDefinitionRecord<'_>>> {
-    references::validate_capture(capture)?;
+pub(super) struct QueryStoreDefinitionCapture<'a> {
+    capture: &'a EvidenceCapture,
+    read: CapturedReadRef,
+    rows: Vec<QueryStoreDefinitionRecord<'a>>,
+}
+impl<'a> QueryStoreDefinitionCapture<'a> {
+    pub(super) fn new(capture: &'a EvidenceCapture) -> Result<Self> {
+        let read = references::captured_read(capture)?;
+        let rows = rows(capture)?;
+        Ok(Self { capture, read, rows })
+    }
+
+    pub(super) fn evidence(&self) -> QueryStoreDefinitionEvidence<'_> {
+        QueryStoreDefinitionEvidence {
+            source: self.capture.source(),
+            read: &self.read,
+            rows: &self.rows,
+            selected_rows: self.capture.metrics().selected_rows,
+            read_complete: self.capture.is_read_complete(),
+        }
+    }
+}
+
+fn rows(capture: &EvidenceCapture) -> Result<Vec<QueryStoreDefinitionRecord<'_>>> {
     if capture.families() != [EvidenceFamily::QueryDefinitions]
         || capture.source().query_history().is_none()
         || capture.source().target.engine() != Engine::Mssql

@@ -130,7 +130,8 @@ async fn genuine_ready_originals_reach_mcp_with_exact_counts_folded_definitions_
             assert_eq!(view["entries_presented"], 0);
         }
         if name == "single_fragment_with_definitions" {
-            assert_eq!(view["entries"][0]["statement_binding"], "matched");
+            // The original capture supplies this definition; global namespace qualification stays independent.
+            assert_eq!(view["entries"][0]["statement_binding"], "captured");
             assert!(view["entries"][0]["sql_preview"].as_str().unwrap().chars().count() <= 512);
         }
         let text = result.to_string();

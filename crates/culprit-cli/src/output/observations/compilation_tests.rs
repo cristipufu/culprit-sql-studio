@@ -44,12 +44,20 @@ fn report_for(name: &str, missing_definition: bool) -> CompilationReport {
             })
             .collect()
     };
+    let read = CapturedReadRef::new(
+        &source,
+        recovery.manifest.capture.clone(),
+        recovery.manifest.capture_manifest_sha256.clone(),
+        vec![CapturedStreamRows { stream: TelemetryStream::QueryDefinitions, rows: records.len() as u32 }],
+    )
+    .unwrap();
     culprit_checks::compilation::explain(CompilationEvidence {
         context: Some(&context),
         observations: &observations,
         source: Some(&outcome),
         definitions: Some(QueryStoreDefinitionEvidence {
             source: &source,
+            read: &read,
             rows: &definitions,
             selected_rows: records.len() as u32,
             read_complete: !missing_definition,

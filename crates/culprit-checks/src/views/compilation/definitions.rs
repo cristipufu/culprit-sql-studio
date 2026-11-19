@@ -31,7 +31,7 @@ impl<'a> Definitions<'a> {
         }
     }
     pub(super) fn resolve(&self, native: &'a MssqlQueryCompilation) -> Result<Statement<'a>> {
-        let binding = self.index.resolve(Some(&native.identity));
+        let binding = self.index.resolve(Some(&native.identity), None)?;
         let QueryStoreDefinitionBinding::Matched(row) = binding else {
             return Ok(Statement::without_definition(native, binding.state()));
         };

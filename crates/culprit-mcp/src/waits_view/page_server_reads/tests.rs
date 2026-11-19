@@ -233,3 +233,51 @@ fn an_absent_original_definition_carrier_is_a_gap_and_never_stale_derived_sql_au
         assert!(!encoded.contains(secret), "{secret}");
     }
 }
+
+#[test]
+fn captured_transport_keeps_the_binders_typed_statement_and_bounded_preview_without_reinterpreting_namespace() {
+    use culprit_core::query_store_statement_report::*;
+    let data = data(1);
+    let mut report = culprit_engine::explain_page_server_reads(&data.snapshot).unwrap().unwrap();
+    let read = CapturedReadRef {
+        capture: CaptureIdentity { observation_id: "original-bounded-capture".into(), revision: None },
+        manifest_sha256: digest(b"original-manifest"),
+        source_sha256: digest(b"original-source"),
+        streams: vec![CapturedStreamRows { stream: TelemetryStream::QueryRuntime, rows: 1 }],
+    };
+    report.definition_read = Some(Box::new(QueryStoreDefinitionRead {
+        namespace: QueryStoreDefinitionNamespace::Unverified,
+        selected_rows: 1,
+        observed_rows: 1,
+        read_complete: true,
+    }));
+    let preview = format!("SELECT [{}", "界".repeat(504));
+    assert_eq!(preview.chars().count(), 512);
+    report.entries[0].statement = Some(Box::new(QueryStoreStatementExplanation {
+        binding: QueryStoreStatementBinding::Captured,
+        definition: None,
+        origin: StatementOrigin::Application,
+        monitoring_template_id: None,
+        preview: Some(preview.clone()),
+        preview_truncated: true,
+        unavailable: None,
+        unavailable_explanation: None,
+        explanation: String::new(),
+    }));
+    let value = super::compact(&report, Origin::Capture(&read)).unwrap();
+    assert_eq!(value["definition_read"]["namespace"], "unverified");
+    assert_eq!(value["entries"][0]["statement_binding"], "captured");
+    assert_eq!(value["entries"][0]["sql_preview"], preview);
+    assert_eq!(value["entries"][0]["sql_preview_truncated"], true);
+    assert_eq!(value["entries"][0]["executions"], "9007199254740993");
+    assert!(!serde_json::to_string(&value).unwrap().contains("manifest_sha256"));
+    let statement = report.entries[0].statement.as_mut().unwrap();
+    statement.binding = QueryStoreStatementBinding::IdentityUnavailable;
+    statement.preview = None;
+    statement.preview_truncated = false;
+    statement.unavailable = Some(PayloadUnavailable::NotCollected);
+    let value = super::compact(&report, Origin::Capture(&read)).unwrap();
+    assert_eq!(value["entries"][0]["statement_binding"], "identity-unavailable");
+    assert!(value["entries"][0]["sql_preview"].is_null());
+    assert_eq!(value["entries"][0]["sql_preview_truncated"], false);
+}

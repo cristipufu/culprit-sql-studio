@@ -227,6 +227,12 @@ even when a native cohort is shared. Unlocalized runtime read gaps withhold each
 membership cannot establish an unpartitioned workload. Warehouse receipt and recovery verification always cover
 the original capture rather than a filtered proof.
 
+The shared definition index can bind a runtime row to its own capture's SQL through exact authenticated original
+parents, the resolved definition ID and full native query incarnation. This `Captured` association preserves the
+independent database-namespace verdict; another capture still needs the existing namespace match. Missing bodies,
+unresolved references and recovery previews cannot supply complete SQL. UI, CLI and MCP render the binder's bounded
+result rather than repeating its association policy.
+
 `QueryHistoryDescription.acquisition_owner` records the native observer independently of the historical data
 namespace and execution populations. An acquired owner requires `SourceCompletion::QueryHistory`: its original
 owner, read start, interval, wait semantics and layout facts must survive completion. Only fully drained runtime

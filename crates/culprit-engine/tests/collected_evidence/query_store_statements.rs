@@ -82,7 +82,7 @@ async fn an_explicit_same_capture_definition_family_uses_the_identical_original_
     let definitions = fixture.read_families(DEFINITIONS).await;
     let analysis = collected_resources::page_server_reads(&runtime, Some(&definitions)).unwrap();
     let statement = analysis.report.entries[0].statement.as_ref().unwrap();
-    assert_eq!(statement.binding, QueryStoreStatementBinding::Matched);
+    assert_eq!(statement.binding, QueryStoreStatementBinding::Captured);
     assert!(statement.preview.is_some());
     assert_eq!(analysis.context.range_id, analysis.definition_context.as_ref().unwrap().range_id);
     assert_eq!(
@@ -167,5 +167,57 @@ async fn a_short_unicode_preview_requires_explicit_bounded_hydration_before_sql_
     assert!(!statement.preview_truncated);
     assert!(statement.preview.as_ref().unwrap().contains("OPTION(RECOMPILE)"));
     assert_eq!(hydrated.metrics().recovery_objects, 1);
+    assert_eq!(fixture.recovery_object_reads(), opens + 1);
+}
+
+#[tokio::test]
+async fn same_capture_binding_does_not_turn_a_unicode_warehouse_prefix_into_a_complete_sql_body() {
+    let mut case =
+        query_store_statement_evidence_cases().into_iter().find(|case| case.name == "short_unicode_sql").unwrap();
+    let TelemetryRecord::QueryDefinition(original) = &case.definitions.as_ref().unwrap().1[0] else { panic!() };
+    let TelemetryRecord::QueryDefinition(captured) =
+        case.runtime.1.iter_mut().find(|record| record.stream() == TelemetryStream::QueryDefinitions).unwrap()
+    else {
+        panic!()
+    };
+    captured.sql = original.sql.clone();
+    captured.source_text_bytes = original.source_text_bytes.clone();
+    captured.origin = original.origin;
+    let fixture = Fixture::with_sequence(case.runtime.0, case.runtime.1, 957_000).await;
+    let opens = fixture.recovery_object_reads();
+    let runtime = fixture.read_families(RUNTIME).await;
+    let prefix = fixture.read_families(DEFINITIONS).await;
+    let analysis = collected_resources::page_server_reads(&runtime, Some(&prefix)).unwrap();
+    let statement = analysis.report.entries[0].statement.as_ref().unwrap();
+    assert_eq!(statement.binding, QueryStoreStatementBinding::NotObserved);
+    assert!(statement.preview.is_none() && statement.definition.is_none());
+    assert!(analysis.report.read_complete);
+    let read = analysis.report.definition_read.as_ref().unwrap();
+    assert_eq!((read.selected_rows, read.observed_rows, read.read_complete), (1, 0, false));
+    assert_eq!(fixture.recovery_object_reads(), opens);
+    let bytes = fixture
+        .range
+        .manifest()
+        .batches
+        .iter()
+        .find(|batch| batch.stream == TelemetryStream::QueryDefinitions)
+        .unwrap()
+        .bytes;
+    let error = fixture
+        .try_read_families_with_recovery(DEFINITIONS, RecoveryPayloadBudget { max_objects: 1, max_bytes: bytes - 1 })
+        .await
+        .unwrap_err();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Capacity)));
+    assert_eq!(fixture.recovery_object_reads(), opens, "full original bytes are admitted before opening the body");
+    let definitions = fixture
+        .read_families_with_recovery(DEFINITIONS, RecoveryPayloadBudget { max_objects: 1, max_bytes: bytes })
+        .await;
+    let analysis = collected_resources::page_server_reads(&runtime, Some(&definitions)).unwrap();
+    let statement = analysis.report.entries[0].statement.as_ref().unwrap();
+    assert_eq!(statement.binding, QueryStoreStatementBinding::Captured);
+    assert!(statement.definition.is_some());
+    assert!(statement.preview.as_ref().unwrap().contains("OPTION(RECOMPILE)"));
+    assert!(!statement.preview_truncated);
+    assert_eq!(definitions.metrics().recovery_objects, 1);
     assert_eq!(fixture.recovery_object_reads(), opens + 1);
 }

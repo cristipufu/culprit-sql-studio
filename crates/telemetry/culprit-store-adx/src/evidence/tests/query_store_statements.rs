@@ -75,9 +75,7 @@ async fn runtime_and_companion_cases_preserve_separate_original_rows_scopes_and_
 
 #[tokio::test]
 async fn explicit_same_capture_family_selection_keeps_both_original_streams_without_hydration() {
-    let case =
-        test_support::query_store_statement_evidence_cases().into_iter().find(|case| case.name == "matched").unwrap();
-    let (source, records) = case.runtime;
+    let (source, records) = test_support::boxed_query_history_evidence();
     let fixture = fixture(source.clone(), records.clone(), &[RUNTIME, DEFINITIONS]).await;
     let opens = fixture.recovery.object_reads.load(Ordering::SeqCst);
     let capture = read(&fixture, &[RUNTIME, DEFINITIONS], None).await;
@@ -86,6 +84,19 @@ async fn explicit_same_capture_family_selection_keeps_both_original_streams_with
     assert_eq!(capture.captured_rows(TelemetryStream::QueryRuntime), Some(1));
     assert_eq!(capture.captured_rows(TelemetryStream::QueryDefinitions), Some(1));
     assert!(capture.records().iter().all(|record| &record.row().capture == capture.capture()));
+    let runtime = read(&fixture, &[RUNTIME], None).await;
+    let definitions = read(&fixture, &[DEFINITIONS], None).await;
+    assert_eq!(runtime.capture(), definitions.capture());
+    assert_eq!(runtime.capture_manifest_sha256(), definitions.capture_manifest_sha256());
+    assert_eq!(runtime.source(), definitions.source());
+    assert!(runtime.source().target.database().unwrap().incarnation.is_none());
+    assert!(query_store_database_namespace(&source.target, &source.partition).is_none());
+    assert!(source.query_history().unwrap().acquisition_owner.as_ref().unwrap().has_qualified_local_owner());
+    let TelemetryRecord::QueryRuntime(native) = &runtime.records()[0].row().record else { panic!() };
+    let TelemetryRecord::QueryDefinition(definition) = &definitions.records()[0].row().record else { panic!() };
+    assert_eq!(native.key.references.query.as_ref().unwrap().native, definition.identity.native());
+    assert_eq!(native.key.references.query.as_ref().unwrap().definition_id.as_ref(), Some(&definition.id));
+    assert!(matches!(&definition.sql, DefinitionPayload::Available { text, .. } if !text.is_empty()));
     assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opens);
 }
 

@@ -1,6 +1,7 @@
 //! Exact database compilation history remains independent of runtime intervals and current compiler admission.
+use super::query_store_definitions::QueryStoreDefinitionCapture;
 use super::*;
-use culprit_checks::{compilation::CompilationEvidence, query_store_definitions::QueryStoreDefinitionEvidence};
+use culprit_checks::compilation::CompilationEvidence;
 use culprit_core::collected_resource_analysis::CollectedCompilationAnalysis;
 
 pub fn compilation(
@@ -24,19 +25,12 @@ pub fn compilation(
     let rows = input.rows()?;
     let source = input.outcome(rows.len())?;
     let context = NativeReadContext::from_snapshot(capture.source())?;
-    let definition_rows = definitions.map(super::query_store_definitions::rows).transpose()?;
-    let definition_evidence =
-        definitions.zip(definition_rows.as_deref()).map(|(capture, rows)| QueryStoreDefinitionEvidence {
-            source: capture.source(),
-            rows,
-            selected_rows: capture.metrics().selected_rows,
-            read_complete: capture.is_read_complete(),
-        });
+    let definition_capture = definitions.map(QueryStoreDefinitionCapture::new).transpose()?;
     let evidence = CompilationEvidence {
         context: Some(&context),
         observations: &rows,
         source: Some(&source),
-        definitions: definition_evidence,
+        definitions: definition_capture.as_ref().map(QueryStoreDefinitionCapture::evidence),
     };
     let mut report = culprit_checks::compilation::explain(evidence).map_err(|_| invalid())?;
     if let Some(baseline) = baseline {

@@ -60,7 +60,7 @@ pub fn explain_archive(input: PageServerReadEvidence<'_>) -> Result<PageServerRe
         .map(|value| PageServerReadAvailability::from_native_property(value).ok_or_else(invalid))
         .transpose()?;
     let definitions = definitions
-        .map(|input| QueryStoreDefinitions::new(QueryStoreStatementScope::History(source), input))
+        .map(|input| QueryStoreDefinitions::new(QueryStoreStatementScope::CapturedHistory { source, read }, input))
         .transpose()?;
     let mut physical_rows = BTreeSet::new();
     let mut entries = Vec::with_capacity(rows.len().min(MAX_DETAIL_ENTRIES));
@@ -78,7 +78,12 @@ pub fn explain_archive(input: PageServerReadEvidence<'_>) -> Result<PageServerRe
         }
         let statement = definitions
             .as_ref()
-            .map(|definitions| self::definitions::statement(definitions.resolve(identity.as_ref())));
+            .map(|definitions| {
+                let recorded_id =
+                    row.runtime.key.references.query.as_ref().and_then(|query| query.definition_id.as_deref());
+                definitions.resolve(identity.as_ref(), recorded_id).map(self::definitions::statement)
+            })
+            .transpose()?;
         let mut explanation = match row.runtime.page_server_reads.as_deref() {
             Some(statistics) => explain_statistics(statistics, None)?,
             None => explain_statistics(&PageServerReadStatistics::default(), None)?,
@@ -112,7 +117,11 @@ pub fn explain_archive(input: PageServerReadEvidence<'_>) -> Result<PageServerRe
     }
     let definition_read = definitions.as_ref().map(|definitions| Box::new(definitions.report()));
     if let Some(read) = &definition_read {
-        self::definitions::append_limitations(read, &mut limitations);
+        self::definitions::append_limitations(
+            read,
+            definitions.as_ref().is_some_and(QueryStoreDefinitions::shares_original_capture),
+            &mut limitations,
+        );
     }
     let presentation_limited = rows.len() > MAX_DETAIL_ENTRIES;
     if presentation_limited {
