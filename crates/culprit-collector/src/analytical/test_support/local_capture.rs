@@ -35,6 +35,7 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
             "tempdb_metadata_memory",
             super::tempdb_metadata_memory_evidence(super::TempdbMetadataMemoryCase::Reserved),
         ),
+        case("table_memory", super::table_memory_evidence(super::TableMemoryCase::Exact)),
         case("instance_resources", super::instance_resource_evidence(super::InstanceResourceCase::Exact)),
         case("database_properties", super::database_properties_evidence(super::DatabasePropertiesCase::Exact)),
         case("table_full_text", super::table_full_text_evidence(super::TableFullTextCase::Enabled)),
