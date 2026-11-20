@@ -527,3 +527,6 @@ mod instance_resources;
 mod table_full_text;
 
 mod boxed_query_history;
+
+#[cfg(feature = "mssql")]
+mod vendor_conformance;
