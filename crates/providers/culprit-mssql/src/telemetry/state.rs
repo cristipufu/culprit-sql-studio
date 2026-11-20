@@ -48,7 +48,9 @@ impl StateSource {
 impl<R: NativeRead> StateSource<R> {
     fn with_io(io: R, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         request.validate()?;
-        let CollectionSelection::Snapshot { dataset } = request.selection else { return Err(invalid_data()) };
+        let CollectionSelection::Snapshot { dataset } = request.selection else {
+            return Err(invalid_data());
+        };
         subject::validate_dataset(&request.subject, dataset)?;
         Ok(Self {
             request: request.clone(),
@@ -109,20 +111,7 @@ impl<R: NativeRead> StateSource<R> {
                     self.identity.as_ref(),
                 )
                 .await;
-            let outcome = match result {
-                Ok(point::ReadOutcome::NotApplicable) => StateSourceCoverage::not_applicable(source),
-                Ok(point::ReadOutcome::Observed(batch)) => {
-                    if batch.values.len() > remaining {
-                        return Err(CollectionStop::RowLimit.error());
-                    }
-                    let count = batch.values.len().try_into().map_err(|_| invalid_data())?;
-                    let mut outcome = StateSourceCoverage::observed(source, count, batch.complete_scope);
-                    outcome.error_code = batch.error_code;
-                    self.rows.extend(batch.values);
-                    outcome
-                }
-                Err(error) => source_failure(source, error)?,
-            };
+            let outcome = record_family(*family, result, remaining, &mut self.rows)?;
             outcomes.push(outcome);
         }
         Ok(outcomes)
@@ -140,6 +129,30 @@ impl<R: NativeRead> StateSource<R> {
         Ok(remaining)
     }
 }
+/// One family-result policy for current native point sources. A protocol/admission fence stops the
+/// original owner; other failures keep this family's unavailability without erasing independent facts.
+pub(super) fn record_family(
+    family: point::Family,
+    result: Result<point::ReadOutcome>,
+    remaining: usize,
+    rows: &mut Vec<TelemetryRecord>,
+) -> Result<StateSourceCoverage> {
+    let source = family.source().name.to_owned();
+    match result {
+        Ok(point::ReadOutcome::NotApplicable) => Ok(StateSourceCoverage::not_applicable(source)),
+        Ok(point::ReadOutcome::Observed(batch)) => {
+            if batch.values.len() > remaining {
+                return Err(CollectionStop::RowLimit.error());
+            }
+            let count = batch.values.len().try_into().map_err(|_| invalid_data())?;
+            let mut outcome = StateSourceCoverage::observed(source, count, batch.complete_scope);
+            outcome.error_code = batch.error_code;
+            rows.extend(batch.values);
+            Ok(outcome)
+        }
+        Err(error) => source_failure(source, error),
+    }
+}
 fn source_failure(source: String, error: culprit_core::Error) -> Result<StateSourceCoverage> {
     let stopped = CollectionStop::from_error(&error);
     if stops_remaining_reads(&error) {
@@ -154,7 +167,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             return Err(invalid_data());
         }
         self.progress = Progress::Failed;
-        let CollectionSelection::Snapshot { dataset } = self.request.selection else { return Err(invalid_data()) };
+        let CollectionSelection::Snapshot { dataset } = self.request.selection else {
+            return Err(invalid_data());
+        };
         let shared = subject::is_shared(&self.request.subject)?;
         let families = if shared { point::shared_families(dataset)? } else { point::families(dataset)? };
         let detail = if !shared && dataset == SnapshotDataset::Operational {

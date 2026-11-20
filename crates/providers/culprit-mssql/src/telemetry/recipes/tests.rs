@@ -103,9 +103,15 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
         RecipeSelector::FocusedCompilationAdmission => CollectionSelection::FocusedCompilationAdmission {
             focus: Box::new(crate::activity::compiler_admission::tests::focus()),
         },
-        RecipeSelector::MaintenanceProgress => panic!("the SQL Server catalog does not declare maintenance progress"),
-        RecipeSelector::CurrentRequestWork => panic!("the SQL Server catalog does not declare current request work"),
-        RecipeSelector::FocusedBlocking => panic!("the SQL Server catalog does not declare focused blocking"),
+        RecipeSelector::MaintenanceProgress => {
+            panic!("the SQL Server catalog does not declare maintenance progress")
+        }
+        RecipeSelector::CurrentRequestWork => {
+            panic!("the SQL Server catalog does not declare current request work")
+        }
+        RecipeSelector::FocusedBlocking => {
+            panic!("the SQL Server catalog does not declare focused blocking")
+        }
         RecipeSelector::CacheEntryMemory => {
             CollectionSelection::CacheEntryMemory { focus: Box::new(crate::cache_entry_memory::tests::focus().await) }
         }
@@ -374,4 +380,22 @@ fn hyperscale_component_source_is_independent_and_does_not_grant_automatic_produ
         recipe.selector,
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::HyperscaleLogComponents))
     );
+}
+
+#[test]
+fn cleanup_recipe_keeps_its_local_three_family_envelope_separate_from_azure_operational() {
+    let recipes = declarations();
+    let cleanup = recipes.iter().find(|recipe| recipe.id == "mssql.cleanup").unwrap();
+    assert_eq!(cleanup.version, 1);
+    assert_eq!(cleanup.purpose, RecipePurpose::Investigation);
+    assert_eq!(cleanup.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(cleanup.subjects, vec![RecipeSubject::Database]);
+    assert_eq!(cleanup.budget.max_queries, super::super::cleanup::MAX_QUERIES);
+    assert_eq!(cleanup.budget.max_snapshot_rows, 3);
+    assert_eq!(cleanup.budget.page_rows, 3);
+    assert_eq!(cleanup.budget.page_bytes, 32 * 1024);
+    assert_eq!(cleanup.budget.total_bytes, 32 * 1024);
+    assert_eq!(cleanup.budget.statement_timeout_ms, 1_000);
+    assert_eq!(cleanup.budget.total_timeout_ms, 5_000);
+    assert_ne!(cleanup.selector, recipes.iter().find(|recipe| recipe.id == "mssql.operational").unwrap().selector);
 }

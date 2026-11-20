@@ -11,6 +11,10 @@ pub enum CleanupCase {
     UnattributedParticipant,
     UnavailableNativeSources,
     UnrelatedOperationalCounter,
+    LocalLoggedGenerator,
+    LocalSnapshotProtector,
+    LocalRecoveredHorizon,
+    LocalUnavailableHorizon,
     QualifiedEmptyRetention,
     UnqualifiedEmptyRetention,
     TiedRetention,
@@ -29,6 +33,10 @@ pub fn cleanup_evidence_cases() -> Vec<(CleanupCase, CollectionDescription, Vec<
         UnattributedParticipant,
         UnavailableNativeSources,
         UnrelatedOperationalCounter,
+        LocalLoggedGenerator,
+        LocalSnapshotProtector,
+        LocalRecoveredHorizon,
+        LocalUnavailableHorizon,
         QualifiedEmptyRetention,
         UnqualifiedEmptyRetention,
         TiedRetention,
@@ -66,6 +74,12 @@ pub fn cleanup_tamper_cases() -> Vec<(CleanupCase, &'static str, &'static str, s
             json!("2020-01-01T12:00:01.003"),
         ),
         (
+            CleanupCase::LocalSnapshotProtector,
+            "mssql-cleanup-horizon",
+            "/oldest_confirmed/session/generation",
+            json!("2020-01-01T10:00:00.004"),
+        ),
+        (
             CleanupCase::TiedRetention,
             "retention-coverage",
             "/qualified_horizons",
@@ -78,6 +92,10 @@ pub fn cleanup_tamper_cases() -> Vec<(CleanupCase, &'static str, &'static str, s
 
 pub fn cleanup_evidence(case: CleanupCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
     match case {
+        CleanupCase::LocalLoggedGenerator
+        | CleanupCase::LocalSnapshotProtector
+        | CleanupCase::LocalRecoveredHorizon
+        | CleanupCase::LocalUnavailableHorizon => local_native(case),
         CleanupCase::QualifiedEmptyRetention => {
             complete_retention_inventory(super::retention_coverage_only_evidence(vec![
                 CleanupHorizon::Data,
@@ -185,6 +203,64 @@ fn native(case: CleanupCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
         sources,
     });
     (manifest.source, rows)
+}
+
+/// The same canonical native facts are retained through the newly supported local Cleanup intake.
+/// Recovery changes the original horizon, not the independently observed byte gauge.
+fn local_native(case: CleanupCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (mut source, mut rows) = native(CleanupCase::EmptyHorizon);
+    let (activity, _) = replica_activity_evidence_cases().remove(0);
+    let SourcePartition::InstanceLocal { member: Some(mut member), epoch } = activity.partition else { unreachable!() };
+    member.kind = SharedResourceKind::Instance;
+    source.partition = SourcePartition::InstanceLocal { member: Some(member), epoch };
+    let CollectionTarget::Database(database) = &mut source.target else { unreachable!() };
+    database.incarnation = None;
+    source.source = "mssql-cleanup".into();
+    let TelemetryRecord::Operational(row) = &mut rows[0] else { unreachable!() };
+    let OperationalFact::MssqlCleanupHorizon(horizon) = &mut row.fact else { unreachable!() };
+    match case {
+        CleanupCase::LocalLoggedGenerator | CleanupCase::LocalSnapshotProtector => {
+            let mut participant = transaction("57", "1001");
+            if case == CleanupCase::LocalSnapshotProtector {
+                participant.session.id = "58".into();
+                participant.transaction.id = "1002".into();
+                participant.snapshot_isolation = Some(true);
+                participant.log_record_count = Some("0".into());
+                participant.log_bytes_used = Some("0".into());
+                participant.begin_lsn = None;
+            }
+            horizon.oldest_confirmed = Some(Box::new(participant));
+        }
+        CleanupCase::LocalRecoveredHorizon | CleanupCase::LocalUnavailableHorizon => {}
+        _ => unreachable!(),
+    }
+    rows.push(TelemetryRecord::Operational(OperationalObservation {
+        source: source_id::VERSION_STORE.into(),
+        key: "tempdb-version-store".into(),
+        fact: OperationalFact::Counter(NativeCounterSample::gauge(
+            "tempdb-version-store",
+            64,
+            CounterUnit::Kibibytes,
+            MeasurementScope::Database,
+            "sys.dm_tran_version_store_space_usage",
+            "reserved_space_kb",
+        )),
+    }));
+    let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+    snapshot.dataset = SnapshotDataset::Cleanup;
+    snapshot.sources.push(StateSourceCoverage::collected(source_id::VERSION_STORE.into(), 1));
+    if case == CleanupCase::LocalUnavailableHorizon {
+        rows.remove(0);
+        let coverage =
+            snapshot.sources.iter_mut().find(|coverage| coverage.source == source_id::OPEN_TRANSACTIONS).unwrap();
+        *coverage =
+            StateSourceCoverage::unavailable(source_id::OPEN_TRANSACTIONS.into(), ErrorCode::PermissionDenied, None);
+    }
+    snapshot.records = rows.len() as u32;
+    assert!(source.partition_is_consistent());
+    assert!(source.partition.is_qualified());
+    assert!(rows.iter().all(TelemetryRecord::is_valid));
+    (source, rows)
 }
 
 fn persistent_versions() -> MssqlPersistentVersionStore {

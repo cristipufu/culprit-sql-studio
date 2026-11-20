@@ -9,6 +9,18 @@ pub fn cleanup(capture: &EvidenceCapture) -> Result<CollectedCleanupAnalysis> {
     if !matches!(native.dataset, SnapshotDataset::Cleanup | SnapshotDataset::Operational) {
         return Err(DeliveryProblem::UnsupportedSchema.error());
     }
+    let local_cleanup = native.dataset == SnapshotDataset::Cleanup
+        && matches!(capture.source().partition, SourcePartition::InstanceLocal { .. });
+    if local_cleanup {
+        let context = NativeReadContext::from_snapshot(capture.source())?;
+        if context.target.engine() != Engine::Mssql
+            || !context.has_qualified_local_owner()
+            || !matches!(context.partition, SourcePartition::InstanceLocal { member: Some(ref member), .. }
+                if member.kind == SharedResourceKind::Instance)
+        {
+            return Err(invalid());
+        }
+    }
     let mut observations = Vec::new();
     let mut sources = Vec::new();
     for input in CapturedState::sources(capture, native.dataset)? {
@@ -16,6 +28,36 @@ pub fn cleanup(capture: &EvidenceCapture) -> Result<CollectedCleanupAnalysis> {
         let bounds = input.bounds()?;
         let rows = input.rows()?;
         match native.dataset {
+            SnapshotDataset::Cleanup if local_cleanup => {
+                if rows.len() > 1 {
+                    return Err(invalid());
+                }
+                let expected = match input.coverage.source.as_str() {
+                    source_id::OPEN_TRANSACTIONS => {
+                        rows.iter().all(|row| matches!(row.fact, OperationalFact::MssqlCleanupHorizon(_)))
+                    }
+                    source_id::PERSISTENT_VERSION_STORE => {
+                        rows.iter().all(|row| matches!(row.fact, OperationalFact::MssqlPersistentVersionStore(_)))
+                    }
+                    source_id::VERSION_STORE => rows.iter().all(|row| {
+                        matches!(&row.fact, OperationalFact::Counter(counter)
+                        if counter.scope == culprit_core::MeasurementScope::Database
+                            && counter.key == "tempdb-version-store"
+                            && counter.unit == CounterUnit::Kibibytes
+                            && counter.nature == CounterNature::Gauge
+                            && counter.native_object == "sys.dm_tran_version_store_space_usage"
+                            && counter.native_name == "reserved_space_kb")
+                    }),
+                    _ => false,
+                };
+                if !expected {
+                    return Err(invalid());
+                }
+                if input.coverage.source != source_id::VERSION_STORE {
+                    sources.push(input.outcome(rows.len())?);
+                    observations.extend(rows);
+                }
+            }
             SnapshotDataset::Cleanup => {
                 for row in &rows {
                     match &row.fact {

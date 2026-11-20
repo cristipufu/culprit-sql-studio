@@ -28,6 +28,149 @@ fn boundary(report: &CleanupReport, horizon: CleanupHorizon) -> &culprit_core::C
 }
 
 #[tokio::test]
+async fn local_cleanup_distinguishes_logged_generator_from_zero_log_snapshot_and_keeps_original_bytes_separate() {
+    for (case, message) in [
+        (CleanupCase::LocalLoggedGenerator, culprit_core::t!("view.cleanup.transaction.context.logged_versioning")),
+        (CleanupCase::LocalSnapshotProtector, culprit_core::t!("view.cleanup.transaction.context.snapshot_zero_log")),
+    ] {
+        let analysis = analyze_case(case).await;
+        let entry = analysis
+            .report
+            .entries
+            .iter()
+            .find(|entry| entry.reference.source == source_id::OPEN_TRANSACTIONS)
+            .unwrap();
+        assert!(entry.explanation.contains(&message));
+        assert_eq!(analysis.context.source.target.database().unwrap().incarnation, None);
+        assert!(analysis.context.source.partition.is_qualified());
+        assert!(!analysis.report.entries.iter().any(|entry| entry.reference.source == source_id::VERSION_STORE));
+        assert!(analysis.context.records.iter().any(|row| matches!(&row.row.record,
+            TelemetryRecord::Operational(row) if row.source == source_id::VERSION_STORE
+                && matches!(&row.fact, OperationalFact::Counter(counter)
+                    if counter.value == MeasurementValue::Integer("64".into())))));
+    }
+    let recovered = analyze_case(CleanupCase::LocalRecoveredHorizon).await;
+    assert!(recovered.report.entries.iter().all(|entry| entry.mechanisms.is_empty()));
+    assert!(
+        recovered.context.records.iter().any(|row| matches!(&row.row.record,
+        TelemetryRecord::Operational(row) if matches!(&row.fact, OperationalFact::Counter(counter)
+            if counter.value == MeasurementValue::Integer("64".into())))),
+        "ending the original protection does not prove immediate native byte reclamation"
+    );
+    let unavailable = analyze_case(CleanupCase::LocalUnavailableHorizon).await;
+    assert!(unavailable.report.entries.is_empty());
+    assert!(
+        unavailable
+            .report
+            .sources
+            .iter()
+            .any(|source| source.source == source_id::OPEN_TRANSACTIONS && source.state == SourceState::Unavailable)
+    );
+}
+
+#[tokio::test]
+async fn local_cleanup_intake_refuses_unqualified_members_target_scope_and_unrelated_fact_families() {
+    let (original, records) = cleanup_evidence(CleanupCase::LocalLoggedGenerator);
+    for partition in [
+        SourcePartition::Target,
+        SourcePartition::InstanceLocal { member: None, epoch: None },
+        match original.partition.clone() {
+            SourcePartition::InstanceLocal { member: Some(mut member), epoch } => {
+                member.kind = SharedResourceKind::Node;
+                SourcePartition::InstanceLocal { member: Some(member), epoch }
+            }
+            _ => unreachable!(),
+        },
+    ] {
+        let mut source = original.clone();
+        source.partition = partition;
+        if !source.partition.is_qualified() {
+            let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+            for coverage in &mut snapshot.sources {
+                if matches!(coverage.state, SourceState::Collected | SourceState::Empty) {
+                    *coverage = StateSourceCoverage::observed(coverage.source.clone(), coverage.records, false);
+                }
+            }
+        }
+        let fixture = Fixture::new(source, records.clone()).await;
+        let capture =
+            fixture.read_families(&[culprit_collector::analytical::evidence::EvidenceFamily::OperationalSamples]).await;
+        assert!(collected_resources::cleanup(&capture).is_err());
+    }
+    for engine in [culprit_core::Engine::Postgres, culprit_core::Engine::Mysql] {
+        let mut source = original.clone();
+        let CollectionTarget::Database(database) = &mut source.target else { unreachable!() };
+        database.engine = engine;
+        let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut source.partition else { unreachable!() };
+        member.engine = engine;
+        assert!(source.partition_is_consistent());
+        assert!(
+            NativeReadContext::from_snapshot(&source).unwrap().has_qualified_local_owner(),
+            "qualified local ownership is vendor-neutral"
+        );
+        let fixture = Fixture::new(source, records.clone()).await;
+        let capture =
+            fixture.read_families(&[culprit_collector::analytical::evidence::EvidenceFamily::OperationalSamples]).await;
+        assert!(
+            collected_resources::cleanup(&capture).is_err(),
+            "{engine:?} cannot supply the SQL Server native cleanup interpretation"
+        );
+    }
+    let mut duplicate_rows = records.clone();
+    let mut duplicate = duplicate_rows
+        .iter()
+        .find(|row| {
+            matches!(row,
+        TelemetryRecord::Operational(row) if row.source == source_id::OPEN_TRANSACTIONS)
+        })
+        .unwrap()
+        .clone();
+    let TelemetryRecord::Operational(row) = &mut duplicate else { unreachable!() };
+    row.key = "second-horizon-row".into();
+    duplicate_rows.push(duplicate);
+    let mut duplicate_source = original.clone();
+    let SourceObservation::Snapshot(snapshot) = &mut duplicate_source.observation else { unreachable!() };
+    snapshot.records = duplicate_rows.len() as u32;
+    snapshot.sources.iter_mut().find(|coverage| coverage.source == source_id::OPEN_TRANSACTIONS).unwrap().records = 2;
+    let fixture = Fixture::new(duplicate_source, duplicate_rows).await;
+    let capture =
+        fixture.read_families(&[culprit_collector::analytical::evidence::EvidenceFamily::OperationalSamples]).await;
+    assert!(collected_resources::cleanup(&capture).is_err(), "one local native horizon source is a singleton point");
+    for mutation in ["source", "scope", "unit", "native-name"] {
+        let mut rows = records.clone();
+        let TelemetryRecord::Operational(row) = rows
+            .iter_mut()
+            .find(|row| {
+                matches!(row,
+            TelemetryRecord::Operational(row) if row.source == source_id::VERSION_STORE)
+            })
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let OperationalFact::Counter(counter) = &mut row.fact else { unreachable!() };
+        let mut source = original.clone();
+        match mutation {
+            "source" => {
+                row.source = "foreign-cleanup-source".into();
+                let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+                snapshot.sources.iter_mut().find(|source| source.source == source_id::VERSION_STORE).unwrap().source =
+                    row.source.clone();
+            }
+            "scope" => counter.scope = culprit_core::MeasurementScope::Server,
+            "unit" => counter.unit = CounterUnit::Bytes,
+            "native-name" => counter.native_name = "different_native_counter".into(),
+            _ => unreachable!(),
+        }
+        assert!(rows.iter().all(TelemetryRecord::is_valid));
+        let fixture = Fixture::new(source, rows).await;
+        let capture =
+            fixture.read_families(&[culprit_collector::analytical::evidence::EvidenceFamily::OperationalSamples]).await;
+        assert!(collected_resources::cleanup(&capture).is_err(), "{mutation}");
+    }
+}
+
+#[tokio::test]
 async fn every_cleanup_population_uses_original_rows_sources_and_the_existing_pure_view_without_native_work() {
     for (case, _, _) in cleanup_evidence_cases() {
         let analysis = analyze_case(case).await;
@@ -147,7 +290,11 @@ async fn native_null_missing_columns_and_zero_keep_different_meanings_and_failur
             .any(|source| source.source == source_id::OPEN_TRANSACTIONS && source.state == SourceState::Partial)
     );
     assert!(
-        partial.report.entries.iter().any(|entry| entry.mechanisms.contains(&CleanupMechanism::UnattributedVersioning))
+        partial
+            .report
+            .entries
+            .iter()
+            .any(|entry| { entry.mechanisms.contains(&CleanupMechanism::UnattributedVersioning) })
     );
     let failed = analyze_case(CleanupCase::UnavailableNativeSources).await;
     assert!(failed.report.entries.is_empty());

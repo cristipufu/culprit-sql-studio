@@ -247,6 +247,13 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(crate::task_space::bounded_budget)
     .version(3),
+    Registration::database(
+        "mssql.cleanup",
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cleanup)),
+        |pool, request, host, port| Ok(Box::new(cleanup::CleanupSource::new(pool, request, host, port)?)),
+    )
+    .bounded(cleanup::bounded_budget)
+    .on_editions(crate::instance::SUPPORTED_EDITIONS),
     state!("mssql.operational", Operational).baseline().version(6),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
