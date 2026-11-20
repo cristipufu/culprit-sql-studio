@@ -221,7 +221,7 @@ async fn metadata_memory_feature_and_data_visibility_remain_separate_without_wit
         let mut replies = replies(metadata());
         replies[METADATA_LAYOUT_REPLY] =
             Ok(vec![replace(&crate::tempdb_metadata_memory::tests::layout_row(), &[(field, value)])]);
-        replies.remove(METADATA_LAYOUT_REPLY + 1);
+        replies.remove(METADATA_LAYOUT_REPLY + 1).expect("the omitted consumer reply must be a successful native read");
         let mut source =
             StateSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
         let description = source.describe().await.unwrap();

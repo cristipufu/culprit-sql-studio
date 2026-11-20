@@ -29,6 +29,7 @@ async fn instance(provider: &MssqlProvider) -> SharedResourceIdentity {
         resources[0].collections,
         [
             TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
+            TelemetryCollection::DeadlockHistory,
             TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
             TelemetryCollection::Snapshot(SnapshotDataset::Operational),
         ]
@@ -45,6 +46,26 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     let member = provider(fixture.port, &fixture.database, fixture.password());
     let identity = instance(&master).await;
     assert_eq!(identity, instance(&member).await, "the member database is a route, not the shared owner");
+    // This independent fixture oracle is outside source accounting. Enabling the feature requires a restart,
+    // so its native value remains fixed throughout the original process-qualified source acquisition.
+    let expected_metadata_enabled = member
+        .pool
+        .observe(|reader| {
+            Box::pin(async move {
+                let row = crate::read::one(
+                    reader,
+                    "SELECT /* culprit */ CONVERT(int,SERVERPROPERTY('IsTempDbMetadataMemoryOptimized')) AS metadata_enabled",
+                )
+                .await?;
+                crate::read::optional_boolean(&row, "metadata_enabled")
+            })
+        })
+        .await
+        .unwrap();
+    assert!(
+        expected_metadata_enabled.is_some(),
+        "the owned supported SQL instance must expose its native feature state"
+    );
 
     let request = CollectionRequest {
         subject: CollectionSubject::Shared { resource: identity.clone() },
@@ -62,15 +83,21 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
         .collect::<BTreeSet<_>>();
     assert_eq!(snapshot.sources.len(), expected_sources.len(), "each registered family appears once");
     assert_eq!(snapshot.sources.iter().map(|source| source.source.as_str()).collect::<BTreeSet<_>>(), expected_sources);
-    for name in [
-        crate::sources::MEMORY_CLERKS.name,
-        crate::sources::SCHEDULERS.name,
-        crate::sources::LOG_CAPACITY.name,
-        crate::sources::TEMPDB_METADATA_MEMORY.name,
-    ] {
+    for name in [crate::sources::MEMORY_CLERKS.name, crate::sources::SCHEDULERS.name, crate::sources::LOG_CAPACITY.name]
+    {
         let coverage = snapshot.sources.iter().find(|source| source.source == name).unwrap();
         assert_eq!(coverage.state, SourceState::Collected, "{coverage:?}");
         assert!(coverage.complete_scope && coverage.records > 0);
+    }
+    let metadata =
+        snapshot.sources.iter().find(|source| source.source == crate::sources::TEMPDB_METADATA_MEMORY.name).unwrap();
+    let metadata_limit = (MAX_MSSQL_TEMPDB_METADATA_CONSUMERS + 1) as u32;
+    assert!(matches!(metadata.state, SourceState::Collected | SourceState::Partial), "{metadata:?}");
+    assert!((1..=metadata_limit).contains(&metadata.records));
+    assert_eq!(metadata.complete_scope, metadata.state == SourceState::Collected);
+    assert_eq!((metadata.error_code, metadata.stopped), (None, None));
+    if metadata.state == SourceState::Partial {
+        assert_eq!(metadata.records, metadata_limit, "one feature plus the bounded consumer prefix, no overflow row");
     }
 
     let capture = CaptureIdentity { observation_id: "owned-shared-native".into(), revision: None };
@@ -79,6 +106,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     let mut tempdb_log_points = 0;
     let mut tempdb_data_points = 0;
     let mut tempdb_metadata_features = 0;
+    let mut tempdb_metadata_consumers = 0;
     let context = NativeReadContext::from_snapshot(&description).unwrap();
     let mut cursor = None;
     let mut records = 0;
@@ -101,13 +129,11 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
                                 == Some(MSSQL_TEMPDB_METADATA_FEATURE_KIND)
                             {
                                 let feature = TempdbMetadataFeature::from_original(&set, &context).unwrap();
-                                assert!(
-                                    feature.enabled().is_some(),
-                                    "supported owned SQL must expose its actual feature state"
-                                );
+                                assert_eq!(feature.enabled(), expected_metadata_enabled);
                                 tempdb_metadata_features += 1;
                             } else {
                                 TempdbMetadataConsumer::from_original(&set, &context).unwrap();
+                                tempdb_metadata_consumers += 1;
                             }
                         }
                         counter_sources.insert(source);
@@ -151,6 +177,12 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     assert_eq!(tempdb_log_points, 1, "native tempdb log visibility must be proved, never skipped");
     assert_eq!(tempdb_data_points, 1, "data and log retain independent source populations");
     assert_eq!(tempdb_metadata_features, 1, "native feature state is measured once, including when disabled");
+    assert_eq!(tempdb_metadata_features + tempdb_metadata_consumers, metadata.records);
+    if expected_metadata_enabled == Some(true) {
+        assert!(tempdb_metadata_consumers > 0, "the enabled native control must exercise consumer decoding");
+    } else {
+        assert_eq!(tempdb_metadata_consumers, 0, "disabled metadata cannot manufacture consumer measurements");
+    }
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert_eq!(member.source_shutdown(), SourceShutdown::Quiescent);
