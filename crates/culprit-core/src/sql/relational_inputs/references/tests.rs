@@ -3,6 +3,7 @@ use super::*;
 mod apply;
 mod cte;
 mod derived;
+mod options;
 mod projection;
 
 fn parameter(name: &str, alias: Option<&str>) -> MssqlRelationReference {

@@ -400,3 +400,127 @@ fn a_complete_parameter_population_is_bounded_without_accepting_its_prefix_or_un
     );
     assert_eq!(compare(&a, &unknown).relation(), Relation::Unavailable);
 }
+
+fn cached_with_execution_hints(runtime: &str, cached: bool, hints: &str, original_text_matches: bool) -> Plan {
+    use culprit_core::telemetry::*;
+    let sql = format!("SELECT value FROM dbo.rows WHERE id=@p {hints}");
+    let native = native(runtime, cached);
+    let raw = native
+        .raw
+        .as_ref()
+        .unwrap()
+        .replace("SELECT value FROM dbo.rows WHERE id=@p", &sql)
+        .replace("QueryHash=\"0xA\"", "QueryHash=\"0x0123456789ABCDEF\"");
+    let context = CachedStatementContext {
+        identity: CachedStatementIdentity {
+            plan_handle: "0x0102".into(),
+            sql_handle: "0x0304".into(),
+            statement_start_bytes: 0,
+            statement_end_bytes: -1,
+            created_without_offset: "2026-11-14T12:00:00.003".into(),
+            plan_generation: "1".into(),
+        },
+        database_id: 7,
+        query_hash: Some("0x0123456789ABCDEF".into()),
+        origin: StatementOrigin::Application,
+        monitoring_template_id: None,
+        source_text_bytes: Some((sql.encode_utf16().count() * 2).to_string()),
+        source_text_complete: true,
+    };
+    let read = crate::plan_xml::test_read_context("app");
+    crate::plan_xml::parse_cached_statement(
+        &raw,
+        crate::plan_xml::CachedInputContext {
+            statement: &context,
+            module_parameters: None,
+            text: Some(if original_text_matches { &sql } else { "SELECT value FROM foreign.rows WHERE id=@p" }),
+            origin: crate::plan_xml::PlanInputOrigin::OriginalNative { read: Some(&read) },
+        },
+    )
+    .unwrap()
+}
+const EXECUTION_HINTS: &str = "OPTION(HASH GROUP,MAXDOP 1,MIN_GRANT_PERCENT=70,MAX_GRANT_PERCENT=70)";
+#[test]
+fn original_cached_native_statements_with_terminal_hints_keep_complete_runtime_tuple_comparison() {
+    let a = cached_with_execution_hints("(+001)", true, EXECUTION_HINTS, true);
+    let b = cached_with_execution_hints("(1)", true, EXECUTION_HINTS, true);
+    assert_eq!(compare(&a, &b).relation(), Relation::Same);
+    assert_eq!(compare(&b, &a).relation(), Relation::Same);
+    let different = cached_with_execution_hints("(2)", true, EXECUTION_HINTS, true);
+    assert_eq!(compare(&a, &different).relation(), Relation::Different);
+    assert_eq!(
+        a.statement.as_deref(),
+        Some(format!("SELECT value FROM dbo.rows WHERE id=@p {EXECUTION_HINTS}").as_str())
+    );
+    assert!(
+        a.facts()
+            .parameter_context
+            .as_ref()
+            .unwrap()
+            .parameters
+            .iter()
+            .all(|parameter| parameter.runtime == State::Recorded)
+    );
+}
+#[test]
+fn terminal_hint_inventory_never_bypasses_original_statement_native_tree_or_variant_guards() {
+    let original = cached_with_execution_hints("(1)", true, EXECUTION_HINTS, true);
+    let mismatch = cached_with_execution_hints("(1)", true, EXECUTION_HINTS, false);
+    assert_eq!(compare(&original, &mismatch).relation(), Relation::Unavailable);
+    let other_hints = cached_with_execution_hints(
+        "(1)",
+        true,
+        "OPTION(MAXDOP 1,MIN_GRANT_PERCENT=60,MAX_GRANT_PERCENT=70,HASH GROUP)",
+        true,
+    );
+    assert_eq!(
+        compare(&original, &other_hints).relation(),
+        Relation::Unavailable,
+        "complete original statement text still agrees"
+    );
+    for case in ["tree", "runtime", "variant", "raw"] {
+        let mut changed = original.clone();
+        match case {
+            "tree" => changed.root.act_executions = Some(2.0),
+            "raw" => changed.raw = None,
+            "runtime" => {
+                let raw = changed.raw.as_ref().unwrap().replace(" ParameterRuntimeValue=\"(1)\"", "");
+                changed = crate::plan_xml::parse(&raw).unwrap();
+            }
+            _ => {
+                let raw = changed.raw.as_ref().unwrap().replace("<StmtSimple ", "<StmtSimple QueryVariantID=\"7\" ");
+                changed = crate::plan_xml::parse(&raw).unwrap();
+            }
+        }
+        assert_eq!(compare(&original, &changed).relation(), Relation::Unavailable, "{case}");
+    }
+}
+#[test]
+fn unknown_or_malformed_option_clauses_remain_unavailable_with_native_runtime_attributes() {
+    for hints in [
+        "OPTION(MAXDOP 1,MAXDOP 2)",
+        "OPTION(MAXDOP (1))",
+        "OPTION(OPTIMIZE FOR(@p=1))",
+        "OPTION(MAXDOP 1) SELECT value FROM foreign.rows",
+    ] {
+        let a = cached_with_execution_hints("(1)", true, hints, true);
+        let b = cached_with_execution_hints("(1)", true, hints, true);
+        assert_eq!(compare(&a, &b).relation(), Relation::Unavailable, "{hints}");
+    }
+}
+#[test]
+fn accepting_tvp_relation_syntax_never_promotes_it_to_the_named_scalar_comparison_contract() {
+    let a = cached_with_execution_hints("(1)", true, EXECUTION_HINTS, true);
+    let raw = a
+        .raw
+        .as_ref()
+        .unwrap()
+        .replace("dbo.rows", "@Rows")
+        .replace("<Object Schema=\"[dbo]\" Table=\"[rows]\"/>", "<Object Table=\"[@Rows]\"/>");
+    let variable = crate::plan_xml::parse(&raw).unwrap();
+    assert_eq!(compare(&variable, &variable).relation(), Relation::Unavailable);
+    assert_eq!(
+        variable.root.facts().relational_input.unwrap().kind,
+        culprit_core::plan_facts::RelationalInputKind::Unknown
+    );
+}

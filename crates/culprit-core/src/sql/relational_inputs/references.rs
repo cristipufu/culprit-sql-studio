@@ -7,6 +7,7 @@ mod apply;
 mod cte;
 mod derived;
 mod expressions;
+mod options;
 mod projection;
 
 /// An original SQL reference, retaining spelling and case. A named relation is not proof of its resolved object.
@@ -25,6 +26,7 @@ pub struct MssqlRelationReference {
 
 /// Recognize a deliberately small SELECT/JOIN grammar, with agreement under every supported lexical mode.
 /// Only bounded grouping, known built-ins, closed passthroughs and one direct-column CROSS APPLY are admitted.
+/// A closed terminal OPTION may contain only the admitted relation-neutral execution hints.
 /// Other nested statements, unknown functions, rowset-changing APPLY, implicit joins and hints are not resolved.
 /// Multiple relations require distinct explicit aliases. Nothing here infers variable kind or default schema.
 pub fn mssql_relational_references(text: &str) -> Option<Vec<MssqlRelationReference>> {
@@ -32,7 +34,7 @@ pub fn mssql_relational_references(text: &str) -> Option<Vec<MssqlRelationRefere
         return None;
     }
     let readings = readings(text, Engine::Mssql).ok()?;
-    let mut candidates = readings.iter().map(|tokens| references(tokens));
+    let mut candidates = readings.iter().map(|tokens| options::statement(text, tokens).and_then(references));
     let first = candidates.next()??;
     candidates.all(|candidate| candidate.as_ref() == Some(&first)).then_some(first)
 }
