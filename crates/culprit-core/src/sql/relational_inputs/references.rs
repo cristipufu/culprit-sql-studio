@@ -23,7 +23,7 @@ pub struct MssqlRelationReference {
 }
 
 /// Recognize a deliberately small SELECT/JOIN grammar, with agreement under every supported lexical mode.
-/// Only bounded grouping, recognized built-ins and one closed derived or CTE parameter passthrough are admitted.
+/// Only bounded grouping, recognized built-ins, one closed derived relation or two chained CTE passthroughs are admitted.
 /// Other nested statements, unknown functions, APPLY, implicit joins and table hints are not resolved.
 /// Multiple relations require distinct explicit aliases. Nothing here infers variable kind or default schema.
 pub fn mssql_relational_references(text: &str) -> Option<Vec<MssqlRelationReference>> {
@@ -74,10 +74,9 @@ fn references(tokens: &[Token<'_>]) -> Option<Vec<MssqlRelationReference>> {
     if tokens[at..].iter().any(|token| join_start(token) || word(Some(token), "ON")) {
         return None;
     }
-    let outer_alias =
-        derived.as_ref().map(|scope| scope.alias()).or_else(|| cte.as_ref().and_then(|scope| scope.alias()));
+    let scope_aliases = derived.iter().map(|scope| scope.alias()).chain(cte.iter().flat_map(|scope| scope.aliases()));
     if !closed_scope(tokens, derived.as_ref())
-        || !distinct_aliases(&relations, outer_alias)
+        || !distinct_aliases(&relations, scope_aliases)
         || cte.as_ref().is_some_and(|scope| !scope.is_bound(&relations))
     {
         return None;
@@ -126,12 +125,13 @@ fn closed_scope(tokens: &[Token<'_>], derived: Option<&derived::DerivedRelation>
         && tokens.iter().filter(|token| word(Some(token), "FROM")).count() == 1
 }
 
-fn distinct_aliases(relations: &[MssqlRelationReference], outer_alias: Option<&str>) -> bool {
-    if relations.len() == 1 && outer_alias.is_none() {
+fn distinct_aliases<'a>(relations: &'a [MssqlRelationReference], scope_aliases: impl Iterator<Item = &'a str>) -> bool {
+    let mut scope_aliases = scope_aliases.peekable();
+    if relations.len() == 1 && scope_aliases.peek().is_none() {
         return true;
     }
     let mut aliases: Vec<&str> = Vec::new();
-    for alias in relations.iter().map(|relation| relation.alias.as_deref()).chain(outer_alias.map(Some)) {
+    for alias in relations.iter().map(|relation| relation.alias.as_deref()).chain(scope_aliases.map(Some)) {
         let Some(alias) = alias else { return false };
         if aliases.iter().any(|previous| alias.eq_ignore_ascii_case(previous)) {
             return false;

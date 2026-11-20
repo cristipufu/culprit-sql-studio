@@ -21,6 +21,8 @@ enum Probe {
     ProjectedHealthy,
     AliasedCounted,
     AliasedHealthy,
+    ChainCounted,
+    ChainHealthy,
 }
 impl Probe {
     fn name(self) -> &'static str {
@@ -36,6 +38,8 @@ impl Probe {
             Self::ProjectedHealthy => "projected_healthy_probe",
             Self::AliasedCounted => "aliased_count_probe",
             Self::AliasedHealthy => "aliased_healthy_probe",
+            Self::ChainCounted => "chain_count_probe",
+            Self::ChainHealthy => "chain_healthy_probe",
         }
     }
     fn statement(self) -> &'static str {
@@ -67,12 +71,23 @@ impl Probe {
             Self::AliasedHealthy => {
                 "WITH input AS (SELECT r.id AS input_id FROM @Rows AS r) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d"
             }
+            Self::ChainCounted => {
+                "WITH seed AS (SELECT r.id FROM @Rows AS r), input AS (SELECT p.id FROM seed AS p) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d WHERE (d.id > 10000)"
+            }
+            Self::ChainHealthy => {
+                "WITH seed AS (SELECT r.id FROM @Rows AS r), input AS (SELECT p.id FROM seed AS p) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d"
+            }
         }
     }
     fn is_healthy(self) -> bool {
         matches!(
             self,
-            Self::Healthy | Self::DerivedHealthy | Self::CteHealthy | Self::ProjectedHealthy | Self::AliasedHealthy
+            Self::Healthy
+                | Self::DerivedHealthy
+                | Self::CteHealthy
+                | Self::ProjectedHealthy
+                | Self::AliasedHealthy
+                | Self::ChainHealthy
         )
     }
     fn execution(self, rows: usize) -> String {
@@ -133,6 +148,8 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
             | Probe::ProjectedHealthy
             | Probe::AliasedCounted
             | Probe::AliasedHealthy
+            | Probe::ChainCounted
+            | Probe::ChainHealthy
     ) {
         assert_eq!(
             input.facts().table_alias.as_deref(),
@@ -189,6 +206,7 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
                 | Probe::CteCounted
                 | Probe::ProjectedCounted
                 | Probe::AliasedCounted
+                | Probe::ChainCounted
         ) {
             assert_eq!(input.act_rows, Some(FILTERED_ROWS));
             let counts = culprit_core::t!(
@@ -331,4 +349,14 @@ async fn capture_aliased_probes(fixture: &OwnedSourceFixture, database: &str) {
 #[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
 async fn owned_explicit_column_aliases_keep_original_native_input_and_a_healthy_large_control() {
     super::fixture::run("aliases", capture_aliased_probes).await;
+}
+
+async fn capture_chained_cte_probes(fixture: &OwnedSourceFixture, database: &str) {
+    capture_cases(fixture, database, &[Probe::ChainCounted, Probe::ChainHealthy]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
+async fn owned_two_cte_chain_keeps_original_native_input_and_a_healthy_large_control() {
+    super::fixture::run("chain", capture_chained_cte_probes).await;
 }

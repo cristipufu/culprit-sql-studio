@@ -144,3 +144,131 @@ fn ctes_reuse_existing_expression_reference_and_sql_byte_bounds() {
     assert!(mssql_relational_references(&bounded).is_some());
     assert!(mssql_relational_references(&(bounded + " ")).is_none());
 }
+
+const CHAIN: &str = "WITH seed AS (SELECT r.id FROM @Rows AS r), input AS (SELECT p.id FROM seed AS p)";
+
+#[test]
+fn two_single_use_ctes_keep_the_exact_original_parameter_and_native_inner_alias() {
+    for sql in [
+        format!("{CHAIN} SELECT d.id FROM input AS d"),
+        "WITH seed AS (SELECT * FROM @Rows AS r), input AS (SELECT * FROM seed AS p) SELECT COUNT_BIG(*) FROM input AS d WHERE (d.id > 10000)".into(),
+        "WITH seed AS (SELECT r.id AS source_id FROM @Rows AS r), input AS (SELECT p.source_id AS input_id FROM seed AS p) SELECT d.input_id FROM input AS d".into(),
+        ";WITH [元] AS (SELECT [内].[名前] FROM @Rows AS [内]), [入力] AS (SELECT [中].[名前] FROM [元] AS [中]) SELECT [外].[名前] FROM [入力] AS [外];".into(),
+    ] {
+        let alias = if sql.contains("[内]") { "内" } else { "r" };
+        assert_eq!(mssql_relational_references(&sql), Some(vec![parameter("@Rows", Some(alias))]), "{sql}");
+    }
+}
+
+#[test]
+fn a_chained_cte_in_either_join_slot_keeps_the_whole_original_native_inventory() {
+    let named = MssqlRelationReference {
+        name: MssqlRelationName::Named(vec!["dbo".into(), "Items".into()]),
+        alias: Some("i".into()),
+    };
+    let left = format!("{CHAIN} SELECT d.id FROM input AS d JOIN dbo.Items AS i ON d.id=i.id");
+    assert_eq!(mssql_relational_references(&left), Some(vec![parameter("@Rows", Some("r")), named.clone()]));
+    let right = format!("{CHAIN} SELECT d.id FROM dbo.Items AS i JOIN input AS d ON d.id=i.id");
+    assert_eq!(mssql_relational_references(&right), Some(vec![named, parameter("@Rows", Some("r"))]));
+}
+
+#[test]
+fn every_chain_name_and_alias_is_explicit_distinct_and_not_shadowed() {
+    for sql in [
+        CHAIN.replace("seed AS (", "seed(id) AS ("),
+        CHAIN.replace("input AS (", "input(id) AS ("),
+        CHAIN.replace("input AS (", "SEED AS ("),
+        CHAIN.replace("@Rows AS r", "@Rows r"),
+        CHAIN.replace("seed AS p", "seed p"),
+        CHAIN.replace("seed AS p", "SEED AS p"),
+        CHAIN.replace("p.id", "R.id").replace("seed AS p", "seed AS R"),
+        CHAIN.replace("p.id", "seed.id").replace("seed AS p", "seed AS seed"),
+        CHAIN.replace("p.id", "input.id").replace("seed AS p", "seed AS input"),
+        CHAIN.replace("p.id", "d.id").replace("seed AS p", "seed AS d"),
+        CHAIN.replace("r.id", "seed.id").replace("@Rows AS r", "@Rows AS seed"),
+        CHAIN.replace("r.id", "input.id").replace("@Rows AS r", "@Rows AS input"),
+        CHAIN.replace("seed AS (", "\"seed\" AS ("),
+    ] {
+        let sql = format!("{sql} SELECT d.id FROM input AS d");
+        assert!(mssql_relational_references(&sql).is_none(), "{sql}");
+    }
+    for alias in ["r", "p", "d", "seed", "input"] {
+        let sql = format!("{CHAIN} SELECT d.id FROM input AS d JOIN dbo.Items AS {alias} ON d.id={alias}.id");
+        assert!(mssql_relational_references(&sql).is_none(), "{sql}");
+    }
+    for reference in ["input d", "input AS p", "input AS R", "input AS seed", "INPUT AS d"] {
+        let sql = format!("{CHAIN} SELECT d.id FROM {reference}");
+        assert!(mssql_relational_references(&sql).is_none(), "{sql}");
+    }
+}
+
+#[test]
+fn the_predecessor_and_terminal_cte_are_each_consumed_once_without_recursion_or_an_extra_scope() {
+    for sql in [
+        format!("{CHAIN} SELECT * FROM seed AS d"),
+        format!("{CHAIN} SELECT * FROM @Other AS o"),
+        format!("{CHAIN} SELECT * FROM input AS d JOIN seed AS e ON d.id=e.id"),
+        format!("{CHAIN} SELECT * FROM input AS d JOIN input AS e ON d.id=e.id"),
+        format!("{CHAIN}, third AS (SELECT * FROM input AS d) SELECT * FROM third AS e"),
+        CHAIN.replace("FROM seed AS p", "FROM input AS p") + " SELECT * FROM input AS d",
+        CHAIN.replace("FROM seed AS p", "FROM @Other AS p") + " SELECT * FROM input AS d",
+        CHAIN.replace("FROM seed AS p", "FROM dbo.seed AS p") + " SELECT * FROM input AS d",
+        CHAIN.replace("FROM seed AS p", "FROM dbo.expand(seed) AS p") + " SELECT * FROM input AS d",
+        format!("{CHAIN} SELECT * FROM (SELECT * FROM input AS x) AS d"),
+        format!("{CHAIN} SELECT * FROM input AS d CROSS APPLY dbo.expand(d.id) AS x"),
+        format!("{CHAIN} SELECT * FROM input AS d WHERE EXISTS(SELECT 1 FROM @Other)"),
+        format!("{CHAIN} SELECT dbo.hidden(d.id) FROM input AS d"),
+        format!("{CHAIN} SELECT * FROM input AS d; SELECT * FROM @Other AS o"),
+    ] {
+        assert!(mssql_relational_references(&sql).is_none(), "{sql}");
+    }
+}
+
+#[test]
+fn both_chain_bodies_use_the_same_closed_direct_projection_grammar() {
+    for projection in [
+        "id",
+        "foreign.id",
+        "p.id+1",
+        "ABS(p.id)",
+        "COUNT_BIG(*)",
+        "DISTINCT p.id",
+        "TOP(1) p.id",
+        "p.id,p.id",
+        "p.*",
+        "p.id AS name COLLATE Latin1_General_100_CI_AS",
+    ] {
+        let sql =
+            format!("{} SELECT d.id FROM input AS d", CHAIN.replace("SELECT p.id", &format!("SELECT {projection}")));
+        assert!(mssql_relational_references(&sql).is_none(), "{sql}");
+    }
+    for (before, after) in [
+        ("FROM @Rows AS r)", "FROM @Rows AS r WHERE r.id>0)"),
+        ("FROM seed AS p)", "FROM seed AS p WHERE p.id>0)"),
+        ("FROM seed AS p)", "FROM seed AS p GROUP BY p.id)"),
+        ("FROM seed AS p)", "FROM seed AS p JOIN @Other AS o ON p.id=o.id)"),
+        ("SELECT r.id", "SELECT dbo.hidden(r.id)"),
+        ("SELECT p.id", "SELECT (SELECT id FROM @Other)"),
+        ("FROM seed AS p", "FROM (SELECT * FROM seed AS x) AS p"),
+    ] {
+        let sql = format!("{} SELECT d.id FROM input AS d", CHAIN.replace(before, after));
+        assert!(mssql_relational_references(&sql).is_none(), "{sql}");
+    }
+}
+
+#[test]
+fn chained_ctes_keep_kind_unknown_and_reuse_existing_statement_and_inventory_bounds() {
+    let sql = format!("{} SELECT * FROM input AS d", CHAIN.replace("@Rows", "@Local"));
+    assert_eq!(mssql_relational_references(&sql), Some(vec![parameter("@Local", Some("r"))]));
+    let bounded = format!("{sql} /*{}*/", "x".repeat(MAX_RELATIONAL_SQL_BYTES - sql.len() - 5));
+    assert_eq!(bounded.len(), MAX_RELATIONAL_SQL_BYTES);
+    assert!(mssql_relational_references(&bounded).is_some());
+    assert!(mssql_relational_references(&(bounded + " ")).is_none());
+    let mut sql = format!("{CHAIN} SELECT * FROM input AS d");
+    for at in 1..MAX_RELATIONAL_REFERENCES {
+        sql.push_str(&format!(" CROSS JOIN @Other{at} AS other{at}"));
+    }
+    assert_eq!(mssql_relational_references(&sql).unwrap().len(), MAX_RELATIONAL_REFERENCES);
+    sql.push_str(" CROSS JOIN @Overflow AS overflow");
+    assert!(mssql_relational_references(&sql).is_none());
+}

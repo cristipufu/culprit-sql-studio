@@ -256,6 +256,7 @@ async fn redacted_join_namespaces_cannot_be_reconstructed_from_an_authenticated_
 #[tokio::test]
 async fn retained_native_input_proofs_restore_exact_archived_join_kinds_and_independent_warnings() {
     let mut originals = std::collections::BTreeSet::new();
+    let mut chained_originals = 0;
     for (source, records) in object_definition_bound_join_evidence() {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let reads_before = fixture.recovery_object_reads();
@@ -276,7 +277,7 @@ async fn retained_native_input_proofs_restore_exact_archived_join_kinds_and_inde
         assert_eq!(result.context.records[0].row.record, records[0]);
         let [entry] = result.report.entries.as_slice() else { panic!() };
         let plan = entry.plan.as_ref().unwrap();
-        match &definition(&records[0]).fact {
+        let statement = match &definition(&records[0]).fact {
             ObjectDefinitionFact::MssqlRetainedPlan(native) => {
                 assert!(originals.insert(native.relational_input_proof.as_ref().unwrap().input_sha256.clone()));
                 assert_eq!(native.statement_executions.as_deref(), Some("9007199254740993"));
@@ -290,17 +291,31 @@ async fn retained_native_input_proofs_restore_exact_archived_join_kinds_and_inde
                 assert_eq!(plan.root.children[1].act_rows, None);
                 assert_eq!(plan.facts().last_run_at, None);
                 assert_eq!(plan.facts().elapsed_ms, None);
+                &native.statement
             }
             ObjectDefinitionFact::MssqlCachedDefinition(native) => {
                 assert!(originals.insert(native.relational_input_proof.as_ref().unwrap().input_sha256.clone()));
                 assert_eq!(plan.kind, PlanKind::Estimated);
                 assert!(plan.nodes().iter().all(|node| node.act_rows.is_none()));
+                &native.statement
             }
             _ => panic!(),
+        };
+        let DefinitionPayload::Available { text, .. } = &statement.payload else { panic!("original statement") };
+        assert!(!text.contains("9264"), "native SQL literals are removed from the retained statement body");
+        if text.starts_with("WITH seed AS") {
+            chained_originals += 1;
+            assert!(text.contains("input AS (SELECT p.value FROM seed AS p)"));
+            assert!(text.contains("FROM input AS d"));
         }
         assert_join_proof_explanation(plan, entry);
     }
-    assert_eq!(originals.len(), 4, "cached and retained direct/derived statements retain distinct original proofs");
+    assert_eq!(
+        originals.len(),
+        6,
+        "cached and retained direct/derived/two-CTE statements keep distinct original proofs"
+    );
+    assert_eq!(chained_originals, 2, "both archived chain populations must reach the fresh native parser");
 }
 
 #[cfg(feature = "mssql")]

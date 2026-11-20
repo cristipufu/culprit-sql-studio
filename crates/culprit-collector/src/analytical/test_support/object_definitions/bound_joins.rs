@@ -12,7 +12,15 @@ pub fn object_definition_bound_join_evidence() -> Vec<(CollectionDescription, Ve
     assert_ne!(derived, sql, "the closed wrapper must exercise a different original statement");
     let derived_xml = raw_xml.replace(&sql, &derived);
     assert_ne!(derived_xml, raw_xml, "the native statement and original payload must describe the same wrapper");
-    [(sql, raw_xml), (derived, derived_xml)]
+    let chain = sql.replacen(
+        "SELECT r.value, o.id FROM @Rows AS r",
+        "WITH seed AS (SELECT r.value FROM @Rows AS r), input AS (SELECT p.value FROM seed AS p) SELECT d.value, o.id FROM input AS d",
+        1,
+    );
+    assert_ne!(chain, sql, "the closed CTE chain must be a distinct original statement");
+    let chain_xml = raw_xml.replace(&sql, &chain);
+    assert_ne!(chain_xml, raw_xml, "the original native statement must describe that exact chain");
+    [(sql, raw_xml), (derived, derived_xml), (chain, chain_xml)]
         .into_iter()
         .flat_map(|(sql, xml)| [false, true].into_iter().map(move |retained| bound_join(&sql, &xml, retained)))
         .collect()
