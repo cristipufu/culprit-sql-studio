@@ -25,10 +25,11 @@ pub enum ParameterEvidenceCase {
     SourceUnavailable,
     StatementUnavailable,
     PayloadUnavailable,
+    RecordedStatisticsContext,
 }
 
 impl ParameterEvidenceCase {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::AccessMismatch,
         Self::AccurateAccess,
         Self::HealthyNativeVariant,
@@ -43,6 +44,7 @@ impl ParameterEvidenceCase {
         Self::SourceUnavailable,
         Self::StatementUnavailable,
         Self::PayloadUnavailable,
+        Self::RecordedStatisticsContext,
     ];
 }
 
@@ -203,8 +205,13 @@ fn statement(case: ParameterEvidenceCase, sql: &str, hash: &str) -> String {
     } else {
         seek(case, 7)
     };
+    let statistics = if case == ParameterEvidenceCase::RecordedStatisticsContext {
+        r#"<OptimizerStatsUsage><StatisticsInfo Database="[app]" Schema="[dbo]" Table="[orders]" Statistics="[ix_customer]" LastUpdate="2020-01-01T11:45:00.003" ModificationCount="0" SamplingPercent="100"/></OptimizerStatsUsage>"#
+    } else {
+        ""
+    };
     format!(
-        r#"<StmtSimple QueryHash="{hash}" StatementText="{sql}" StatementType="SELECT" StatementSubTreeCost="1"><QueryPlan>
+        r#"<StmtSimple QueryHash="{hash}" StatementText="{sql}" StatementType="SELECT" StatementSubTreeCost="1"><QueryPlan>{statistics}
 <ParameterList><ColumnReference Column="@customer" ParameterDataType="{data_type}" ParameterCompiledValue="{compiled}" {runtime_attribute}/>{unused}</ParameterList>
 {operators}</QueryPlan></StmtSimple>"#
     )

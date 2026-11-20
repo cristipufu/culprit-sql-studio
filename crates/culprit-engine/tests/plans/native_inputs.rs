@@ -27,6 +27,53 @@ fn assert_private_values_absent(text: &str) {
 }
 
 #[test]
+fn different_native_statistics_refresh_context_keeps_only_same_input_observed_work_with_its_limits() {
+    let (a, b) = pair();
+    let with_statistics = |plan: &Plan, at: &str| {
+        let raw = plan.raw.as_deref().unwrap();
+        let marker = "<QueryPlan>";
+        assert!(raw.contains(marker));
+        let metadata = format!(
+            r#"<OptimizerStatsUsage><StatisticsInfo Database="[app]" Schema="[dbo]" Table="[rows]" Statistics="[ix_bucket]" LastUpdate="{at}" ModificationCount="0" SamplingPercent="100"/></OptimizerStatsUsage>"#
+        );
+        parse_plan(&raw.replacen(marker, &format!("{marker}{metadata}"), 1)).unwrap()
+    };
+    let a = with_statistics(&a, "2020-01-01T11:00:00.003");
+    let b = with_statistics(&b, "2020-01-01T12:00:00.003");
+    let original_a = a.raw.clone();
+    let original_b = b.raw.clone();
+    let comparison = compare_plans(&a, "Original", &b, "After statistics", &CompareContext::default());
+    assert!(observed(&comparison));
+    let scenario = comparison
+        .scenarios
+        .iter()
+        .find(|scenario| {
+            scenario
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(&t!("core.plan_compare.scalar_reuse.limit")))
+        })
+        .unwrap();
+    assert_eq!((scenario.a, scenario.b), (Some(3), Some(5)));
+    let expected = format!(
+        "{} {}",
+        t!(
+            "core.plan_compare.scalar_reuse.detail",
+            reused = "Original",
+            scan = "After statistics",
+            executions = culprit_core::format::count(10_000.0),
+            lookup_reads = culprit_core::format::count(30_000.0),
+            scan_reads = culprit_core::format::count(2_000.0)
+        ),
+        t!("core.plan_compare.scalar_reuse.limit")
+    );
+    assert_eq!(scenario.detail.as_deref(), Some(expected.as_str()));
+    assert_private_values_absent(&serde_json::to_string(&comparison).unwrap());
+    assert_eq!(a.raw, original_a);
+    assert_eq!(b.raw, original_b);
+}
+
+#[test]
 fn sdk_json_and_human_exports_preserve_the_native_same_input_comparison_without_literals() {
     let (a, b) = pair();
     let original_a = a.raw.clone();

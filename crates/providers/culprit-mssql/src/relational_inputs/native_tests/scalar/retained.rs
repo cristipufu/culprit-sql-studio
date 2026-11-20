@@ -4,6 +4,7 @@ use crate::test_support::owned_captures::{Captured, OwnedCaptures};
 use culprit_core::telemetry::*;
 mod diagnostics;
 mod source_parameters;
+mod statistics;
 
 pub(super) struct Original {
     owner: OwnedCaptures,

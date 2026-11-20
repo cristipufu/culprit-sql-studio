@@ -4,6 +4,42 @@ use culprit_collector::analytical::test_support::{ParameterEvidenceCase as Case,
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::ObjectDefinitions];
 
 #[tokio::test]
+async fn original_optimizer_statistics_metadata_survives_recovery_without_current_statistics_or_exclusive_reuse_blame()
+{
+    let (source, records) = parameter_evidence(Case::RecordedStatisticsContext);
+    let fixture = Fixture::new(source.clone(), records.clone()).await;
+    let capture = fixture.read_families_with_recovery(FAMILY, RecoveryPayloadBudget::default()).await;
+    culprit_collector::analytical::test_support::assert_object_definition_capture(&capture, &source, &records);
+    let original = collected_resources::cached_plans(&capture).unwrap();
+    let expected = serde_json::to_value(&original).unwrap();
+    let ObjectDefinitionFact::MssqlRetainedPlan(native) = &definition(&capture.records()[0].row().record).fact else {
+        panic!("original retained plan")
+    };
+    assert!(definition(&capture.records()[0].row().record).fact.native_plan_proofs_match(&source));
+    let DefinitionPayload::Available { text, .. } = &native.batch_plan.payload else {
+        panic!("authenticated original body")
+    };
+    assert!(text.contains("OptimizerStatsUsage") && text.contains("2020-01-01T11:45:00.003"));
+    fixture.unpublish();
+    let replayed = collected_resources::cached_plans(&capture).unwrap();
+    assert_eq!(
+        serde_json::to_value(&replayed).unwrap(),
+        expected,
+        "the exact original capture remains the evidence after the current warehouse head disappears"
+    );
+    #[cfg(feature = "mssql")]
+    {
+        let plan = replayed.report.entries[0].plan.as_ref().unwrap();
+        let parameter =
+            plan.insights.as_ref().unwrap().items.iter().find(|insight| insight.rule == "parameter-context").unwrap();
+        assert_eq!(parameter.severity, culprit_core::Severity::Low);
+        assert_eq!(parameter.impact, 0.0);
+        assert!(parameter.fix_sql.is_none());
+        assert!(plan.raw.is_none() && plan.statement.is_none());
+    }
+}
+
+#[tokio::test]
 async fn scalar_facts_wait_for_the_exact_native_body_and_missing_warehouse_membership_cannot_be_repaired() {
     let (source, records) = parameter_evidence(Case::AccessMismatch);
     let fixture = Fixture::new(source.clone(), records.clone()).await;
@@ -116,6 +152,7 @@ fn verify_plan(
             | Case::UnsupportedConversion
             | Case::UseLimit
             | Case::PartialSource
+            | Case::RecordedStatisticsContext
     );
     assert_eq!(insight.is_some(), generic, "{case:?}");
     if let Some(insight) = insight {
@@ -130,7 +167,7 @@ fn verify_plan(
         );
         assert_eq!(
             insight.detail.contains(&access),
-            matches!(case, Case::AccessMismatch | Case::PartialSource),
+            matches!(case, Case::AccessMismatch | Case::PartialSource | Case::RecordedStatisticsContext),
             "{case:?}"
         );
         assert_eq!(insight.impact, 0.0);
