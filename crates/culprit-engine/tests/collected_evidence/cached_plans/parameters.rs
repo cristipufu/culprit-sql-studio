@@ -4,6 +4,88 @@ use culprit_collector::analytical::test_support::{ParameterEvidenceCase as Case,
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::ObjectDefinitions];
 
 #[tokio::test]
+async fn original_scalar_access_and_independent_native_blocking_survive_recovery_without_exclusive_elapsed_attribution()
+{
+    use culprit_collector::analytical::{
+        evidence::EvidenceCapture,
+        test_support::{assert_activity_capture, scalar_blocking_activity_evidence},
+    };
+    fn blocking(capture: &EvidenceCapture) -> Option<culprit_core::Blocking> {
+        // EvidenceReader already authenticated these exact original rows and source before this pure owner.
+        let rows = capture
+            .records()
+            .iter()
+            .map(|record| {
+                let TelemetryRecord::Activity(observation) = &record.row().record else { panic!("original Activity") };
+                ActivityFrameRow { observation, reference: None }
+            })
+            .collect::<Vec<_>>();
+        let frame = ActivityFrameEvidence::new(capture.source(), &rows, capture.is_read_complete()).unwrap();
+        culprit_core::blocking::analyze_activity(&frame).unwrap()
+    }
+    let (source, records) = parameter_evidence(Case::AccessMismatch);
+    let plans = Fixture::new(source.clone(), records.clone()).await;
+    let retained = plans.read_families_with_recovery(FAMILY, RecoveryPayloadBudget::default()).await;
+    culprit_collector::analytical::test_support::assert_object_definition_capture(&retained, &source, &records);
+    let (activity_source, activity_rows) = scalar_blocking_activity_evidence();
+    assert_eq!(activity_source.target, source.target);
+    assert_eq!(activity_source.partition, source.partition);
+    let SourceObservation::Snapshot(plan_window) = &source.observation else { unreachable!() };
+    let native = activity_source.observation.activity().unwrap();
+    assert!(ObservationBounds::new(&native.observed_until, &plan_window.observed_from).is_some());
+    assert_ne!(native.at, plan_window.observed_from);
+    let actors = Fixture::new(activity_source.clone(), activity_rows.clone()).await;
+    let activity = actors.read_families(&[EvidenceFamily::ActivityObservations]).await;
+    assert_activity_capture(&activity, &activity_source, &activity_rows);
+    let graph = blocking(&activity).unwrap();
+    assert_eq!(graph.chains.len(), 1);
+    let head = &graph.chains[0];
+    assert_eq!(head.head_kind, culprit_core::HeadKind::IdleInTransaction);
+    assert_eq!(head.tree.session, "62");
+    assert!(
+        head.tree.context.as_ref().unwrap().sql.is_none(),
+        "the last/current statement is not a lock-acquisition statement"
+    );
+    assert_eq!(head.tree.children.len(), 1);
+    assert_eq!(head.tree.children[0].session, "61");
+    let before = collected_resources::cached_plans(&retained).unwrap();
+    let expected = serde_json::to_value(&before).unwrap();
+    let rendered = serde_json::to_string(&before.report).unwrap() + &serde_json::to_string(&graph).unwrap();
+    for private in [
+        "private-original-compiled-canary",
+        "private-original-runtime-canary",
+        "private-statement-canary",
+        "ShowPlanXML",
+        "ParameterRuntimeValue",
+    ] {
+        assert!(!rendered.contains(private), "{private}");
+    }
+    #[cfg(feature = "mssql")]
+    {
+        let plan = before.report.entries[0].plan.as_ref().unwrap();
+        let parameter =
+            plan.insights.as_ref().unwrap().items.iter().find(|insight| insight.rule == "parameter-context").unwrap();
+        assert_eq!(parameter.severity, culprit_core::Severity::Low);
+        assert_eq!(parameter.impact, 0.0);
+        assert!(parameter.fix_sql.is_none());
+        assert_eq!(parameter.fix, culprit_core::t!("insight.parameter_context.fix"));
+        assert!(plan.raw.is_none() && plan.statement.is_none());
+    }
+    actors.remove_first_row(TelemetryStream::ActivityObservations);
+    let missing = actors.read_families(&[EvidenceFamily::ActivityObservations]).await;
+    assert!(!missing.is_read_complete());
+    assert!(missing.gaps().iter().any(|gap| gap.reason == EvidenceGapReason::MissingRows));
+    assert!(
+        blocking(&missing).is_none(),
+        "a missing original waiter cannot borrow a later/retained plan or become a healthy-zero verdict"
+    );
+    plans.unpublish();
+    actors.unpublish();
+    assert_eq!(serde_json::to_value(collected_resources::cached_plans(&retained).unwrap()).unwrap(), expected);
+    assert_eq!(serde_json::to_value(blocking(&activity)).unwrap(), serde_json::to_value(Some(graph)).unwrap());
+}
+
+#[tokio::test]
 async fn original_optimizer_statistics_metadata_survives_recovery_without_current_statistics_or_exclusive_reuse_blame()
 {
     let (source, records) = parameter_evidence(Case::RecordedStatisticsContext);

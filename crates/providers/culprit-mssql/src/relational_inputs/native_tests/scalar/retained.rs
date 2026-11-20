@@ -2,6 +2,7 @@
 use super::*;
 use crate::test_support::owned_captures::{Captured, OwnedCaptures};
 use culprit_core::telemetry::*;
+mod blocking;
 mod diagnostics;
 mod source_parameters;
 mod statistics;
@@ -16,7 +17,9 @@ pub(super) struct Original {
 }
 impl Original {
     pub async fn capture(probe: &Probe, run: &RecordedRun) -> Self {
-        let mut owner = OwnedCaptures::from_pool(probe.pool.clone(), probe.port).unwrap();
+        Self::capture_owned(OwnedCaptures::from_pool(probe.pool.clone(), probe.port).unwrap(), run).await
+    }
+    async fn capture_owned(mut owner: OwnedCaptures, run: &RecordedRun) -> Self {
         let capture =
             owner.capture(CollectionSelection::Snapshot { dataset: SnapshotDataset::RetainedPlans }).await.unwrap();
         let positions = capture

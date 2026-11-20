@@ -10,7 +10,7 @@ mod owned_source;
 pub(crate) mod parameter_variants;
 pub(crate) mod query_store_probes;
 pub(crate) mod recorded_runtime;
-pub(crate) use actual_plans::{actual_plan_capture, actual_plans};
+pub(crate) use actual_plans::{actual_plan_capture, actual_plan_capture_notifying, actual_plans};
 pub(crate) mod owned_captures;
 pub(crate) use cost_receipts::{receipt_directory, save_cost_receipt};
 pub(crate) use owned_source::{OwnedSourceFixture, verify_owned_source};

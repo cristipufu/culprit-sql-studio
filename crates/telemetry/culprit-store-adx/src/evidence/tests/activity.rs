@@ -2,7 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn activity_readback_preserves_exact_originals_unknowns_empty_populations_and_native_coverage() {
-    for (source, records) in test_support::activity_evidence_cases() {
+    for (source, records) in
+        test_support::activity_evidence_cases().into_iter().chain([test_support::scalar_blocking_activity_evidence()])
+    {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
         let capture = fixture

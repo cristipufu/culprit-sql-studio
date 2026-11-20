@@ -100,14 +100,9 @@ async fn changed_statistics(fixture: &OwnedSourceFixture, database: &str) {
         (&used_before.database, &used_before.schema, &used_before.table, &used_before.statistic),
         (&used_after.database, &used_after.schema, &used_after.table, &used_after.statistic)
     );
-    assert_eq!(
-        native_instant(&used_before.updated_without_offset),
-        native_instant(before.last_updated_without_offset.as_ref().unwrap())
-    );
-    assert_eq!(
-        native_instant(&used_after.updated_without_offset),
-        native_instant(after.last_updated_without_offset.as_ref().unwrap())
-    );
+    // Showplan and the current statistics DMF expose independent timestamps. Keep both original
+    // surfaces and require each to change; neither an exact match nor one statistics-blob version
+    // follows from matching database/table/statistic labels. Do not round them into agreement.
     assert_ne!(native_instant(&used_before.updated_without_offset), native_instant(&used_after.updated_without_offset));
     let lookup = original.operator("Key Lookup");
     let scan = counterpart.operator("Clustered Index Scan");
@@ -186,6 +181,7 @@ async fn changed_statistics(fixture: &OwnedSourceFixture, database: &str) {
             "histogram_change_or_exclusive_parameter_cause_established":false,
             "statistics_refresh_alone_isolated_as_cause":false,
             "fresh_compilation_inferred_from_cache_flag":false,
+            "cross_surface_statistics_timestamp_equality_established":false,
             "source_cost_qualified":false,
         }),
     )

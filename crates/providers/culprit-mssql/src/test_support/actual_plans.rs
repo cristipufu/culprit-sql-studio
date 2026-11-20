@@ -34,10 +34,7 @@ pub(crate) async fn actual_plan_capture(
     sql: &str,
     parameters: Vec<Parameter>,
 ) -> ActualPlanCapture {
-    capture_response(client, sql, parameters)
-        .await
-        .finish()
-        .expect("owned actual-plan response must retain native XML within its explicit capture bounds")
+    capture_plans(client, sql, parameters, None).await
 }
 
 /// Some native metadata statements return no showplan. The response still has to drain within all retention
@@ -47,13 +44,41 @@ pub(super) async fn metadata_plans(
     sql: &str,
     parameters: Vec<Parameter>,
 ) -> Option<Vec<String>> {
-    capture_response(client, sql, parameters)
+    capture_response(client, sql, parameters, None)
         .await
         .finish_metadata()
         .expect("owned metadata response exceeded its explicit capture bounds")
 }
 
-async fn capture_response(client: &mut MsClient, sql: &str, parameters: Vec<Parameter>) -> Capture {
+/// A fixture may coordinate one independently owned observer at the client submission boundary. This
+/// notification is not native readiness, execution or settlement proof; the observer must establish its facts.
+pub(crate) async fn actual_plan_capture_notifying(
+    client: &mut MsClient,
+    sql: &str,
+    parameters: Vec<Parameter>,
+    submitting: &tokio::sync::Notify,
+) -> ActualPlanCapture {
+    capture_plans(client, sql, parameters, Some(submitting)).await
+}
+
+async fn capture_plans(
+    client: &mut MsClient,
+    sql: &str,
+    parameters: Vec<Parameter>,
+    submitting: Option<&tokio::sync::Notify>,
+) -> ActualPlanCapture {
+    capture_response(client, sql, parameters, submitting)
+        .await
+        .finish()
+        .expect("owned actual-plan response must retain native XML within its explicit capture bounds")
+}
+
+async fn capture_response(
+    client: &mut MsClient,
+    sql: &str,
+    parameters: Vec<Parameter>,
+    submitting: Option<&tokio::sync::Notify>,
+) -> Capture {
     batch(client, "SET STATISTICS XML ON").await;
     let response = tokio::time::timeout(CAPTURE_TIMEOUT, async {
         let mut query = tiberius::Query::new(sql);
@@ -66,6 +91,9 @@ async fn capture_response(client: &mut MsClient, sql: &str, parameters: Vec<Para
                     query.bind(value.as_str());
                 }
             }
+        }
+        if let Some(submitting) = submitting {
+            submitting.notify_one();
         }
         let mut stream = query.query(&mut *client).await?;
         let mut capture = Capture::default();

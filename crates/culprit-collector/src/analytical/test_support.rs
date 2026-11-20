@@ -30,7 +30,9 @@ mod session_census;
 pub use session_census::{SessionCensusCase, session_census_evidence};
 mod compilation_definitions;
 mod compilation_intervals;
-pub use activity::{activity_evidence_cases, activity_observation, assert_activity_capture};
+pub use activity::{
+    activity_evidence_cases, activity_observation, assert_activity_capture, scalar_blocking_activity_evidence,
+};
 pub use compilation_definitions::{CompilationDefinitionCase, compilation_definition_evidence_cases};
 mod blocking;
 pub use blocking::{BlockingCase, assert_blocking_capture, blocking_evidence, blocking_evidence_cases};

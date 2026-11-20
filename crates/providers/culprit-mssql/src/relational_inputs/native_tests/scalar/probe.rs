@@ -1,6 +1,8 @@
 use super::*;
 use crate::test_support::actual_plan_capture;
-use culprit_core::telemetry::{CachedStatementContext, CachedStatementIdentity};
+use culprit_core::telemetry::CachedStatementContext;
+
+mod metadata;
 
 const MARKER: &str = "scalar_original_probe";
 const SOURCE_ROWS: usize = 32_768;
@@ -123,7 +125,7 @@ impl Probe {
             &format!("CREATE PROCEDURE dbo.scalar_probe @bucket int AS {}", projection.statement()),
         )
         .await;
-        let native=crate::conn::query_one(&mut application,"SELECT /* culprit fixture */ OBJECT_ID(N'dbo.scalar_probe') AS object_id,@@SPID AS id,CONVERT(varchar(40),login_time,126) AS generation FROM sys.dm_exec_sessions WHERE session_id=@@SPID").await.unwrap();
+        let native=crate::conn::query_one(&mut application,"SELECT /* culprit fixture */ OBJECT_ID(N'dbo.scalar_probe') AS object_id,@@SPID AS id,CONVERT(varchar(40),CAST(login_time AS datetime2),126) AS generation FROM sys.dm_exec_sessions WHERE session_id=@@SPID").await.unwrap();
         let object = crate::read::signed_integer(&native, "object_id").unwrap();
         let actor = Actor {
             id: crate::read::signed_integer(&native, "id").unwrap(),
@@ -144,32 +146,58 @@ impl Probe {
     /// This private fixture may borrow already captured original XML for an immediate pairwise comparison.
     /// Ordinary fixture capture still returns the same redacted plan; no value/hash field is introduced.
     pub async fn record_native(&mut self, bucket: i32, expected: CacheExpectation<'_>) -> RecordedRun {
+        self.record_original(bucket, expected, None).await
+    }
+
+    pub async fn record_native_notifying(
+        &mut self,
+        bucket: i32,
+        expected: CacheExpectation<'_>,
+        submitting: &tokio::sync::Notify,
+    ) -> RecordedRun {
+        self.record_original(bucket, expected, Some(submitting)).await
+    }
+
+    async fn record_original(
+        &mut self,
+        bucket: i32,
+        expected: CacheExpectation<'_>,
+        submitting: Option<&tokio::sync::Notify>,
+    ) -> RecordedRun {
         assert!(matches!(bucket, 1..=3));
         let mut reader = ReadSession::new(self.pool.clone(), super::super::expressions::reader_budget());
         if let CacheExpectation::Reused(original) = expected {
-            let before = super::super::named_definition(&mut reader, self.object, MARKER).await;
-            same_incarnation(&before.context, original);
+            phase("metadata-before", &reader);
+            metadata::read(&mut reader, self.object, Some(original)).await.unwrap();
+            phase("metadata-before-verified", &reader);
         }
-        let captured =
-            actual_plan_capture(&mut self.application, &format!("EXEC dbo.scalar_probe @bucket={bucket}"), vec![])
-                .await;
-        let current = super::super::named_definition(&mut reader, self.object, MARKER).await;
-        if let CacheExpectation::Reused(original) = expected {
-            same_incarnation(&current.context, original);
-        }
+        phase("execution-owner-start", &reader);
+        let sql = format!("EXEC dbo.scalar_probe @bucket={bucket}");
+        let captured = match submitting {
+            Some(submitting) => {
+                crate::test_support::actual_plan_capture_notifying(&mut self.application, &sql, vec![], submitting)
+                    .await
+            }
+            None => actual_plan_capture(&mut self.application, &sql, vec![]).await,
+        };
+        phase("execution-response-drained", &reader);
+        let original = match expected {
+            CacheExpectation::New => None,
+            CacheExpectation::Reused(original) => Some(original),
+        };
+        phase("metadata-after", &reader);
+        let current = metadata::read(&mut reader, self.object, original).await.unwrap();
+        phase("metadata-after-verified", &reader);
         let hash = current.context.query_hash.as_ref().unwrap();
         let selected =
             captured.plans.iter().filter(|xml| super::super::expressions::has_statement(xml, hash)).collect::<Vec<_>>();
         let [xml] = selected.as_slice() else { panic!("one selected native scalar statement") };
-        let DefinitionPayload::Available { text: statement, .. } = &current.statement.payload else {
-            panic!("same original complete native statement")
-        };
         let plan = crate::plan_xml::parse_cached_statement(
             xml,
             crate::plan_xml::CachedInputContext {
                 statement: &current.context,
-                module_parameters: current.module_parameters.as_ref(),
-                text: Some(statement),
+                module_parameters: Some(&current.module_parameters),
+                text: Some(&current.statement),
                 origin: crate::plan_xml::PlanInputOrigin::OriginalNative { read: None },
             },
         )
@@ -184,8 +212,7 @@ impl Probe {
         RecordedRun { plan, context: current.context, result }
     }
 }
-fn same_incarnation(current: &CachedStatementContext, original: &CachedStatementContext) {
-    assert_eq!(current.database_id, original.database_id);
-    let key = |identity: &CachedStatementIdentity| identity.key().unwrap();
-    assert_eq!(key(&current.identity), key(&original.identity), "new cache generations must not replace the original");
+fn phase(stage: &'static str, reader: &ReadSession) {
+    // Fixed fixture phases and client dispatch counts only; no SQL, handles, input values or elapsed claims.
+    eprintln!("owned scalar capture stage={stage}; metadata_queries={}", reader.queries());
 }
