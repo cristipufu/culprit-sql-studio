@@ -177,3 +177,34 @@ fn record(grant: ExecutionGrantObservation) -> TelemetryRecord {
         fact: OperationalFact::ExecutionGrant(Box::new(grant)),
     })
 }
+
+/// The same original native resource roster distinguishes a rebuild's reservation from an affected rebuild.
+/// Partial visibility retains the positive participants without claiming that they caused the queue.
+pub fn maintenance_memory_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
+    let (source, rows) = reservation_demand_evidence_cases().remove(0);
+    [(ExecutionGrantState::Granted, true), (ExecutionGrantState::Waiting, true), (ExecutionGrantState::Granted, false)]
+        .into_iter()
+        .map(|(maintenance_state, complete)| {
+            let mut records = rows.clone();
+            for record in &mut records {
+                let TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::ExecutionGrant(grant),
+                    ..
+                }) = record
+                else {
+                    unreachable!()
+                };
+                if grant.state == maintenance_state {
+                    grant.request.as_mut().unwrap().statement = DefinitionPayload::sql(
+                        "ALTER INDEX ix_orders_customer ON dbo.orders REBUILD",
+                        culprit_core::Engine::Mssql,
+                    );
+                }
+            }
+            let mut source = source.clone();
+            let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+            snapshot.sources = vec![StateSourceCoverage::observed(source.source.clone(), snapshot.records, complete)];
+            (source, records)
+        })
+        .collect()
+}

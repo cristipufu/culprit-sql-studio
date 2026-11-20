@@ -4,7 +4,7 @@ use crate::support::request_memory::{
     AdmissionShortfall, Participant, has_shared_admission_scope, qualified_participants,
 };
 use culprit_core::{
-    MemoryGrantAdmission, MemoryParticipantExplanation, MemoryParticipantMechanism, MemoryParticipantReference,
+    Engine, MemoryGrantAdmission, MemoryParticipantExplanation, MemoryParticipantMechanism, MemoryParticipantReference,
     MemoryParticipantsReport, Result, SourceOutcome, format, t,
     telemetry::{
         ExecutionGrantObservation, ExecutionGrantState, GrantStatementRelationship, NativeIdentity, NativeReadContext,
@@ -12,6 +12,7 @@ use culprit_core::{
     },
 };
 use std::collections::BTreeMap;
+mod maintenance;
 mod reservation_demand;
 mod workload_group_tempdb;
 
@@ -53,7 +54,10 @@ pub fn explain(
             )
         },
         limitations,
-        entries: cases.into_iter().map(|participant| render(participant, &resources)).collect(),
+        entries: cases
+            .into_iter()
+            .map(|participant| render(participant, &resources, evidence.context.target.engine()))
+            .collect(),
         admission_resources: resources.into_iter().map(|resource| resource.admission).collect(),
     })
 }
@@ -61,6 +65,7 @@ pub fn explain(
 struct AdmissionResource {
     admission: MemoryGrantAdmission,
     demand: Option<reservation_demand::ReservationDemand>,
+    rebuild_reservations: maintenance::RebuildReservations,
 }
 
 fn admission_resources(
@@ -81,6 +86,10 @@ fn admission_resources(
         .into_iter()
         .map(|(resource, members)| AdmissionResource {
             demand: reservation_demand::ReservationDemand::from_participants(&members, source),
+            rebuild_reservations: maintenance::RebuildReservations::from_participants(
+                &members,
+                evidence.context.target.engine(),
+            ),
             admission: MemoryGrantAdmission {
                 resource,
                 participants: members
@@ -201,12 +210,22 @@ fn participant_words(
     words
 }
 
-fn render(participant: Participant<'_>, resources: &[AdmissionResource]) -> MemoryParticipantExplanation {
+fn render(
+    participant: Participant<'_>,
+    resources: &[AdmissionResource],
+    engine: Engine,
+) -> MemoryParticipantExplanation {
     let observation = participant.observation();
     let admission = participant.resource().and_then(|identity| {
         resources.binary_search_by(|group| group.admission.resource.cmp(identity)).ok().map(|index| &resources[index])
     });
     let mut words = participant_words(&participant, admission.and_then(|resource| resource.demand.as_ref()));
+    maintenance::append_context(
+        &participant,
+        admission.map(|resource| &resource.rebuild_reservations),
+        engine,
+        &mut words,
+    );
     let mut details = vec![words.explanation, request_context(&participant)];
     if let Some(group) = workload_group_tempdb::explain(&participant) {
         details.push(group);

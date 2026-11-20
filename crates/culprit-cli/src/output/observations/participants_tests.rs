@@ -1,7 +1,7 @@
 use super::*;
 use culprit_collector::analytical::test_support::{
-    request_memory_evidence, request_memory_evidence_cases, reservation_demand_evidence_cases,
-    session_memory_evidence_cases,
+    maintenance_memory_evidence_cases, request_memory_evidence, request_memory_evidence_cases,
+    reservation_demand_evidence_cases, session_memory_evidence_cases,
 };
 use culprit_core::telemetry::*;
 
@@ -163,7 +163,9 @@ fn assert_source_state(report: &MemoryParticipantsReport) {
     let text = participants(report);
     match report.source_state {
         Some(SourceState::Partial) => assert!(text.contains(&t!("evidence.cli.source_partial"))),
-        Some(SourceState::Unavailable) => assert!(text.contains(&t!("evidence.cli.source_unavailable"))),
+        Some(SourceState::Unavailable) => {
+            assert!(text.contains(&t!("evidence.cli.source_unavailable")))
+        }
         Some(SourceState::Empty) => assert!(report.entries.is_empty()),
         _ => {}
     }
@@ -211,6 +213,29 @@ fn original_waiter_size_and_concurrency_advice_reuses_the_canonical_bounded_repo
         assert!(text.contains(&t!("view.request_memory.demand.limit")));
         assert!(text.contains(&t!("view.request_memory.limit.population")));
         for absent in ["SELECT payload", "9264", "9007199254740993", "observation_key", "qualified_request"] {
+            assert!(!text.contains(absent), "{absent}");
+        }
+        let restored: MemoryParticipantsReport =
+            serde_json::from_value(serde_json::to_value(&report).unwrap()).unwrap();
+        assert_eq!(participants(&restored), text);
+    }
+}
+
+#[test]
+fn memory_rebuild_roles_reuse_canonical_investigation_without_claiming_allocation_or_a_blocker() {
+    for (index, (source, rows)) in maintenance_memory_evidence_cases().into_iter().enumerate() {
+        let report = request_report(&source, &rows);
+        assert_canonical_fields(&report);
+        let text = participants(&report);
+        let expected = if index == 1 {
+            t!("view.request_memory.maintenance.waiting")
+        } else {
+            t!("view.request_memory.maintenance.same_resource")
+        };
+        assert!(text.contains(&expected));
+        assert!(text.contains(&t!("view.request_memory.maintenance.investigate")));
+        assert!(text.contains(&t!("view.request_memory.maintenance.verify")));
+        for absent in ["ALTER INDEX", "SELECT payload", "9264", "observation_key", "qualified_request"] {
             assert!(!text.contains(absent), "{absent}");
         }
         let restored: MemoryParticipantsReport =
