@@ -17,6 +17,7 @@ pub(super) enum Family {
     ProcessorTopology,
     CompilationGateways,
     MemoryClerks,
+    TempdbMetadataMemory,
     InstanceResources,
     Schedulers,
     MemoryFailures,
@@ -111,6 +112,7 @@ pub(super) fn shared_families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         Family::Operation(native::Kind::Temp),
         Family::Operation(native::Kind::TempLog),
         Family::MemoryClerks,
+        Family::TempdbMetadataMemory,
         Family::InstanceResources,
         Family::Schedulers,
         Family::PerformanceCounters,
@@ -132,6 +134,7 @@ impl Family {
             Self::ProcessorTopology => &sources::PROCESSOR_TOPOLOGY,
             Self::CompilationGateways => &sources::COMPILATION_GATEWAYS,
             Self::MemoryClerks => &sources::MEMORY_CLERKS,
+            Self::TempdbMetadataMemory => &sources::TEMPDB_METADATA_MEMORY,
             Self::InstanceResources => &sources::INSTANCE_RESOURCES,
             Self::Schedulers => &sources::SCHEDULERS,
             Self::MemoryFailures => &sources::MEMORY_FAILURES,
@@ -170,6 +173,7 @@ impl Family {
         reader: &mut R,
         limit: usize,
         tuning_layout: Option<&Result<crate::query_store::tuning::Layout>>,
+        owner: Option<&super::subject::Identity>,
     ) -> Result<ReadOutcome> {
         let records = match self {
             Self::MemoryFailures => {
@@ -208,6 +212,19 @@ impl Family {
                 }));
             }
             Self::MemoryClerks => counter_sets(self.source().name, crate::memory_clerks::read(reader, limit).await?)?,
+            Self::TempdbMetadataMemory => {
+                let Some(super::subject::Identity::Instance(owner)) = owner else {
+                    return Ok(ReadOutcome::NotApplicable);
+                };
+                let Some(read) = crate::tempdb_metadata_memory::read(reader, owner, limit).await? else {
+                    return Ok(ReadOutcome::NotApplicable);
+                };
+                return Ok(ReadOutcome::Observed(Records {
+                    values: counter_sets(self.source().name, read.counters)?,
+                    complete_scope: read.complete_scope,
+                    error_code: read.error_code,
+                }));
+            }
             Self::Schedulers => counter_sets(self.source().name, crate::schedulers::read(reader, limit).await?)?,
             Self::Tuning(kind) => {
                 let layout = tuning_layout.ok_or_else(crate::read::invalid_data)?.as_ref().map_err(Clone::clone)?;

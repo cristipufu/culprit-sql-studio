@@ -31,6 +31,10 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
     let case = |analysis, (source, records)| LocalSnapshotCase { analysis, source, records };
     vec![
         case("performance_counters", super::performance_counter_evidence(super::PerformanceCounterCase::Exact)),
+        case(
+            "tempdb_metadata_memory",
+            super::tempdb_metadata_memory_evidence(super::TempdbMetadataMemoryCase::Reserved),
+        ),
         case("instance_resources", super::instance_resource_evidence(super::InstanceResourceCase::Exact)),
         case("database_properties", super::database_properties_evidence(super::DatabasePropertiesCase::Exact)),
         case("compilation", super::query_compilation_evidence()),

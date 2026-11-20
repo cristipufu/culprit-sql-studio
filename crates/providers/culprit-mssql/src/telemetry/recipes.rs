@@ -251,7 +251,7 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
-        .version(6),
+        .version(7),
     state!("mssql.memory-failures", MemoryFailures)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance), RecipeSubject::Shared(SharedResourceKind::Pool)])
         .bounded(state::memory_failure_budget)

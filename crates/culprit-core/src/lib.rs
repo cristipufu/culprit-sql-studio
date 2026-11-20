@@ -24,6 +24,8 @@ pub use instance_resource_report::{InstanceResourceField, InstanceResourceGroup,
 mod database_properties_report;
 mod hyperscale_log_component_report;
 mod memory_clerk_report;
+mod tempdb_metadata_memory_report;
+pub use tempdb_metadata_memory_report::{TempdbMetadataMemoryEntry, TempdbMetadataMemoryReport};
 mod performance_counter_report;
 pub use database_properties_report::{DatabasePropertiesReport, DatabasePropertyField};
 pub use memory_clerk_report::{MemoryClerkEntry, MemoryClerkField, MemoryClerkReport};

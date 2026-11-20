@@ -333,6 +333,32 @@ Current database log occupancy and reuse reasons, writable filegroup allocation 
 
 Filegroup capacity is aggregated across files. Shared tempdb is context, not attributed to the selected database. Configured growth does not prove filesystem headroom. Reserved sequence values do not forecast remaining requests. Unreadable DMVs remain unavailable.
 
+### Tempdb metadata memory
+
+The explicitly selected shared Operational source uses the same retained native instance/process owner to record
+`IsTempDbMetadataMemoryOptimized` and, on supported boxed SQL Server 2022+ instances, a bounded tempdb
+`sys.dm_db_xtp_memory_consumers` projection. Both fixed statements execute in a nested tempdb context and return
+`DB_ID()` from that context; the nested batch restores the reader's original database context. The source checks
+actual database ID 2, tempdb creation, native UTC read bounds and final instance/process identity. Azure SQL Database
+and Managed Instance do not acquire this tempdb authority.
+
+A capability/permission read precedes at most one consumer read. The enabled branch retains at most 64 consumers
+plus one independent native feature point, with a single overflow witness and no sort, aggregation, retry or user
+rows. It requires tempdb `VIEW DATABASE PERFORMANCE STATE` and metadata visibility. Disabled, native NULL,
+unreadable and partial states remain distinct, and unavailable new fields do not withdraw other shared families.
+
+The metadata feature state does not attribute every consumer’s bytes to metadata. Allocated bytes are native
+reservations; used bytes are interpreted only for documented `VARHEAP` consumers.
+Aggregation rows are excluded. Other native usage values remain uninterpreted properties, and unknown usage stays
+unknown. Consumer IDs establish no cross-read continuity. The pure report distinguishes reservation, usage and
+contradictory values without adding memory pressure, reclaimable capacity, an allocating query or transaction,
+leak, duration or recovery claims. This source is unqualified for production cost until its changed recipe is
+measured; it does not enable memory-optimized metadata or request garbage collection.
+
+Native contracts: [database-level XTP memory consumers](https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-xtp-memory-consumers-transact-sql),
+[tempdb metadata-memory troubleshooting](https://learn.microsoft.com/troubleshoot/sql/database-engine/performance/memory-optimized-tempdb-out-of-memory),
+and [scoped dynamic-statement database context](https://learn.microsoft.com/sql/relational-databases/system-stored-procedures/sp-executesql-transact-sql).
+
 ## Verification
 
 The saved examples cover SQL Server 2022 and Azure SQL Database. The reproducible [SQL Server fixture](../../dev/mssql/README.md) plants workload, index, blocking and deadlock problems; saved snapshots exercise offline replay, plan analysis, views and agent output.

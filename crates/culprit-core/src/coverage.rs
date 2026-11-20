@@ -93,6 +93,7 @@ pub mod source_id {
     pub const GLOBAL_STATUS: &str = "global status";
     pub const PROCESSOR_TOPOLOGY: &str = "processor topology";
     pub const MEMORY_CLERKS: &str = "memory clerks";
+    pub const TEMPDB_METADATA_MEMORY: &str = "tempdb metadata memory";
     pub const MEMORY_FAILURES: &str = "memory failures";
     pub const NATIVE_FAILURES: &str = "native failures";
     pub const SCHEDULERS: &str = "schedulers";
@@ -209,6 +210,7 @@ pub mod source_id {
         GLOBAL_STATUS,
         PROCESSOR_TOPOLOGY,
         MEMORY_CLERKS,
+        TEMPDB_METADATA_MEMORY,
         MEMORY_FAILURES,
         NATIVE_FAILURES,
         SCHEDULERS,

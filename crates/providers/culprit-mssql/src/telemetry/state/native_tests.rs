@@ -62,8 +62,12 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
         .collect::<BTreeSet<_>>();
     assert_eq!(snapshot.sources.len(), expected_sources.len(), "each registered family appears once");
     assert_eq!(snapshot.sources.iter().map(|source| source.source.as_str()).collect::<BTreeSet<_>>(), expected_sources);
-    for name in [crate::sources::MEMORY_CLERKS.name, crate::sources::SCHEDULERS.name, crate::sources::LOG_CAPACITY.name]
-    {
+    for name in [
+        crate::sources::MEMORY_CLERKS.name,
+        crate::sources::SCHEDULERS.name,
+        crate::sources::LOG_CAPACITY.name,
+        crate::sources::TEMPDB_METADATA_MEMORY.name,
+    ] {
         let coverage = snapshot.sources.iter().find(|source| source.source == name).unwrap();
         assert_eq!(coverage.state, SourceState::Collected, "{coverage:?}");
         assert!(coverage.complete_scope && coverage.records > 0);
@@ -74,6 +78,8 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     let mut instance_points = 0;
     let mut tempdb_log_points = 0;
     let mut tempdb_data_points = 0;
+    let mut tempdb_metadata_features = 0;
+    let context = NativeReadContext::from_snapshot(&description).unwrap();
     let mut cursor = None;
     let mut records = 0;
     loop {
@@ -90,6 +96,20 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
                     OperationalFact::CounterSet(set) => {
                         assert_eq!(set.scope, MeasurementScope::Server);
                         assert!(set.is_valid());
+                        if source == crate::sources::TEMPDB_METADATA_MEMORY.name {
+                            if set.identity.qualifiers.get("kind").map(String::as_str)
+                                == Some(MSSQL_TEMPDB_METADATA_FEATURE_KIND)
+                            {
+                                let feature = TempdbMetadataFeature::from_original(&set, &context).unwrap();
+                                assert!(
+                                    feature.enabled().is_some(),
+                                    "supported owned SQL must expose its actual feature state"
+                                );
+                                tempdb_metadata_features += 1;
+                            } else {
+                                TempdbMetadataConsumer::from_original(&set, &context).unwrap();
+                            }
+                        }
                         counter_sources.insert(source);
                     }
                     OperationalFact::MssqlInstanceResources(point) => {
@@ -130,6 +150,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     assert_eq!(instance_points, 1, "the seventh family retains its raw instance point without admission");
     assert_eq!(tempdb_log_points, 1, "native tempdb log visibility must be proved, never skipped");
     assert_eq!(tempdb_data_points, 1, "data and log retain independent source populations");
+    assert_eq!(tempdb_metadata_features, 1, "native feature state is measured once, including when disabled");
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert_eq!(member.source_shutdown(), SourceShutdown::Quiescent);

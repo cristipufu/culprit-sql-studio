@@ -26,6 +26,18 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
                 },
             )?)))
         }
+        LocalCaptureAnalysisKind::TempdbMetadataMemory => {
+            let coverage = required_source(read, source_id::TEMPDB_METADATA_MEMORY)?;
+            let rows = rows_for(read, coverage);
+            Ok(LocalSnapshotReport::TempdbMetadataMemory(Box::new(culprit_checks::tempdb_metadata_memory::explain(
+                culprit_checks::tempdb_metadata_memory::TempdbMetadataMemoryEvidence {
+                    context: &context,
+                    coverage,
+                    observations: &rows,
+                    read_complete: read.read_complete,
+                },
+            )?)))
+        }
         LocalCaptureAnalysisKind::InstanceResources => Ok(LocalSnapshotReport::InstanceResources(Box::new(
             culprit_checks::instance_resources::explain_captured(read)?,
         ))),

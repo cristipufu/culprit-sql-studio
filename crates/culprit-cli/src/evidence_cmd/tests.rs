@@ -1,3 +1,4 @@
+mod tempdb_metadata_memory;
 use super::*;
 use clap::Parser;
 mod compilation_definitions;

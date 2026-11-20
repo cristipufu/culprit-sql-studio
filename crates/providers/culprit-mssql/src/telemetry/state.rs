@@ -101,8 +101,14 @@ impl<R: NativeRead> StateSource<R> {
                 Ok(point::Availability::Available) => {}
             }
             let remaining = self.admit().await?;
-            let result =
-                family.read(&mut self.io, remaining.min(MAX_BUFFERED_FAMILY_ROWS), tuning_layout.as_ref()).await;
+            let result = family
+                .read(
+                    &mut self.io,
+                    remaining.min(MAX_BUFFERED_FAMILY_ROWS),
+                    tuning_layout.as_ref(),
+                    self.identity.as_ref(),
+                )
+                .await;
             let outcome = match result {
                 Ok(point::ReadOutcome::NotApplicable) => StateSourceCoverage::not_applicable(source),
                 Ok(point::ReadOutcome::Observed(batch)) => {

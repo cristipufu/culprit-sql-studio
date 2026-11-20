@@ -23,7 +23,7 @@ async fn native_tuning_points_keep_unknown_plan_scopes_partial_including_empty_r
                 let count = rows.len();
                 let mut reader = FakeRead::new(vec![Ok(rows)]);
                 let ReadOutcome::Observed(records) =
-                    Family::Tuning(kind).read(&mut reader, 10, Some(&layout)).await.unwrap()
+                    Family::Tuning(kind).read(&mut reader, 10, Some(&layout), None).await.unwrap()
                 else {
                     panic!("supported native source")
                 };

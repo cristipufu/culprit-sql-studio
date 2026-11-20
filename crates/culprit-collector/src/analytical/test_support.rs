@@ -7,8 +7,12 @@ use culprit_core::telemetry::*;
 
 mod database_properties;
 mod memory_clerks;
+mod tempdb_metadata_memory;
 pub use database_properties::{DatabasePropertiesCase, database_properties_evidence};
 pub use memory_clerks::{MemoryClerkCase, memory_clerk_evidence};
+pub use tempdb_metadata_memory::{
+    TempdbMetadataMemoryCase, assert_tempdb_metadata_memory_capture, tempdb_metadata_memory_evidence,
+};
 mod counter_ratios;
 mod performance_counters;
 pub use performance_counters::{PerformanceCounterCase, performance_counter_evidence};

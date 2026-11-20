@@ -4,6 +4,7 @@ mod grant_output;
 mod hyperscale_log_components;
 mod participant_context;
 mod snapshots;
+mod tempdb_metadata_memory;
 use super::*;
 use clap::Parser;
 use culprit_collector::{

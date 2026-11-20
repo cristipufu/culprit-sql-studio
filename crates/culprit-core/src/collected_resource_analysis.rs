@@ -253,3 +253,10 @@ pub struct CollectedInstanceResourceAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: Box<crate::InstanceResourceReport>,
 }
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedTempdbMetadataMemoryAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::TempdbMetadataMemoryReport>,
+}

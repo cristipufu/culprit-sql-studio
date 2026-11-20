@@ -25,6 +25,7 @@ pub use session_census::LocalSessionCensus;
 pub enum LocalCaptureAnalysisKind {
     PageServerReads,
     MemoryClerks,
+    TempdbMetadataMemory,
     HyperscaleLogComponents,
     PerformanceCounters,
     DatabaseProperties,
@@ -44,9 +45,10 @@ pub enum LocalCaptureAnalysisKind {
     SessionCensus,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::PageServerReads,
         Self::MemoryClerks,
+        Self::TempdbMetadataMemory,
         Self::HyperscaleLogComponents,
         Self::PerformanceCounters,
         Self::DatabaseProperties,
@@ -75,6 +77,7 @@ impl LocalCaptureAnalysisKind {
             Self::Blocking => Blocking,
             Self::SessionCensus => Activity,
             Self::MemoryClerks
+            | Self::TempdbMetadataMemory
             | Self::PerformanceCounters
             | Self::InstanceResources
             | Self::DatabaseProperties

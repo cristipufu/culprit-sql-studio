@@ -237,6 +237,7 @@ enum Analysis {
     CounterRatios,
     PerformanceCounters,
     MemoryClerks,
+    TempdbMetadataMemory,
     DatabaseProperties,
     InstanceResources,
     Storage,
@@ -274,6 +275,7 @@ impl Analysis {
             | Self::CounterRatios
             | Self::PerformanceCounters
             | Self::MemoryClerks
+            | Self::TempdbMetadataMemory
             | Self::InstanceResources
             | Self::DatabaseProperties
             | Self::Storage
@@ -465,6 +467,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::MemoryClerks) => {
             let analysis = culprit_engine::collected_resources::memory_clerks(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::memory_clerks(&analysis.report))?;
+        }
+        Some(Analysis::TempdbMetadataMemory) => {
+            let analysis = culprit_engine::collected_resources::tempdb_metadata_memory(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::tempdb_metadata_memory(&analysis.report))?;
         }
         Some(Analysis::PerformanceCounters) => {
             let analysis = culprit_engine::collected_resources::performance_counters(&capture)?;

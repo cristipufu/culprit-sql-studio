@@ -28,6 +28,8 @@ fn replies(final_identity: Rec) -> Vec<crate::read::ReadResult<Vec<Rec>>> {
         Ok(vec![crate::operations::native::test_support::temp_log_layout_row()]),
         Ok(vec![crate::operations::native::test_support::temp_log_row()]),
         Ok(vec![crate::memory_clerks::tests::row()]),
+        Ok(vec![crate::tempdb_metadata_memory::tests::layout_row()]),
+        Ok(vec![crate::tempdb_metadata_memory::tests::row()]),
         Ok(vec![replace(&instance_pressure_row(), &[("observed_at", Val::Text("2020-01-01T06:02:00.5Z".into()))])]),
         Ok(crate::schedulers::fixture_columns()),
         Ok(vec![crate::schedulers::tests::row()]),
@@ -58,8 +60,8 @@ async fn instance_capture_reuses_native_readers_and_never_charges_the_shared_fac
     assert!(valid_digest(epoch));
     assert!(description.is_partition_qualified());
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.sources.len(), 8);
-    assert_eq!(snapshot.records, 10);
+    assert_eq!(snapshot.sources.len(), 9);
+    assert_eq!(snapshot.records, 12);
     assert!(snapshot.sources.iter().all(|source| source.state == culprit_core::SourceState::Collected));
     let capture = CaptureIdentity { observation_id: "native-instance".into(), revision: None };
     let mut cursor = None;
@@ -92,7 +94,7 @@ async fn instance_capture_reuses_native_readers_and_never_charges_the_shared_fac
         }
     }
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
-    assert_eq!(source.query_count(), 16);
+    assert_eq!(source.query_count(), 18);
     assert_eq!(source.io.calls.iter().filter(|call| call.sql.contains("sys.dm_os_process_memory")).count(), 1);
     assert!(
         !source.io.calls.iter().any(|call| call.sql.contains("sys.dm_db_resource_stats")),
@@ -154,7 +156,7 @@ async fn the_emitted_shared_partition_is_the_existing_native_process_generation_
             epoch: Some(native.capture_epoch().unwrap()),
         }
     );
-    assert_eq!(source.query_count(), 14, "the partition reuses the initial authority already owned by this read");
+    assert_eq!(source.query_count(), 16, "the partition reuses the initial authority already owned by this read");
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
 
@@ -182,7 +184,7 @@ async fn unavailable_tempdb_log_keeps_the_independent_data_population_and_does_n
         assert_eq!(log.records, 0);
         assert_eq!(data.state, culprit_core::SourceState::Collected);
         assert_eq!(data.records, 1);
-        assert_eq!(snapshot.records, 9);
+        assert_eq!(snapshot.records, 11);
         assert_eq!(
             source.io.calls.iter().filter(|call| call.sql.contains("FROM tempdb.sys.dm_db_log_space_usage")).count(),
             0
@@ -195,4 +197,70 @@ async fn unavailable_tempdb_log_keeps_the_independent_data_population_and_does_n
             .iter()
             .any(|family| { matches!(family, point::Family::Operation(crate::operations::native::Kind::TempLog)) })
     );
+}
+
+#[tokio::test]
+async fn metadata_memory_feature_and_data_visibility_remain_separate_without_withdrawing_existing_shared_sources() {
+    const METADATA_LAYOUT_REPLY: usize = 7;
+    for (field, value, state, error) in [
+        ("metadata_enabled", Val::Int(0), culprit_core::SourceState::Collected, None),
+        ("metadata_enabled", Val::Null, culprit_core::SourceState::Partial, None),
+        (
+            "permission",
+            Val::Int(0),
+            culprit_core::SourceState::Partial,
+            Some(culprit_core::ErrorCode::PermissionDenied),
+        ),
+        (
+            "columns_present",
+            Val::Int(5),
+            culprit_core::SourceState::Partial,
+            Some(culprit_core::ErrorCode::Unsupported),
+        ),
+    ] {
+        let mut replies = replies(metadata());
+        replies[METADATA_LAYOUT_REPLY] =
+            Ok(vec![replace(&crate::tempdb_metadata_memory::tests::layout_row(), &[(field, value)])]);
+        replies.remove(METADATA_LAYOUT_REPLY + 1);
+        let mut source =
+            StateSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+        let description = source.describe().await.unwrap();
+        let snapshot = description.observation.snapshot().unwrap();
+        let metadata = snapshot
+            .sources
+            .iter()
+            .find(|source| source.source == culprit_core::source_id::TEMPDB_METADATA_MEMORY)
+            .unwrap();
+        assert_eq!(metadata.state, state);
+        assert_eq!(metadata.error_code, error);
+        assert_eq!(
+            metadata.records, 1,
+            "the native feature point is retained independently from missing consumer data"
+        );
+        for native in &snapshot.sources {
+            if native.source != metadata.source {
+                assert_eq!(native.state, culprit_core::SourceState::Collected);
+            }
+        }
+        let mut cursor = None;
+        loop {
+            let CollectionRead::Page { next_cursor, .. } =
+                source.read_page(TelemetryStream::OperationalSamples, cursor.as_deref()).await.unwrap()
+            else {
+                panic!()
+            };
+            cursor = next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+        assert_eq!(source.query_count(), 17);
+        assert_eq!(
+            source.io.calls.iter().filter(|call| call.sql.contains("FROM sys.dm_db_xtp_memory_consumers")).count(),
+            0
+        );
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert_eq!(source.io.closed, 1);
+    }
 }

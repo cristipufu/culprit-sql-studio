@@ -151,6 +151,11 @@ pub const INSTANCE_RESOURCES: Source = Source {
     reads: culprit_core::key!("view.instance_resources.source"),
     delivers: &[],
 };
+pub const TEMPDB_METADATA_MEMORY: Source = Source {
+    name: source_id::TEMPDB_METADATA_MEMORY,
+    reads: culprit_core::key!("provider.mssql.source.tempdb_metadata_memory"),
+    delivers: &[],
+};
 pub const MEMORY_CLERKS: Source = Source {
     name: crate::memory_clerks::SOURCE_NAME,
     reads: culprit_core::key!("provider.mssql.source.memory_clerks"),
@@ -446,6 +451,7 @@ pub const ALL: &[Source] = &[
     RESOURCES,
     POOL_RESOURCES,
     MEMORY_CLERKS,
+    TEMPDB_METADATA_MEMORY,
     INSTANCE_RESOURCES,
     SCHEDULERS,
     FORWARDED_FETCHES,

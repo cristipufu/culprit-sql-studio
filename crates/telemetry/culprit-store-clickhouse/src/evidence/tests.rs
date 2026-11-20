@@ -37,6 +37,7 @@ mod source_partitions;
 mod statement_grants;
 mod statement_outcomes;
 mod statement_work;
+mod tempdb_metadata_memory;
 mod tuning;
 use crate::{catalog::SchemaCatalog, client::QueryRequest, response::QueryTable, schema::Schema};
 use async_trait::async_trait;

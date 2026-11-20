@@ -43,6 +43,7 @@ mod session_memory;
 mod statement_grants;
 mod statement_work;
 mod task_space;
+mod tempdb_metadata_memory;
 mod temporary_space;
 mod tuning;
 mod variant_family;

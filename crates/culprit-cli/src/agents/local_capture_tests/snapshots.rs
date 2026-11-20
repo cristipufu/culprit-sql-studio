@@ -35,6 +35,7 @@ async fn every_shared_operational_report_reaches_the_existing_english_mcp_operat
             LocalCaptureAnalysisKind::DatabaseProperties => "view.database_properties.title",
             LocalCaptureAnalysisKind::Compilation => "view.compilation.title",
             LocalCaptureAnalysisKind::PerformanceCounters => "view.performance_counters.title",
+            LocalCaptureAnalysisKind::TempdbMetadataMemory => "view.tempdb_metadata_memory.title",
             _ => "",
         };
         if !title_key.is_empty() {

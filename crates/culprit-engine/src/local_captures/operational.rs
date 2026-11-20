@@ -52,6 +52,7 @@ impl LocalSnapshotAnalysis {
 #[derive(Debug)]
 pub enum LocalSnapshotReport {
     PerformanceCounters(Box<PerformanceCounterReport>),
+    TempdbMetadataMemory(Box<TempdbMetadataMemoryReport>),
     DatabaseProperties(Box<DatabasePropertiesReport>),
     InstanceResources(Box<InstanceResourceReport>),
     Compilation(Box<CompilationReport>),
@@ -70,6 +71,7 @@ impl LocalSnapshotReport {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
         match self {
             Self::PerformanceCounters(_) => LocalCaptureAnalysisKind::PerformanceCounters,
+            Self::TempdbMetadataMemory(_) => LocalCaptureAnalysisKind::TempdbMetadataMemory,
             Self::InstanceResources(_) => LocalCaptureAnalysisKind::InstanceResources,
             Self::DatabaseProperties(_) => LocalCaptureAnalysisKind::DatabaseProperties,
             Self::Compilation(_) => LocalCaptureAnalysisKind::Compilation,

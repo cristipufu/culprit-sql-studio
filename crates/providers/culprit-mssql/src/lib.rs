@@ -73,6 +73,7 @@ mod storage_io;
 mod tables;
 mod task_space;
 mod telemetry;
+mod tempdb_metadata_memory;
 #[cfg(test)]
 mod test_support;
 mod timeline;
