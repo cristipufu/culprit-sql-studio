@@ -20,6 +20,45 @@ fn observations(rows: &[TelemetryRecord]) -> Vec<&TaskSpaceObservation> {
 }
 
 #[tokio::test]
+async fn ordinary_user_allocation_without_current_context_cannot_borrow_a_peer_statement_or_become_a_retention_cause() {
+    let (source, rows) = task_space_evidence_cases().pop().unwrap();
+    let original = observations(&rows).into_iter().find(|row| row.task.execution_context_id == "5").unwrap();
+    assert_eq!(original.user_allocated_pages.as_deref(), Some("64"));
+    assert!(original.request.is_none());
+    assert!(original.statement_identity.is_none());
+    let fixture = Fixture::new(source.clone(), rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let analysis = collected_resources::task_space(&capture).unwrap();
+    let ordinary = analysis.report.entries.iter().find(|entry| entry.task == original.task).unwrap();
+    assert_eq!(ordinary.activity, culprit_core::TaskAllocationActivity::UserObjects);
+    assert!(
+        ordinary.current_request.is_none(),
+        "the same raw session/request IDs on another checked task cannot supply this row's missing generation/context"
+    );
+    let quiet = analysis.report.entries.iter().find(|entry| entry.task.execution_context_id == "0").unwrap();
+    assert_eq!(quiet.activity, culprit_core::TaskAllocationActivity::NoRecordedActivity);
+    assert!(quiet.current_request.is_some(), "a real peer context stays on its own original row");
+    assert_eq!(analysis.report.source_state, Some(SourceState::Partial));
+    assert_eq!(analysis.context.source, source);
+    assert_eq!(analysis.context.records.len(), rows.len());
+    let words = serde_json::to_string(ordinary).unwrap();
+    assert!(!words.contains("9264") && !words.contains("dbo.orders"));
+    let (cleanup_source, cleanup_rows) = culprit_collector::analytical::test_support::cleanup_evidence(
+        culprit_collector::analytical::test_support::CleanupCase::LocalRecoveredHorizon,
+    );
+    let cleanup_fixture = Fixture::new(cleanup_source.clone(), cleanup_rows.clone()).await;
+    let cleanup_capture = cleanup_fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let cleanup = collected_resources::cleanup(&cleanup_capture).unwrap();
+    assert!(cleanup.report.entries.iter().all(|entry| entry.mechanisms.is_empty()));
+    assert_eq!(cleanup.context.source, cleanup_source);
+    assert_eq!(cleanup.context.records.len(), cleanup_rows.len());
+    assert!(
+        cleanup.report.boundaries.is_empty(),
+        "separate allocation and cleanup points do not create a retainer, distance or owner join"
+    );
+}
+
+#[tokio::test]
 async fn authenticated_task_investigation_reuses_pure_explanations_and_keeps_original_rows_once() {
     for (source, rows) in task_space_evidence_cases() {
         let coverage = &source.observation.snapshot().unwrap().sources[0];

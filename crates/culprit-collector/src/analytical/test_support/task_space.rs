@@ -16,20 +16,26 @@ pub fn task_space_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryR
         row.plan_identity = None;
         partial.push(record(row));
     }
-    let mut unassigned = observation("4");
-    unassigned.request = None;
-    unassigned.before_check = None;
-    unassigned.after_check = None;
-    unassigned.statement_identity = None;
-    unassigned.plan_identity = None;
+    let mut unassigned = unassigned_observation("4");
     unassigned.user_allocated_pages = None;
     unassigned.internal_deallocated_pages = None;
     partial.push(record(unassigned));
+    let mut quiet_checked = observation("0");
+    quiet_checked.user_allocated_pages = Some("0".into());
+    quiet_checked.user_deallocated_pages = Some("0".into());
+    quiet_checked.internal_allocated_pages = Some("0".into());
+    quiet_checked.internal_deallocated_pages = Some("0".into());
+    let mut ordinary_unassigned = unassigned_observation("5");
+    ordinary_unassigned.user_allocated_pages = Some("64".into());
+    ordinary_unassigned.user_deallocated_pages = Some("0".into());
+    ordinary_unassigned.internal_allocated_pages = Some("0".into());
+    ordinary_unassigned.internal_deallocated_pages = Some("0".into());
     [
         (full, culprit_core::SourceState::Collected),
         (partial, culprit_core::SourceState::Partial),
         (vec![], culprit_core::SourceState::Empty),
         (vec![], culprit_core::SourceState::Unavailable),
+        (vec![record(quiet_checked), record(ordinary_unassigned)], culprit_core::SourceState::Partial),
     ]
     .into_iter()
     .map(|(records, state)| {
@@ -57,6 +63,16 @@ pub fn task_space_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryR
         (source, records)
     })
     .collect()
+}
+
+fn unassigned_observation(execution: &str) -> TaskSpaceObservation {
+    let mut row = observation(execution);
+    row.request = None;
+    row.before_check = None;
+    row.after_check = None;
+    row.statement_identity = None;
+    row.plan_identity = None;
+    row
 }
 
 fn observation(execution: &str) -> TaskSpaceObservation {

@@ -28,6 +28,47 @@ fn boundary(report: &CleanupReport, horizon: CleanupHorizon) -> &culprit_core::C
 }
 
 #[tokio::test]
+async fn a_read_only_snapshot_is_only_a_retention_candidate_with_zero_unknown_or_positive_version_bytes() {
+    for case in [
+        CleanupCase::LocalSnapshotZeroVersions,
+        CleanupCase::LocalSnapshotUnknownVersions,
+        CleanupCase::LocalSnapshotProtector,
+    ] {
+        let analysis = analyze_case(case).await;
+        let [entry] = analysis.report.entries.as_slice() else { panic!("one original snapshot candidate") };
+        assert_eq!(entry.mechanisms, vec![CleanupMechanism::ConfirmedDatabaseTransaction]);
+        assert!(entry.explanation.contains(&culprit_core::t!("view.cleanup.transaction.context.snapshot_zero_log")));
+        assert!(entry.investigation.contains(&culprit_core::t!("view.cleanup.transaction.investigate_snapshot")));
+        let source = analysis.context.source.observation.snapshot().unwrap();
+        let coverage = source.sources.iter().find(|source| source.source == source_id::VERSION_STORE).unwrap();
+        let observed = analysis.context.records.iter().find_map(|row| match &row.row.record {
+            TelemetryRecord::Operational(row) if row.source == source_id::VERSION_STORE => match &row.fact {
+                OperationalFact::Counter(counter) => Some(counter.value.clone()),
+                _ => None,
+            },
+            _ => None,
+        });
+        match case {
+            CleanupCase::LocalSnapshotZeroVersions => {
+                assert_eq!(coverage.state, SourceState::Collected);
+                assert_eq!(observed, Some(MeasurementValue::Integer("0".into())));
+            }
+            CleanupCase::LocalSnapshotUnknownVersions => {
+                assert_eq!(coverage.state, SourceState::Unavailable);
+                assert_eq!(coverage.error_code, Some(culprit_core::ErrorCode::PermissionDenied));
+                assert_eq!(observed, None, "an unavailable native gauge cannot become measured zero");
+            }
+            CleanupCase::LocalSnapshotProtector => assert_eq!(observed, Some(MeasurementValue::Integer("64".into()))),
+            _ => unreachable!(),
+        }
+        assert!(
+            analysis.report.boundaries.is_empty(),
+            "a snapshot and database bytes do not establish a native cleanup-distance boundary"
+        );
+    }
+}
+
+#[tokio::test]
 async fn local_cleanup_distinguishes_logged_generator_from_zero_log_snapshot_and_keeps_original_bytes_separate() {
     for (case, message) in [
         (CleanupCase::LocalLoggedGenerator, culprit_core::t!("view.cleanup.transaction.context.logged_versioning")),

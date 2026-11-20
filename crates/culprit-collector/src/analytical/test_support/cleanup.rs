@@ -15,6 +15,8 @@ pub enum CleanupCase {
     LocalSnapshotProtector,
     LocalRecoveredHorizon,
     LocalUnavailableHorizon,
+    LocalSnapshotZeroVersions,
+    LocalSnapshotUnknownVersions,
     QualifiedEmptyRetention,
     UnqualifiedEmptyRetention,
     TiedRetention,
@@ -37,6 +39,8 @@ pub fn cleanup_evidence_cases() -> Vec<(CleanupCase, CollectionDescription, Vec<
         LocalSnapshotProtector,
         LocalRecoveredHorizon,
         LocalUnavailableHorizon,
+        LocalSnapshotZeroVersions,
+        LocalSnapshotUnknownVersions,
         QualifiedEmptyRetention,
         UnqualifiedEmptyRetention,
         TiedRetention,
@@ -79,6 +83,7 @@ pub fn cleanup_tamper_cases() -> Vec<(CleanupCase, &'static str, &'static str, s
             "/oldest_confirmed/session/generation",
             json!("2020-01-01T10:00:00.004"),
         ),
+        (CleanupCase::LocalSnapshotZeroVersions, "counter", "/value/value", json!("1")),
         (
             CleanupCase::TiedRetention,
             "retention-coverage",
@@ -95,7 +100,9 @@ pub fn cleanup_evidence(case: CleanupCase) -> (CollectionDescription, Vec<Teleme
         CleanupCase::LocalLoggedGenerator
         | CleanupCase::LocalSnapshotProtector
         | CleanupCase::LocalRecoveredHorizon
-        | CleanupCase::LocalUnavailableHorizon => local_native(case),
+        | CleanupCase::LocalUnavailableHorizon
+        | CleanupCase::LocalSnapshotZeroVersions
+        | CleanupCase::LocalSnapshotUnknownVersions => local_native(case),
         CleanupCase::QualifiedEmptyRetention => {
             complete_retention_inventory(super::retention_coverage_only_evidence(vec![
                 CleanupHorizon::Data,
@@ -219,9 +226,17 @@ fn local_native(case: CleanupCase) -> (CollectionDescription, Vec<TelemetryRecor
     let TelemetryRecord::Operational(row) = &mut rows[0] else { unreachable!() };
     let OperationalFact::MssqlCleanupHorizon(horizon) = &mut row.fact else { unreachable!() };
     match case {
-        CleanupCase::LocalLoggedGenerator | CleanupCase::LocalSnapshotProtector => {
+        CleanupCase::LocalLoggedGenerator
+        | CleanupCase::LocalSnapshotProtector
+        | CleanupCase::LocalSnapshotZeroVersions
+        | CleanupCase::LocalSnapshotUnknownVersions => {
             let mut participant = transaction("57", "1001");
-            if case == CleanupCase::LocalSnapshotProtector {
+            if matches!(
+                case,
+                CleanupCase::LocalSnapshotProtector
+                    | CleanupCase::LocalSnapshotZeroVersions
+                    | CleanupCase::LocalSnapshotUnknownVersions
+            ) {
                 participant.session.id = "58".into();
                 participant.transaction.id = "1002".into();
                 participant.snapshot_isolation = Some(true);
@@ -239,7 +254,7 @@ fn local_native(case: CleanupCase) -> (CollectionDescription, Vec<TelemetryRecor
         key: "tempdb-version-store".into(),
         fact: OperationalFact::Counter(NativeCounterSample::gauge(
             "tempdb-version-store",
-            64,
+            if case == CleanupCase::LocalSnapshotZeroVersions { 0 } else { 64 },
             CounterUnit::Kibibytes,
             MeasurementScope::Database,
             "sys.dm_tran_version_store_space_usage",
@@ -255,6 +270,13 @@ fn local_native(case: CleanupCase) -> (CollectionDescription, Vec<TelemetryRecor
             snapshot.sources.iter_mut().find(|coverage| coverage.source == source_id::OPEN_TRANSACTIONS).unwrap();
         *coverage =
             StateSourceCoverage::unavailable(source_id::OPEN_TRANSACTIONS.into(), ErrorCode::PermissionDenied, None);
+    }
+    if case == CleanupCase::LocalSnapshotUnknownVersions {
+        rows.retain(|row| !matches!(row, TelemetryRecord::Operational(row) if row.source == source_id::VERSION_STORE));
+        let coverage =
+            snapshot.sources.iter_mut().find(|coverage| coverage.source == source_id::VERSION_STORE).unwrap();
+        *coverage =
+            StateSourceCoverage::unavailable(source_id::VERSION_STORE.into(), ErrorCode::PermissionDenied, None);
     }
     snapshot.records = rows.len() as u32;
     assert!(source.partition_is_consistent());

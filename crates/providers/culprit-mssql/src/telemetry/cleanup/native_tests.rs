@@ -18,6 +18,8 @@ use serde_json::json;
 use std::{panic::AssertUnwindSafe, time::Duration};
 use tokio::time::Instant;
 
+mod counterexamples;
+
 const ROWS: u32 = 256;
 const UPDATED_ROWS: u32 = ROWS - 2;
 const CASE_TIMEOUT: Duration = Duration::from_secs(45);
@@ -71,6 +73,7 @@ struct Fixture {
     fixture_queries: u32,
     fixture_session_setups: u32,
     fixture_connect_attempts: u32,
+    retained_source_queries: u32,
     original_evidence: Vec<serde_json::Value>,
 }
 impl Fixture {
@@ -138,11 +141,7 @@ impl Fixture {
         self.generator_batch(&format!("UPDATE dbo.cleanup_fixture SET n=1,pad=REPLICATE('y',512) WHERE id BETWEEN 1 AND 254;IF @@ROWCOUNT<>{UPDATED_ROWS} THROW 51000,'generator quota incomplete',1")).await?;
         // A fresh pool has no preparation dispatches. Its one Stats-session setup is separate from the
         // source query counter; the same returned native session must serve every retained capture.
-        let pool = Arc::new(Pool::new(
-            config(self.admission.port, &self.database, self.admission.password(), "culprit"),
-            None,
-        ));
-        let mut captures = OwnedCaptures::from_pool(pool, self.admission.port)?;
+        let mut captures = self.captures()?;
         let original = capture(&mut captures, cancellation).await?;
         self.retain_stage("both-alive", &original);
         let original_horizon = horizon(&original);
@@ -177,19 +176,8 @@ impl Fixture {
         assert!(horizon(&recovered).oldest_confirmed.is_none());
         assert!(horizon(&recovered).oldest_unattributed_versioning.is_none());
         for (before, after) in [(&original, &protected), (&protected, &recovered)] {
-            assert_eq!(before.source()?.target, after.source()?.target);
-            assert_eq!(before.source()?.partition, after.source()?.partition);
-            assert!(
-                ObservationBounds::new(
-                    &before.source()?.observation.snapshot().unwrap().observed_until,
-                    &after.source()?.observation.snapshot().unwrap().observed_from,
-                )
-                .is_some()
-            );
+            assert_same_source(before, after)?;
         }
-        let original_source_session = source_session(&original);
-        assert_eq!(source_session(&protected), original_source_session);
-        assert_eq!(source_session(&recovered), original_source_session);
         for captured in [&original, &protected, &recovered] {
             captures.verify_retained(captured).await?;
         }
@@ -218,7 +206,15 @@ impl Fixture {
             "cost_qualified":false,
         }))
     }
+    fn captures(&self) -> culprit_core::Result<OwnedCaptures> {
+        let pool = Arc::new(Pool::new(
+            config(self.admission.port, &self.database, self.admission.password(), "culprit"),
+            None,
+        ));
+        OwnedCaptures::from_pool(pool, self.admission.port)
+    }
     fn retain_stage(&mut self, stage: &str, captured: &Captured) {
+        self.retained_source_queries += captured.manifest.source_queries;
         self.original_evidence.push(json!({
             "stage": stage,
             "manifest": &captured.manifest,
@@ -318,9 +314,23 @@ fn source_session(captured: &Captured) -> &NativeActivityIdentity {
     assert_eq!(work.settlement, NativeReadSettlement::Quiescent);
     let interval = work.interval.as_ref().expect("native self-observation interval");
     assert_eq!(interval.initial.query_ordinal, 3);
-    assert_eq!(interval.latest.as_ref().unwrap().query_ordinal, 11);
+    assert_eq!(interval.latest.as_ref().unwrap().query_ordinal, captured.manifest.source_queries);
     &interval.session
 }
+fn assert_same_source(before: &Captured, after: &Captured) -> culprit_core::Result<()> {
+    assert_eq!(before.source()?.target, after.source()?.target);
+    assert_eq!(before.source()?.partition, after.source()?.partition);
+    assert!(
+        ObservationBounds::new(
+            &before.source()?.observation.snapshot().unwrap().observed_until,
+            &after.source()?.observation.snapshot().unwrap().observed_from,
+        )
+        .is_some()
+    );
+    assert_eq!(source_session(before), source_session(after));
+    Ok(())
+}
+
 fn report(captured: &Captured) -> culprit_core::Result<CleanupReport> {
     let native = captured
         .records
@@ -358,9 +368,24 @@ fn report(captured: &Captured) -> culprit_core::Result<CleanupReport> {
     )
 }
 
-#[tokio::test]
-#[ignore = "requires guarded nonce-owned loopback SQL Server with CULPRIT_SMOKE_OWNER, CULPRIT_SMOKE_DATABASE and private receipt directory"]
-async fn owned_generator_and_original_snapshot_protector_have_distinct_cleanup_roles_until_protection_ends() {
+struct ExpectedWork {
+    fixture_queries: u32,
+    session_setups: u32,
+    source_queries: u32,
+    captures: usize,
+}
+impl ExpectedWork {
+    fn total_queries(&self) -> u32 {
+        // One reused source Stats setup plus the original owned-admission query and its setup.
+        self.fixture_queries + self.session_setups + self.source_queries + 1 + 2
+    }
+}
+
+async fn run_owned_case(
+    receipt_name: &str,
+    expected: ExpectedWork,
+    work: impl AsyncFnOnce(&mut Fixture, &CollectionCancellation) -> culprit_core::Result<serde_json::Value>,
+) {
     let directory = receipt_directory();
     let admission = OwnedSourceFixture::open("cleanup-intervention-admission").await.unwrap();
     let database = format!("{}_cleanup_{}", admission.database, std::process::id());
@@ -373,35 +398,43 @@ async fn owned_generator_and_original_snapshot_protector_have_distinct_cleanup_r
         fixture_queries: 0,
         fixture_session_setups: 0,
         fixture_connect_attempts: 0,
+        retained_source_queries: 0,
         original_evidence: Vec::new(),
     };
     let cancellation = CollectionCancellation::default();
     let (expired, body) = finish_case(
         Instant::now() + CASE_TIMEOUT,
         &cancellation,
-        AssertUnwindSafe(Box::pin(fixture.exercise(&cancellation))).catch_unwind(),
+        AssertUnwindSafe(Box::pin(work(&mut fixture, &cancellation))).catch_unwind(),
     )
     .await;
     let cleanup = AssertUnwindSafe(Box::pin(fixture.cleanup())).catch_unwind().await;
-    let successful = matches!(&body, Ok(Ok(_))) && matches!(&cleanup, Ok(Ok(()))) && !expired;
+    let accounting_matches = fixture.fixture_queries == expected.fixture_queries
+        && fixture.fixture_session_setups == expected.session_setups
+        && fixture.fixture_connect_attempts == expected.session_setups
+        && fixture.retained_source_queries == expected.source_queries
+        && fixture.original_evidence.len() == expected.captures;
+    let successful = matches!(&body, Ok(Ok(_))) && matches!(&cleanup, Ok(Ok(()))) && !expired && accounting_matches;
     let details = match &body {
         Ok(Ok(value)) => Some(value),
         _ => None,
     };
     save_cost_receipt(
         &directory,
-        "cleanup-generator-protector",
+        receipt_name,
         &json!({
             "successful":successful,"expired":expired,
             "fixture_query_attempts":fixture.fixture_queries,
+            "retained_source_queries":fixture.retained_source_queries,
+            "accounting_matches":accounting_matches,
             "confirmed_fixture_session_setup_dispatches":fixture.fixture_session_setups,
             "fixture_connect_attempts":fixture.fixture_connect_attempts,
             "fixture_connection_setup_uncertain":fixture.fixture_connect_attempts!=fixture.fixture_session_setups,
             "initial_admission_queries":1,"initial_admission_session_setup_dispatches":1,
             "setup_and_workload_separate_from_source":true,
-            "successful_case_expected_fixture_queries":13,
-            "successful_case_expected_fixture_session_setups":4,
-            "successful_case_expected_total_sql_dispatches_including_admission_and_source":53,
+            "successful_case_expected_fixture_queries":expected.fixture_queries,
+            "successful_case_expected_fixture_session_setups":expected.session_setups,
+            "successful_case_expected_total_sql_dispatches_including_admission_and_source":expected.total_queries(),
             "owned_database_removed":matches!(&cleanup,Ok(Ok(()))),
             "case_error":match &body{Ok(Err(error))=>Some(error.code),_=>None},
             "cleanup_error":match &cleanup{Ok(Err(error))=>Some(error.code),_=>None},
@@ -420,8 +453,21 @@ async fn owned_generator_and_original_snapshot_protector_have_distinct_cleanup_r
         Err(panic) => std::panic::resume_unwind(panic),
         Ok(result) => result.unwrap(),
     }
-    assert_eq!(fixture.fixture_queries, 13);
-    assert_eq!(fixture.fixture_session_setups, 4);
-    assert_eq!(fixture.fixture_connect_attempts, 4);
+    assert_eq!(fixture.fixture_queries, expected.fixture_queries);
+    assert_eq!(fixture.fixture_session_setups, expected.session_setups);
+    assert_eq!(fixture.fixture_connect_attempts, expected.session_setups);
+    assert_eq!(fixture.original_evidence.len(), expected.captures);
+    assert_eq!(fixture.retained_source_queries, expected.source_queries);
     assert!(!expired, "owned original source and actors settled after the case deadline");
+}
+
+#[tokio::test]
+#[ignore = "requires guarded nonce-owned loopback SQL Server with CULPRIT_SMOKE_OWNER, CULPRIT_SMOKE_DATABASE and private receipt directory"]
+async fn owned_generator_and_original_snapshot_protector_have_distinct_cleanup_roles_until_protection_ends() {
+    run_owned_case(
+        "cleanup-generator-protector",
+        ExpectedWork { fixture_queries: 13, session_setups: 4, source_queries: 33, captures: 3 },
+        async |fixture, cancellation| fixture.exercise(cancellation).await,
+    )
+    .await;
 }
