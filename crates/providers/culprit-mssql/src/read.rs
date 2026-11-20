@@ -4,7 +4,9 @@ mod fixture_dispatch_tests;
 pub(crate) mod measurement;
 #[cfg(test)]
 mod native_tests;
+mod observed_session;
 mod output;
+pub(crate) mod qualification;
 pub(crate) mod session_work;
 use output::Output;
 pub(crate) use output::{ReadBatch, value_bytes};
@@ -79,6 +81,7 @@ struct ReadQuery {
     row_limit: usize,
     byte_limit: usize,
     output: Output,
+    admission: Option<Arc<qualification::Admission>>,
 }
 
 enum QueryDispatch {
@@ -100,7 +103,7 @@ impl ReadQuery {
             #[cfg(test)]
             QueryDispatch::OwnedApplication => sql.into(),
         };
-        Self { sql, parameters, row_limit, byte_limit, output }
+        Self { sql, parameters, row_limit, byte_limit, output, admission: None }
     }
 }
 
@@ -116,6 +119,10 @@ pub(crate) trait NativeRead: Send {
         None
     }
     fn observe_session_work(&mut self, _observation: session_work::Observation) {}
+    /// Final independent measurement belongs to the successful cancellable finish path, never cleanup.
+    async fn finish_measurement(&mut self) -> ReadResult<()> {
+        Ok(())
+    }
     async fn close(&mut self) -> culprit_core::telemetry::SourceShutdown;
 }
 
@@ -156,6 +163,8 @@ pub(crate) struct ReadSession {
     streaming: Option<StreamingRead>,
     connection_generation: u64,
     native_work: session_work::SessionWork,
+    admission: Option<Arc<qualification::Admission>>,
+    session_setup: Option<qualification::SetupWork>,
 }
 struct StreamingRead {
     _owner: tokio::sync::oneshot::Sender<()>,
@@ -184,6 +193,8 @@ impl ReadSession {
             streaming: None,
             connection_generation: 0,
             native_work: session_work::SessionWork::default(),
+            admission: None,
+            session_setup: None,
         }
     }
 
@@ -281,7 +292,8 @@ impl ReadSession {
         let (owner, cancelled) = tokio::sync::oneshot::channel::<()>();
         // The task owns the socket until result completion or Attention acknowledgement/disconnect. Dropping the
         // caller requests cancellation instead of dropping a future while leaving SQL work running on the server.
-        let query = ReadQuery::new(sql, parameters, row_limit, byte_limit, output, dispatch);
+        let mut query = ReadQuery::new(sql, parameters, row_limit, byte_limit, output, dispatch);
+        query.admission = self.admission.clone();
         let transport = self.pool.transport_owner();
         let template = self.metrics.begin(sql);
         self.active = Some(tokio::spawn(read_owned(
@@ -323,6 +335,9 @@ impl ReadSession {
             return Err(ReadError::Stopped(CollectionStop::QueryLimit));
         }
         let remaining = self.remaining_statement_time()?;
+        if let Some(admission) = &self.admission {
+            admission.start().map_err(ReadError::Stopped)?;
+        }
         self.queries += 1;
         Ok(remaining)
     }
@@ -332,7 +347,17 @@ impl ReadSession {
         let generation =
             self.connection_generation.checked_add(1).ok_or(ReadError::Stopped(CollectionStop::QueryLimit))?;
         self.acquiring = true;
-        let result = tokio::time::timeout(timeout, self.pool.get()).await;
+        if self.admission.is_some() && self.session_setup.is_none() {
+            self.acquiring = false;
+            return Err(ReadError::Stopped(CollectionStop::SourceChanged));
+        }
+        let acquisition = async {
+            match &self.session_setup {
+                Some(setup) => self.pool.get_with_accounting(Some(setup)).await,
+                None => self.pool.get().await,
+            }
+        };
+        let result = tokio::time::timeout(timeout, acquisition).await;
         self.acquiring = false;
         match result {
             Ok(Ok(client)) => {
@@ -513,7 +538,9 @@ async fn read_owned(
             #[cfg(test)]
             match &acknowledgement {
                 Ok(Err(error)) => eprintln!("Native cancellation acknowledgement failed: {error}"),
-                Err(_) => eprintln!("Native cancellation acknowledgement exceeded its bounded deadline"),
+                Err(_) => {
+                    eprintln!("Native cancellation acknowledgement exceeded its bounded deadline")
+                }
                 _ => {}
             }
             let acknowledged = matches!(acknowledgement, Ok(Ok(())));
@@ -532,7 +559,7 @@ async fn read(
     request: ReadQuery,
     progress: Arc<crate::read_metrics::Progress>,
 ) -> ReadResult<Vec<Rec>> {
-    let ReadQuery { sql, parameters, row_limit, byte_limit, mut output } = request;
+    let ReadQuery { sql, parameters, row_limit, byte_limit, mut output, admission } = request;
     let mut query = Query::new(&sql);
     for parameter in &parameters {
         match parameter {
@@ -562,6 +589,9 @@ async fn read(
                 progress.rows.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let row_bytes = output::value_bytes(&row);
                 progress.bytes.fetch_add(row_bytes as u64, std::sync::atomic::Ordering::Relaxed);
+                if let Some(admission) = &admission {
+                    admission.charge(row_bytes).map_err(ReadError::Stopped)?;
+                }
                 budget
                     .charge_values(row_bytes)
                     .map_err(|error| ReadError::Stopped(CollectionStop::from_error(&error)))?;

@@ -246,6 +246,7 @@ fn native_evidence() -> SourceOverheadEvidence {
     };
     input.read_metrics.as_mut().unwrap().native_session_work =
         Some(Box::new(NativeSessionReadWork::MssqlSession(Box::new(MssqlSessionReadWork {
+            qualification_work: None,
             settlement: NativeReadSettlement::Quiescent,
             issue: None,
             interval: Some(Box::new(MssqlSessionReadInterval {

@@ -47,9 +47,9 @@ impl NativeStreamRead for RecordedStream {
     }
 }
 type MeasurementSource = StreamedSnapshot<QueryCompilation, RecordedStream>;
-struct OwnedSource(Mutex<Option<MeasurementSource>>);
+struct OwnedSource<R: NativeStreamRead>(Mutex<Option<StreamedSnapshot<QueryCompilation, R>>>);
 #[async_trait::async_trait]
-impl SourceFactory for OwnedSource {
+impl<R: NativeStreamRead + 'static> SourceFactory for OwnedSource<R> {
     async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
         assert!(matches!(
             request.selection,
@@ -137,12 +137,18 @@ async fn measurement_capture_uses_eight_original_queries_and_real_same_reader_co
 }
 
 async fn capture_measurement(source: MeasurementSource) -> CollectionManifest {
+    capture_source(source, measurement_request()).await
+}
+async fn capture_source<R: NativeStreamRead + 'static>(
+    source: StreamedSnapshot<QueryCompilation, R>,
+    request: CollectionRequest,
+) -> CollectionManifest {
     let factory = OwnedSource(Mutex::new(Some(source)));
     let directory = tempfile::tempdir().unwrap();
     capture::collect_once(
         &culprit_read::admission::SourceGate::default(),
         &factory,
-        measurement_request(),
+        request,
         &directory.path().join("capture"),
         &CollectionCancellation::default(),
     )
@@ -167,7 +173,7 @@ fn qualification_gaps(manifest: &CollectionManifest, source: &CollectionDescript
 }
 
 #[tokio::test]
-async fn only_the_exact_original_query_window_can_avoid_the_partial_measurement_gap() {
+async fn relabelled_endpoints_without_paid_phase_accounting_remain_a_partial_window() {
     let manifest = capture_measurement(measured(
         measured_authority(FIRST, 10),
         measured_authority(LAST, 17),
@@ -175,7 +181,7 @@ async fn only_the_exact_original_query_window_can_avoid_the_partial_measurement_
     ))
     .await;
     let source = manifest.description.as_ref().unwrap();
-    for (first, last, partial) in [(0, 8, false), (1, 8, true), (2, 8, true), (0, 7, true), (0, 9, true)] {
+    for (first, last, partial) in [(0, 8, true), (1, 8, true), (2, 8, true), (0, 7, true), (0, 9, true)] {
         let mut changed = manifest.clone();
         let interval = native_interval(&mut changed);
         interval.initial.query_ordinal = first;
@@ -362,4 +368,92 @@ async fn unsupported_native_profile_and_stricter_query_budget_dispatch_no_body_o
     assert_eq!(bounded.query_count(), 7);
     assert_eq!(bounded.inner.reader().io.native.starts, 1);
     assert_eq!(bounded.close().await, SourceShutdown::Quiescent);
+}
+
+fn independently_observed_source(
+    after: Rec,
+    budget: CollectionBudget,
+) -> StreamedSnapshot<
+    QueryCompilation,
+    crate::read::qualification::QualificationRead<crate::read::qualification::ScriptedSession>,
+> {
+    let native = crate::read::qualification::scripted_reader(
+        vec![
+            Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
+            Ok(vec![measured_authority(FIRST, 11)]),
+            Ok(vec![clock(FIRST)]),
+            Ok(vec![pressure()]),
+            Ok(vec![pressure()]),
+            Ok(vec![clock(LAST)]),
+            Ok(vec![after]),
+        ],
+        vec![batch(crate::query_store::tests::compilation_row(), true).unwrap()],
+        budget.clone(),
+    );
+    let mut request = measurement_request();
+    request.budget = budget;
+    StreamedSnapshot::with_purpose(
+        native,
+        &request,
+        "fixture.invalid".into(),
+        1433,
+        QueryCompilation,
+        SnapshotPurpose::NativeCostMeasurement,
+    )
+    .unwrap()
+}
+#[tokio::test]
+async fn independent_original_boundaries_and_paid_phases_remove_only_the_partial_window_gap() {
+    let mut request = measurement_request();
+    request.budget = CollectionBudget::default();
+    let source = independently_observed_source(measured_authority(LAST, 17), request.budget.clone());
+    let manifest = capture_source(source, request).await;
+    assert_eq!(manifest.status, CollectionStatus::Complete);
+    assert_eq!(manifest.source_queries, 8);
+    let original = manifest.description.as_ref().unwrap();
+    assert_eq!(
+        qualification_gaps(&manifest, original),
+        [RecipeQualificationGap::NativeGrantEvidenceUnavailable, RecipeQualificationGap::ActiveCancellationUnproved]
+    );
+    let NativeSessionReadWork::MssqlSession(work) =
+        manifest.read_metrics.as_ref().unwrap().native_session_work.as_deref().unwrap();
+    let paid = work.qualification_work.as_ref().unwrap();
+    assert_eq!(paid.preparation.queries, 3);
+    assert_eq!(paid.observer.queries, 6);
+    assert_eq!(work.interval.as_ref().unwrap().initial.query_ordinal, 0);
+    assert_eq!(work.interval.as_ref().unwrap().latest.as_ref().unwrap().query_ordinal, 8);
+    let public =
+        serde_json::to_string(&manifest.read_metrics.as_ref().unwrap().summary(Some(original)).unwrap()).unwrap();
+    assert!(!public.contains("qualification_work"));
+    assert!(!public.contains("fixture.invalid"));
+}
+#[tokio::test]
+async fn changed_original_session_with_independent_observer_cannot_supply_a_complete_window() {
+    let mut request = measurement_request();
+    request.budget = CollectionBudget::default();
+    let changed = replace(&measured_authority(LAST, 17), &[("collector_session_id", Val::Int(99))]);
+    let source = independently_observed_source(changed, request.budget.clone());
+    let manifest = capture_source(source, request).await;
+    assert_ne!(manifest.status, CollectionStatus::Complete);
+    assert!(
+        qualification_gaps(&manifest, manifest.description.as_ref().unwrap())
+            .contains(&RecipeQualificationGap::NativeMeasurementsUnavailable)
+    );
+}
+#[tokio::test]
+async fn aggregate_query_exhaustion_preserves_partial_evidence_and_never_borrows_the_source_allowance() {
+    let mut request = measurement_request();
+    request.budget = CollectionBudget { max_queries: 16, ..Default::default() };
+    let source = independently_observed_source(measured_authority(LAST, 17), request.budget.clone());
+    let manifest = capture_source(source, request).await;
+    assert_ne!(manifest.status, CollectionStatus::Complete);
+    let metrics = manifest.read_metrics.as_ref().unwrap();
+    let NativeSessionReadWork::MssqlSession(work) = metrics.native_session_work.as_deref().unwrap();
+    let paid = work.qualification_work.as_ref().unwrap();
+    assert_eq!(paid.aggregate_budget.max_queries, 16);
+    assert!(!paid.covers_source(metrics, manifest.source_queries));
+    assert!(
+        qualification_gaps(&manifest, manifest.description.as_ref().unwrap())
+            .contains(&RecipeQualificationGap::NativeMeasurementsUnavailable)
+    );
 }

@@ -1,10 +1,11 @@
 use super::*;
 
-fn work() -> NativeSessionReadWork {
+pub(super) fn work() -> NativeSessionReadWork {
     let mut context = crate::telemetry::native_read_context::tests::read_context();
     let CollectionTarget::Database(database) = &mut context.target else { panic!() };
     database.database = "private-native-cost-db-canary".into();
     NativeSessionReadWork::MssqlSession(Box::new(MssqlSessionReadWork {
+        qualification_work: None,
         settlement: NativeReadSettlement::Quiescent,
         issue: None,
         interval: Some(Box::new(MssqlSessionReadInterval {

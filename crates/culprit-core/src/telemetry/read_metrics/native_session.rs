@@ -1,6 +1,9 @@
 //! Private source-session proof and a public numerical projection. Neither is a native-cost approval.
 use super::*;
 
+mod qualification;
+pub use qualification::*;
+
 const MAX_NATIVE_SESSION_WORK_BYTES: usize = 16 * 1024;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,7 +137,9 @@ impl MssqlSessionReadInterval {
         })
     }
     fn binding(&self, source: Option<&CollectionDescription>) -> NativeReadOwnerBinding {
-        let Some(source) = source else { return NativeReadOwnerBinding::Unverified };
+        let Some(source) = source else {
+            return NativeReadOwnerBinding::Unverified;
+        };
         if source.target.engine() != crate::Engine::Mssql {
             return NativeReadOwnerBinding::Contradictory;
         }
@@ -167,9 +172,11 @@ impl MssqlSessionReadInterval {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct MssqlSessionReadWork {
+    /// Paid auxiliary work for this explicit qualification run; never a cost approval.
+    pub qualification_work: Option<Box<MssqlQualificationReadWork>>,
     pub settlement: NativeReadSettlement,
     /// First failure retained independently from later shutdown or a return to the original owner/counters.
     pub issue: Option<NativeReadWorkIssue>,
@@ -177,7 +184,8 @@ pub struct MssqlSessionReadWork {
 }
 impl MssqlSessionReadWork {
     fn is_valid(&self) -> bool {
-        self.interval.as_ref().is_none_or(|interval| interval.is_valid())
+        self.qualification_work.as_ref().is_none_or(|work| work.is_valid())
+            && self.interval.as_ref().is_none_or(|interval| interval.is_valid())
             && match (&self.interval, self.issue, self.settlement) {
                 (None, None, _) => false,
                 (Some(interval), None, _)
@@ -208,7 +216,7 @@ impl MssqlSessionReadWork {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(tag = "profile", content = "observation", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum NativeSessionReadWork {

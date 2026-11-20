@@ -1,4 +1,5 @@
 //! Owned-fixture instrumentation around the real reader. Observer and preparation work are separate from source work.
+use super::observed_session::{self, Counters, Sample, SessionIdentity, observer_scope};
 use super::*;
 use crate::{activity::IdentityDetail, local_source};
 use culprit_core::telemetry::*;
@@ -33,30 +34,6 @@ impl TemplateObservation {
     }
 }
 
-#[derive(Clone)]
-struct SessionIdentity {
-    id: i64,
-    login: String,
-}
-// These native meanings match MssqlSessionReadPoint: reads are counts and writes are dirty marks.
-#[derive(Clone)]
-struct Counters {
-    cpu_ms: u64,
-    logical_reads: u64,
-    reads: u64,
-    dirty_marks: u64,
-}
-struct Sample {
-    observed_at: String,
-    counters: Counters,
-    memory_pages: Option<u64>,
-    active: bool,
-    wait: Option<String>,
-    blocker: Option<i64>,
-    granted_kb: Option<u64>,
-    requested_kb: Option<u64>,
-    used_kb: Option<u64>,
-}
 /// A separately acquired observer keeps its own route and setup cost. Fixture admission belongs to its caller.
 pub(crate) struct HeldObserver {
     owner: ReadSession,
@@ -89,19 +66,6 @@ fn observer_budget() -> CollectionBudget {
     }
 }
 
-async fn observer_scope<R: NativeRead>(
-    observer: &mut R,
-    source: &NativeReadContext,
-    host: &str,
-    port: u16,
-) -> culprit_core::Result<NativeReadContext> {
-    let authority = local_source::Context::read(observer, host, port).await?;
-    let context = authority.completed(&authority)?;
-    if !context.matches_earlier_scope(source) {
-        return Err(CollectionStop::SourceChanged.error());
-    }
-    Ok(context)
-}
 struct Observer {
     connection: HeldObserver,
     identity: SessionIdentity,
@@ -556,45 +520,42 @@ impl Observer {
         }
         self.queries += 1;
         let started = Instant::now();
-        let attempted = self.connection.owner.query(
-            "SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,CONVERT(bigint,s.cpu_time) AS cpu_ms,s.logical_reads,s.reads,s.writes AS dirty_marks,s.memory_usage AS memory_pages,CAST(CASE WHEN r.session_id IS NULL THEN 0 ELSE 1 END AS bit) AS active,r.wait_type,r.blocking_session_id,CONVERT(bigint,g.granted_memory_kb) AS granted_kb,CONVERT(bigint,g.requested_memory_kb) AS requested_kb,CONVERT(bigint,g.used_memory_kb) AS used_kb FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id LEFT JOIN sys.dm_exec_query_memory_grants g ON g.session_id=r.session_id AND g.request_id=r.request_id WHERE s.session_id=@P1 AND CONVERT(datetime2(7),s.login_time)=CONVERT(datetime2(7),@P2,126) OPTION(MAXDOP 1)",
-            vec![Parameter::Integer(self.identity.id), Parameter::Text(self.identity.login.clone())],
-            2,
-        ).await;
+        let before_bytes = self.connection.owner.read_metrics().and_then(|metrics| {
+            metrics
+                .templates
+                .iter()
+                .try_fold(0u64, |sum, metric| sum.checked_add(metric.charged_value_bytes.parse::<u64>().ok()?))
+        });
+        let attempted = observed_session::sample(&mut self.connection.owner, &self.identity).await;
         self.elapsed_ms += started.elapsed().as_secs_f64() * 1000.0;
-        let rows = match attempted {
-            Ok(rows) => rows,
+        match attempted {
+            Ok(sample) => {
+                // Decoded byte charges come from the same reader's retained original metrics.
+                let after_bytes = self
+                    .connection
+                    .owner
+                    .read_metrics()
+                    .map(|metrics| {
+                        metrics
+                            .templates
+                            .iter()
+                            .filter_map(|template| template.charged_value_bytes.parse::<u64>().ok())
+                            .sum()
+                    })
+                    .unwrap_or(self.charged_bytes);
+                if let Some(bytes) = before_bytes.and_then(|before| after_bytes.checked_sub(before)) {
+                    self.charged_bytes += bytes;
+                }
+                Ok(sample)
+            }
             Err(error) => {
                 self.failed = true;
-                return Err(error.into_error());
+                Err(error)
             }
-        };
-        let [row] = rows.as_slice() else {
-            return if rows.is_empty() { Ok(None) } else { Err(CollectionStop::SourceChanged.error()) };
-        };
-        self.charged_bytes += value_bytes(row) as u64;
-        Ok(Some(Sample {
-            observed_at: canonical_time(&text(row, "observed_at")?)?,
-            counters: Counters::read(row)?,
-            memory_pages: optional_count(row, "memory_pages")?,
-            active: boolean(row, "active")?,
-            wait: optional_text(row, "wait_type")?,
-            blocker: optional_signed_integer(row, "blocking_session_id")?,
-            granted_kb: optional_count(row, "granted_kb")?,
-            requested_kb: optional_count(row, "requested_kb")?,
-            used_kb: optional_count(row, "used_kb")?,
-        }))
+        }
     }
 }
 impl Counters {
-    fn read(row: &Rec) -> culprit_core::Result<Self> {
-        Ok(Self {
-            cpu_ms: count(row, "cpu_ms")?,
-            logical_reads: count(row, "logical_reads")?,
-            reads: count(row, "reads")?,
-            dirty_marks: count(row, "dirty_marks")?,
-        })
-    }
     fn delta(&self, after: &Self) -> culprit_core::Result<Value> {
         let delta =
             |before, after: u64| after.checked_sub(before).map(|value| value.to_string()).ok_or_else(invalid_data);
@@ -631,9 +592,6 @@ impl Phase {
         retain_maximum(&mut self.maximum_sampled_used_kb, sample.used_kb);
     }
 }
-fn count(row: &Rec, key: &str) -> culprit_core::Result<u64> {
-    optional_counter(row, key)?.ok_or_else(invalid_data)?.parse().map_err(|_| invalid_data())
-}
 fn parameter_values(parameters: &[Parameter]) -> Value {
     Value::Array(
         parameters
@@ -667,35 +625,9 @@ async fn prepare_owned<R: NativeRead>(owner: &mut R, host: &str, port: u16) -> c
     }
 }
 async fn prepare<R: NativeRead>(owner: &mut R, host: &str, port: u16) -> culprit_core::Result<PreparedSource> {
-    if host.trim().is_empty() || host.contains('\0') || port == 0 {
-        return Err(invalid_data());
-    }
     let started = Instant::now();
-    let identity=owner.query("SELECT /* culprit */ CONVERT(bigint,@@SPID) AS session_id,CONVERT(varchar(33),CONVERT(datetime2(7),login_time),126) AS login_time FROM sys.dm_exec_sessions WHERE session_id=@@SPID",vec![],1).await.map_err(ReadError::into_error)?;
-    let [identity] = identity.as_slice() else {
-        return Err(invalid_data());
-    };
-    let identity = SessionIdentity {
-        id: integer(identity, "session_id")?,
-        login: crate::sql_time::native_time(&text(identity, "login_time")?)?,
-    };
-    if !(1..=i16::MAX as i64).contains(&identity.id) || identity.login.starts_with("1900-01-01") {
-        return Err(invalid_data());
-    }
-    let (authority, metadata) =
-        local_source::read_initial(owner, host, port, IdentityDetail::Endpoint, local_source::Detail::Authority)
-            .await?;
-    let partition = authority.source_partition()?;
-    if !authority.is_qualified() || !partition.is_qualified() {
-        return Err(invalid_data());
-    }
-    let context = NativeReadContext {
-        target: authority.activity.database.clone().into(),
-        partition,
-        observed_from: authority.activity.at.clone(),
-        observed_until: authority.activity.at.clone(),
-        database_writable: authority.activity.writable,
-    };
+    let observed_session::PreparedSession { identity, context, authority, metadata } =
+        observed_session::prepare(owner, host, port, IdentityDetail::Endpoint).await?;
     let preparation = json!({
         "client_elapsed_ms":started.elapsed().as_secs_f64()*1000.0,
         "queries":owner.queries(),
@@ -716,9 +648,6 @@ fn retain_maximum(retained: &mut Option<u64>, observed: Option<u64>) {
     if let Some(observed) = observed {
         *retained = Some(retained.unwrap_or(0).max(observed));
     }
-}
-fn optional_count(row: &Rec, key: &str) -> culprit_core::Result<Option<u64>> {
-    optional_counter(row, key)?.map(|value| value.parse().map_err(|_| invalid_data())).transpose()
 }
 #[cfg(test)]
 mod tests;

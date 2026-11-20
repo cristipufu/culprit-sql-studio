@@ -149,9 +149,9 @@ impl<D: SnapshotRecipe> StreamedSnapshot<D> {
         host: String,
         port: u16,
         recipe: D,
-    ) -> Result<Self> {
-        Self::with_purpose(
-            ReadSession::new(pool, request.budget.clone()),
+    ) -> Result<StreamedSnapshot<D, crate::read::qualification::QualificationRead>> {
+        StreamedSnapshot::with_purpose(
+            crate::read::qualification::QualificationRead::new(pool, request.budget.clone(), host.clone(), port)?,
             request,
             host,
             port,
@@ -369,6 +369,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
                     error_code: (!visible).then_some(culprit_core::ErrorCode::PermissionDenied),
                 }
             };
+            self.io.finish_measurement().await.map_err(ReadError::into_error)?;
             return Ok(culprit_read::SnapshotRecheck {
                 unchanged: true,
                 observed_until: context.observed_until.clone(),

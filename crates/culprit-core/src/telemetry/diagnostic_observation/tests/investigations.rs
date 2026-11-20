@@ -635,6 +635,7 @@ fn native_ownership_must_be_settled_before_client_accounting_can_form_a_cost_rec
         let receipt = scenario.receipt();
         receipt.read_metrics.native_session_work =
             Some(Box::new(NativeSessionReadWork::MssqlSession(Box::new(MssqlSessionReadWork {
+                qualification_work: None,
                 settlement,
                 issue: Some(NativeReadWorkIssue::MissingFinalObservation),
                 interval: None,

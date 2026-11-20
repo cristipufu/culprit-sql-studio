@@ -43,7 +43,6 @@ pub(crate) struct SessionWork {
     authority: Option<Context>,
     counters: CounterWatermark,
     awaiting_context: bool,
-    #[cfg(test)]
     source_boundary_pending: bool,
 }
 impl SessionWork {
@@ -67,7 +66,6 @@ impl SessionWork {
             }
         }
     }
-    #[cfg(test)]
     pub(super) fn source_boundary(
         &mut self,
         authority: &Context,
@@ -121,6 +119,7 @@ impl SessionWork {
             };
             self.counters.observe(&point);
             self.work = Some(MssqlSessionReadWork {
+                qualification_work: None,
                 settlement: NativeReadSettlement::Pending,
                 issue,
                 interval: Some(Box::new(MssqlSessionReadInterval {
@@ -234,6 +233,7 @@ impl SessionWork {
     }
     pub(crate) fn poison(&mut self, issue: NativeReadWorkIssue) {
         let work = self.work.get_or_insert(MssqlSessionReadWork {
+            qualification_work: None,
             settlement: NativeReadSettlement::Pending,
             issue: None,
             interval: None,
@@ -251,7 +251,6 @@ impl SessionWork {
         }
     }
     pub(crate) fn close(&mut self, shutdown: SourceShutdown, generation: u64) {
-        #[cfg(test)]
         if self.source_boundary_pending {
             self.poison(NativeReadWorkIssue::MissingFinalObservation);
         }

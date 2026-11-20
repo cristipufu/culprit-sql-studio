@@ -51,6 +51,7 @@ pub fn native_source_overhead_read_metrics() -> ReadWorkMetrics {
         database_writable: Some(true),
     };
     metrics.native_session_work = Some(Box::new(NativeSessionReadWork::MssqlSession(Box::new(MssqlSessionReadWork {
+        qualification_work: None,
         settlement: NativeReadSettlement::Quiescent,
         issue: None,
         interval: Some(Box::new(MssqlSessionReadInterval {

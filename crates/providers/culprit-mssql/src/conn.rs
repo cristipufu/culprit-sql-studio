@@ -124,7 +124,9 @@ async fn endpoint_for(
     config: &Config,
     transport: Option<&dyn ConnectionTransport>,
 ) -> Result<Option<ConnectionEndpoint>> {
-    let Some(transport) = transport else { return Ok(None) };
+    let Some(transport) = transport else {
+        return Ok(None);
+    };
     let addr = config.get_addr();
     let (host, port) =
         addr.rsplit_once(':').ok_or_else(|| Error::invalid(t!("provider.mssql.connect.invalid_endpoint")))?;
@@ -184,6 +186,7 @@ async fn connect(
     transport: Option<&dyn ConnectionTransport>,
     kind: SessionKind,
     work: &mut ConnectionWork<'_>,
+    accounting: Option<&crate::read::qualification::SetupWork>,
 ) -> Result<MsClient> {
     let mut endpoint = endpoint_for(config, transport).await?;
     let attempt = match open_tcp(config.clone(), endpoint.as_ref(), work).await {
@@ -206,7 +209,12 @@ async fn connect(
         SessionKind::Stats => STATS_SESSION_SETUP,
         SessionKind::User => USER_SESSION_SETUP,
     };
-    execute(&mut client, setup).await.map_err(map_error)?;
+    let recorded = accounting.map(|accounting| accounting.begin(setup)).transpose()?;
+    let result = execute(&mut client, setup).await.map_err(map_error);
+    if let Some(recorded) = recorded {
+        recorded.finish(result.is_ok());
+    }
+    result?;
     work.confirmed();
     Ok(client)
 }
@@ -242,9 +250,16 @@ impl Pool {
     }
 
     pub(crate) async fn connect(&self, kind: SessionKind) -> Result<MsClient> {
+        self.connect_with_accounting(kind, None).await
+    }
+    async fn connect_with_accounting(
+        &self,
+        kind: SessionKind,
+        accounting: Option<&crate::read::qualification::SetupWork>,
+    ) -> Result<MsClient> {
         self.ensure_available()?;
         let mut work = ConnectionWork { pool: self, started: false };
-        connect(&self.config, self.transport.as_deref(), kind, &mut work).await
+        connect(&self.config, self.transport.as_deref(), kind, &mut work, accounting).await
     }
 
     pub(crate) fn mark_uncertain(&self) {
@@ -269,18 +284,26 @@ impl Pool {
     }
 
     pub(crate) async fn get(&self) -> Result<MsClient> {
+        self.get_with_accounting(None).await
+    }
+    pub(crate) async fn get_with_accounting(
+        &self,
+        accounting: Option<&crate::read::qualification::SetupWork>,
+    ) -> Result<MsClient> {
         self.ensure_available()?;
         if let Some(client) = self.take_idle() {
             return Ok(client);
         }
-        self.connect(SessionKind::Stats).await
+        self.connect_with_accounting(SessionKind::Stats, accounting).await
     }
 
     pub(crate) fn put(&self, client: MsClient) {
         if self.ensure_available().is_err() {
             return;
         }
-        let Ok(mut idle) = self.idle.lock() else { return };
+        let Ok(mut idle) = self.idle.lock() else {
+            return;
+        };
         if idle.len() < MAX_IDLE {
             idle.push(client);
         }

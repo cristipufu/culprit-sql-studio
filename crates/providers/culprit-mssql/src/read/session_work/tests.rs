@@ -526,3 +526,17 @@ fn duplicate_optional_counter_columns_are_unavailable_without_overwriting_origin
     assert_eq!(body(&work).issue, Some(NativeReadWorkIssue::InvalidObservation));
     assert_eq!(measured(&work), None);
 }
+
+#[test]
+fn independent_boundaries_cannot_reset_an_already_unconfirmed_original_owner() {
+    let mut work = completed();
+    work.close(SourceShutdown::Unconfirmed, 1);
+    let original = body(&work).interval.unwrap();
+    boundary(&mut work, 3, 20, 0);
+    boundary(&mut work, 4, 21, 9);
+    work.close(SourceShutdown::Quiescent, 1);
+    let retained = body(&work);
+    assert_eq!(retained.settlement, NativeReadSettlement::Unconfirmed);
+    assert_eq!(retained.interval.unwrap(), original);
+    assert_eq!(measured(&work), None);
+}

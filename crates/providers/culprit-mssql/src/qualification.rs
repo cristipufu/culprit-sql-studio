@@ -15,7 +15,19 @@ pub fn assess_recipe_qualification(
     }
     match measured_interval(manifest, source) {
         Some(interval) => {
-            if interval.first_query_ordinal != 0 || interval.last_query_ordinal != Some(manifest.source_queries) {
+            let paid_window = manifest.read_metrics.as_ref().is_some_and(|metrics| {
+                let Some(NativeSessionReadWork::MssqlSession(work)) = metrics.native_session_work.as_deref() else {
+                    return false;
+                };
+                work.qualification_work.as_ref().is_some_and(|paid| {
+                    paid.aggregate_budget == manifest.request.budget
+                        && paid.covers_source(metrics, manifest.source_queries)
+                })
+            });
+            if !paid_window
+                || interval.first_query_ordinal != 0
+                || interval.last_query_ordinal != Some(manifest.source_queries)
+            {
                 gaps.push(RecipeQualificationGap::PartialNativeMeasurementWindow);
             }
         }
