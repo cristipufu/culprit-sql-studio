@@ -24,7 +24,7 @@ fn direct_projection_lists_preserve_the_original_parameter_alias_in_both_passthr
 }
 
 #[test]
-fn unqualified_foreign_duplicate_and_renamed_columns_are_not_direct_projections() {
+fn unqualified_foreign_duplicate_and_implicit_aliases_are_not_direct_projections() {
     for projection in [
         "",
         "id",
@@ -35,14 +35,11 @@ fn unqualified_foreign_duplicate_and_renamed_columns_are_not_direct_projections(
         "r.id,r.id",
         "r.Id,r.id",
         "r.id,[r].[id]",
-        "r.id AS other",
-        "r.id AS id",
         "r.id other",
         "other=r.id",
         "r.id,",
         ",r.id",
         "r.id,,r.Code",
-        "r.id,r.Code AS other",
         "r.*",
         "*,r.id",
         "r.id,*",
@@ -146,4 +143,64 @@ fn direct_projection_lists_preserve_existing_statement_and_reference_bounds() {
     assert_eq!(mssql_relational_references(&sql).unwrap().len(), MAX_RELATIONAL_REFERENCES);
     sql.push_str(" CROSS JOIN @Overflow AS overflow");
     assert!(mssql_relational_references(&sql).is_none());
+}
+
+#[test]
+fn explicit_direct_column_aliases_preserve_the_original_relation_in_derived_and_cte_forms() {
+    for (projection, selected) in [
+        ("r.id AS input_id", "input_id"),
+        ("r.id AS id", "id"),
+        ("r.id AS input_id,r.Code AS input_code", "input_id"),
+        ("r.id,r.Code AS input_code", "id"),
+        ("[r].[odd.name] AS [input.name],r.Code AS [escaped]]field]", "[input.name]"),
+    ] {
+        for sql in statements(projection) {
+            let sql = sql.replacen("SELECT d.id", &format!("SELECT d.{selected}"), 1);
+            assert_eq!(mssql_relational_references(&sql), Some(vec![parameter("@Rows", Some("r"))]), "{sql}");
+        }
+    }
+    let sql =
+        "WITH [入力] AS (SELECT [内].[名前] AS [入力名] FROM @Rows AS [内]) SELECT [外].[入力名] FROM [入力] AS [外]";
+    assert_eq!(mssql_relational_references(sql), Some(vec![parameter("@Rows", Some("内"))]));
+}
+
+#[test]
+fn aliases_require_one_direct_column_and_distinct_input_and_output_names_without_collation_guesses() {
+    for projection in [
+        "r.id AS input_id,r.Code AS INPUT_ID",
+        "r.id AS Code,r.Code",
+        "r.id AS first_id,r.id AS second_id",
+        "r.Id AS first_id,r.id AS second_id",
+        "foreign.id AS input_id",
+        "r.id AS foreign.input_id",
+        "r.id AS @input_id",
+        "r.id AS input_id AS another_id",
+        "r.id AS input_id+1",
+        "r.id AS input_id COLLATE Latin1_General_100_CI_AS",
+        "r.id+1 AS input_id",
+        "ABS(r.id) AS input_id",
+        "CAST(r.id AS bigint) AS input_id",
+        "r.id input_id",
+        "input_id=r.id",
+        "r.id AS 'input_id'",
+        "r.* AS input_id",
+        "r.id AS input_id,",
+    ] {
+        for sql in statements(projection) {
+            assert!(mssql_relational_references(&sql).is_none(), "{sql}");
+        }
+    }
+}
+
+#[test]
+fn output_column_aliases_do_not_repair_repeated_nested_apply_or_relation_alias_ambiguity() {
+    for sql in [
+        "WITH input AS (SELECT r.id AS input_id FROM @Rows AS r) SELECT d.input_id FROM input AS d JOIN input AS e ON d.input_id=e.input_id",
+        "SELECT d.input_id FROM (SELECT r.id AS input_id FROM @Rows AS r) AS d CROSS APPLY dbo.hidden(d.input_id) AS f",
+        "SELECT d.input_id FROM (SELECT r.id AS input_id FROM @Rows AS r) AS d JOIN dbo.Items AS r ON d.input_id=r.id",
+        "SELECT d.input_id FROM (SELECT r.id AS input_id FROM (SELECT * FROM @Rows AS inner_rows) AS r) AS d",
+        "WITH input AS (SELECT r.id AS input_id FROM @Rows AS r) SELECT d.input_id FROM input AS r",
+    ] {
+        assert!(mssql_relational_references(sql).is_none(), "{sql}");
+    }
 }

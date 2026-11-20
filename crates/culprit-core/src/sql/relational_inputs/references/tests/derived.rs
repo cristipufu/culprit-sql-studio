@@ -7,6 +7,7 @@ fn a_closed_passthrough_retains_only_its_exact_physical_parameter_alias() {
     for sql in [
         format!("SELECT d.id FROM {PASSTHROUGH}"),
         format!("SELECT COUNT_BIG(*) FROM {PASSTHROUGH} WHERE (d.id > 10000)"),
+        "SELECT * FROM (SELECT r.id AS other FROM @Rows AS r) AS d".into(),
         "SELECT [外].id FROM (select /* not another FROM */ * from @Rows as [内]) as [外]".into(),
         ";SELECT d.id FROM (SELECT * FROM @Rows AS r) AS d;".into(),
     ] {
@@ -53,7 +54,6 @@ fn a_passthrough_never_admits_projection_population_or_nested_scope_changes() {
         "SELECT id FROM @Rows AS r",
         "SELECT r.* FROM @Rows AS r",
         "SELECT *,1 AS extra FROM @Rows AS r",
-        "SELECT r.id AS other FROM @Rows AS r",
         "SELECT TOP(1) * FROM @Rows AS r",
         "SELECT DISTINCT * FROM @Rows AS r",
         "SELECT COUNT_BIG(*) FROM @Rows AS r",

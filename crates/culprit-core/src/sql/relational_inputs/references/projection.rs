@@ -1,5 +1,5 @@
-//! Preserve names and rowsets only: a star or distinct direct columns of the one original source alias.
-use super::{Token, identifier, unsupported};
+//! Preserve rowsets only: a star or distinct direct columns of the one original source alias.
+use super::{Token, identifier, unsupported, word};
 use std::collections::BTreeSet;
 
 pub(super) fn is_direct(tokens: &[Token<'_>], source_alias: &str) -> bool {
@@ -7,17 +7,26 @@ pub(super) fn is_direct(tokens: &[Token<'_>], source_alias: &str) -> bool {
         return true;
     }
     // The existing SQL-byte bound also bounds this list. No catalog/type or current schema is consulted.
-    let mut columns = BTreeSet::new();
+    let mut inputs = BTreeSet::new();
+    let mut outputs = BTreeSet::new();
     for column in tokens.split(|token| *token == Token::Punct(',')) {
-        let [alias, Token::Punct('.'), name] = column else { return false };
-        if unsupported(alias) || unsupported(name) || identifier(alias).as_deref() != Some(source_alias) {
-            return false;
-        }
-        let Some(name) = identifier(name) else { return false };
-        // Database collation is not inferred; even a potentially valid case-sensitive duplicate stays unknown.
-        if !columns.insert(name.to_ascii_lowercase()) {
+        let Some((input, output)) = direct_column(column, source_alias) else { return false };
+        // Database collation is not inferred; potentially case-sensitive duplicates remain unknown.
+        if !inputs.insert(input.to_ascii_lowercase()) || !outputs.insert(output.to_ascii_lowercase()) {
             return false;
         }
     }
-    !columns.is_empty()
+    !inputs.is_empty()
+}
+
+fn direct_column(tokens: &[Token<'_>], source_alias: &str) -> Option<(String, String)> {
+    let (alias, name, output) = match tokens {
+        [alias, Token::Punct('.'), name] => (alias, name, name),
+        [alias, Token::Punct('.'), name, keyword, output] if word(Some(keyword), "AS") => (alias, name, output),
+        _ => return None,
+    };
+    if [alias, name, output].into_iter().any(unsupported) || identifier(alias).as_deref() != Some(source_alias) {
+        return None;
+    }
+    Some((identifier(name)?, identifier(output)?))
 }

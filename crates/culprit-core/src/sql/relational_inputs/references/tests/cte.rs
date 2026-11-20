@@ -7,6 +7,7 @@ fn a_single_closed_cte_retains_its_original_parameter_and_inner_alias() {
     for sql in [
         format!("{CTE} SELECT d.id FROM input AS d"),
         format!(";{CTE} SELECT COUNT_BIG(*) FROM input AS d WHERE (d.id > 10000);"),
+        "WITH input AS (SELECT r.id AS other FROM @Rows AS r) SELECT * FROM input AS d".into(),
         "WITH [入力] AS (select /* only this FROM */ * from @Rows as [内]) SELECT [外].id FROM [入力] AS [外]".into(),
     ] {
         let alias = if sql.contains("[内]") { "内" } else { "r" };
@@ -55,7 +56,6 @@ fn projection_population_native_functions_and_nested_scopes_are_not_passthrough_
         "SELECT id FROM @Rows AS r",
         "SELECT r.* FROM @Rows AS r",
         "SELECT *,1 AS extra FROM @Rows AS r",
-        "SELECT r.id AS other FROM @Rows AS r",
         "SELECT TOP(1) * FROM @Rows AS r",
         "SELECT DISTINCT * FROM @Rows AS r",
         "SELECT COUNT_BIG(*) FROM @Rows AS r",

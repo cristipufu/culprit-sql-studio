@@ -19,6 +19,8 @@ enum Probe {
     CteHealthy,
     ProjectedCounted,
     ProjectedHealthy,
+    AliasedCounted,
+    AliasedHealthy,
 }
 impl Probe {
     fn name(self) -> &'static str {
@@ -32,6 +34,8 @@ impl Probe {
             Self::CteHealthy => "cte_healthy_probe",
             Self::ProjectedCounted => "projected_count_probe",
             Self::ProjectedHealthy => "projected_healthy_probe",
+            Self::AliasedCounted => "aliased_count_probe",
+            Self::AliasedHealthy => "aliased_healthy_probe",
         }
     }
     fn statement(self) -> &'static str {
@@ -57,10 +61,19 @@ impl Probe {
             Self::ProjectedHealthy => {
                 "WITH input AS (SELECT r.id FROM @Rows AS r) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d"
             }
+            Self::AliasedCounted => {
+                "WITH input AS (SELECT r.id AS input_id FROM @Rows AS r) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d WHERE (d.input_id > 10000)"
+            }
+            Self::AliasedHealthy => {
+                "WITH input AS (SELECT r.id AS input_id FROM @Rows AS r) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d"
+            }
         }
     }
     fn is_healthy(self) -> bool {
-        matches!(self, Self::Healthy | Self::DerivedHealthy | Self::CteHealthy | Self::ProjectedHealthy)
+        matches!(
+            self,
+            Self::Healthy | Self::DerivedHealthy | Self::CteHealthy | Self::ProjectedHealthy | Self::AliasedHealthy
+        )
     }
     fn execution(self, rows: usize) -> String {
         assert!(matches!(rows, 1 | LARGE_INPUT));
@@ -118,6 +131,8 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
             | Probe::CteHealthy
             | Probe::ProjectedCounted
             | Probe::ProjectedHealthy
+            | Probe::AliasedCounted
+            | Probe::AliasedHealthy
     ) {
         assert_eq!(
             input.facts().table_alias.as_deref(),
@@ -167,7 +182,14 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
             .expect("measured native input estimate discrepancy");
         assert!(concern.fix_sql.is_none());
         assert!(concern.fix.contains("table-valued parameter"));
-        if matches!(case, Probe::Counted | Probe::DerivedCounted | Probe::CteCounted | Probe::ProjectedCounted) {
+        if matches!(
+            case,
+            Probe::Counted
+                | Probe::DerivedCounted
+                | Probe::CteCounted
+                | Probe::ProjectedCounted
+                | Probe::AliasedCounted
+        ) {
             assert_eq!(input.act_rows, Some(FILTERED_ROWS));
             let counts = culprit_core::t!(
                 "insight.relational_input.completed_input_counts",
@@ -299,4 +321,14 @@ async fn owned_cte_count_actual_plans_preserve_the_original_inner_alias_and_a_he
 #[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
 async fn owned_projected_cte_count_actual_plans_preserve_original_alias_and_healthy_input() {
     super::fixture::run("projected", capture_projected_probes).await;
+}
+
+async fn capture_aliased_probes(fixture: &OwnedSourceFixture, database: &str) {
+    capture_cases(fixture, database, &[Probe::AliasedCounted, Probe::AliasedHealthy]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
+async fn owned_explicit_column_aliases_keep_original_native_input_and_a_healthy_large_control() {
+    super::fixture::run("aliases", capture_aliased_probes).await;
 }
