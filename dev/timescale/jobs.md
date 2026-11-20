@@ -24,6 +24,14 @@ start/end accounting is a separate native path. See the
 [native job API](https://github.com/timescale/timescaledb/blob/2.31.0/tsl/src/bgw_policy/job_api.c) and
 [background worker lifecycle](https://github.com/timescale/timescaledb/blob/2.31.0/src/bgw/job.c).
 
+The same guarded setup also registers one separately tracked paused job with a real
+[`check_config` function](https://www.tigerdata.com/docs/reference/timescaledb/jobs-automation/add_job).
+Registration invokes that function once, incrementing an owned sequence. The native acceptance compares the
+sequence before and after the actual source factory capture and requires exactly that one invocation. It also
+requires the original schema/name and genuine absence of a checker on the two ordinary jobs. This is a required
+positive case, not a skip when the installed view or fixture is unavailable. The checker job is never scheduled;
+its objects belong to the same disposable schema and supervisor cleanup. No job config or private error is retained.
+
 Only this disposable fixture revokes PUBLIC access to `job_history`. The limited login can still read its native
 owner-filtered `job_errors`; the source must retain that weaker layout and missing verdict fields. The
 [2.31 public view definitions](https://github.com/timescale/timescaledb/blob/2.31.0/sql/views.sql) list all jobs in
@@ -34,7 +42,14 @@ owner-filtered `job_errors`; the source must retain that weaker layout and missi
 Reuse the supervisor's existing `CULPRIT_SMOKE_OWNER`, `CULPRIT_PREVIEW_PG_DATABASE`, `CULPRIT_PREVIEW_PG_PORT`,
 `CULPRIT_PREVIEW_PG_PASSWORD`, `CULPRIT_SMOKE_LIMITED_USER` and `CULPRIT_SMOKE_LIMITED_PASSWORD`. No URL or password is
 printed or retained in receipts. Test admission checks the exact native cluster marker before source acquisition.
-Fixture-oracle reads and setup work are separate from the source's measured query accounting.
+Fixture-oracle reads and setup work are separate from the source's measured query accounting. The checker case
+uses the existing native admission reader (setup plus one nonce/database read) and the existing fixture admin
+reader retained across capture (setup, job map and two counter reads: four dispatches). The latter keeps its
+one-second statement limit, eight-call cap and the existing 20-second fixture-case deadline; the production source
+still has its five-second total limit. The source receipt contains seven dispatches: one session setup and the
+unchanged six native acquisition calls. The source's eight-call cap and 256-row state cap plus one lookahead remain
+unchanged. Sequence registration and the five additional setup statements belong to the existing supervisor SQL
+connection and are outside that source receipt. Passing conformance does not qualify server cost.
 
 The supervisor skips these optional jobs cases in a broad ordinary PostgreSQL selection. Run the installed
 Timescale cases through the owned fixture supervisor:
@@ -45,7 +60,7 @@ python3 dev/smoke-providers.py timescale \
   --test culprit-postgres telemetry::native_tests::jobs::limits::
 ```
 
-- `telemetry::native_tests::jobs::compatibility::` — two installed-view, native-state/failure and limited-visibility cases.
+- `telemetry::native_tests::jobs::compatibility::` — three installed-view, native-state/failure, limited-visibility and non-invoking configuration-check cases.
 - `telemetry::native_tests::jobs::limits::` — four row/query/byte, frozen paging and retirement cases.
 
 Each test is individually ignored. The existing supervisor runs the crate library with `--ignored --test-threads=1`
@@ -59,4 +74,11 @@ against absent job views. Do not include that case in the installed Timescale se
 ```sh
 python3 dev/smoke-providers.py postgres \
   --test culprit-postgres telemetry::native_tests::jobs::absent::
+```
+
+The exact new positive selector is:
+
+```sh
+python3 dev/smoke-providers.py timescale \
+  --test culprit-postgres telemetry::native_tests::jobs::compatibility::configured_validation_function_is_recorded_without_invocation_during_collection
 ```

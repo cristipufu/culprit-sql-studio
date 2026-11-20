@@ -178,9 +178,8 @@ fn inaccessible_or_absent_views_retain_coverage_without_inventing_empty_success(
     assert!(metadata.is_valid());
 }
 
-#[test]
-fn sharing_withholds_the_read_endpoint_owner_and_paths_but_preserves_valid_exact_native_measurements() {
-    let point = TimescaleJobState {
+fn state() -> TimescaleJobState {
+    TimescaleJobState {
         position: 1,
         observed_at: "2020-01-02T12:00:00.5Z".into(),
         job_id: "1000".into(),
@@ -192,6 +191,10 @@ fn sharing_withholds_the_read_endpoint_owner_and_paths_but_preserves_valid_exact
         max_retries: "-1".into(),
         retry_period: "00:05:00".into(),
         fixed_schedule: Some(true),
+        configuration_check: Some(TimescaleJobProcedure {
+            schema: "public".into(),
+            name: "/private/job-check-canary".into(),
+        }),
         initial_start: Some(TimescaleJobTimestamp::NegativeInfinity),
         next_start: None,
         hypertable: None,
@@ -206,7 +209,12 @@ fn sharing_withholds_the_read_endpoint_owner_and_paths_but_preserves_valid_exact
             total_successes: Some("0".into()),
             total_failures: None,
         }),
-    };
+    }
+}
+
+#[test]
+fn sharing_withholds_the_read_endpoint_owner_and_paths_but_preserves_valid_exact_native_measurements() {
+    let point = state();
     let row = OperationalObservation {
         source: TIMESCALE_JOBS_SOURCE.into(),
         key: point.key().unwrap(),
@@ -225,7 +233,9 @@ fn sharing_withholds_the_read_endpoint_owner_and_paths_but_preserves_valid_exact
     let read = shared.operations.jobs.as_ref().unwrap();
     assert!(read.is_valid());
     let json = serde_json::to_string(read).unwrap();
-    for private in ["owned.invalid", "private-job-owner-canary", "/private/job-procedure-canary"] {
+    for private in
+        ["owned.invalid", "private-job-owner-canary", "/private/job-procedure-canary", "/private/job-check-canary"]
+    {
         assert!(!json.contains(private), "{private}");
     }
     assert!(json.contains("9007199254740993"));
@@ -305,4 +315,28 @@ fn stored_labels_require_the_verified_original_view_contract_and_never_current_d
         TimescaleJobProcedureOrigin::for_view("2.99.0", TimescaleJobViewKind::History),
         TimescaleJobProcedureOrigin::Unknown
     );
+}
+
+#[test]
+fn configuration_function_labels_are_required_nullable_and_do_not_supply_a_new_job_identity() {
+    let original = state();
+    assert!(original.is_valid());
+    let value = serde_json::to_value(&original).unwrap();
+    let mut missing = value.clone();
+    missing.as_object_mut().unwrap().remove("configuration_check");
+    assert!(serde_json::from_value::<TimescaleJobState>(missing).is_err());
+    let mut none = original.clone();
+    none.configuration_check = None;
+    assert!(none.is_valid());
+    assert_eq!(none.key().unwrap(), original.key().unwrap());
+    assert_eq!(serde_json::from_value::<TimescaleJobState>(serde_json::to_value(&none).unwrap()).unwrap(), none);
+    for (schema, name) in [
+        ("".into(), "check".into()),
+        ("public".into(), "".into()),
+        ("public".into(), "x".repeat(MAX_TIMESCALE_JOB_LABEL_BYTES + 1)),
+    ] {
+        let mut invalid = original.clone();
+        invalid.configuration_check = Some(TimescaleJobProcedure { schema, name });
+        assert!(!invalid.is_valid());
+    }
 }

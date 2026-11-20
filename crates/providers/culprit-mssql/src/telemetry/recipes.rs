@@ -271,7 +271,7 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.settings", Settings).baseline().version(3),
     streamed!("mssql.statement-grants", StatementGrants, grants::Grants),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations),
-    streamed!("mssql.tables", Tables, tables::Tables),
+    streamed!("mssql.tables", Tables, tables::Tables).version(2),
     streamed!("mssql.foreign-keys", ForeignKeys, foreign_keys::ForeignKeys),
     streamed!("mssql.columns", Columns, columns::Columns),
     streamed!("mssql.statistics", Statistics, statistics::Statistics),

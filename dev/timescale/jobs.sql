@@ -84,6 +84,36 @@ BEGIN
 END
 $$;
 
+-- The documented check_config FUNCTION runs once at registration. This paused job never enters a worker.
+-- Collection must retain its label without running it again; sequence state is an independent fixture oracle.
+-- https://www.tigerdata.com/docs/reference/timescaledb/jobs-automation/add_job
+/* culprit:fixture */ CREATE SEQUENCE culprit_jobs_test.configuration_check_calls;
+/* culprit:fixture */ CREATE FUNCTION culprit_jobs_test.validate_native_configuration(config jsonb) RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM pg_catalog.nextval('culprit_jobs_test.configuration_check_calls'::regclass);
+    IF config->>'private' IS DISTINCT FROM 'culprit-jobs-private-config-canary' THEN
+        RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='culprit-jobs-private-error-canary';
+    END IF;
+END
+$$;
+/* culprit:fixture */ CREATE TABLE culprit_jobs_test.configuration_check_job (job_id integer PRIMARY KEY);
+/* culprit:fixture */ INSERT INTO culprit_jobs_test.configuration_check_job
+SELECT public.add_job('culprit_jobs_test.fail_native_job'::regproc,INTERVAL '1 day',
+    config=>' {"private":"culprit-jobs-private-config-canary"}'::jsonb,scheduled=>false,
+    check_config=>'culprit_jobs_test.validate_native_configuration'::regproc);
+/* culprit:fixture */ DO $$
+BEGIN
+    IF (SELECT last_value<>1 OR NOT is_called FROM culprit_jobs_test.configuration_check_calls)
+       OR (SELECT count(*) FROM culprit_jobs_test.configuration_check_job fixture
+           JOIN timescaledb_information.jobs job USING(job_id)
+           WHERE NOT job.scheduled AND job.check_schema='culprit_jobs_test'
+             AND job.check_name='validate_native_configuration') <> 1 THEN
+        RAISE EXCEPTION 'The owned paused checker job must have exactly one registration invocation';
+    END IF;
+END
+$$;
+
 -- Deliberate fixture-only permission difference. PUBLIC job_errors remains owner-filtered by the native view.
 /* culprit:fixture */ REVOKE SELECT ON timescaledb_information.job_history FROM PUBLIC;
 /* culprit:fixture */ SELECT kind,job_id,owner FROM culprit_jobs_test.fixture_jobs ORDER BY kind;

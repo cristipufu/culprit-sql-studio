@@ -26,6 +26,8 @@ pub(super) fn states(jobs: &View, statistics: Option<&View>, limit: u32) -> Stri
         "max_retries",
         "retry_period",
         "fixed_schedule",
+        "check_schema",
+        "check_name",
         "hypertable_schema",
         "hypertable_name",
     ] {

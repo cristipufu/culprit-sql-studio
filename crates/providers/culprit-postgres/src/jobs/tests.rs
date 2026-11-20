@@ -14,10 +14,11 @@ async fn frozen_pages_and_verification_reuse_the_original_job_read_and_close_onc
     let description = source.describe().await.unwrap();
     let queries = source.query_count();
     assert!(description.observation.covers_request());
-    assert!(matches!(
-        source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap(),
-        CollectionRead::Page { next_cursor: None, .. }
-    ));
+    let page = source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap();
+    let CollectionRead::Page { records, next_cursor: None } = page else { panic!("original bounded job page") };
+    assert!(records.iter().any(|record| matches!(record, TelemetryRecord::Operational(OperationalObservation {
+        fact: OperationalFact::TimescaleJobState(point), ..
+    }) if point.configuration_check.as_ref().is_some_and(|check| check.name == "validate_owned_configuration"))));
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
     assert_eq!(source.query_count(), queries);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);

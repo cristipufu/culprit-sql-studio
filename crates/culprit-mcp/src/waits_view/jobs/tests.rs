@@ -44,6 +44,10 @@ fn state(index: u32) -> OperationalObservation {
         max_retries: "-1".into(),
         retry_period: "00:05:00".into(),
         fixed_schedule: Some(true),
+        configuration_check: Some(TimescaleJobProcedure {
+            schema: "public".into(),
+            name: "private-configuration-check".into(),
+        }),
         initial_start: None,
         next_start: None,
         hypertable: None,
@@ -146,6 +150,7 @@ fn jobs_recompute_raw_points_keep_full_counts_and_bound_presentation_without_phy
         "private-job-host",
         "private-job-owner",
         "private-job-procedure",
+        "private-configuration-check",
         "private-job-reported-procedure",
         "2147483647",
     ] {

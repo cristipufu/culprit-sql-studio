@@ -7,7 +7,11 @@ export type TimescaleJobState = {
 /**
  * Original bounded read position. Repeated native job IDs are retained without picking a representative.
  */
-position: number, observed_at: string, job_id: string, procedure: TimescaleJobProcedure, owner: string, scheduled: boolean, schedule_interval: string, max_runtime: string, max_retries: string, retry_period: string, fixed_schedule: boolean | null, initial_start: TimescaleJobTimestamp | null, next_start: TimescaleJobTimestamp | null, 
+position: number, observed_at: string, job_id: string, procedure: TimescaleJobProcedure, owner: string, scheduled: boolean, schedule_interval: string, max_runtime: string, max_retries: string, retry_period: string, fixed_schedule: boolean | null, 
+/**
+ * Current optional configuration-validation function label, not an executed procedure or historical binding.
+ */
+configuration_check: TimescaleJobProcedure | null, initial_start: TimescaleJobTimestamp | null, next_start: TimescaleJobTimestamp | null, 
 /**
  * Native associated-object label; not an object incarnation or a historical execution binding.
  */

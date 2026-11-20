@@ -1,5 +1,6 @@
 use super::support::*;
-use culprit_core::telemetry::*;
+use crate::read::{NativeRead, QueryRead};
+use culprit_core::{SourceState, telemetry::*};
 
 #[tokio::test]
 #[ignore = "requires nonce-owned Timescale 2.31 fixture prepared by dev/timescale/jobs.sql; see dev/timescale/jobs.md"]
@@ -77,4 +78,62 @@ async fn limited_history_permission_uses_the_real_owner_filtered_error_view_with
     );
     assert_runs_are_partial(read);
     assert!(coverage(read, TIMESCALE_JOB_RUNS_SOURCE).error_code.is_none());
+}
+
+#[tokio::test]
+#[ignore = "requires the nonce-owned paused configuration-check job from dev/timescale/jobs.sql"]
+async fn configured_validation_function_is_recorded_without_invocation_during_collection() {
+    const COUNTER: &str = "SELECT fixture.job_id::text AS job_id,calls.last_value::text AS invocations,calls.is_called FROM culprit_jobs_test.configuration_check_job fixture CROSS JOIN culprit_jobs_test.configuration_check_calls calls LIMIT 2";
+    let (fixture, before, captured, after, admin_queries) = Fixture::with_admin(|fixture, reader, cancellation| {
+        Box::pin(async move {
+            let before = reader.query(COUNTER, 2).await.expect("owned checker invocation baseline");
+            let captured = capture_with_cancellation(&fixture.admin, request(), cancellation).await;
+            let after = reader.query(COUNTER, 2).await.expect("owned checker invocation final point");
+            (fixture, before, captured, after, reader.queries())
+        })
+    })
+    .await;
+    assert_eq!(admin_queries, 4, "fixture setup, job map, and before/after invocation reads are separate");
+    assert_eq!(before.len(), 1);
+    assert_eq!(after.len(), 1);
+    let before = &before[0];
+    let after = &after[0];
+    let id = before.unsigned_text("job_id").unwrap().unwrap();
+    assert!(id.parse::<u32>().is_ok_and(|value| value > 0));
+    assert_eq!(after.unsigned_text("job_id").unwrap().as_deref(), Some(id.as_str()));
+    for point in [before, after] {
+        assert_eq!(point.value("is_called"), Some(Some("t")), "registration genuinely invokes the checker");
+        assert_eq!(point.unsigned_text("invocations").unwrap().as_deref(), Some("1"));
+    }
+    assert_eq!(captured.manifest.source_queries, 7, "one source setup plus the unchanged six acquisition calls");
+    assert_eq!(request().budget.max_queries, 8);
+    assert_eq!(captured.manifest.status, CollectionStatus::Complete);
+    let snapshot = &captured.snapshot;
+    assert_eq!(
+        snapshot.metadata.extension.as_ref().unwrap().qualifiers.get("version").map(String::as_str),
+        Some("2.31.0")
+    );
+    assert_eq!(snapshot.metadata.view(TimescaleJobViewKind::Jobs).unwrap().state, TimescaleJobViewState::Available);
+    assert_eq!(coverage(snapshot, TIMESCALE_JOBS_SOURCE).state, SourceState::Collected);
+    let point = state(snapshot, &id);
+    assert!(!point.scheduled);
+    assert_eq!(
+        point.configuration_check,
+        Some(TimescaleJobProcedure {
+            schema: "culprit_jobs_test".into(),
+            name: "validate_native_configuration".into(),
+        })
+    );
+    for id in fixture.jobs.values() {
+        assert!(state(snapshot, id).configuration_check.is_none(), "ordinary native jobs have no invented checker");
+    }
+    assert!(point.observed_at.ends_with('Z'));
+    assert!(snapshot.context.observed_from.ends_with('Z') && snapshot.context.observed_until.ends_with('Z'));
+    assert_runs_are_partial(snapshot);
+    let json = serde_json::to_string(&captured.manifest).unwrap() + &serde_json::to_string(snapshot).unwrap();
+    assert!(!json.contains(PRIVATE_CONFIG));
+    assert!(!json.contains(PRIVATE_ERROR));
+    assert_settled(captured.manifest.read_metrics.as_ref().unwrap(), captured.manifest.source_queries);
+    let recipe = crate::telemetry_recipes().into_iter().find(|recipe| recipe.id == "postgres.timescale-jobs").unwrap();
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
 }

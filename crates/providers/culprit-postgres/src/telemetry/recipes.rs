@@ -106,7 +106,7 @@ impl Registration {
 const REGISTRATIONS: &[Registration] = &[
     Registration {
         id: "postgres.timescale-jobs",
-        version: 1,
+        version: 2,
         purpose: RecipePurpose::Investigation,
         subject: RecipeSubject::Database,
         route: Route::Jobs,

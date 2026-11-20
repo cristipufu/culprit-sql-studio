@@ -51,6 +51,7 @@ pub(super) fn state(row: &Row, position: u32) -> Result<TimescaleJobState> {
         max_retries: text(row, "max_retries")?,
         retry_period: text(row, "retry_period")?,
         fixed_schedule: optional_flag(row, "fixed_schedule")?,
+        configuration_check: procedure(row, "check_schema", "check_name")?,
         initial_start: timestamp(row, "initial_start")?,
         next_start: timestamp(row, "next_start")?,
         hypertable: procedure(row, "hypertable_schema", "hypertable_name")?,

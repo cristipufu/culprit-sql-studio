@@ -110,3 +110,42 @@ async fn native_nulls_and_duplicate_job_ids_never_gain_worker_current_definition
 }
 
 mod mssql_agent;
+
+#[tokio::test]
+async fn current_validation_function_survives_authenticated_readback_without_attaching_to_run_history() {
+    for case in [JobsCase::Failed, JobsCase::Running, JobsCase::Limited] {
+        let (source, records) = jobs_evidence(case);
+        let original = records.clone();
+        let fixture = Fixture::new(source.clone(), records).await;
+        let capture = fixture.read_families(FAMILY).await;
+        assert_jobs_capture(&capture, &source, &original);
+        let analysis = collected_resources::jobs(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.context.records.len(), original.len());
+        let current =
+            analysis.report.entries.iter().find(|entry| entry.kind == culprit_core::JobEntryKind::State).unwrap();
+        assert!(current.metrics.iter().any(|metric| metric.is("view.jobs.metric.configuration_check")
+            && metric.text.as_deref() == Some("current_schema.current_configuration_check")));
+        for run in analysis.report.entries.iter().filter(|entry| entry.kind == culprit_core::JobEntryKind::RetainedRun)
+        {
+            assert!(run.metrics.iter().all(|metric| !metric.is("view.jobs.metric.configuration_check")));
+            assert!(!run.explanation.contains(&culprit_core::t!("view.jobs.configuration_check.recorded")));
+        }
+        let state = analysis
+            .context
+            .records
+            .iter()
+            .find_map(|record| match &record.row.record {
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::TimescaleJobState(point),
+                    ..
+                }) => Some(point),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(state.configuration_check.as_ref().unwrap().name, "current_configuration_check");
+        if matches!(case, JobsCase::Limited) {
+            assert!(analysis.report.sources.iter().all(|source| source.state == SourceState::Partial));
+        }
+    }
+}

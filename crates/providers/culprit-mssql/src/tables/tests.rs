@@ -25,7 +25,28 @@ pub(crate) fn row() -> Rec {
         ("sizes_available", Val::Int(1)),
         ("has_primary_key", Val::Int(1)),
         ("is_heap", Val::Int(0)),
+        ("full_text_availability", Val::Int(0)),
+        ("full_text_object_id", Val::Int(100)),
+        ("full_text_unique_index_id", Val::Int(1)),
+        ("full_text_catalog_id", Val::Int(3)),
+        ("full_text_enabled", Val::Int(0)),
+        ("full_text_change_tracking", Val::Text("M".into())),
+        ("full_text_last_crawl_completed", Val::Int(1)),
     ])
+}
+pub(crate) fn without_full_text(availability: i64) -> Rec {
+    replace(
+        &row(),
+        &[
+            ("full_text_availability", Val::Int(availability)),
+            ("full_text_object_id", Val::Null),
+            ("full_text_unique_index_id", Val::Null),
+            ("full_text_catalog_id", Val::Null),
+            ("full_text_enabled", Val::Null),
+            ("full_text_change_tracking", Val::Null),
+            ("full_text_last_crawl_completed", Val::Null),
+        ],
+    )
 }
 #[tokio::test]
 async fn scan_projection_uses_the_same_exact_native_values_and_declares_limited_metadata() {
@@ -36,6 +57,11 @@ async fn scan_projection_uses_the_same_exact_native_values_and_declares_limited_
     assert_eq!(result.tables[0].rows, Some(9_007_199_254_740_993_u64 as f64));
     assert_eq!(result.tables[0].total_bytes, Some(81920.0));
     assert_eq!(result.tables[0].in_row_bytes, Some(32768.0));
+    let full_text = result.tables[0].mssql_full_text.as_ref().unwrap();
+    assert_eq!(full_text, &decode(&row(), &Layout::new(true)).unwrap().full_text);
+    let index = full_text.index.as_ref().unwrap();
+    assert_eq!(index.enabled, Some(false));
+    assert_eq!(index.last_crawl_completed, Some(true));
     assert_eq!(reader.calls.len(), 2);
     assert!(reader.calls[1].sql.contains("sys.dm_db_partition_stats"));
     let mut limited = FakeRead::new(vec![Ok(vec![metadata(false)]), Ok(vec![row()])]);
@@ -84,6 +110,25 @@ async fn failed_or_oversized_table_reads_do_not_retry_or_fall_back_to_table_cont
         application(&mut oversized, true).await.err().unwrap().detail,
         Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::RowLimit))
     );
-    assert!(oversized.calls[1].sql.contains("SELECT TOP (@P1)"));
+    assert!(oversized.calls[1].sql.contains("TOP (@P1)"));
     assert_eq!(oversized.calls[1].limit, MAX_APPLICATION_TABLES + 1);
+}
+
+#[tokio::test]
+async fn unavailable_full_text_catalogs_preserve_the_same_bounded_table_projection() {
+    for (native, expected) in [
+        (1, MssqlFullTextCatalogAvailability::Unsupported),
+        (2, MssqlFullTextCatalogAvailability::PermissionDenied),
+        (3, MssqlFullTextCatalogAvailability::Unknown),
+    ] {
+        let mut reader = FakeRead::new(vec![Ok(vec![metadata(true)]), Ok(vec![without_full_text(native)])]);
+        let result = application(&mut reader, true).await.unwrap();
+        assert!(result.complete_scope);
+        let table = &result.tables[0];
+        assert_eq!(table.total_bytes, Some(81920.0));
+        assert_eq!(table.mssql_full_text.as_ref().unwrap().availability, expected);
+        assert!(table.mssql_full_text.as_ref().unwrap().index.is_none());
+        assert_eq!(reader.calls.len(), 2);
+        assert_eq!(reader.calls[1].limit, MAX_APPLICATION_TABLES + 1);
+    }
 }

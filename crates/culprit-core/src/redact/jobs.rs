@@ -27,6 +27,9 @@ fn redact_timescale(
             OperationalFact::TimescaleJobState(point) => {
                 point.owner = opaque(&point.owner);
                 procedure(&mut point.procedure);
+                if let Some(check) = &mut point.configuration_check {
+                    procedure(check);
+                }
                 if let Some(object) = &mut point.hypertable {
                     procedure(object);
                 }

@@ -624,6 +624,7 @@ fn table(t: &SchemaTable, rows: Option<f64>, data: Option<f64>, index_bytes: f64
         xid_age: None,
         forwarded_fetches: None,
         storage: None,
+        mssql_full_text: None,
         in_row_bytes: None,
         lob_bytes: None,
         overflow_bytes: None,

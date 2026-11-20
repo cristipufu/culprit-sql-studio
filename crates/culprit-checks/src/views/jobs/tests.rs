@@ -175,3 +175,5 @@ fn a_stored_reported_label_is_available_without_becoming_a_definition_or_resourc
 mod policy;
 
 mod agent;
+
+mod configuration_check;

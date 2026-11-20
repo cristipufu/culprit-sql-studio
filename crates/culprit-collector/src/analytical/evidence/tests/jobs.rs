@@ -35,6 +35,25 @@ async fn jobs_reconstruct_from_the_existing_operational_projection_with_original
                     panic!("bounded native job facts stay inline")
                 };
                 assert_eq!(*actual, expected);
+                if matches!(&expected.record, TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::TimescaleJobState(point), ..
+                }) if point.configuration_check.is_some())
+                {
+                    let mut altered = values.clone();
+                    let details = altered.get_mut("Details").unwrap();
+                    *details.pointer_mut("/configuration_check/name").unwrap() =
+                        serde_json::json!("another_configuration_check");
+                    let changed: TimescaleJobState = serde_json::from_value(details.clone()).unwrap();
+                    assert!(changed.is_valid(), "the altered native label remains well formed");
+                    assert_eq!(changed.key().unwrap(), altered["FactKey"].as_str().unwrap());
+                    assert!(
+                        matches!(
+                            decode::record(&range, batch.stream, &altered, &batch.rows[index]).unwrap(),
+                            decode::Decoded::Unavailable(EvidenceGapReason::NativeRepresentationRequired)
+                        ),
+                        "a valid changed label cannot borrow the original immutable native row receipt"
+                    );
+                }
             }
         }
     }

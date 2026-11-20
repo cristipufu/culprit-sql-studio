@@ -846,7 +846,7 @@
         "table": "orders"
       }
     ],
-    "format": 26,
+    "format": 27,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -1142,6 +1142,7 @@
         "last_vacuum": null,
         "lob_bytes": null,
         "modifications_since_analyze": null,
+        "mssql_full_text": null,
         "name": "customers",
         "overflow_bytes": null,
         "partition_of": null,
@@ -1171,6 +1172,7 @@
         "last_vacuum": null,
         "lob_bytes": null,
         "modifications_since_analyze": null,
+        "mssql_full_text": null,
         "name": "import_staging",
         "overflow_bytes": null,
         "partition_of": null,
@@ -1200,6 +1202,7 @@
         "last_vacuum": null,
         "lob_bytes": null,
         "modifications_since_analyze": null,
+        "mssql_full_text": null,
         "name": "order_items",
         "overflow_bytes": null,
         "partition_of": null,
@@ -1229,6 +1232,7 @@
         "last_vacuum": null,
         "lob_bytes": null,
         "modifications_since_analyze": null,
+        "mssql_full_text": null,
         "name": "orders",
         "overflow_bytes": null,
         "partition_of": null,
@@ -1258,6 +1262,7 @@
         "last_vacuum": null,
         "lob_bytes": null,
         "modifications_since_analyze": null,
+        "mssql_full_text": null,
         "name": "products",
         "overflow_bytes": null,
         "partition_of": null,

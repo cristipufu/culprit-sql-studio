@@ -126,6 +126,9 @@ pub struct TimescaleJobState {
     pub max_retries: String,
     pub retry_period: String,
     pub fixed_schedule: Option<bool>,
+    /// Current optional configuration-validation function label, not an executed procedure or historical binding.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub configuration_check: Option<TimescaleJobProcedure>,
     pub initial_start: Option<TimescaleJobTimestamp>,
     pub next_start: Option<TimescaleJobTimestamp>,
     /// Native associated-object label; not an object incarnation or a historical execution binding.
@@ -145,6 +148,7 @@ impl TimescaleJobState {
                 .all(|value| label(value, 128))
             && self.max_retries.parse::<i32>().is_ok_and(|value| value.to_string() == self.max_retries)
             && [&self.initial_start, &self.next_start].into_iter().flatten().all(TimescaleJobTimestamp::is_valid)
+            && self.configuration_check.as_ref().is_none_or(TimescaleJobProcedure::is_valid)
             && self.hypertable.as_ref().is_none_or(TimescaleJobProcedure::is_valid)
             && self.statistics.as_ref().is_none_or(TimescaleJobStatistics::is_valid)
     }

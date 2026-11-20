@@ -22,7 +22,7 @@ pub use workload::{
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
 /// or mean something else.
-pub const SNAPSHOT_FORMAT: u32 = 26;
+pub const SNAPSHOT_FORMAT: u32 = 27;
 
 /// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
 mod current_format {
@@ -428,6 +428,8 @@ pub struct TableStat {
     pub forwarded_fetches: Option<f64>,
     /// How updates land on its pages and how much is empty space (PostgreSQL).
     pub storage: Option<crate::signals::TableStorage>,
+    /// SQL Server's original table-scoped full-text catalog metadata; unavailable on other providers.
+    pub mssql_full_text: Option<crate::telemetry::MssqlTableFullText>,
     /// Bytes of the table's own rows (its heap or clustered index) kept in the rows' pages. With `lob_bytes` and
     /// `overflow_bytes`, how its data splits between the rows and the large values kept apart from them. `None` where
     /// the engine doesn't say.

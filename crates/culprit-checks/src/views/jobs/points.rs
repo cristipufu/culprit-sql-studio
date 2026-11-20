@@ -38,6 +38,14 @@ pub(super) fn state(row: &OperationalObservation, point: &TimescaleJobState, dup
         Metric::said_text(culprit_core::key!("view.jobs.metric.retry_period"), &point.retry_period),
         Metric::said_text(culprit_core::key!("view.jobs.metric.max_retries"), &point.max_retries),
     ];
+    if let Some(check) = &point.configuration_check {
+        metrics.push(Metric::said_text(
+            culprit_core::key!("view.jobs.metric.configuration_check"),
+            format!("{}.{}", check.schema, check.name),
+        ));
+        explanation.push(' ');
+        explanation.push_str(&t!("view.jobs.configuration_check.recorded"));
+    }
     if let Some(fixed) = point.fixed_schedule {
         metrics.push(Metric::said_text(culprit_core::key!("view.jobs.metric.fixed_schedule"), fixed.to_string()));
     }

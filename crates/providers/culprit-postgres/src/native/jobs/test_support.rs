@@ -16,6 +16,8 @@ pub(crate) fn catalog() -> Vec<Row> {
                 ("max_retries", 23),
                 ("retry_period", 1186),
                 ("fixed_schedule", 16),
+                ("check_schema", 19),
+                ("check_name", 19),
                 ("initial_start", 1184),
                 ("next_start", 1184),
                 ("hypertable_schema", 19),
@@ -88,6 +90,9 @@ pub(crate) fn catalog() -> Vec<Row> {
         .collect()
 }
 pub(crate) fn state() -> Row {
+    state_with_configuration_check(Some("public"), Some("validate_owned_configuration"))
+}
+pub(crate) fn state_with_configuration_check(schema: Option<&str>, name: Option<&str>) -> Row {
     row(&[
         ("observed_at", Some(AT)),
         ("job_id", Some("1000")),
@@ -100,6 +105,8 @@ pub(crate) fn state() -> Row {
         ("max_retries", Some("-1")),
         ("retry_period", Some("00:05:00")),
         ("fixed_schedule", Some("t")),
+        ("check_schema", schema),
+        ("check_name", name),
         ("initial_start", Some("-infinity")),
         ("next_start", Some("infinity")),
         ("hypertable_schema", None),

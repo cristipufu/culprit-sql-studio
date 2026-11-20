@@ -1,11 +1,12 @@
-use super::super::owned_fixture;
+use super::super::{case, owned_fixture};
 use crate::{
     connect::Connector,
     read::{NativeRead, QueryRead, ReadSession},
 };
 use culprit_collector::capture::CollectionCancellation;
 use culprit_core::{ConnectionSpec, SourceState, telemetry::*};
-use std::{collections::BTreeMap, time::Duration};
+use futures_util::{FutureExt, future::LocalBoxFuture};
+use std::{collections::BTreeMap, panic::AssertUnwindSafe, time::Duration};
 
 pub(super) const CASE_TIMEOUT: Duration = Duration::from_secs(20);
 pub(super) const PRIVATE_ERROR: &str = "culprit-jobs-private-error-canary";
@@ -31,18 +32,48 @@ pub(super) async fn owned_spec(database: &str) -> ConnectionSpec {
 
 impl Fixture {
     pub(super) async fn open() -> Self {
+        Self::with_admin(|fixture, _, _| Box::pin(async move { fixture })).await
+    }
+
+    /// Keep the existing fixture reader through the oracle interval, then close it before returning or unwinding.
+    pub(super) async fn with_admin<T>(
+        body: for<'a> fn(Self, &'a mut ReadSession, &'a CollectionCancellation) -> LocalBoxFuture<'a, T>,
+    ) -> T {
         let admin = owned_spec("culprit_timescale").await;
-        let mut reader = ReadSession::new(Connector::new(&admin).unwrap(), request().budget);
-        let result = reader
-            .query("SELECT kind,job_id::text AS job_id FROM culprit_jobs_test.fixture_jobs ORDER BY kind", 3)
-            .await;
-        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+        // Fixture-oracle work has its own existing case deadline; the source retains its five-second budget.
+        let admin_budget =
+            CollectionBudget { total_timeout_ms: CASE_TIMEOUT.as_millis().try_into().unwrap(), ..request().budget };
+        let mut reader = ReadSession::new(Connector::new(&admin).unwrap(), admin_budget);
+        let cancellation = CollectionCancellation::default();
+        let completed = case::finish(
+            CASE_TIMEOUT,
+            &cancellation,
+            AssertUnwindSafe(async {
+                let fixture = Self::read(admin, &mut reader).await;
+                body(fixture, &mut reader, &cancellation).await
+            })
+            .catch_unwind(),
+        )
+        .await;
+        let shutdown = reader.close().await;
+        eprintln!(
+            "owned jobs fixture admin_queries={} shutdown={shutdown:?}; source work is accounted separately",
+            reader.queries()
+        );
+        let value = completed.value.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        assert_eq!(shutdown, SourceShutdown::Quiescent);
         assert_settled(&reader.metrics().unwrap(), reader.queries());
-        let jobs = result
-            .expect("supervisor-prepared paused jobs")
-            .iter()
-            .map(|row| (row.text("kind").unwrap(), row.text("job_id").unwrap()))
-            .collect::<BTreeMap<_, _>>();
+        assert!(!completed.deadline_reached, "owned jobs case exceeded its existing absolute deadline");
+        value
+    }
+
+    async fn read(admin: ConnectionSpec, reader: &mut ReadSession) -> Self {
+        let rows = reader
+            .query("SELECT kind,job_id::text AS job_id FROM culprit_jobs_test.fixture_jobs ORDER BY kind", 3)
+            .await
+            .expect("supervisor-prepared paused jobs");
+        let jobs =
+            rows.iter().map(|row| (row.text("kind").unwrap(), row.text("job_id").unwrap())).collect::<BTreeMap<_, _>>();
         assert_eq!(jobs.keys().map(String::as_str).collect::<Vec<_>>(), vec!["admin", "limited"]);
         assert!(jobs.values().all(|id| id.parse::<u32>().is_ok_and(|id| id > 0)));
         let mut limited = admin.clone();
@@ -58,7 +89,15 @@ pub(super) struct Captured {
 }
 
 pub(super) async fn capture(specification: &ConnectionSpec, request: CollectionRequest) -> Captured {
-    let captured = owned_fixture::capture(specification, request, &CollectionCancellation::default()).await;
+    capture_with_cancellation(specification, request, &CollectionCancellation::default()).await
+}
+
+pub(super) async fn capture_with_cancellation(
+    specification: &ConnectionSpec,
+    request: CollectionRequest,
+    cancellation: &CollectionCancellation,
+) -> Captured {
+    let captured = owned_fixture::capture(specification, request, cancellation).await;
     let source = captured.source();
     let observations = captured
         .records

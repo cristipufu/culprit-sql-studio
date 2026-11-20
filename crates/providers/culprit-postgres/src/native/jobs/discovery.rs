@@ -218,6 +218,8 @@ fn supported(kind: TimescaleJobViewKind, columns: &BTreeMap<String, u32>) -> boo
     let optional: &[(&str, &[u32])] = match kind {
         TimescaleJobViewKind::Jobs => &[
             ("fixed_schedule", &[16]),
+            ("check_schema", &[19, 25]),
+            ("check_name", &[19, 25]),
             ("initial_start", &[1184]),
             ("next_start", &[1184]),
             ("hypertable_schema", &[19, 25]),
@@ -238,6 +240,9 @@ fn supported(kind: TimescaleJobViewKind, columns: &BTreeMap<String, u32>) -> boo
             &[("pid", &[23]), ("sqlerrcode", &[25]), ("proc_schema", &[19, 25]), ("proc_name", &[19, 25])]
         }
     };
-    required.iter().all(|(key, allowed)| columns.get(*key).is_some_and(|oid| allowed.contains(oid)))
+    let complete_configuration_check = kind != TimescaleJobViewKind::Jobs
+        || columns.contains_key("check_schema") == columns.contains_key("check_name");
+    complete_configuration_check
+        && required.iter().all(|(key, allowed)| columns.get(*key).is_some_and(|oid| allowed.contains(oid)))
         && optional.iter().all(|(key, allowed)| columns.get(*key).is_none_or(|oid| allowed.contains(oid)))
 }

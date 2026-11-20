@@ -445,11 +445,48 @@ async fn table_capture_shares_native_decoding_and_requires_full_metadata_visibil
         let TelemetryRecord::Operational(observation) = &records[0] else { panic!("operational") };
         let OperationalFact::MssqlTable(table) = &observation.fact else { panic!("table") };
         assert_eq!(table.estimated_rows.as_deref(), Some("9007199254740993"));
+        assert_eq!(table.full_text.index.as_ref().unwrap().enabled, Some(false));
+        assert_eq!(table.full_text.index.as_ref().unwrap().last_crawl_completed, Some(true));
         assert_eq!(observation.key, table.identity.key().unwrap());
         let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
         assert_eq!(completed.observation.snapshot().unwrap().records, 1);
         assert_eq!(completed.observation.snapshot().unwrap().sources[0].source, crate::sources::TABLES.name);
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn full_text_catalog_availability_survives_original_stream_sealing_without_an_extra_read() {
+    use crate::telemetry::tables::Tables;
+    for (native, expected) in [
+        (0, MssqlFullTextCatalogAvailability::Available),
+        (1, MssqlFullTextCatalogAvailability::Unsupported),
+        (2, MssqlFullTextCatalogAvailability::PermissionDenied),
+        (3, MssqlFullTextCatalogAvailability::Unknown),
+    ] {
+        let mut source =
+            catalog_source(Tables, crate::tables::tests::without_full_text(native), true, true, Default::default());
+        let initial = source.describe().await.unwrap();
+        let CollectionRead::Page { records, next_cursor } =
+            source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
+        else {
+            panic!("page")
+        };
+        assert!(next_cursor.is_none());
+        let bytes = serde_json::to_vec(&records[0]).unwrap();
+        let retained: TelemetryRecord = serde_json::from_slice(&bytes).unwrap();
+        let TelemetryRecord::Operational(observation) = retained else { panic!("operational") };
+        let OperationalFact::MssqlTable(table) = observation.fact else { panic!("table") };
+        assert_eq!(table.full_text.availability, expected);
+        assert!(table.full_text.index.is_none());
+        assert_eq!(table.estimated_rows.as_deref(), Some("9007199254740993"));
+        let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
+        assert_eq!(completed.observation.snapshot().unwrap().records, 1);
+        assert_eq!(source.inner.reader().io.starts, 1);
+        assert_eq!(source.inner.reader().io.native.calls.len(), 8);
+        assert_eq!(source.query_count(), 8);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert_eq!(source.inner.reader().io.native.closed, 1);
     }
 }
 

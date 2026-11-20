@@ -5,6 +5,8 @@ use crate::{
 };
 use culprit_core::{Result, TableStat, telemetry::*};
 
+mod full_text;
+
 const MAX_APPLICATION_TABLES: usize = 10_000;
 pub(crate) struct Layout {
     with_partition_statistics: bool,
@@ -16,6 +18,10 @@ impl Layout {
 }
 
 pub(crate) fn select_sql(layout: &Layout) -> String {
+    full_text::query(|columns, join| table_query(layout, columns, join))
+}
+
+fn table_query(layout: &Layout, full_text_columns: &str, full_text_join: &str) -> String {
     let relation = crate::partition_storage::relation(layout.with_partition_statistics);
     let page_bytes = crate::partition_storage::PAGE_BYTES;
     let measurable = if layout.with_partition_statistics {
@@ -47,11 +53,13 @@ SELECT TOP (@P1) DB_ID() AS database_id,t.object_id,s.name AS schema_name,t.name
  CASE WHEN {measurable} THEN CONVERT(varchar(40),p.lob_bytes) END AS lob_bytes,
  CASE WHEN {measurable} THEN CONVERT(varchar(40),p.overflow_bytes) END AS overflow_bytes,
  CASE WHEN {measurable} THEN 1 ELSE 0 END AS sizes_available,
+ {full_text_columns},
  CAST(OBJECTPROPERTY(t.object_id,'TableHasPrimaryKey') AS int) AS has_primary_key,
  CASE WHEN HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION')=1
   THEN CASE WHEN EXISTS(SELECT 1 FROM sys.indexes i WHERE i.object_id=t.object_id AND i.index_id=0) THEN 1 ELSE 0 END END AS is_heap
 FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id
 LEFT JOIN totals p ON p.object_id=t.object_id
+{full_text_join}
 WHERE t.is_ms_shipped=0
 ORDER BY t.object_id OPTION(MAXDOP 1)
 "#
@@ -68,12 +76,15 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlTableSnapshot> {
     } else {
         MssqlTableSizeSource::CatalogAllocations
     };
+    let identity = MssqlObjectIdentity {
+        database_id: integer(row, "database_id")?.try_into().map_err(|_| invalid_data())?,
+        object_id: integer(row, "object_id")?.try_into().map_err(|_| invalid_data())?,
+        created_without_offset: text(row, "created_without_offset")?,
+    };
+    let full_text = full_text::decode(row, identity.object_id)?;
     let value = MssqlTableSnapshot {
-        identity: MssqlObjectIdentity {
-            database_id: integer(row, "database_id")?.try_into().map_err(|_| invalid_data())?,
-            object_id: integer(row, "object_id")?.try_into().map_err(|_| invalid_data())?,
-            created_without_offset: text(row, "created_without_offset")?,
-        },
+        identity,
+        full_text,
         schema: text(row, "schema_name")?,
         name: text(row, "table_name")?,
         modified_without_offset: text(row, "modified_without_offset")?,
@@ -148,6 +159,7 @@ fn project(value: MssqlTableSnapshot) -> Result<TableStat> {
         forwarded_fetches: None,
         xid_age: None,
         storage: None,
+        mssql_full_text: Some(value.full_text),
         partition_of: None,
         counters_since: None,
     })
@@ -155,3 +167,6 @@ fn project(value: MssqlTableSnapshot) -> Result<TableStat> {
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod native_tests;

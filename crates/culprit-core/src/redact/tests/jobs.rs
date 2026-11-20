@@ -57,6 +57,7 @@ fn read() -> Box<TimescaleJobsSnapshot> {
         max_retries: "-1".into(),
         retry_period: "00:05:00".into(),
         fixed_schedule: Some(true),
+        configuration_check: Some(procedure("configuration-check")),
         initial_start: Some(TimescaleJobTimestamp::NegativeInfinity),
         next_start: Some(TimescaleJobTimestamp::PositiveInfinity),
         hypertable: Some(procedure("associated-object")),
@@ -199,6 +200,14 @@ fn valid_state_and_run_facts_stay_valid_exact_and_redaction_stable() {
     assert_eq!(state.initial_start, Some(TimescaleJobTimestamp::NegativeInfinity));
     assert_eq!(state.next_start, Some(TimescaleJobTimestamp::PositiveInfinity));
     assert!(state.owner.starts_with("redacted-"));
+    assert!(state.configuration_check.is_some());
+    assert_ne!(
+        state.configuration_check,
+        match &original.observations[0].fact {
+            OperationalFact::TimescaleJobState(point) => point.configuration_check.clone(),
+            _ => panic!(),
+        }
+    );
     assert_ne!(
         shared.observations[0].key, original.observations[0].key,
         "masked procedure labels require the matching new native row key"

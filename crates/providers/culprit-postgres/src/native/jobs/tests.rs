@@ -188,3 +188,5 @@ async fn only_the_verified_interface_strengthens_reported_procedure_label_proven
     let OperationalFact::TimescaleJobRun(point) = &captured.observations[1].fact else { panic!() };
     assert_eq!(point.procedure.as_ref().unwrap().origin, TimescaleJobProcedureOrigin::Unknown);
 }
+
+mod configuration_check;

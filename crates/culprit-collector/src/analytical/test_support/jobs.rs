@@ -167,6 +167,10 @@ fn state(position: u32) -> OperationalObservation {
         max_retries: "-1".into(),
         retry_period: "00:05:00".into(),
         fixed_schedule: Some(true),
+        configuration_check: Some(TimescaleJobProcedure {
+            schema: "current_schema".into(),
+            name: "current_configuration_check".into(),
+        }),
         initial_start: Some(TimescaleJobTimestamp::NegativeInfinity),
         next_start: Some(TimescaleJobTimestamp::PositiveInfinity),
         hypertable: None,

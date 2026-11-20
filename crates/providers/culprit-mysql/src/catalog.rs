@@ -81,6 +81,7 @@ pub(crate) async fn tables(conn: &mut impl crate::read::QueryRead, db: &str) -> 
                 xid_age: None,
                 name,
                 storage: None,
+                mssql_full_text: None,
                 in_row_bytes: None,
                 lob_bytes: None,
                 overflow_bytes: None,

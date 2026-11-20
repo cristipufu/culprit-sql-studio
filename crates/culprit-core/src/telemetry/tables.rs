@@ -1,5 +1,7 @@
 //! Native table metadata and approximate partition counters, without reading application rows.
 use super::*;
+mod full_text;
+pub use full_text::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -28,6 +30,7 @@ pub struct MssqlTableSnapshot {
     pub has_primary_key: Option<bool>,
     pub is_heap: Option<bool>,
     pub size_source: MssqlTableSizeSource,
+    pub full_text: MssqlTableFullText,
 }
 impl MssqlTableSnapshot {
     pub fn is_valid(&self) -> bool {
@@ -40,6 +43,7 @@ impl MssqlTableSnapshot {
             &self.row_overflow_bytes,
         ];
         self.identity.is_valid()
+            && self.full_text.is_valid()
             && [&self.schema, &self.name].into_iter().all(|name| !name.is_empty() && name.len() <= 2048)
             && super::catalog::local_time(&self.modified_without_offset)
             && self.estimated_rows.as_deref().is_none_or(valid_counter)
