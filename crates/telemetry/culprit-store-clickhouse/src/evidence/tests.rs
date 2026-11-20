@@ -503,8 +503,10 @@ async fn page_wait_reads_preserve_original_requests_mapping_failures_and_exact_n
 
 #[tokio::test]
 async fn memory_participants_preserve_scope_exact_values_unknowns_and_zero_row_coverage() {
-    for (source, records) in
-        test_support::request_memory_evidence_cases().into_iter().chain(test_support::session_memory_evidence_cases())
+    for (source, records) in test_support::request_memory_evidence_cases()
+        .into_iter()
+        .chain(test_support::session_memory_evidence_cases())
+        .chain([test_support::scalar_grant_pressure_evidence()])
     {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());

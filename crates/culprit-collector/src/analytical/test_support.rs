@@ -115,6 +115,7 @@ pub use observations::{
 mod request_memory;
 pub use request_memory::{
     maintenance_memory_evidence_cases, request_memory_evidence_cases, reservation_demand_evidence_cases,
+    scalar_grant_pressure_evidence,
 };
 mod grant_output;
 pub use grant_output::{

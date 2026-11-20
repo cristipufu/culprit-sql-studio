@@ -26,10 +26,11 @@ pub enum ParameterEvidenceCase {
     StatementUnavailable,
     PayloadUnavailable,
     RecordedStatisticsContext,
+    RecordedGrantPressure,
 }
 
 impl ParameterEvidenceCase {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::AccessMismatch,
         Self::AccurateAccess,
         Self::HealthyNativeVariant,
@@ -45,6 +46,7 @@ impl ParameterEvidenceCase {
         Self::StatementUnavailable,
         Self::PayloadUnavailable,
         Self::RecordedStatisticsContext,
+        Self::RecordedGrantPressure,
     ];
 }
 
@@ -210,8 +212,13 @@ fn statement(case: ParameterEvidenceCase, sql: &str, hash: &str) -> String {
     } else {
         ""
     };
+    let grant = if case == ParameterEvidenceCase::RecordedGrantPressure {
+        r#"<MemoryGrantInfo SerialRequiredMemory="256" SerialDesiredMemory="1024" RequiredMemory="256" RequestedMemory="1024" GrantedMemory="1024" MaxUsedMemory="1024" GrantWaitTime="2"/>"#
+    } else {
+        ""
+    };
     format!(
-        r#"<StmtSimple QueryHash="{hash}" StatementText="{sql}" StatementType="SELECT" StatementSubTreeCost="1"><QueryPlan>{statistics}
+        r#"<StmtSimple QueryHash="{hash}" StatementText="{sql}" StatementType="SELECT" StatementSubTreeCost="1"><QueryPlan>{statistics}{grant}
 <ParameterList><ColumnReference Column="@customer" ParameterDataType="{data_type}" ParameterCompiledValue="{compiled}" {runtime_attribute}/>{unused}</ParameterList>
 {operators}</QueryPlan></StmtSimple>"#
     )

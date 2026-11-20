@@ -208,3 +208,47 @@ pub fn maintenance_memory_evidence_cases() -> Vec<(CollectionDescription, Vec<Te
         })
         .collect()
 }
+
+/// The original admission queue and the completed selected plan have separate native clocks. Their shared
+/// request token is context only: neither this corpus nor a retained plan invents a grant blocker or parameter cause.
+pub fn scalar_grant_pressure_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (plan_source, definitions) = parameter_evidence(ParameterEvidenceCase::RecordedGrantPressure);
+    let TelemetryRecord::ObjectDefinition(definition) = &definitions[0] else { unreachable!() };
+    let ObjectDefinitionFact::MssqlRetainedPlan(native) = &definition.fact else { unreachable!() };
+    let (mut source, records) = output_wait_grant_evidence();
+    source.target = plan_source.target;
+    source.partition = plan_source.partition;
+    let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+    snapshot.observed_from = "2020-01-01T11:59:58.1000000Z".into();
+    snapshot.observed_until = "2020-01-01T11:59:58.9000000Z".into();
+    let rows = records
+        .into_iter()
+        .map(|row| {
+            let TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::ExecutionGrant(grant),
+                ..
+            }) = row
+            else {
+                unreachable!()
+            };
+            let mut grant = *grant;
+            grant.observed_at = "2020-01-01T11:59:58.5000000Z".into();
+            grant.request.as_mut().unwrap().database = Some(source.target.database().unwrap().database.clone());
+            if grant.state == ExecutionGrantState::Waiting {
+                let request = grant.request.as_mut().unwrap();
+                request.statement_identity = Some(
+                    NativeIdentity::new(native.context.identity.sql_handle.trim_start_matches("0x"))
+                        .qualified("native_object", "sys.dm_exec_requests.sql_handle")
+                        .qualified("database_id", native.context.database_id.to_string())
+                        .qualified("statement_start_offset", native.context.identity.statement_start_bytes.to_string())
+                        .qualified("statement_end_offset", native.context.identity.statement_end_bytes.to_string()),
+                );
+                request.query_hash =
+                    native.context.query_hash.as_deref().map(|value| value.trim_start_matches("0x").to_owned());
+                request.statement = native.statement.payload.clone();
+            }
+            record(grant)
+        })
+        .collect();
+    (source, rows)
+}

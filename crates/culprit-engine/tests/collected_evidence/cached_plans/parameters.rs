@@ -235,6 +235,7 @@ fn verify_plan(
             | Case::UseLimit
             | Case::PartialSource
             | Case::RecordedStatisticsContext
+            | Case::RecordedGrantPressure
     );
     assert_eq!(insight.is_some(), generic, "{case:?}");
     if let Some(insight) = insight {
@@ -249,7 +250,13 @@ fn verify_plan(
         );
         assert_eq!(
             insight.detail.contains(&access),
-            matches!(case, Case::AccessMismatch | Case::PartialSource | Case::RecordedStatisticsContext),
+            matches!(
+                case,
+                Case::AccessMismatch
+                    | Case::PartialSource
+                    | Case::RecordedStatisticsContext
+                    | Case::RecordedGrantPressure
+            ),
             "{case:?}"
         );
         assert_eq!(insight.impact, 0.0);
@@ -291,5 +298,142 @@ fn scalar_proof_cannot_move_to_another_scope_statement_node_or_native_body() {
         }
         let error = culprit_mssql::plan_xml::parse_retained_definition(&native, &source).unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{changed}");
+    }
+}
+
+#[tokio::test]
+async fn original_grant_queue_and_completed_scalar_work_recover_independently_without_exclusive_parameter_blame() {
+    use culprit_collector::analytical::test_support::{
+        assert_memory_participants_capture, scalar_grant_pressure_evidence,
+    };
+    let (plan_source, plans) = parameter_evidence(Case::RecordedGrantPressure);
+    let plan_owner = Fixture::new(plan_source.clone(), plans.clone()).await;
+    let retained = plan_owner.read_families_with_recovery(FAMILY, RecoveryPayloadBudget::default()).await;
+    let (memory_source, grants) = scalar_grant_pressure_evidence();
+    assert_eq!(memory_source.target, plan_source.target);
+    assert_eq!(memory_source.partition, plan_source.partition);
+    let earlier = memory_source.observation.snapshot().unwrap();
+    let later = plan_source.observation.snapshot().unwrap();
+    assert!(ObservationBounds::new(&earlier.observed_until, &later.observed_from).is_some());
+    let memory_owner = Fixture::new(memory_source.clone(), grants.clone()).await;
+    let captured = memory_owner.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert_memory_participants_capture(&captured, &memory_source, &grants);
+    let memory = collected_resources::request_memory(&captured).unwrap();
+    assert_eq!(memory.report.admission_resources.len(), 1);
+    assert_eq!(memory.report.admission_resources[0].participants.len(), 2);
+    assert!(
+        memory.report.entries.iter().any(|entry| entry.mechanism
+            == Some(culprit_core::MemoryParticipantMechanism::ReservationDuringClientOutputWait))
+    );
+    for message in [
+        culprit_core::t!("view.request_memory.limit.ownership"),
+        culprit_core::t!("view.request_memory.limit.clock"),
+        culprit_core::t!("view.request_memory.limit.population"),
+    ] {
+        assert!(memory.report.limitations.contains(&message));
+    }
+    let completed = collected_resources::cached_plans(&retained).unwrap();
+    #[cfg(feature = "mssql")]
+    {
+        let plan = completed.report.entries[0].plan.as_ref().unwrap();
+        assert!(plan.facts().memory_grant_wait_ms.is_some_and(|wait| wait > 0.0));
+        let insight =
+            plan.insights.as_ref().unwrap().items.iter().find(|insight| insight.rule == "parameter-context").unwrap();
+        assert_eq!(insight.severity, culprit_core::Severity::Low);
+        assert_eq!(insight.impact, 0.0);
+        assert!(insight.fix_sql.is_none());
+        assert!(plan.raw.is_none() && plan.statement.is_none());
+    }
+    let expected_memory = serde_json::to_value(&memory).unwrap();
+    let expected_plan = serde_json::to_value(&completed).unwrap();
+    memory_owner.unpublish();
+    plan_owner.unpublish();
+    assert_eq!(serde_json::to_value(collected_resources::request_memory(&captured).unwrap()).unwrap(), expected_memory);
+    assert_eq!(serde_json::to_value(collected_resources::cached_plans(&retained).unwrap()).unwrap(), expected_plan);
+    let rendered = serde_json::to_string(&completed.report).unwrap() + &serde_json::to_string(&memory.report).unwrap();
+    for private in [
+        "private-original-compiled-canary",
+        "private-original-runtime-canary",
+        "private-statement-canary",
+        "ShowPlanXML",
+        "ParameterRuntimeValue",
+    ] {
+        assert!(!rendered.contains(private), "{private}");
+    }
+}
+
+#[tokio::test]
+async fn a_missing_original_grant_member_is_partial_history_and_cannot_be_repaired_by_the_completed_plan() {
+    use culprit_collector::analytical::test_support::scalar_grant_pressure_evidence;
+    let (source, rows) = scalar_grant_pressure_evidence();
+    let owner = Fixture::new(source.clone(), rows).await;
+    owner.remove_first_row(TelemetryStream::OperationalSamples);
+    let original = owner.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(!original.is_read_complete());
+    let report = collected_resources::request_memory(&original).unwrap().report;
+    assert_eq!(report.source_state, Some(SourceState::Partial));
+    assert_eq!(report.entries.len(), 1);
+    assert!(report.entries.iter().all(|entry| entry.mechanism.is_none()));
+    assert!(report.admission_resources.iter().all(|resource| resource.participants.len() == 1));
+    let (plan_source, plans) = parameter_evidence(Case::RecordedGrantPressure);
+    let plan_owner = Fixture::new(plan_source, plans).await;
+    let retained = plan_owner.read_families_with_recovery(FAMILY, RecoveryPayloadBudget::default()).await;
+    assert!(!collected_resources::cached_plans(&retained).unwrap().report.entries.is_empty());
+    assert_eq!(
+        collected_resources::request_memory(&original).unwrap().report,
+        report,
+        "a later completed plan cannot fill an original participant population"
+    );
+}
+
+#[tokio::test]
+async fn original_grant_unknown_owner_and_unavailable_statement_do_not_borrow_later_plan_authority() {
+    use culprit_collector::analytical::test_support::scalar_grant_pressure_evidence;
+    for unknown_owner in [false, true] {
+        let (mut source, mut rows) = scalar_grant_pressure_evidence();
+        if unknown_owner {
+            source.partition = SourcePartition::InstanceLocal { member: None, epoch: None };
+            let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+            for coverage in &mut snapshot.sources {
+                *coverage = StateSourceCoverage::observed(coverage.source.clone(), coverage.records, false);
+            }
+        }
+        for row in &mut rows {
+            let TelemetryRecord::Operational(observed) = row else { unreachable!() };
+            let OperationalFact::ExecutionGrant(grant) = &mut observed.fact else { unreachable!() };
+            if grant.state == ExecutionGrantState::Waiting {
+                grant.request.as_mut().unwrap().statement =
+                    DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted };
+                grant.statement_relationship = GrantStatementRelationship::Unresolved;
+                observed.key = grant.key().unwrap();
+            }
+        }
+        let owner = Fixture::new(source, rows).await;
+        let original = owner.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        assert!(original.is_read_complete());
+        let report = collected_resources::request_memory(&original).unwrap().report;
+        if unknown_owner {
+            assert_eq!(report.source_state, Some(SourceState::Partial));
+            assert!(report.entries.iter().all(|entry| entry.qualified_request.is_none() && entry.mechanism.is_none()));
+            assert!(report.admission_resources.is_empty());
+            assert!(report.limitations.contains(&culprit_core::t!("view.request_memory.limit.owner")));
+        }
+        let waiter = original
+            .records()
+            .iter()
+            .find_map(|row| match &row.row().record {
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::ExecutionGrant(grant),
+                    ..
+                }) if grant.state == ExecutionGrantState::Waiting => Some(grant.as_ref()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(waiter.statement_relationship, GrantStatementRelationship::Unresolved);
+        assert!(matches!(
+            waiter.request.as_ref().unwrap().statement,
+            DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted }
+        ));
+        assert!(!serde_json::to_string(&report).unwrap().contains("SELECT order_id"));
     }
 }
