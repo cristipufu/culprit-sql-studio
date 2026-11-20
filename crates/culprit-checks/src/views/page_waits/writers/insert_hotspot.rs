@@ -1,4 +1,5 @@
 //! A recorded end-of-leaf position and an INSERT access plan permit a candidate, never a cause or owner.
+use super::super::leaf_position::LeafPosition;
 use culprit_core::{SourceOutcome, SourceState, WaitResourceKind, telemetry::*};
 
 #[derive(Clone, Copy)]
@@ -26,15 +27,7 @@ impl EndOfLeafInsert {
             return None;
         }
         let target = page.target.as_ref()?;
-        // SQL Server's index levels are key-order doubly linked lists; (0:0) is their native end marker.
-        // https://www.sqlskills.com/blogs/paul/checkdb-from-every-angle-complete-description-of-all-checkdb-stages/
-        // These links describe only this observed header, never physical identity or a proven page split.
-        if target.kind != PageWaitTargetKind::IndexLeaf
-            || target.header.level != Some(0)
-            || target.header.next_file_id != Some(0)
-            || target.header.next_page_id != Some(0)
-            || target.writer_target_key().is_err()
-        {
+        if LeafPosition::from_target(target) != Some(LeafPosition::End) || target.writer_target_key().is_err() {
             return None;
         }
         let point = page.index_operations.as_ref()?;

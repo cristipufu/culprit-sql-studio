@@ -3,6 +3,7 @@ use culprit_core::{Engine, ObservedWaitResource, telemetry::*};
 use serde_json::json;
 mod holders;
 mod index_operations;
+mod leaf_position;
 mod participation;
 mod writers;
 
@@ -111,7 +112,7 @@ fn io_waits_do_not_become_in_memory_latch_diagnoses_or_a_storage_cause_verdict()
     assert_eq!(report.entries[1].title, t!("view.page_waits.io.title"));
     assert!(report.entries[1].explanation.contains(&t!("view.page_waits.io.explanation")));
     assert_eq!(report.entries[1].investigation, t!("view.page_waits.investigation.io"));
-    assert_eq!(report.entries[0].investigation, t!("view.page_waits.investigation.leaf"));
+    assert_eq!(report.entries[0].investigation, t!("view.page_waits.investigation.leaf_position"));
 }
 
 #[test]

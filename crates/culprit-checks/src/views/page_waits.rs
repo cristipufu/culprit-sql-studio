@@ -13,6 +13,8 @@ use culprit_core::{
     },
 };
 use std::collections::BTreeSet;
+mod leaf_position;
+use leaf_position::LeafPosition;
 mod writers;
 pub use writers::explain_writers;
 mod holders;
@@ -105,13 +107,20 @@ enum Investigation {
     Unresolved,
     Storage,
     MemoryTarget(PageWaitTargetKind),
+    MemoryLeaf(LeafPosition),
 }
 impl Investigation {
     fn for_observation(observation: &PageWaitObservation, wait: WaitKind) -> Self {
         let Some(target) = &observation.target else {
             return Self::Unresolved;
         };
-        if matches!(wait, WaitKind::Io) { Self::Storage } else { Self::MemoryTarget(target.kind) }
+        if matches!(wait, WaitKind::Io) {
+            Self::Storage
+        } else if let Some(position) = LeafPosition::from_target(target) {
+            Self::MemoryLeaf(position)
+        } else {
+            Self::MemoryTarget(target.kind)
+        }
     }
 }
 enum IndexPoint<'a> {
@@ -200,6 +209,13 @@ fn render(
     }
     if let Some(target) = &observation.target {
         details.push(culprit_core::i18n::t(kind_message(target.kind), &[]));
+        if let Investigation::MemoryLeaf(position) = case.investigation {
+            let message = match position {
+                LeafPosition::End => key!("view.page_waits.leaf.end"),
+                LeafPosition::Followed => key!("view.page_waits.leaf.followed"),
+            };
+            details.push(culprit_core::i18n::t(message, &[]));
+        }
         if target.identity_basis == culprit_core::telemetry::PageTargetIdentityBasis::LocalTempdbPrimaryFileEpoch {
             details.push(t!("view.page_waits.target.primary_file_epoch"));
         }
@@ -399,6 +415,7 @@ fn investigation_message(investigation: Investigation) -> &'static str {
     match investigation {
         Investigation::Unresolved => key!("view.page_waits.investigation.unresolved"),
         Investigation::Storage => key!("view.page_waits.investigation.io"),
+        Investigation::MemoryLeaf(_) => key!("view.page_waits.investigation.leaf_position"),
         Investigation::MemoryTarget(kind) => match kind {
             PageWaitTargetKind::IndexLeaf => key!("view.page_waits.investigation.leaf"),
             PageWaitTargetKind::IndexBranch => key!("view.page_waits.investigation.branch"),
