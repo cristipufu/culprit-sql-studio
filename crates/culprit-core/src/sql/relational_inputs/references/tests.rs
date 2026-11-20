@@ -1,5 +1,6 @@
 use super::*;
 
+mod apply;
 mod cte;
 mod derived;
 mod projection;

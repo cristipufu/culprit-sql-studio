@@ -3,9 +3,11 @@ use super::{Token, identifier, unsupported, word};
 use std::collections::BTreeSet;
 
 pub(super) fn is_direct(tokens: &[Token<'_>], source_alias: &str) -> bool {
-    if tokens == [Token::Punct('*')] {
-        return true;
-    }
+    tokens == [Token::Punct('*')] || is_direct_columns(tokens, source_alias)
+}
+
+/// A source-free APPLY projection needs explicit columns: its star has no local FROM binding.
+pub(super) fn is_direct_columns(tokens: &[Token<'_>], source_alias: &str) -> bool {
     // The existing SQL-byte bound also bounds this list. No catalog/type or current schema is consulted.
     let mut inputs = BTreeSet::new();
     let mut outputs = BTreeSet::new();

@@ -23,6 +23,8 @@ enum Probe {
     AliasedHealthy,
     ChainCounted,
     ChainHealthy,
+    ApplyCounted,
+    ApplyHealthy,
 }
 impl Probe {
     fn name(self) -> &'static str {
@@ -40,6 +42,8 @@ impl Probe {
             Self::AliasedHealthy => "aliased_healthy_probe",
             Self::ChainCounted => "chain_count_probe",
             Self::ChainHealthy => "chain_healthy_probe",
+            Self::ApplyCounted => "apply_count_probe",
+            Self::ApplyHealthy => "apply_healthy_probe",
         }
     }
     fn statement(self) -> &'static str {
@@ -77,6 +81,12 @@ impl Probe {
             Self::ChainHealthy => {
                 "WITH seed AS (SELECT r.id FROM @Rows AS r), input AS (SELECT p.id FROM seed AS p) SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM input AS d"
             }
+            Self::ApplyCounted => {
+                "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM @Rows AS r CROSS APPLY (SELECT r.id AS input_id) AS d WHERE (d.input_id > 10000)"
+            }
+            Self::ApplyHealthy => {
+                "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM @Rows AS r CROSS APPLY (SELECT r.id AS input_id) AS d"
+            }
         }
     }
     fn is_healthy(self) -> bool {
@@ -88,6 +98,7 @@ impl Probe {
                 | Self::ProjectedHealthy
                 | Self::AliasedHealthy
                 | Self::ChainHealthy
+                | Self::ApplyHealthy
         )
     }
     fn execution(self, rows: usize) -> String {
@@ -150,6 +161,8 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
             | Probe::AliasedHealthy
             | Probe::ChainCounted
             | Probe::ChainHealthy
+            | Probe::ApplyCounted
+            | Probe::ApplyHealthy
     ) {
         assert_eq!(
             input.facts().table_alias.as_deref(),
@@ -207,6 +220,7 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
                 | Probe::ProjectedCounted
                 | Probe::AliasedCounted
                 | Probe::ChainCounted
+                | Probe::ApplyCounted
         ) {
             assert_eq!(input.act_rows, Some(FILTERED_ROWS));
             let counts = culprit_core::t!(
@@ -359,4 +373,14 @@ async fn capture_chained_cte_probes(fixture: &OwnedSourceFixture, database: &str
 #[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
 async fn owned_two_cte_chain_keeps_original_native_input_and_a_healthy_large_control() {
     super::fixture::run("chain", capture_chained_cte_probes).await;
+}
+
+async fn capture_apply_probes(fixture: &OwnedSourceFixture, database: &str) {
+    capture_cases(fixture, database, &[Probe::ApplyCounted, Probe::ApplyHealthy]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
+async fn owned_direct_column_cross_apply_keeps_original_native_input_and_a_healthy_large_control() {
+    super::fixture::run("apply", capture_apply_probes).await;
 }

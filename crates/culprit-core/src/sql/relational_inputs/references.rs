@@ -3,6 +3,7 @@ use super::{Engine, Token, readings};
 const MAX_RELATIONAL_REFERENCES: usize = 64;
 const MAX_RELATIONAL_SQL_BYTES: usize = 64 * 1024;
 
+mod apply;
 mod cte;
 mod derived;
 mod expressions;
@@ -23,8 +24,8 @@ pub struct MssqlRelationReference {
 }
 
 /// Recognize a deliberately small SELECT/JOIN grammar, with agreement under every supported lexical mode.
-/// Only bounded grouping, recognized built-ins, one closed derived relation or two chained CTE passthroughs are admitted.
-/// Other nested statements, unknown functions, APPLY, implicit joins and table hints are not resolved.
+/// Only bounded grouping, known built-ins, closed passthroughs and one direct-column CROSS APPLY are admitted.
+/// Other nested statements, unknown functions, rowset-changing APPLY, implicit joins and hints are not resolved.
 /// Multiple relations require distinct explicit aliases. Nothing here infers variable kind or default schema.
 pub fn mssql_relational_references(text: &str) -> Option<Vec<MssqlRelationReference>> {
     if text.len() > MAX_RELATIONAL_SQL_BYTES {
@@ -51,9 +52,21 @@ fn references(tokens: &[Token<'_>]) -> Option<Vec<MssqlRelationReference>> {
     }
     let at = tokens.iter().position(|token| word(Some(token), "FROM"))?;
     let mut at = at + 1;
+    let input_start = at;
     let mut derived = None;
+    let mut applied = None;
     let mut relations = vec![input(tokens, &mut at, &mut derived, &mut cte)?];
     while at < tokens.len() && !tail_clause(&tokens[at]) {
+        if apply::starts(tokens, at) {
+            if derived.is_some() || cte.is_some() || relations.len() != 1 || !word(tokens.get(input_start + 1), "AS") {
+                return None;
+            }
+            applied = Some(apply::AppliedProjection::read(tokens, &mut at, &relations[0])?);
+            if at < tokens.len() && !tail_clause(&tokens[at]) {
+                return None;
+            }
+            break;
+        }
         let predicate = join(tokens, &mut at)?;
         if relations.len() == MAX_RELATIONAL_REFERENCES {
             return None;
@@ -74,8 +87,12 @@ fn references(tokens: &[Token<'_>]) -> Option<Vec<MssqlRelationReference>> {
     if tokens[at..].iter().any(|token| join_start(token) || word(Some(token), "ON")) {
         return None;
     }
-    let scope_aliases = derived.iter().map(|scope| scope.alias()).chain(cte.iter().flat_map(|scope| scope.aliases()));
-    if !closed_scope(tokens, derived.as_ref())
+    let scope_aliases = derived
+        .iter()
+        .map(|scope| scope.alias())
+        .chain(applied.iter().map(|scope| scope.alias()))
+        .chain(cte.iter().flat_map(|scope| scope.aliases()));
+    if !closed_scope(tokens, derived.as_ref(), applied.as_ref())
         || !distinct_aliases(&relations, scope_aliases)
         || cte.as_ref().is_some_and(|scope| !scope.is_bound(&relations))
     {
@@ -106,14 +123,20 @@ fn input(
     Some(reference)
 }
 
-fn closed_scope(tokens: &[Token<'_>], derived: Option<&derived::DerivedRelation>) -> bool {
-    // Only the completely parsed relation may be excluded. Arbitrary nested SELECTs still fail the outer grammar.
+fn closed_scope(
+    tokens: &[Token<'_>],
+    derived: Option<&derived::DerivedRelation>,
+    applied: Option<&apply::AppliedProjection>,
+) -> bool {
+    // Only fully parsed closed scopes may be excluded. Other nested SELECTs still fail the outer grammar.
     let outer;
-    let tokens = if let Some(derived) = derived {
+    let tokens = if derived.is_some() || applied.is_some() {
         outer = tokens
             .iter()
             .enumerate()
-            .filter(|(at, _)| !derived.contains(*at))
+            .filter(|(at, _)| {
+                !derived.is_some_and(|scope| scope.contains(*at)) && !applied.is_some_and(|scope| scope.contains(*at))
+            })
             .map(|(_, token)| *token)
             .collect::<Vec<_>>();
         outer.as_slice()
@@ -245,8 +268,8 @@ fn predicate_end(tokens: &[Token<'_>], start: usize) -> Option<usize> {
 
 fn reserved(name: &str) -> bool {
     [
-        "FROM", "AS", "ON", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "OUTER", "WHERE", "GROUP", "HAVING",
-        "ORDER", "OFFSET", "FETCH",
+        "FROM", "AS", "ON", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "OUTER", "APPLY", "WHERE", "GROUP",
+        "HAVING", "ORDER", "OFFSET", "FETCH",
     ]
     .iter()
     .any(|value| name.eq_ignore_ascii_case(value))

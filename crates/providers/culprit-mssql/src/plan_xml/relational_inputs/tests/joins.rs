@@ -4,6 +4,7 @@ use culprit_core::{
     telemetry::{MssqlModuleParameters, NativeReadContext},
 };
 
+mod apply;
 mod cte;
 mod derived;
 mod expressions;
