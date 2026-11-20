@@ -86,7 +86,8 @@ async fn export_vendor_field_conformance_from_canonical_original_evidence() {
         "recipe_catalog_sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/telemetry/recipes.rs"))),
         "schema_digest":catalog.digest(), "schemas":schemas, "sources":sources,
         "recipes":culprit_mssql::telemetry_recipes(),
-        "performance_counter_profile":{"native_object":profile.native_object, "selection":profile.selection, "fields":counters},
+        "performance_counter_profile":{"native_object":profile.native_object, "selection":profile.selection, "fields":counters,"database_field_ids":profile.database_field_ids},
+        "field_context_export_version":1,"field_context_contracts":field_context_contracts(),
         "cases":cases,
     });
     let mut options = OpenOptions::new();
@@ -155,7 +156,8 @@ async fn export_case(case: Case, expected: Option<&[TelemetryRecord]>, catalog: 
         actual.sort();
         assert_eq!(actual, wanted, "no missing/extra original corpus members after canonical recovery");
     }
-    json!({"family":case.family, "name":case.name, "manifest":manifest, "rows":rows})
+    let field_context = field_context(case.family, &manifest.source, &originals);
+    json!({"family":case.family, "name":case.name, "manifest":manifest, "rows":rows,"field_context":field_context})
 }
 
 fn inputs() -> Vec<(&'static str, String, CollectionDescription, Vec<TelemetryRecord>)> {
@@ -179,6 +181,10 @@ fn inputs() -> Vec<(&'static str, String, CollectionDescription, Vec<TelemetryRe
     for case in corpus::PerformanceCounterCase::ALL {
         let (s, r) = corpus::performance_counter_evidence(case);
         cases.push(("performance-counters", format!("{case:?}"), s, r));
+    }
+    for case in corpus::DatabasePerformanceCounterCase::ALL {
+        let (s, r) = corpus::database_performance_counter_evidence(case);
+        cases.push(("database-performance-counters", format!("{case:?}"), s, r));
     }
     for case in corpus::InstanceResourceCase::ALL {
         let (s, r) = corpus::instance_resource_evidence(case);
@@ -229,4 +235,55 @@ fn inputs() -> Vec<(&'static str, String, CollectionDescription, Vec<TelemetryRe
     let (source, record) = corpus::pool_history();
     cases.push(("pool-resource-history", "original".into(), source, vec![record]));
     cases
+}
+
+// The canonical recovery above verifies the whole original before either existing pure interpreter runs.
+// This is controlled corpus replay, not a native source/profile or cost acceptance receipt.
+fn field_context(family: &str, source: &CollectionDescription, records: &[TelemetryRecord]) -> Option<Value> {
+    match family {
+        "session-census" => {
+            let rows = records
+                .iter()
+                .map(|record| {
+                    let TelemetryRecord::Activity(observation) = record else {
+                        panic!("original census Activity rows")
+                    };
+                    ActivityFrameRow { observation, reference: None }
+                })
+                .collect::<Vec<_>>();
+            let frame = ActivityFrameEvidence::new(source, &rows, true).unwrap();
+            let report = culprit_checks::session_census::explain_frame(&frame).unwrap();
+            Some(json!({"session_census":report}))
+        }
+        "database-performance-counters" => {
+            let rows = records
+                .iter()
+                .map(|record| {
+                    let TelemetryRecord::Operational(row) = record else { panic!("original selected counter rows") };
+                    row
+                })
+                .collect::<Vec<_>>();
+            let snapshot = source.observation.snapshot().unwrap();
+            let [coverage] = snapshot.sources.as_slice() else { panic!("one original selected source") };
+            let report = culprit_checks::performance_counters::explain_source(source, coverage, &rows, true).unwrap();
+            let SourceObservation::DatabasePerformanceCounters { native_database, .. } = &source.observation else {
+                panic!("original native database header")
+            };
+            Some(json!({"performance_counters":report,"native_database_key":native_database.key().unwrap()}))
+        }
+        _ => None,
+    }
+}
+
+fn field_context_contracts() -> Vec<Value> {
+    [
+        json!({"path":"crates/providers/culprit-mssql/src/activity/session_context.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/activity/session_context.rs")))}),
+        json!({"path":"crates/culprit-core/src/telemetry/activity/session_context.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-core/src/telemetry/activity/session_context.rs")))}),
+        json!({"path":"crates/culprit-checks/src/views/session_census.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-checks/src/views/session_census.rs")))}),
+        json!({"path":"crates/providers/culprit-mssql/src/performance/database.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/performance/database.rs")))}),
+        json!({"path":"crates/culprit-core/src/telemetry/performance_counters/database.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-core/src/telemetry/performance_counters/database.rs")))}),
+        json!({"path":"crates/culprit-checks/src/views/performance_counters.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-checks/src/views/performance_counters.rs")))}),
+        json!({"path":"crates/culprit-collector/src/analytical/database_counter_contexts.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/database_counter_contexts.rs")))}),
+        json!({"path":"crates/culprit-collector/src/analytical/publication/context.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/publication/context.rs")))}),
+    ].into_iter().collect()
 }
