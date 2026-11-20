@@ -38,6 +38,9 @@
                 "login_established": false,
                 "native_state": "Dormant",
                 "request_connection_id": null,
+                "request_database_id": null,
+                "session_database_id": "0",
+                "session_database_name": null,
                 "tds_protocol_version": null,
                 "times": {
                   "last_request_end_without_offset": null,
@@ -151,6 +154,21 @@
               "key": "database",
               "label": "Observed database context",
               "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "0"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": null
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
             },
             {
               "key": "application",
@@ -274,7 +292,8 @@
       "limitations": [
         "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
         "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
-        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither."
       ],
       "native_rows": 1,
       "native_source": {
@@ -381,7 +400,8 @@
       "limitations": [
         "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
         "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
-        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither."
       ],
       "native_rows": 0,
       "native_source": {
@@ -452,6 +472,9 @@
                 "login_established": true,
                 "native_state": "sleeping",
                 "request_connection_id": null,
+                "request_database_id": null,
+                "session_database_id": "7",
+                "session_database_name": "db",
                 "tds_protocol_version": null,
                 "times": {
                   "last_request_end_without_offset": "2020-01-01T11:59:55.0000000",
@@ -565,6 +588,21 @@
               "key": "database",
               "label": "Observed database context",
               "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "7"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
             },
             {
               "key": "application",
@@ -688,7 +726,8 @@
       "limitations": [
         "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
         "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
-        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither."
       ],
       "native_rows": 1,
       "native_source": {
@@ -767,6 +806,9 @@
                 "login_established": true,
                 "native_state": "Running",
                 "request_connection_id": "11111111-1111-1111-1111-111111111111",
+                "request_database_id": "7",
+                "session_database_id": "4",
+                "session_database_name": "session-default",
                 "tds_protocol_version": null,
                 "times": {
                   "last_request_end_without_offset": "2020-01-01T11:59:55.0000000",
@@ -836,6 +878,9 @@
                 "login_established": true,
                 "native_state": "Running",
                 "request_connection_id": "22222222-2222-2222-2222-222222222222",
+                "request_database_id": "7",
+                "session_database_id": "4",
+                "session_database_name": "session-default",
                 "tds_protocol_version": null,
                 "times": {
                   "last_request_end_without_offset": "2020-01-01T11:59:55.0000000",
@@ -952,6 +997,21 @@
               "key": "database",
               "label": "Observed database context",
               "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "4"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "session-default"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": "7"
             },
             {
               "key": "application",
@@ -1114,6 +1174,21 @@
               "value": "db"
             },
             {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "4"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "session-default"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": "7"
+            },
+            {
               "key": "application",
               "label": "Client program",
               "value": "fixture-client"
@@ -1255,7 +1330,8 @@
       "limitations": [
         "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
         "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
-        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither."
       ],
       "native_rows": 2,
       "native_source": {
@@ -1326,6 +1402,9 @@
                 "login_established": true,
                 "native_state": "sleeping",
                 "request_connection_id": null,
+                "request_database_id": null,
+                "session_database_id": "7",
+                "session_database_name": "db",
                 "tds_protocol_version": null,
                 "times": {
                   "last_request_end_without_offset": "2020-01-01T11:59:55.0000000",
@@ -1439,6 +1518,21 @@
               "key": "database",
               "label": "Observed database context",
               "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "7"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
             },
             {
               "key": "application",
@@ -1563,6 +1657,7 @@
         "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
         "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
         "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
         "The observed rows do not establish complete population visibility. Missing permissions, generations, row limits and read gaps do not become healthy emptiness."
       ],
       "native_rows": 2,
@@ -1671,6 +1766,7 @@
         "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
         "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
         "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
         "The observed rows do not establish complete population visibility. Missing permissions, generations, row limits and read gaps do not become healthy emptiness."
       ],
       "native_rows": 0,
@@ -1742,6 +1838,9 @@
                 "login_established": true,
                 "native_state": "future-native-state",
                 "request_connection_id": null,
+                "request_database_id": null,
+                "session_database_id": null,
+                "session_database_name": null,
                 "tds_protocol_version": null,
                 "times": {
                   "last_request_end_without_offset": null,
@@ -1855,6 +1954,21 @@
               "key": "database",
               "label": "Observed database context",
               "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": null
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": null
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
             },
             {
               "key": "application",
@@ -1978,7 +2092,8 @@
       "limitations": [
         "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
         "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
-        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither."
       ],
       "native_rows": 1,
       "native_source": {

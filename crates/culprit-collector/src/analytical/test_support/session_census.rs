@@ -35,6 +35,11 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
         "/../../fixtures/session-census.native.json"
     )))
     .unwrap();
+    let SessionNativeContext::Mssql(native) =
+        read.observations[0].session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+    native.session_database_id = Some("7".into());
+    native.session_database_name = Some("db".into());
+    native.request_database_id = None;
     match case {
         SessionCensusCase::Idle | SessionCensusCase::Partial => (),
         SessionCensusCase::Dormant => {
@@ -48,6 +53,8 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
             context.last_request_end_age_ms = None;
             let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
             native.native_state = "Dormant".into();
+            native.session_database_id = Some("0".into());
+            native.session_database_name = None;
             native.login_established = false;
             native.times.login_without_offset = row.key.session.generation.clone();
             native.times.last_request_start_without_offset = None;
@@ -71,6 +78,8 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
             context.client_process_id = None;
             let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
             native.native_state = "future-native-state".into();
+            native.session_database_id = None;
+            native.session_database_name = None;
             native.times.last_request_start_without_offset = None;
             native.times.last_request_end_without_offset = None;
         }
@@ -114,6 +123,9 @@ fn current_request(mut row: ActivityObservation, id: &str, connection: &str) -> 
     context.lifecycle = SessionLifecycle::Running;
     let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
     native.native_state = "Running".into();
+    native.session_database_id = Some("4".into());
+    native.session_database_name = Some("session-default".into());
+    native.request_database_id = Some("7".into());
     native.has_current_request = true;
     native.request_connection_id = Some(connection.into());
     row

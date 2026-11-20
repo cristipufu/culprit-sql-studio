@@ -22,7 +22,7 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 const IDENTIFY_OWNED_SESSION: &str = r#"SELECT /* culprit census fixture */
  CONVERT(varchar(16),s.session_id) AS session_id,
  CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS session_generation,
- DB_NAME(s.database_id) AS database_name
+ CONVERT(varchar(16),s.database_id) AS database_id,DB_NAME(s.database_id) AS database_name
  FROM sys.dm_exec_sessions s WHERE s.session_id=@@SPID"#;
 
 #[tokio::test]
@@ -68,7 +68,7 @@ async fn run(directory: &Path, cancellation: &CollectionCancellation) -> Result<
         let identity = identify(actors.last_mut().ok_or_else(invalid_data)?, &fixture.database).await?;
         identities.push(identity);
     }
-    if identities.iter().collect::<BTreeSet<_>>().len() != OWNED_IDLE_SESSIONS {
+    if identities.iter().map(|(session, _)| session).collect::<BTreeSet<_>>().len() != OWNED_IDLE_SESSIONS {
         return Err(invalid_data());
     }
     let budget = CollectionBudget {
@@ -118,7 +118,18 @@ async fn run(directory: &Path, cancellation: &CollectionCancellation) -> Result<
         Ok(result) => result,
         Err(panic) => std::panic::resume_unwind(panic),
     };
-    result?;
+    let read = result?;
+    // The immutable original remains usable after all three actors and the source owner have ended.
+    if !read.is_valid()
+        || read
+            .observations
+            .iter()
+            .filter(|row| identities.iter().any(|(identity, _)| row.key.session == *identity))
+            .count()
+            != OWNED_IDLE_SESSIONS
+    {
+        return Err(invalid_data());
+    }
     saved?;
     if !quiet? {
         return Err(CollectionStop::CancellationUnconfirmed.error());
@@ -144,7 +155,7 @@ async fn run(directory: &Path, cancellation: &CollectionCancellation) -> Result<
     Ok(())
 }
 
-async fn identify(client: &mut MsClient, database: &str) -> Result<NativeActivityIdentity> {
+async fn identify(client: &mut MsClient, database: &str) -> Result<(NativeActivityIdentity, String)> {
     let row = tokio::time::timeout(SETUP_TIMEOUT, crate::conn::query_one(client, IDENTIFY_OWNED_SESSION))
         .await
         .map_err(|_| CollectionStop::TimedOut.error())?
@@ -152,24 +163,40 @@ async fn identify(client: &mut MsClient, database: &str) -> Result<NativeActivit
     if text(&row, "database_name")? != database {
         return Err(invalid_data());
     }
-    Ok(NativeActivityIdentity {
-        id: text(&row, "session_id")?,
-        generation: crate::sql_time::native_time(&text(&row, "session_generation")?)?,
-    })
+    let database_id = text(&row, "database_id")?;
+    if !database_id.parse::<i16>().is_ok_and(|id| id > 0 && id.to_string() == database_id) {
+        return Err(invalid_data());
+    }
+    Ok((
+        NativeActivityIdentity {
+            id: text(&row, "session_id")?,
+            generation: crate::sql_time::native_time(&text(&row, "session_generation")?)?,
+        },
+        database_id,
+    ))
 }
 
 async fn capture_idle(
     reader: &mut ActivityReader<MeasuredRead>,
-    identities: &[NativeActivityIdentity],
+    identities: &[(NativeActivityIdentity, String)],
 ) -> Result<ActivityCensusRead> {
     let pending =
         capture::PendingActivityFrame::begin(reader, capture::ActivityAuthorityPolicy::RetainPartialBaseline).await?;
     let completed = pending.finish(reader).await?;
     let read = ActivityCensusRead::new(completed.description, completed.frame.observations(), true)?;
-    for identity in identities {
+    for (identity, database_id) in identities {
         let mut matching = read.observations.iter().filter(|row| &row.key.session == identity);
         let Some(row) = matching.next() else { return Err(invalid_data()) };
         let context = row.session_context.as_deref().ok_or_else(invalid_data)?;
+        let Some(SessionNativeContext::Mssql(native)) = context.native.as_deref() else { return Err(invalid_data()) };
+        if native.session_database_id.as_deref() != Some(database_id.as_str())
+            || native.session_database_name.as_deref()
+                != read.source.target.database().map(|database| database.database.as_str())
+            || native.request_database_id.is_some()
+            || row.statement_identity.is_some()
+        {
+            return Err(invalid_data());
+        }
         if matching.next().is_some()
             || !row.idle
             || row.key.request.is_some()

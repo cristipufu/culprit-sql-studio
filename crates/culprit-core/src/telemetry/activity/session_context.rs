@@ -1,6 +1,8 @@
 //! Session metadata is context. Its lifetimes, client claims and connection tokens do not identify a request owner.
 use super::*;
 
+const MAX_NATIVE_DATABASE_NAME_BYTES: usize = 512;
+
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
@@ -52,12 +54,29 @@ pub struct MssqlSessionContext {
     /// The native 1900-01-01 prelogin sentinel cannot identify an established session generation.
     pub login_established: bool,
     pub tds_protocol_version: Option<String>,
+    /// Original sys.dm_exec_sessions database_id, scoped to this native source and point; not a global identity.
+    /// A reported zero is retained separately from an unacquired value and supplies no database association.
+    pub session_database_id: Option<String>,
+    /// Optional DB_NAME(session_database_id) label. NULL/zero never fall back to the reader's database.
+    pub session_database_name: Option<String>,
+    /// Original request-row database_id, independent of statement text/locators and the session's database.
+    pub request_database_id: Option<String>,
     pub times: MssqlSessionTimeTokens,
     pub has_current_request: bool,
     /// Taken only from this exact native request row. No representative connection is selected by session ID.
     pub request_connection_id: Option<String>,
 }
 impl MssqlSessionContext {
+    fn database_context_is_valid(&self, has_request: bool) -> bool {
+        self.session_database_id.as_deref().is_none_or(native_database_id)
+            && self.session_database_name.as_deref().is_none_or(|name| {
+                !name.is_empty()
+                    && name.len() <= MAX_NATIVE_DATABASE_NAME_BYTES
+                    && self.session_database_id.as_deref().is_some_and(|id| id != "0")
+            })
+            && self.request_database_id.as_deref().is_none_or(|id| has_request && native_database_id(id))
+    }
+
     /// Native sys.dm_exec_sessions status only; current request status is a separate observation.
     pub fn lifecycle_from_native_state(native_state: &str) -> SessionLifecycle {
         match native_state.to_ascii_lowercase().as_str() {
@@ -87,6 +106,7 @@ impl ActivitySessionContext {
                     identifier(&context.native_state)
                         && self.lifecycle == MssqlSessionContext::lifecycle_from_native_state(&context.native_state)
                         && context.tds_protocol_version.as_deref().is_none_or(native_integer_code)
+                        && context.database_context_is_valid(key.request.is_some())
                         && self.client_process_id.as_deref().is_none_or(native_integer_code)
                         && context.times.is_valid()
                         && context.times.login_without_offset == key.session.generation
@@ -129,6 +149,10 @@ fn native_connection_token(value: &str) -> bool {
         && value.bytes().enumerate().all(|(index, byte)| {
             if matches!(index, 8 | 13 | 18 | 23) { byte == b'-' } else { byte.is_ascii_hexdigit() }
         })
+}
+
+fn native_database_id(value: &str) -> bool {
+    value.parse::<i16>().is_ok_and(|native| native >= 0 && native.to_string() == value)
 }
 
 fn native_integer_code(value: &str) -> bool {

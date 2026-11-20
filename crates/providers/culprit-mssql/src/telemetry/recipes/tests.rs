@@ -17,7 +17,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
         BTreeSet::from([
             ("mssql.query-history", 3),
             ("mssql.resource-history", 2),
-            ("mssql.activity", 3),
+            ("mssql.activity", 4),
             ("mssql.page-wait-targets", 2),
             ("mssql.page-wait-tasks", 2),
             ("mssql.shared-tempdb-page-wait-targets", 3),

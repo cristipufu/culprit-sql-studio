@@ -26,6 +26,23 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
         assert_eq!(report["source"], json!(native.coverage));
         assert_eq!(report["read_complete"], true);
         assert_eq!(report["native_rows"], native.native_rows);
+        let expected = match case {
+            SessionCensusCase::Idle | SessionCensusCase::Partial => (Some("7"), Some("db"), None),
+            SessionCensusCase::Mars => (Some("4"), Some("session-default"), Some("7")),
+            SessionCensusCase::Dormant => (Some("0"), None, None),
+            _ => (None, None, None),
+        };
+        for entry in report["entries"].as_array().unwrap() {
+            let fields = entry["fields"].as_array().unwrap();
+            for (key, expected) in [
+                ("session_database_id", expected.0),
+                ("session_database_name", expected.1),
+                ("request_database_id", expected.2),
+            ] {
+                let field = fields.iter().find(|field| field["key"] == key).unwrap();
+                assert_eq!(field["value"], json!(expected), "{case:?}: {key}");
+            }
+        }
         assert_eq!(value["local_verification_bytes"], bytes);
         assert_eq!(value["collected_from"], fixture.manifest.started_at);
         let encoded = value.to_string();

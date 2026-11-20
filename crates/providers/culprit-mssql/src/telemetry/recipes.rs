@@ -151,7 +151,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(activity::bounded_budget)
     .baseline()
-    .version(3),
+    .version(4),
     Registration::database(
         "mssql.page-wait-targets",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)),

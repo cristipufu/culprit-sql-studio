@@ -17,6 +17,9 @@ fn session_context_fixture(request: bool) -> (ActivityKey, ActivitySessionContex
             native_state: if request { "Running" } else { "Sleeping" }.into(),
             login_established: true,
             tds_protocol_version: None,
+            session_database_id: None,
+            session_database_name: None,
+            request_database_id: None,
             times: MssqlSessionTimeTokens {
                 login_without_offset: key.session.generation.clone(),
                 last_request_start_without_offset: Some("2020-01-01T07:59:00.0000000".into()),
@@ -122,4 +125,62 @@ fn canonical_native_session_state_and_declared_lifecycle_cannot_disagree_or_be_r
         assert_eq!(MssqlSessionContext::lifecycle_from_native_state(native), expected);
     }
     assert_eq!(original["native"]["data"]["native_state"], "Sleeping");
+}
+
+#[test]
+fn native_session_and_request_database_ids_roundtrip_independently_without_a_name_or_statement_binding() {
+    let (key, mut context) = session_context_fixture(true);
+    let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+    native.session_database_id = Some("4".into());
+    native.session_database_name = Some("session-default".into());
+    native.request_database_id = Some("7".into());
+    assert!(context.is_valid_for(&key, false));
+    let restored: ActivitySessionContext = serde_json::from_slice(&serde_json::to_vec(&context).unwrap()).unwrap();
+    assert_eq!(restored, context);
+    let SessionNativeContext::Mssql(native) = restored.native.as_deref().unwrap();
+    assert_eq!(native.session_database_id.as_deref(), Some("4"));
+    assert_eq!(native.session_database_name.as_deref(), Some("session-default"));
+    assert_eq!(native.request_database_id.as_deref(), Some("7"));
+}
+
+#[test]
+fn unknown_and_native_zero_database_ids_stay_distinct_without_target_name_fallback() {
+    for native_id in [None, Some("0"), Some("32767")] {
+        let (key, mut context) = session_context_fixture(false);
+        let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+        native.session_database_id = native_id.map(str::to_owned);
+        assert!(context.is_valid_for(&key, true));
+        let restored: ActivitySessionContext = serde_json::from_slice(&serde_json::to_vec(&context).unwrap()).unwrap();
+        assert_eq!(restored, context);
+        let SessionNativeContext::Mssql(native) = restored.native.as_deref().unwrap();
+        assert!(native.session_database_name.is_none());
+        assert!(native.request_database_id.is_none());
+    }
+}
+
+#[test]
+fn malformed_native_database_ids_or_idle_request_metadata_cannot_gain_a_database_association() {
+    for change in
+        ["negative", "padded", "too-wide", "fraction", "name-without-id", "name-at-zero", "wide-name", "idle-request"]
+    {
+        let (key, mut context) = session_context_fixture(false);
+        let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+        match change {
+            "negative" => native.session_database_id = Some("-1".into()),
+            "padded" => native.session_database_id = Some("07".into()),
+            "too-wide" => native.session_database_id = Some("32768".into()),
+            "fraction" => native.session_database_id = Some("7.0".into()),
+            "name-without-id" => native.session_database_name = Some("reader-target".into()),
+            "name-at-zero" => {
+                native.session_database_id = Some("0".into());
+                native.session_database_name = Some("reader-target".into());
+            }
+            "wide-name" => {
+                native.session_database_id = Some("7".into());
+                native.session_database_name = Some("x".repeat(513));
+            }
+            _ => native.request_database_id = Some("7".into()),
+        }
+        assert!(!context.is_valid_for(&key, true), "{change}");
+    }
 }

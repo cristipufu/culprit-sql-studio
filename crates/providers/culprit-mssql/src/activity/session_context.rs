@@ -1,7 +1,7 @@
 //! Only the ordinary census requests these native session facts. Focused request projections stay unchanged.
 use super::rows::{age, value};
 use crate::{
-    read::{integer, invalid_data, optional_signed_integer, optional_text, text},
+    read::{integer, invalid_data, optional_counter, optional_signed_integer, optional_text, text},
     sql_time::native_time,
     value::Rec,
 };
@@ -13,7 +13,8 @@ pub(crate) const ESTABLISHED_SESSION_SQL: &str = "s.login_time IS NOT NULL \
  AND CONVERT(date,s.login_time)<>CONVERT(date,'19000101',112) \
  AND LOWER(s.status) NOT IN(N'dormant',N'preconnect')";
 
-pub(super) const COLUMNS: &str = "1 AS session_context_collected,s.status AS native_session_state,\
+pub(super) const COLUMNS: &str = "1 AS session_context_collected,s.database_id AS session_database_id,\
+ CASE WHEN s.database_id>0 THEN DB_NAME(s.database_id) END AS session_database_name,s.status AS native_session_state,\
  s.client_interface_name,s.host_process_id,s.client_version,\
  CONVERT(varchar(36),r.connection_id) AS request_connection_id";
 
@@ -42,6 +43,9 @@ pub(super) fn decode(
             native_state,
             login_established: established,
             tds_protocol_version: optional_signed_integer(row, "client_version")?.map(|native| native.to_string()),
+            session_database_id: optional_counter(row, "session_database_id")?,
+            session_database_name: optional_text(row, "session_database_name")?,
+            request_database_id: optional_counter(row, "request_database_id")?,
             has_current_request: key.request.is_some() || !no_current_request,
             request_connection_id: optional_text(row, "request_connection_id")?,
             times: MssqlSessionTimeTokens {

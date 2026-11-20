@@ -55,6 +55,9 @@ async fn missing_session_bodies_keep_original_mars_population_and_never_requery_
 async fn altered_client_lifetimes_large_totals_nullable_fields_or_connection_id_cannot_borrow_native_receipts() {
     for (pointer, value) in [
         ("/session_context/client_library", json!("another-library")),
+        ("/session_context/native/data/session_database_id", json!("8")),
+        ("/session_context/native/data/session_database_name", json!("another-session-database")),
+        ("/session_context/native/data/request_database_id", json!("9")),
         ("/session_context/native/data/request_connection_id", json!("33333333-3333-3333-3333-333333333333")),
         ("/session_context/native/data/times/login_without_offset", json!("2020-01-01T11:50:01.0000000")),
         ("/session_context/native/data/tds_protocol_version", json!(0)),

@@ -30,6 +30,27 @@ test("MARS rows have separate presentation keys and never select a representativ
   expect(html).toContain("22222222-2222-2222-2222-222222222222");
 });
 
+test("session and request databases render separately without filling unknown names from the selected database", () => {
+  for (const [name, expected] of [
+    ["mars", ["4", "session-default", "7"]],
+    ["dormant", ["0", null, null]],
+    ["unknown", [null, null, null]],
+  ] as const) {
+    const { report } = sessionCensusCase(name);
+    const html = renderToStaticMarkup(<SessionCensus report={report} />);
+    for (const [key, value] of [
+      ["session_database_id", expected[0]],
+      ["session_database_name", expected[1]],
+      ["request_database_id", expected[2]],
+    ] as const) {
+      const field = report.entries[0]!.fields.find((field) => field.key === key)!;
+      expect(field.value).toBe(value);
+      expect(html).toContain(field.label);
+      expect(html).toContain(field.value ?? t("ui.memory_failures.not_reported"));
+    }
+  }
+});
+
 test("idle and dormant sessions stay visible as context without active counts or progress dispatch", () => {
   for (const name of ["idle", "dormant"] as const) {
     const state = sessionCensusLive(name);

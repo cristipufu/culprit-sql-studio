@@ -141,3 +141,63 @@ fn optional_request_page_server_counts_remain_exact_and_never_turn_session_conte
             .any(|field| field.key == "request_page_server_reads")
     );
 }
+
+#[test]
+fn session_database_context_is_separate_from_mars_request_context_and_display_labels() {
+    let mut read = recorded();
+    let mut first = read.observations.remove(0);
+    first.idle = false;
+    first.scope = ActivityScopeBasis::RequestDatabase;
+    first.state = "running".into();
+    first.key.request = Some(NativeActivityIdentity { id: "0".into(), generation: "request-0".into() });
+    first.request_counters = Some(ActivityCounters::default());
+    let context = first.session_context.as_deref_mut().unwrap();
+    context.lifecycle = SessionLifecycle::Running;
+    let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+    native.native_state = "Running".into();
+    native.has_current_request = true;
+    native.session_database_id = Some("4".into());
+    native.session_database_name = Some("session-default".into());
+    native.request_database_id = Some("7".into());
+    let mut second = first.clone();
+    second.key.request.as_mut().unwrap().id = "1".into();
+    read.observations = vec![first, second];
+    let SourceObservation::Activity(header) = &mut read.source.observation else { panic!() };
+    header.native_rows = 2;
+    header.observations = 2;
+    header.coverage.records = 2;
+    let report = explain(&read).unwrap();
+    assert_eq!((report.observed_sessions, report.observed_requests), (1, 2));
+    for entry in &report.entries {
+        assert_eq!(value(entry, "database"), Some("db"));
+        assert_eq!(value(entry, "session_database_id"), Some("4"));
+        assert_eq!(value(entry, "session_database_name"), Some("session-default"));
+        assert_eq!(value(entry, "request_database_id"), Some("7"));
+    }
+    assert!(report.limitations.contains(&t!("view.session_census.limit.database_ids")));
+    assert!(read.observations.iter().all(|row| row.statement_identity.is_none()));
+}
+
+#[test]
+fn missing_native_session_context_and_zero_ids_do_not_borrow_the_displayed_target_database() {
+    for native_id in [None, Some("0"), Some("7")] {
+        let mut read = recorded();
+        let SessionNativeContext::Mssql(native) =
+            read.observations[0].session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+        native.session_database_id = native_id.map(str::to_owned);
+        native.session_database_name = None;
+        native.request_database_id = None;
+        let report = explain(&read).unwrap();
+        let entry = &report.entries[0];
+        assert_eq!(value(entry, "database"), Some("db"));
+        assert_eq!(value(entry, "session_database_id"), native_id);
+        assert_eq!(value(entry, "session_database_name"), None);
+        assert_eq!(value(entry, "request_database_id"), None);
+    }
+    let mut read = recorded();
+    read.observations[0].session_context = None;
+    let report = explain(&read).unwrap();
+    for key in ["session_database_id", "session_database_name", "request_database_id"] {
+        assert_eq!(value(&report.entries[0], key), None);
+    }
+}

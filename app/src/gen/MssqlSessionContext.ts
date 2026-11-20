@@ -5,7 +5,20 @@ export type MssqlSessionContext = { native_state: string,
 /**
  * The native 1900-01-01 prelogin sentinel cannot identify an established session generation.
  */
-login_established: boolean, tds_protocol_version: string | null, times: MssqlSessionTimeTokens, has_current_request: boolean, 
+login_established: boolean, tds_protocol_version: string | null, 
+/**
+ * Original sys.dm_exec_sessions database_id, scoped to this native source and point; not a global identity.
+ * A reported zero is retained separately from an unacquired value and supplies no database association.
+ */
+session_database_id: string | null, 
+/**
+ * Optional DB_NAME(session_database_id) label. NULL/zero never fall back to the reader's database.
+ */
+session_database_name: string | null, 
+/**
+ * Original request-row database_id, independent of statement text/locators and the session's database.
+ */
+request_database_id: string | null, times: MssqlSessionTimeTokens, has_current_request: boolean, 
 /**
  * Taken only from this exact native request row. No representative connection is selected by session ID.
  */

@@ -105,3 +105,53 @@ async fn shared_postgres_caller_labels_keep_distinct_native_receipts_and_idle_la
     }
     assert_eq!(fixture.recovery_object_reads(), before);
 }
+
+#[tokio::test]
+async fn original_native_session_database_facts_survive_replay_without_becoming_request_sql_or_scope_proof() {
+    for (case, session_id, session_name, request_id) in [
+        (SessionCensusCase::Idle, Some("7"), Some("db"), None),
+        (SessionCensusCase::Dormant, Some("0"), None, None),
+        (SessionCensusCase::Mars, Some("4"), Some("session-default"), Some("7")),
+        (SessionCensusCase::Unknown, None, None, None),
+        (SessionCensusCase::PostgresSharedLabels, None, None, None),
+    ] {
+        let (source, rows) = test_support::session_census_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+        let analysis = culprit_engine::collected_resources::session_census(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.report.entries.len(), rows.len());
+        assert!(!rows.is_empty());
+        for (entry, native_row) in analysis.report.entries.iter().zip(&rows) {
+            let value = |key: &str| entry.fields.iter().find(|field| field.key == key).unwrap().value.as_deref();
+            assert_eq!(value("session_database_id"), session_id, "{case:?}");
+            assert_eq!(value("session_database_name"), session_name, "{case:?}");
+            assert_eq!(value("request_database_id"), request_id, "{case:?}");
+            let reference = entry.reference.as_ref().unwrap();
+            reference.validate_canonical_record(&source, native_row).unwrap();
+            if let TelemetryRecord::Activity(original) = native_row {
+                assert_eq!(entry.activity, original.key);
+                assert_eq!(entry.scope, original.scope);
+                if matches!(case, SessionCensusCase::Mars) {
+                    assert!(original.statement_identity.is_none());
+                    let mut another_source = source.clone();
+                    let CollectionTarget::Database(database) = &mut another_source.target else { panic!() };
+                    let culprit_core::DatabaseLocation::Server { host, .. } = &mut database.location else { panic!() };
+                    *host = "another-native-owner.invalid".into();
+                    assert!(
+                        reference.validate_canonical_record(&another_source, native_row).is_err(),
+                        "equal native DBIDs cannot cross source namespaces"
+                    );
+                    let mut changed = original.as_ref().clone();
+                    let SessionNativeContext::Mssql(native) =
+                        changed.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+                    native.session_database_id = Some("8".into());
+                    assert!(changed.is_valid());
+                    assert!(reference.validate_canonical_record(&source, &TelemetryRecord::from(changed)).is_err());
+                }
+            }
+        }
+        assert_eq!(fixture.recovery_object_reads(), opened);
+    }
+}

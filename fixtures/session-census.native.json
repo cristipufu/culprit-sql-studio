@@ -61,7 +61,10 @@
               "last_request_end_without_offset": "2020-01-01T11:59:55.0000000"
             },
             "has_current_request": false,
-            "request_connection_id": null
+            "request_connection_id": null,
+            "session_database_id": null,
+            "session_database_name": null,
+            "request_database_id": null
           }
         }
       },

@@ -1,6 +1,8 @@
 use super::{SourceQualification, Summary, render_summary};
 use culprit_core::{SessionCensusReport, format, t};
 
+const MAX_FIELD_PREVIEW_CHARACTERS: usize = 512;
+
 pub(crate) fn session_census(report: &SessionCensusReport) -> String {
     render_summary(
         Summary {
@@ -36,7 +38,11 @@ pub(crate) fn session_census(report: &SessionCensusReport) -> String {
                     text.push_str(&t!(
                         "view.counter_ratios.cli.metric",
                         label = &field.label,
-                        value = field.value.clone().unwrap_or_else(|| t!("ui.memory_failures.not_reported"))
+                        value = field
+                            .value
+                            .as_deref()
+                            .map(|value| super::statement::preview_bounded(value, MAX_FIELD_PREVIEW_CHARACTERS))
+                            .unwrap_or_else(|| t!("ui.memory_failures.not_reported"))
                     ));
                 }
             }

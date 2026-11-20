@@ -5,6 +5,8 @@ fn census_row(id: i64, request: Option<i64>, native_state: &str) -> Rec {
     let mut columns = base.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
     columns.extend([
         ("session_context_collected", Val::Int(1)),
+        ("session_database_id", Val::Int(7)),
+        ("session_database_name", Val::Text("shop".into())),
         ("native_session_state", Val::Text(native_state.into())),
         ("client_interface_name", Val::Text("owned driver library".into())),
         ("host_process_id", Val::Int(0)),
@@ -22,6 +24,7 @@ fn census_row(id: i64, request: Option<i64>, native_state: &str) -> Rec {
         &row,
         &[
             ("request_id", Val::Null),
+            ("request_database_id", Val::Null),
             ("request_generation", Val::Null),
             ("no_current_request", Val::Int(1)),
             ("scope_basis", Val::Int(3)),
@@ -63,6 +66,9 @@ async fn quiet_user_sessions_keep_library_lifetimes_and_exact_counters_without_a
     assert!(context.login_age_ms.is_some());
     let SessionNativeContext::Mssql(native) = context.native.as_deref().unwrap();
     assert!(native.tds_protocol_version.is_none() && native.request_connection_id.is_none());
+    assert_eq!(native.session_database_id.as_deref(), Some("7"));
+    assert_eq!(native.session_database_name.as_deref(), Some("shop"));
+    assert!(native.request_database_id.is_none());
     assert_eq!(native.times.last_request_start_without_offset.as_deref(), Some("2020-01-01T07:55:00.0000000"));
 }
 
@@ -90,10 +96,16 @@ async fn quiet_rows_do_not_expand_the_existing_active_request_sql_enrichment_pop
 
 #[tokio::test]
 async fn mars_retains_each_exact_current_request_connection_without_a_representative_session_row() {
-    let a = census_row(42, Some(0), "Running");
+    let a = replace(
+        &census_row(42, Some(0), "Running"),
+        &[("session_database_id", Val::Int(4)), ("session_database_name", Val::Text("session-default".into()))],
+    );
     let b = replace(
-        &census_row(42, Some(1), "Running"),
-        &[("request_connection_id", Val::Text("b8a44410-5033-4db1-9e90-79354ab31702".into()))],
+        &a,
+        &[
+            ("request_id", Val::Int(1)),
+            ("request_connection_id", Val::Text("b8a44410-5033-4db1-9e90-79354ab31702".into())),
+        ],
     );
     let mut reader = baseline_reader(vec![a, b]);
     let (source, rows) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
@@ -105,6 +117,9 @@ async fn mars_retains_each_exact_current_request_connection_without_a_representa
         .iter()
         .map(|row| {
             let SessionNativeContext::Mssql(native) = row.session_context.as_ref().unwrap().native.as_deref().unwrap();
+            assert_eq!(native.session_database_id.as_deref(), Some("4"));
+            assert_eq!(native.session_database_name.as_deref(), Some("session-default"));
+            assert_eq!(native.request_database_id.as_deref(), Some("7"));
             native.request_connection_id.as_deref().unwrap()
         })
         .collect::<BTreeSet<_>>();
@@ -163,4 +178,68 @@ async fn limits_keep_request_priority_and_explicit_original_population_gaps() {
     assert!(query.contains("CASE WHEN a.request_id IS NOT NULL THEN 0"));
     assert!(!query.contains("sys.dm_exec_sql_text"));
     assert!(sql::details(true, sql::QueryPolicy::Activity).contains("c.most_recent_session_id=s.session_id"));
+}
+
+#[test]
+fn current_request_database_context_survives_an_unavailable_sql_locator_and_different_session_database() {
+    for (request_database, expected) in [(Val::Int(7), Some("7")), (Val::Int(0), Some("0")), (Val::Null, None)] {
+        let row = replace(
+            &census_row(42, Some(0), "Running"),
+            &[
+                ("session_database_id", Val::Int(4)),
+                ("session_database_name", Val::Text("session-default".into())),
+                ("request_database_id", request_database),
+                ("sql_handle", Val::Null),
+            ],
+        );
+        let record = rows::record(&row).unwrap().unwrap();
+        assert!(record.current_locator.is_none());
+        assert!(record.facts.statement_identity.is_none());
+        let SessionNativeContext::Mssql(native) =
+            record.facts.session_context.as_ref().unwrap().native.as_deref().unwrap();
+        assert_eq!(native.session_database_id.as_deref(), Some("4"));
+        assert_eq!(native.session_database_name.as_deref(), Some("session-default"));
+        assert_eq!(native.request_database_id.as_deref(), expected);
+    }
+    let sql = sql::metadata(IdentityDetail::Endpoint, page_server_reads::Availability::Unknown);
+    assert!(sql.contains("s.database_id AS session_database_id"));
+    assert!(sql.contains("CASE WHEN s.database_id>0 THEN DB_NAME(s.database_id) END AS session_database_name"));
+    assert!(sql.contains("r.database_id AS request_database_id"));
+}
+
+#[test]
+fn null_zero_and_hidden_native_session_database_names_are_retained_without_request_or_target_fallback() {
+    for (id, expected) in [(Val::Null, None), (Val::Int(0), Some("0")), (Val::Int(7), Some("7"))] {
+        let row = replace(
+            &census_row(55, None, "Sleeping"),
+            &[("session_database_id", id), ("session_database_name", Val::Null)],
+        );
+        let record = rows::record(&row).unwrap().unwrap();
+        let SessionNativeContext::Mssql(native) =
+            record.facts.session_context.as_ref().unwrap().native.as_deref().unwrap();
+        assert_eq!(native.session_database_id.as_deref(), expected);
+        assert!(native.session_database_name.is_none());
+        assert!(native.request_database_id.is_none());
+        assert!(record.current_locator.is_none());
+        assert_eq!(
+            record.facts.database,
+            Some("shop".into()),
+            "existing display context cannot fill an independent native field"
+        );
+    }
+}
+
+#[test]
+fn malformed_or_incoherent_native_database_metadata_is_rejected_by_the_same_decoder() {
+    for changes in [
+        vec![("session_database_id", Val::Int(-1))],
+        vec![("session_database_id", Val::Int(32768))],
+        vec![("session_database_id", Val::Float(7.5))],
+        vec![("session_database_id", Val::Null)],
+        vec![("session_database_id", Val::Int(0))],
+        vec![("request_database_id", Val::Int(7))],
+    ] {
+        let row = replace(&census_row(55, None, "Sleeping"), &changes);
+        assert!(rows::record(&row).is_err());
+    }
 }

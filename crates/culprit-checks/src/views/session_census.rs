@@ -43,6 +43,7 @@ pub fn explain_frame(frame: &ActivityFrameEvidence<'_>) -> Result<SessionCensusR
         t!("view.session_census.limit.point"),
         t!("view.session_census.limit.relationships"),
         t!("view.session_census.limit.client"),
+        t!("view.session_census.limit.database_ids"),
     ];
     if native.population != ActivityPopulation::UserSessionsCurrentRequestsAndBlockers {
         limitations.push(t!("view.session_census.limit.population"));
@@ -112,9 +113,27 @@ fn entry(row: &ActivityFrameRow<'_>) -> SessionCensusEntry {
     let point = row.observation;
     let client = point.client.as_ref();
     let context = point.session_context.as_deref();
+    let native = context.and_then(|context| context.native.as_deref()).map(|native| match native {
+        SessionNativeContext::Mssql(native) => native,
+    });
     let mut fields = vec![
         field("actor_state", t!("view.session_census.field.actor_state"), Some(point.state.clone())),
         field("database", t!("view.session_census.field.database"), point.database.clone()),
+        field(
+            "session_database_id",
+            t!("view.session_census.field.session_database_id"),
+            native.and_then(|native| native.session_database_id.clone()),
+        ),
+        field(
+            "session_database_name",
+            t!("view.session_census.field.session_database_name"),
+            native.and_then(|native| native.session_database_name.clone()),
+        ),
+        field(
+            "request_database_id",
+            t!("view.session_census.field.request_database_id"),
+            native.and_then(|native| native.request_database_id.clone()),
+        ),
         field(
             "application",
             t!("view.session_census.field.application"),
@@ -162,7 +181,7 @@ fn entry(row: &ActivityFrameRow<'_>) -> SessionCensusEntry {
     if let Some(counters) = &point.request_counters {
         fields.extend(counter_fields(counters, CounterLifetime::CurrentRequest));
     }
-    if let Some(SessionNativeContext::Mssql(native)) = context.and_then(|context| context.native.as_deref()) {
+    if let Some(native) = native {
         fields.extend([
             field(
                 "native_session_state",
