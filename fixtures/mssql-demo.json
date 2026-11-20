@@ -61,7 +61,7 @@
       "reason": null
     }
   ],
-  "format": 25,
+  "format": 26,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",
   "environment": "local",

@@ -30,7 +30,11 @@ export type OperationalStats = { storage?: StorageRead, cached_runtime?: CachedR
 /**
  * An independent original capture; its shared target and receipts are never current database ownership.
  */
-memory_clerks?: CapturedOperationalRead, hyperscale_log_components?: CapturedOperationalRead, database_properties?: DatabasePropertiesRead, statement_work?: StatementCounterSnapshot, 
+memory_clerks?: CapturedOperationalRead, 
+/**
+ * Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
+ */
+tempdb_metadata_memory?: CapturedOperationalRead, hyperscale_log_components?: CapturedOperationalRead, database_properties?: DatabasePropertiesRead, statement_work?: StatementCounterSnapshot, 
 /**
  * None means that the native usage population was not established.
  */

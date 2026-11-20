@@ -40,6 +40,10 @@ pub struct LocalSnapshotAnalysis {
     pub(super) report: LocalSnapshotReport,
 }
 impl LocalSnapshotAnalysis {
+    pub(crate) fn into_read(self) -> Box<CapturedOperationalRead> {
+        self.original.into_read()
+    }
+
     pub fn original(&self) -> &LocalOperationalCapture {
         &self.original
     }

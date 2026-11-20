@@ -247,6 +247,8 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
                 )
                 | (crate::source_id::PERFORMANCE_COUNTERS, "view.counter_ratios.invalid")
                 | (crate::source_id::PERFORMANCE_COUNTERS, "view.performance_counters.invalid")
+                | (crate::source_id::TEMPDB_METADATA_MEMORY, "view.tempdb_metadata_memory.invalid")
+                | (crate::source_id::TEMPDB_METADATA_MEMORY, "view.tempdb_metadata_memory.sharing_withheld")
                 | (crate::source_id::MEMORY_CLERKS, "collected.memory_clerks.invalid")
                 | (crate::source_id::MEMORY_CLERKS, "collected.memory_clerks.sharing_withheld")
                 | (crate::telemetry::DATABASE_PROPERTIES_SOURCE, "view.database_properties.invalid")
@@ -328,6 +330,13 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         s.record_unavailable_evidence(
             crate::source_id::FILE_CAPACITY,
             crate::message!("view.storage.sharing_withheld"),
+        );
+    }
+    if s.operations.tempdb_metadata_memory.take().is_some() {
+        // The exact receipt/body is indivisible; masking cannot grant a new signature or source incarnation.
+        s.record_unavailable_evidence(
+            crate::source_id::TEMPDB_METADATA_MEMORY,
+            crate::message!("view.tempdb_metadata_memory.sharing_withheld"),
         );
     }
     if s.operations.memory_clerks.take().is_some() {

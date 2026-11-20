@@ -11,6 +11,24 @@ pub struct TempdbMetadataMemoryEvidence<'a> {
     pub read_complete: bool,
 }
 
+/// A validated original body supplies both native scope and coverage; a current scan contributes no authority.
+pub fn explain_captured(read: &CapturedOperationalRead) -> Result<TempdbMetadataMemoryReport> {
+    if !read.is_valid() {
+        return Err(CollectionStop::InvalidPage.error());
+    }
+    let context = read.context()?;
+    let coverage = read
+        .source_coverage(culprit_core::source_id::TEMPDB_METADATA_MEMORY)
+        .ok_or_else(|| DeliveryProblem::UnsupportedSchema.error())?;
+    let observations = read.observations.iter().filter(|row| row.source == coverage.source).collect::<Vec<_>>();
+    explain(TempdbMetadataMemoryEvidence {
+        context: &context,
+        coverage,
+        observations: &observations,
+        read_complete: read.read_complete,
+    })
+}
+
 pub fn explain(input: TempdbMetadataMemoryEvidence<'_>) -> Result<TempdbMetadataMemoryReport> {
     let invalid = || CollectionStop::InvalidPage.error();
     if !tempdb_metadata_memory_owner_is_qualified(input.context)

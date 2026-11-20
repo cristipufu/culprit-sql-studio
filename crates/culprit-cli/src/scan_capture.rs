@@ -14,7 +14,7 @@ use std::{future::Future, path::PathBuf};
 
 #[derive(Args, Default)]
 #[command(group(clap::ArgGroup::new("captured_original")
-    .args(["memory_clerks_capture", "hyperscale_log_components_capture"]).multiple(false)))]
+    .args(["memory_clerks_capture", "hyperscale_log_components_capture", "tempdb_metadata_memory_capture"]).multiple(false)))]
 pub(crate) struct CapturedScanArgs {
     #[arg(long, value_name = "DIRECTORY", requires = "captured_original", help = culprit_core::t!("view.hyperscale_log_components.intake.outbox"))]
     evidence_outbox: Option<PathBuf>,
@@ -22,6 +22,8 @@ pub(crate) struct CapturedScanArgs {
     memory_clerks_capture: Option<String>,
     #[arg(long, value_name = "OBSERVATION", requires = "evidence_outbox", help = culprit_core::t!("view.hyperscale_log_components.intake.observation"))]
     hyperscale_log_components_capture: Option<String>,
+    #[arg(long, value_name = "OBSERVATION", requires = "evidence_outbox", help = culprit_core::t!("view.tempdb_metadata_memory.intake.observation"))]
+    tempdb_metadata_memory_capture: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -31,13 +33,20 @@ struct CapturedOriginal<'a> {
 }
 impl CapturedScanArgs {
     fn original(&self) -> Result<Option<CapturedOriginal<'_>>> {
-        let original = match (&self.memory_clerks_capture, &self.hyperscale_log_components_capture) {
-            (None, None) => return Ok(None),
-            (Some(observation_id), None) => {
+        let original = match (
+            &self.memory_clerks_capture,
+            &self.hyperscale_log_components_capture,
+            &self.tempdb_metadata_memory_capture,
+        ) {
+            (None, None, None) => return Ok(None),
+            (Some(observation_id), None, None) => {
                 CapturedOriginal { observation_id, analysis: LocalCaptureAnalysisKind::MemoryClerks }
             }
-            (None, Some(observation_id)) => {
+            (None, Some(observation_id), None) => {
                 CapturedOriginal { observation_id, analysis: LocalCaptureAnalysisKind::HyperscaleLogComponents }
+            }
+            (None, None, Some(observation_id)) => {
+                CapturedOriginal { observation_id, analysis: LocalCaptureAnalysisKind::TempdbMetadataMemory }
             }
             _ => return Err(DeliveryProblem::InvalidContract.error()),
         };
@@ -91,8 +100,18 @@ async fn captured_scan(
             })
             .await
         }
+        LocalCapturedAnalysis::Snapshot(captured) => {
+            scan_until_cancelled(cancellation, || {
+                workspace.scan_with_captured_tempdb_metadata_memory(
+                    &args.connection,
+                    &options,
+                    args.query_log.as_deref(),
+                    captured,
+                )
+            })
+            .await
+        }
         LocalCapturedAnalysis::PageServerReads(_)
-        | LocalCapturedAnalysis::Snapshot(_)
         | LocalCapturedAnalysis::Blocking(_)
         | LocalCapturedAnalysis::SessionCensus(_) => Err(DeliveryProblem::InvalidContract.error()),
     }

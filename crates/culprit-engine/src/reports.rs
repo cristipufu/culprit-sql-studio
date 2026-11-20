@@ -32,6 +32,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         memory_clerks: &'a Option<Box<culprit_core::MemoryClerkReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        tempdb_metadata_memory: &'a Option<Box<culprit_core::TempdbMetadataMemoryReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         database_properties: &'a Option<Box<culprit_core::DatabasePropertiesReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
@@ -104,6 +106,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         performance_counters,
         wait_counters,
         memory_clerks,
+        tempdb_metadata_memory,
         database_properties,
         maintenance_progress,
         replication,
@@ -139,6 +142,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         performance_counters,
         wait_counters,
         memory_clerks,
+        tempdb_metadata_memory,
         database_properties,
         maintenance_progress,
         replication,

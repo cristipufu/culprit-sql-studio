@@ -28,6 +28,7 @@ import { StatementWork } from "./StatementWork";
 import { PerformanceCounters } from "./PerformanceCounters";
 import { CounterRatios } from "./CounterRatios";
 import { MemoryClerks } from "./MemoryClerks";
+import { TempdbMetadataMemory } from "./TempdbMetadataMemory";
 import { HyperscaleLogComponents } from "./HyperscaleLogComponents";
 import { DatabaseProperties } from "./DatabaseProperties";
 import { StorageEvidence } from "./StorageEvidence";
@@ -160,6 +161,10 @@ export function HealthTab({
   const databasePropertiesRead = report.snapshot.operations.database_properties;
   const databasePropertiesRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "database-properties");
   const databasePropertiesIssue = observationReadIssue("database-properties", report.snapshot.sources ?? [], Boolean(databasePropertiesRead || databasePropertiesRecorded));
+  const tempdbMetadataMemory = report.tempdb_metadata_memory;
+  const tempdbMetadataRead = report.snapshot.operations.tempdb_metadata_memory;
+  const tempdbMetadataRecorded = Boolean(tempdbMetadataRead) || (report.snapshot.sources ?? []).some((source) => source.source === "tempdb metadata memory");
+  const tempdbMetadataIssue = observationReadIssue("tempdb metadata memory", report.snapshot.sources ?? [], tempdbMetadataRecorded);
   const memoryClerks = report.memory_clerks;
   const memoryClerkRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "memory clerks");
   const memoryClerkIssue = observationReadIssue("memory clerks", report.snapshot.sources ?? [], memoryClerkRecorded);
@@ -183,8 +188,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, databasePropertiesIssue, memoryClerkIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, databasePropertiesIssue, memoryClerkIssue, tempdbMetadataIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -273,6 +278,9 @@ export function HealthTab({
       {databaseProperties && <DatabaseProperties key={report.snapshot.id} report={databaseProperties} />}
       {!databaseProperties && databasePropertiesIssue && <ObservationSourceIssue source={databasePropertiesIssue} title={t("view.database_properties.title")} />}
       {!databaseProperties && (databasePropertiesRead || databasePropertiesRecorded) && !databasePropertiesIssue && <ObservationExplanationIssue title={t("view.database_properties.title")} reason={t("view.database_properties.invalid")} />}
+      {tempdbMetadataMemory && <TempdbMetadataMemory key={report.snapshot.id} report={tempdbMetadataMemory} />}
+      {!tempdbMetadataMemory && tempdbMetadataIssue && <ObservationSourceIssue source={tempdbMetadataIssue} title={t("view.tempdb_metadata_memory.title")} />}
+      {!tempdbMetadataMemory && tempdbMetadataRecorded && !tempdbMetadataIssue && <ObservationExplanationIssue title={t("view.tempdb_metadata_memory.title")} reason={t("view.tempdb_metadata_memory.invalid")} />}
       {memoryClerks && <MemoryClerks key={report.snapshot.id} report={memoryClerks} />}
       {!memoryClerks && memoryClerkIssue && <ObservationSourceIssue source={memoryClerkIssue} title={t("collected.memory_clerks.title")} />}
       {!memoryClerks && memoryClerkRecorded && !memoryClerkIssue && <ObservationExplanationIssue title={t("collected.memory_clerks.title")} reason={t("collected.memory_clerks.invalid")} />}

@@ -355,6 +355,13 @@ contradictory values without adding memory pressure, reclaimable capacity, an al
 leak, duration or recovery claims. This source is unqualified for production cost until its changed recipe is
 measured; it does not enable memory-optimized metadata or request garbage collection.
 
+The local `analyze_capture` action `tempdb_metadata_memory` and archive CLI analysis
+`--analysis tempdb-metadata-memory` use the same report. An explicit scan attachment,
+`--evidence-outbox DIRECTORY --tempdb-metadata-memory-capture OBSERVATION`, adds that original shared context
+to Health after the scan owner settles. It retains the original rows and native scope for saved replay without
+reopening the Outbox; it neither collects shared resources nor matches the original owner to the current database.
+Private original receipts are withheld from shared exports with an explicit unavailable qualification.
+
 Native contracts: [database-level XTP memory consumers](https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-xtp-memory-consumers-transact-sql),
 [tempdb metadata-memory troubleshooting](https://learn.microsoft.com/troubleshoot/sql/database-engine/performance/memory-optimized-tempdb-out-of-memory),
 and [scoped dynamic-statement database context](https://learn.microsoft.com/sql/relational-databases/system-stored-procedures/sp-executesql-transact-sql).

@@ -11,9 +11,15 @@ pub(crate) enum CapturedScanEvidence {
     #[cfg(feature = "collector")]
     CachedRuntime(Box<CachedRuntimeRead>),
     MemoryClerks(Box<CapturedOperationalRead>),
+    TempdbMetadataMemory(Box<CapturedOperationalRead>),
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
 impl CapturedScanEvidence {
+    pub(crate) fn tempdb_metadata_memory(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::tempdb_metadata_memory::explain_captured(&read)?;
+        Ok(Self::TempdbMetadataMemory(read))
+    }
+
     pub(crate) fn memory_clerks(read: Box<CapturedOperationalRead>) -> Result<Self> {
         // The pure view is the one owner of clerk-family admission; keep malformed originals out before scanning.
         culprit_checks::memory_clerks::explain_captured(&read)?;
@@ -47,6 +53,13 @@ impl CapturedScanEvidence {
                     return Err(DeliveryProblem::InvalidContract.error());
                 }
                 snapshot.operations.hyperscale_log_components = Some(read);
+            }
+            Self::TempdbMetadataMemory(read) => {
+                if snapshot.operations.tempdb_metadata_memory.is_some() {
+                    return Err(DeliveryProblem::Conflict.error());
+                }
+                // Keep the authenticated shared native owner, including an unknown current scan identity.
+                snapshot.operations.tempdb_metadata_memory = Some(read);
             }
             Self::MemoryClerks(read) => {
                 if snapshot.operations.memory_clerks.is_some()

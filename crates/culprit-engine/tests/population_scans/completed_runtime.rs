@@ -11,6 +11,7 @@ use culprit_read::admission::SourceGate;
 
 mod hyperscale_log_components;
 mod memory_clerks;
+mod tempdb_metadata_memory;
 
 #[derive(Clone)]
 struct CapturedRows {

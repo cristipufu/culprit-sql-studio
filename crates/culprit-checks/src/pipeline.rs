@@ -38,6 +38,7 @@ mod replication;
 mod runtime_populations;
 mod statement_work;
 mod storage;
+mod tempdb_metadata_memory;
 mod wait_counters;
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
@@ -288,6 +289,7 @@ impl Pipeline {
         let configured_log_rates = configured_log_rates::explain(&mut snapshot);
         let hyperscale_log_components = hyperscale_log_components::explain(&mut snapshot);
         let memory_clerks = memory_clerks::explain(&mut snapshot);
+        let tempdb_metadata_memory = tempdb_metadata_memory::explain(&mut snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
         let storage = storage::explain(&mut snapshot);
         let instance_resources = instance_resources::explain(&mut snapshot);
@@ -418,6 +420,7 @@ impl Pipeline {
             configured_log_rates,
             hyperscale_log_components,
             memory_clerks,
+            tempdb_metadata_memory,
             database_properties,
             statement_work,
             page_server_reads,

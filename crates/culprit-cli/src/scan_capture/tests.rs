@@ -1,5 +1,6 @@
 //! This is a local ownership/integration proof over controlled native-shaped facts, not native cost qualification.
 mod hyperscale_log_components;
+mod tempdb_metadata_memory;
 use super::*;
 use clap::Parser;
 use culprit_collector::analytical::test_support::{LocalCaptureFixture, MemoryClerkCase, memory_clerk_evidence};

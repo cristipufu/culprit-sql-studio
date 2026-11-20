@@ -390,6 +390,9 @@ pub struct Report {
     pub memory_clerks: Option<Box<crate::MemoryClerkReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub tempdb_metadata_memory: Option<Box<crate::TempdbMetadataMemoryReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub database_properties: Option<Box<crate::DatabasePropertiesReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
