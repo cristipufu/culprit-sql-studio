@@ -650,10 +650,9 @@ fn lookups_need_volume_and_name_the_covering_index() {
     assert_eq!(i.severity, Severity::Low);
 }
 
-// The fuzz tests' damaged plans: a step that repeats its parent's id led the misestimate's walk up the plan back to
-// itself, forever.
+// A damaged plan can send ID-based ancestry back to itself. Ambiguous IDs also cannot authorize a misestimate.
 #[test]
-fn a_plan_whose_ids_repeat_cannot_trap_the_walk_up_it() {
+fn duplicate_node_ids_bound_ancestry_and_withhold_ambiguous_misestimates() {
     let mut scan = node(1, "Seq Scan", NodeKind::Scan);
     scan.object = Some("public.customers".into());
     scan.est_rows = 248.0;
@@ -664,6 +663,13 @@ fn a_plan_whose_ids_repeat_cannot_trap_the_walk_up_it() {
     sort.children = vec![scan];
     let mut p = plan(Engine::Postgres, sort);
     p.kind = PlanKind::Actual;
+    let context = Cx::new(&p);
+    let node_count = context.nodes.len();
+    assert!(!context.node_ids_unique);
+    assert!(context.ancestors(&p.root.children[0]).take(node_count + 1).count() <= node_count);
+    assert!(!insights(&p).iter().any(|i| i.rule == "misestimate"));
+
+    p.root.children[0].id = 2;
     assert!(insights(&p).iter().any(|i| i.rule == "misestimate"));
 }
 
