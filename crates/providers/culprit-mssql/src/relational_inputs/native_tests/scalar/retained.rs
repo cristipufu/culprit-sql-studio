@@ -1,10 +1,13 @@
 //! The original native source is captured before removal; replay authenticates the same sealed bytes afterwards.
 use super::*;
 use crate::test_support::owned_captures::{Captured, OwnedCaptures};
+use crate::test_support::owned_case;
+use culprit_collector::capture::CollectionCancellation;
 use culprit_core::telemetry::*;
 mod blocking;
 mod diagnostics;
 mod forcing;
+pub(crate) mod grant_pressure;
 mod source_parameters;
 mod statistics;
 
@@ -15,14 +18,31 @@ pub(super) struct Original {
     statement: CachedStatementIdentity,
     original_parameter_context: Box<culprit_core::plan_facts::PlanParameterContext>,
     original_lookup_insights: Vec<culprit_core::insights::PlanInsight>,
+    cancellation: CollectionCancellation,
 }
 impl Original {
     pub async fn capture(probe: &Probe, run: &RecordedRun) -> Self {
-        Self::capture_owned(OwnedCaptures::from_pool(probe.pool.clone(), probe.port).unwrap(), run).await
+        let mut owner = OwnedCaptures::from_pool(probe.pool.clone(), probe.port).unwrap();
+        let capture = owner
+            .capture_with_cancellation(
+                CollectionSelection::Snapshot { dataset: SnapshotDataset::RetainedPlans },
+                probe.cancellation(),
+            )
+            .await
+            .unwrap();
+        Self::from_capture(owner, capture, run, probe.cancellation().clone())
     }
     async fn capture_owned(mut owner: OwnedCaptures, run: &RecordedRun) -> Self {
         let capture =
             owner.capture(CollectionSelection::Snapshot { dataset: SnapshotDataset::RetainedPlans }).await.unwrap();
+        Self::from_capture(owner, capture, run, CollectionCancellation::default())
+    }
+    fn from_capture(
+        owner: OwnedCaptures,
+        capture: Captured,
+        run: &RecordedRun,
+        cancellation: CollectionCancellation,
+    ) -> Self {
         let positions = capture
             .records
             .iter()
@@ -55,6 +75,7 @@ impl Original {
             statement: run.context.identity.clone(),
             original_parameter_context: Box::new(retained),
             original_lookup_insights,
+            cancellation,
         }
     }
     fn explain(&self) -> Plan {
@@ -66,7 +87,7 @@ impl Original {
         database: &str,
         actor: probe::Actor,
     ) {
-        verify_actor_disappeared(fixture, database, &actor).await;
+        verify_actor_count(fixture, database, &actor, 0, &self.cancellation).await;
         self.owner.verify_retained(&self.capture).await.unwrap();
         let plan = self.explain();
         let context = plan.facts().parameter_context.as_ref().unwrap();
@@ -114,12 +135,19 @@ pub(super) fn explain(capture: &Captured, position: usize, statement: &CachedSta
     plan
 }
 pub(super) async fn verify_actor_present(fixture: &OwnedSourceFixture, database: &str, actor: &probe::Actor) {
-    verify_actor_count(fixture, database, actor, 1).await;
+    verify_actor_count(fixture, database, actor, 1, &CollectionCancellation::default()).await;
 }
 pub(super) async fn verify_actor_disappeared(fixture: &OwnedSourceFixture, database: &str, actor: &probe::Actor) {
-    verify_actor_count(fixture, database, actor, 0).await;
+    verify_actor_count(fixture, database, actor, 0, &CollectionCancellation::default()).await;
 }
-async fn verify_actor_count(fixture: &OwnedSourceFixture, database: &str, actor: &probe::Actor, expected: i64) {
+async fn verify_actor_count(
+    fixture: &OwnedSourceFixture,
+    database: &str,
+    actor: &probe::Actor,
+    expected: i64,
+    cancellation: &CollectionCancellation,
+) {
+    owned_case::require_active(cancellation).unwrap();
     let mut control = crate::test_support::connect(
         &config(fixture.port, database, fixture.password(), "scalar-retained-proof"),
         SessionKind::User,
@@ -127,7 +155,7 @@ async fn verify_actor_count(fixture: &OwnedSourceFixture, database: &str, actor:
     .await
     .unwrap();
     let observed = async {
-        verify_owned_source(&mut control).await?;
+        owned_case::admitted(cancellation, verify_owned_source(&mut control)).await?;
         // Match the SAME full native datetime2 representation as Probe's original login point.
         // A count0 without the corresponding live positive would not validate this generation predicate.
         let mut query = tiberius::Query::new(
@@ -135,14 +163,37 @@ async fn verify_actor_count(fixture: &OwnedSourceFixture, database: &str, actor:
         );
         query.bind(actor.id);
         query.bind(actor.generation.as_str());
-        let rows = query.query(&mut control).await.map_err(crate::conn::map_error)?
-            .into_first_result().await.map_err(crate::conn::map_error)?;
+        owned_case::require_active(cancellation)?;
+        let results = query
+            .query(&mut control)
+            .await
+            .map_err(crate::conn::map_error)?
+            .into_results()
+            .await
+            .map_err(crate::conn::map_error)?;
+        let [rows] = results.as_slice() else { return Err(crate::read::invalid_data()) };
         let [row] = rows.as_slice() else { return Err(crate::read::invalid_data()) };
         crate::read::integer(&crate::value::Rec::from_row(row), "original_actor")
-    }.await;
+    }
+    .await;
     // Always retire this original verifier, preserving the first error before any close failure.
-    let closed = control.close().await;
+    let closed = owned_case::retire(control).await;
     let count = observed.unwrap();
     closed.unwrap();
     assert_eq!(count, expected, "the exact original native actor generation must match its expected lifetime");
+}
+
+/// Activity/grant rows expose the original request SQL token, not a native plan incarnation. The execution
+/// owner's before/final cache checks separately retain that incarnation; this one token join is shared.
+fn matches_native_statement(request: &ActivityObservation, statement: &CachedStatementContext) -> bool {
+    let Some(hash) = statement.query_hash.as_deref() else { return false };
+    let expected = NativeIdentity::new(statement.identity.sql_handle.trim_start_matches("0x"))
+        .qualified("native_object", "sys.dm_exec_requests.sql_handle")
+        .qualified("database_id", statement.database_id.to_string())
+        .qualified("statement_start_offset", statement.identity.statement_start_bytes.to_string())
+        .qualified("statement_end_offset", statement.identity.statement_end_bytes.to_string());
+    request.is_valid()
+        && statement.is_valid()
+        && request.statement_identity.as_ref() == Some(&expected)
+        && request.query_hash.as_deref() == Some(hash.trim_start_matches("0x"))
 }

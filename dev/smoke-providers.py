@@ -75,6 +75,8 @@ OPTIONAL_NATIVE_MODULES = {
         "telemetry::replication::native_tests::", "jobs::",
         "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request",
         "local_native_writer_plans_keep_targeted_writes_separate_from_readers_and_other_resources",
+        "exact_original_scalar_metadata_is_observed_without_memory_collection",
+        "exact_original_scalar_metadata_is_observed_between_memory_source_phases",
     ),
 }
 

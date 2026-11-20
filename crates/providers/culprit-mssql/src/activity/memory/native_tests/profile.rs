@@ -7,7 +7,8 @@ use crate::{
 };
 use culprit_core::Result;
 
-const POOL_MEMORY_PERCENT: i64 = 20;
+pub(super) const STANDARD_POOL_MEMORY_PERCENT: i64 = 20;
+pub(super) const SCALAR_QUEUE_POOL_MEMORY_PERCENT: i64 = 40;
 const REQUEST_GRANT_PERCENT: i64 = 100;
 
 const INITIAL: &str = "SELECT /* culprit */ DB_NAME() AS database_name,c.classifier_function_id AS configured_classifier,d.classifier_function_id AS effective_classifier,c.is_enabled,d.is_reconfiguration_pending,CASE WHEN EXISTS(SELECT 1 FROM sys.resource_governor_resource_pools WHERE name NOT IN(N'internal',N'default')) OR EXISTS(SELECT 1 FROM sys.resource_governor_workload_groups WHERE name NOT IN(N'internal',N'default')) OR OBJECT_ID(@P3) IS NOT NULL THEN 1 ELSE 0 END AS collision FROM sys.resource_governor_configuration c CROSS JOIN sys.dm_resource_governor_configuration d";
@@ -20,10 +21,11 @@ pub(super) struct ActorRoute {
     pub pool_id: i64,
     pub group_id: i64,
     pub classifier_id: i64,
+    pub max_memory_percent: i64,
 }
 impl ActorRoute {
     pub fn matches(&self, row: &Rec) -> Result<bool> {
-        let _ = capacity(row)?;
+        let _ = capacity(row, self.max_memory_percent)?;
         Ok(text(row, "actor_application")? == self.application
             && text(row, "pool_name")? == self.pool
             && text(row, "group_name")? == self.group
@@ -48,12 +50,16 @@ pub(super) struct ResourceProfile {
     group: String,
     classifier: String,
     applications: Vec<String>,
+    max_memory_percent: i64,
     original_enabled: Option<bool>,
     proof: Option<Proof>,
     removed: bool,
 }
 impl ResourceProfile {
-    pub fn new(owned_database: &str) -> Result<Self> {
+    pub fn new(owned_database: &str, max_memory_percent: i64) -> Result<Self> {
+        if !(1..=100).contains(&max_memory_percent) {
+            return Err(invalid_data());
+        }
         let suffix = owned_database.replace('-', "_");
         let pool = format!("grant_pool_{suffix}");
         let group = format!("grant_group_{suffix}");
@@ -69,7 +75,16 @@ impl ResourceProfile {
         if applications.iter().any(|name| name.len() > 128) {
             return Err(invalid_data());
         }
-        Ok(Self { pool, group, classifier, applications, original_enabled: None, proof: None, removed: false })
+        Ok(Self {
+            pool,
+            group,
+            classifier,
+            applications,
+            max_memory_percent,
+            original_enabled: None,
+            proof: None,
+            removed: false,
+        })
     }
 
     pub async fn install(&mut self, admin: &mut MsClient) -> Result<()> {
@@ -97,6 +112,7 @@ impl ResourceProfile {
             pool_id: proof.pool_id,
             group_id: proof.group_id,
             classifier_id: proof.classifier_id,
+            max_memory_percent: self.max_memory_percent,
         })
     }
 
@@ -145,8 +161,8 @@ impl ResourceProfile {
 
     fn create_resources(&self) -> String {
         format!(
-            "/* culprit */ CREATE RESOURCE POOL [{}] WITH(MIN_MEMORY_PERCENT=0,MAX_MEMORY_PERCENT={POOL_MEMORY_PERCENT});CREATE WORKLOAD GROUP [{}] WITH(REQUEST_MAX_MEMORY_GRANT_PERCENT={REQUEST_GRANT_PERCENT},GROUP_MAX_REQUESTS=0) USING [{}]",
-            self.pool, self.group, self.pool
+            "/* culprit */ CREATE RESOURCE POOL [{}] WITH(MIN_MEMORY_PERCENT=0,MAX_MEMORY_PERCENT={});CREATE WORKLOAD GROUP [{}] WITH(REQUEST_MAX_MEMORY_GRANT_PERCENT={REQUEST_GRANT_PERCENT},GROUP_MAX_REQUESTS=0) USING [{}]",
+            self.pool, self.max_memory_percent, self.group, self.pool
         )
     }
 
@@ -183,7 +199,7 @@ impl ResourceProfile {
         let classifier_id = integer(row, "classifier_id")?;
         let pool_id = integer(row, "pool_id")?;
         let group_id = integer(row, "group_id")?;
-        let (max, target) = capacity(row)?;
+        let (max, target) = capacity(row, self.max_memory_percent)?;
         if classifier_id <= 0
             || pool_id <= 2
             || group_id <= 2
@@ -221,7 +237,7 @@ impl ResourceProfile {
             "group":self.group,
             "classifier":format!("dbo.{}",self.classifier),
             "actor_applications":self.applications,
-            "pool_memory_percent":POOL_MEMORY_PERCENT,
+            "pool_memory_percent":self.max_memory_percent,
             "request_max_memory_grant_percent":REQUEST_GRANT_PERCENT,
             "group_max_requests":0,
             "original_enabled":self.original_enabled,
@@ -238,12 +254,12 @@ impl ResourceProfile {
     }
 }
 
-fn capacity(row: &Rec) -> Result<(u64, u64)> {
+fn capacity(row: &Rec, max_memory_percent: i64) -> Result<(u64, u64)> {
     let max = positive(row, "max_memory_kb")?;
     let target = positive(row, "target_memory_kb")?;
     if !boolean(row, "is_enabled")?
         || integer(row, "min_memory_percent")? != 0
-        || integer(row, "max_memory_percent")? != POOL_MEMORY_PERCENT
+        || integer(row, "max_memory_percent")? != max_memory_percent
         || row.f64("grant_percent") != Some(REQUEST_GRANT_PERCENT as f64)
         || integer(row, "group_max_requests")? != 0
         || target > max

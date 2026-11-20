@@ -1,16 +1,19 @@
 //! One owned workload stream. Draining its original handle is the intervention; dropping it is not completion.
 use super::{ACTOR_DRAIN_TIMEOUT, CONTROL_TIMEOUT, FIXTURE_ROWS, WORKLOAD, profile::ActorRoute};
+use crate::test_support::owned_case;
 use crate::{
     conn::{Pool, SessionKind, map_error},
     read::{invalid_data, text},
 };
+use culprit_collector::capture::CollectionCancellation;
 use culprit_core::{Result, telemetry::*};
-use futures_util::TryStreamExt;
+use futures_util::{FutureExt, TryStreamExt};
+use std::panic::AssertUnwindSafe;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 fn session_sql() -> String {
     format!(
-        "/* culprit */ WAITFOR DELAY '00:00:00.010';SELECT CONVERT(varchar(16),s.session_id) AS session_id,CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS session_generation,CONVERT(varchar(40),SYSDATETIME(),126) AS native_ready_without_offset,s.program_name AS actor_application,s.group_id,g.pool_id,g.name AS group_name,p.name AS pool_name,p.min_memory_percent,p.max_memory_percent,p.max_memory_kb,p.target_memory_kb,g.request_max_memory_grant_percent_numeric AS grant_percent,g.group_max_requests,c.is_enabled,c.classifier_function_id AS configured_classifier,d.classifier_function_id AS effective_classifier,d.is_reconfiguration_pending FROM sys.dm_exec_sessions s JOIN sys.dm_resource_governor_workload_groups g ON g.group_id=s.group_id JOIN sys.dm_resource_governor_resource_pools p ON p.pool_id=g.pool_id CROSS JOIN sys.resource_governor_configuration c CROSS JOIN sys.dm_resource_governor_configuration d WHERE s.session_id=@@SPID AND ({})",
+        "SELECT /* culprit */ TOP(2) CONVERT(varchar(16),s.session_id) AS session_id,CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS session_generation,CONVERT(varchar(40),SYSDATETIME(),126) AS native_ready_without_offset,s.program_name AS actor_application,s.group_id,g.pool_id,g.name AS group_name,p.name AS pool_name,p.min_memory_percent,p.max_memory_percent,p.max_memory_kb,p.target_memory_kb,g.request_max_memory_grant_percent_numeric AS grant_percent,g.group_max_requests,c.is_enabled,c.classifier_function_id AS configured_classifier,d.classifier_function_id AS effective_classifier,d.is_reconfiguration_pending  FROM sys.dm_exec_sessions s JOIN sys.dm_resource_governor_workload_groups g ON g.group_id=s.group_id JOIN sys.dm_resource_governor_resource_pools p ON p.pool_id=g.pool_id CROSS JOIN sys.resource_governor_configuration c CROSS JOIN sys.dm_resource_governor_configuration d  WHERE s.session_id=@@SPID AND ({})",
         crate::activity::ESTABLISHED_SESSION_SQL
     )
 }
@@ -23,42 +26,58 @@ pub(super) struct FixtureRequest {
     completed_rows: Option<u32>,
 }
 impl FixtureRequest {
-    pub async fn start(pool: &Pool, route: &ActorRoute) -> Result<Self> {
-        let (mut client, session, ready) = tokio::time::timeout(CONTROL_TIMEOUT, async {
-            let mut client = pool.connect(SessionKind::User).await?;
-            let rows = crate::conn::query(&mut client, &session_sql()).await.map_err(map_error)?;
-            let [row] = rows.as_slice() else { return Err(invalid_data()) };
-            let session = NativeActivityIdentity {
-                id: text(row, "session_id")?,
-                generation: crate::sql_time::native_time(&text(row, "session_generation")?)?,
-            };
-            let ready = crate::sql_time::native_time(&text(row, "native_ready_without_offset")?)?;
-            if !session.is_valid() || !route.matches(row)? || !native_clock_follows_login(&session.generation, &ready) {
-                return Err(invalid_data());
+    pub async fn start(pool: &Pool, route: &ActorRoute, cancellation: &CollectionCancellation) -> Result<Self> {
+        owned_case::require_active(cancellation)?;
+        let deadline = tokio::time::Instant::now() + CONTROL_TIMEOUT;
+        let mut client = tokio::time::timeout_at(deadline, pool.connect(SessionKind::User))
+            .await
+            .map_err(|_| CollectionStop::CancellationUnconfirmed.error())??;
+        let prepared = tokio::time::timeout_at(deadline, verify_route(&mut client, route, cancellation))
+            .await
+            .map_err(|_| CollectionStop::CancellationUnconfirmed.error())
+            .and_then(|result| result)
+            .and_then(|ready| {
+                owned_case::require_active(cancellation)?;
+                Ok(ready)
+            });
+        let (session, ready) = match prepared {
+            Ok(ready) => ready,
+            Err(original) => {
+                let _ = owned_case::retire(client).await;
+                return Err(original);
             }
-            Ok((client, session, ready))
-        })
-        .await
-        .map_err(|_| CollectionStop::CancellationUnconfirmed.error())??;
+        };
+        let cancellation = cancellation.clone();
         let (release, receive) = oneshot::channel();
         let task = tokio::spawn(async move {
-            let mut stream = client.simple_query(WORKLOAD).await.map_err(map_error)?;
-            let first = stream.try_next().await.map_err(map_error)?;
-            let mut rows = u32::from(matches!(first, Some(tiberius::QueryItem::Row(_))));
-            receive.await.map_err(|_| CollectionStop::CancellationUnconfirmed.error())?;
-            while let Some(item) = stream.try_next().await.map_err(map_error)? {
-                if matches!(item, tiberius::QueryItem::Row(_)) {
-                    rows += 1;
-                    if rows > FIXTURE_ROWS {
-                        return Err(CollectionStop::RowLimit.error());
+            let outcome = AssertUnwindSafe(async {
+                owned_case::require_active(&cancellation)?;
+                let mut stream = client.simple_query(WORKLOAD).await.map_err(map_error)?;
+                let first = stream.try_next().await.map_err(map_error)?;
+                let mut rows = u32::from(matches!(first, Some(tiberius::QueryItem::Row(_))));
+                receive.await.map_err(|_| CollectionStop::CancellationUnconfirmed.error())?;
+                while let Some(item) = stream.try_next().await.map_err(map_error)? {
+                    if matches!(item, tiberius::QueryItem::Row(_)) {
+                        rows += 1;
+                        if rows > FIXTURE_ROWS {
+                            return Err(CollectionStop::RowLimit.error());
+                        }
                     }
                 }
-            }
-            drop(stream);
-            if rows != FIXTURE_ROWS {
-                return Err(invalid_data());
-            }
-            client.close().await.map_err(map_error)?;
+                drop(stream);
+                if rows != FIXTURE_ROWS {
+                    return Err(invalid_data());
+                }
+                Ok::<u32, culprit_core::Error>(rows)
+            })
+            .catch_unwind()
+            .await;
+            let closed = owned_case::retire(client).await;
+            let rows = match outcome {
+                Ok(result) => result?,
+                Err(original) => std::panic::resume_unwind(original),
+            };
+            closed?;
             Ok(rows)
         });
         Ok(Self {
@@ -105,6 +124,27 @@ impl FixtureRequest {
     pub fn completed_rows(&self) -> Option<u32> {
         self.completed_rows
     }
+}
+
+/// Both the held-output actor and scalar episode prove the same classifier/resource route on their OWN client.
+pub(super) async fn verify_route(
+    client: &mut crate::conn::MsClient,
+    route: &ActorRoute,
+    cancellation: &CollectionCancellation,
+) -> Result<(NativeActivityIdentity, String)> {
+    owned_case::require_active(cancellation)?;
+    let sql = format!("/* culprit */ WAITFOR DELAY '00:00:00.010';{}", session_sql());
+    let rows = crate::conn::query(client, &sql).await.map_err(map_error)?;
+    let [row] = rows.as_slice() else { return Err(invalid_data()) };
+    let session = NativeActivityIdentity {
+        id: text(row, "session_id")?,
+        generation: crate::sql_time::native_time(&text(row, "session_generation")?)?,
+    };
+    let ready = crate::sql_time::native_time(&text(row, "native_ready_without_offset")?)?;
+    if !session.is_valid() || !route.matches(row)? || !native_clock_follows_login(&session.generation, &ready) {
+        return Err(invalid_data());
+    }
+    Ok((session, ready))
 }
 
 fn native_clock_follows_login(login: &str, ready: &str) -> bool {

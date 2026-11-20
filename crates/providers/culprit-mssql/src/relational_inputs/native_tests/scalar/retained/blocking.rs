@@ -102,18 +102,7 @@ fn require_original_blocking(
             let row = request.observation;
             assert!(row.key.request.is_some() && row.waiting_on_lock == Some(true));
             assert_eq!(row.scope, ActivityScopeBasis::RequestDatabase);
-            let token = row.statement_identity.as_ref().unwrap();
-            assert_eq!(token.id, statement.identity.sql_handle.trim_start_matches("0x"));
-            assert_eq!(token.qualifiers["database_id"], statement.database_id.to_string());
-            assert_eq!(
-                token.qualifiers["statement_start_offset"],
-                statement.identity.statement_start_bytes.to_string()
-            );
-            assert_eq!(token.qualifiers["statement_end_offset"], statement.identity.statement_end_bytes.to_string());
-            assert_eq!(
-                row.query_hash.as_deref(),
-                statement.query_hash.as_deref().map(|hash| hash.trim_start_matches("0x"))
-            );
+            assert!(matches_native_statement(row, statement));
             assert!(request.reference.is_some());
             let owners = frame.session_rows(blocker).collect::<Vec<_>>();
             let [owner] = owners.as_slice() else { panic!("one observed native blocker generation") };
@@ -156,8 +145,13 @@ async fn competing_blocking(fixture: &OwnedSourceFixture, database: &str) {
     // Both futures stay borrowed in this same fixture body. Neither actor nor observer is detached, and
     // the retained execution still uses the existing 40-second capture/attention/retirement owner.
     let (run, blocked) = tokio::join!(
-        AssertUnwindSafe(probe.record_native_notifying(1, CacheExpectation::Reused(&initial.context), &submitting))
-            .catch_unwind(),
+        AssertUnwindSafe(probe.record_native_notifying(
+            1,
+            CacheExpectation::Reused(&initial.context),
+            &submitting,
+            None
+        ))
+        .catch_unwind(),
         AssertUnwindSafe(blocker.capture_and_release(&mut owner, &submitting, &actor, &initial.context)).catch_unwind(),
     );
     let original = match run {

@@ -1,10 +1,11 @@
 //! Multiple-result actual-plan capture belongs only to owned fixtures, never the production metadata reader.
-use super::batch;
+use super::owned_case;
 use crate::{
     conn::MsClient,
     read::{Parameter, value_bytes},
     value::{Rec, Val},
 };
+use culprit_collector::capture::CollectionCancellation;
 use futures_util::TryStreamExt;
 use std::time::Duration;
 use tiberius::QueryItem;
@@ -34,7 +35,9 @@ pub(crate) async fn actual_plan_capture(
     sql: &str,
     parameters: Vec<Parameter>,
 ) -> ActualPlanCapture {
-    capture_plans(client, sql, parameters, None).await
+    capture_plans(client, sql, parameters, None, &CollectionCancellation::default())
+        .await
+        .expect("owned actual-plan capture admission")
 }
 
 /// Some native metadata statements return no showplan. The response still has to drain within all retention
@@ -44,21 +47,23 @@ pub(super) async fn metadata_plans(
     sql: &str,
     parameters: Vec<Parameter>,
 ) -> Option<Vec<String>> {
-    capture_response(client, sql, parameters, None)
+    capture_response(client, sql, parameters, None, &CollectionCancellation::default())
         .await
+        .expect("owned metadata capture admission")
         .finish_metadata()
         .expect("owned metadata response exceeded its explicit capture bounds")
 }
 
-/// A fixture may coordinate one independently owned observer at the client submission boundary. This
-/// notification is not native readiness, execution or settlement proof; the observer must establish its facts.
-pub(crate) async fn actual_plan_capture_notifying(
+/// Cancellation changes admission, not the ownership or settlement of an already dispatched actual response.
+/// The optional submission notification is not native readiness; the observer must establish its own facts.
+pub(crate) async fn actual_plan_capture_admitted(
     client: &mut MsClient,
     sql: &str,
     parameters: Vec<Parameter>,
-    submitting: &tokio::sync::Notify,
-) -> ActualPlanCapture {
-    capture_plans(client, sql, parameters, Some(submitting)).await
+    submitting: Option<&tokio::sync::Notify>,
+    cancellation: &CollectionCancellation,
+) -> culprit_core::Result<ActualPlanCapture> {
+    capture_plans(client, sql, parameters, submitting, cancellation).await
 }
 
 async fn capture_plans(
@@ -66,11 +71,12 @@ async fn capture_plans(
     sql: &str,
     parameters: Vec<Parameter>,
     submitting: Option<&tokio::sync::Notify>,
-) -> ActualPlanCapture {
-    capture_response(client, sql, parameters, submitting)
-        .await
+    cancellation: &CollectionCancellation,
+) -> culprit_core::Result<ActualPlanCapture> {
+    Ok(capture_response(client, sql, parameters, submitting, cancellation)
+        .await?
         .finish()
-        .expect("owned actual-plan response must retain native XML within its explicit capture bounds")
+        .expect("owned actual-plan response must retain native XML within its explicit capture bounds"))
 }
 
 async fn capture_response(
@@ -78,40 +84,47 @@ async fn capture_response(
     sql: &str,
     parameters: Vec<Parameter>,
     submitting: Option<&tokio::sync::Notify>,
-) -> Capture {
-    batch(client, "SET STATISTICS XML ON").await;
-    let response = tokio::time::timeout(CAPTURE_TIMEOUT, async {
-        let mut query = tiberius::Query::new(sql);
-        for parameter in &parameters {
-            match parameter {
-                Parameter::Integer(value) => {
-                    query.bind(*value);
-                }
-                Parameter::Text(value) => {
-                    query.bind(value.as_str());
-                }
-            }
-        }
-        if let Some(submitting) = submitting {
-            submitting.notify_one();
-        }
-        let mut stream = query.query(&mut *client).await?;
-        let mut capture = Capture::default();
-        while let Some(item) = stream.try_next().await? {
-            match item {
-                QueryItem::Metadata(_) => capture.metadata(),
-                QueryItem::Row(row) => {
-                    if capture.limit.is_none() {
-                        capture.row(&Rec::from_row(&row));
+    cancellation: &CollectionCancellation,
+) -> culprit_core::Result<Capture> {
+    owned_case::batch(cancellation, client, "SET STATISTICS XML ON").await?;
+    let mut started = false;
+    let response = tokio::time::timeout(
+        CAPTURE_TIMEOUT,
+        owned_case::admitted(cancellation, async {
+            started = true;
+            let mut query = tiberius::Query::new(sql);
+            for parameter in &parameters {
+                match parameter {
+                    Parameter::Integer(value) => {
+                        query.bind(*value);
+                    }
+                    Parameter::Text(value) => {
+                        query.bind(value.as_str());
                     }
                 }
             }
-        }
-        Ok::<_, tiberius::error::Error>(capture)
-    })
+            if let Some(submitting) = submitting {
+                submitting.notify_one();
+            }
+            let mut stream = query.query(&mut *client).await.map_err(crate::conn::map_error)?;
+            let mut capture = Capture::default();
+            while let Some(item) = stream.try_next().await.map_err(crate::conn::map_error)? {
+                match item {
+                    QueryItem::Metadata(_) => capture.metadata(),
+                    QueryItem::Row(row) => {
+                        if capture.limit.is_none() {
+                            capture.row(&Rec::from_row(&row));
+                        }
+                    }
+                }
+            }
+            Ok(capture)
+        }),
+    )
     .await;
     let capture = match response {
         Ok(Ok(capture)) => capture,
+        Ok(Err(error)) if !started => return Err(error),
         _ => {
             // Reuse the driver's bounded attention primitive; its result never promotes this actor to settled.
             let _ = tokio::time::timeout(ATTENTION_TIMEOUT, client.cancel_query()).await;
@@ -120,8 +133,9 @@ async fn capture_response(
     };
     // Even on a retention limit, the original response was fully drained above. Never start cleanup SQL while
     // dropping a partly consumed response, and never return the retained prefix as a successful capture.
-    batch(client, "SET STATISTICS XML OFF").await;
-    capture
+    owned_case::batch(cancellation, client, "SET STATISTICS XML OFF").await?;
+    owned_case::require_active(cancellation)?;
+    Ok(capture)
 }
 
 #[derive(Default)]

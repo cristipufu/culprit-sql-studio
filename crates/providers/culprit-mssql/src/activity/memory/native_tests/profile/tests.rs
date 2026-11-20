@@ -14,7 +14,9 @@ fn initial() -> Rec {
 
 #[test]
 fn cleanup_refuses_live_sessions_or_replaced_native_objects_even_when_names_match() {
-    let mut profile = ResourceProfile::new("culprit_smoke_0123456789abcdef01234567_grant_output_drain").unwrap();
+    let mut profile =
+        ResourceProfile::new("culprit_smoke_0123456789abcdef01234567_grant_output_drain", STANDARD_POOL_MEMORY_PERCENT)
+            .unwrap();
     let native = effective(&profile);
     profile.proof = Some(profile.validate_effective(&native).unwrap());
     assert!(profile.validate_cleanup(&native).is_ok());
@@ -52,7 +54,7 @@ fn effective(profile: &ResourceProfile) -> Rec {
         ("pool_name", Val::Text(profile.pool.clone())),
         ("group_name", Val::Text(profile.group.clone())),
         ("min_memory_percent", Val::Int(0)),
-        ("max_memory_percent", Val::Int(20)),
+        ("max_memory_percent", Val::Int(profile.max_memory_percent)),
         ("max_memory_kb", Val::Int(100000)),
         ("target_memory_kb", Val::Int(80000)),
         ("grant_percent", Val::Float(100.0)),
@@ -78,7 +80,9 @@ fn stored_effective_pending_foreign_and_unknown_configuration_cannot_be_overwrit
 
 #[test]
 fn effective_native_policy_and_capacity_must_precede_every_registered_actor_route() {
-    let mut profile = ResourceProfile::new("culprit_smoke_0123456789abcdef01234567_grant_output_drain").unwrap();
+    let mut profile =
+        ResourceProfile::new("culprit_smoke_0123456789abcdef01234567_grant_output_drain", STANDARD_POOL_MEMORY_PERCENT)
+            .unwrap();
     let native = effective(&profile);
     profile.proof = Some(profile.validate_effective(&native).unwrap());
     for index in 0..MAX_FIXTURE_REQUESTS {
@@ -94,7 +98,7 @@ fn effective_native_policy_and_capacity_must_precede_every_registered_actor_rout
             ("is_reconfiguration_pending", Val::Bool(false)),
             ("is_enabled", Val::Bool(true)),
             ("min_memory_percent", Val::Int(0)),
-            ("max_memory_percent", Val::Int(20)),
+            ("max_memory_percent", Val::Int(route.max_memory_percent)),
             ("max_memory_kb", Val::Int(100000)),
             ("target_memory_kb", Val::Int(80000)),
             ("grant_percent", Val::Float(100.0)),
@@ -116,5 +120,45 @@ fn effective_native_policy_and_capacity_must_precede_every_registered_actor_rout
         ("max_memory_kb", Val::Int((MAX_FIXTURE_MEMORY_KIB / 3 + 1) as i64)),
     ] {
         assert!(profile.validate_effective(&replace(&native, &[(name, value)])).is_err(), "{name}");
+    }
+}
+
+#[test]
+fn larger_scalar_queue_pool_keeps_exact_native_policy_and_the_two_gib_capacity_ceiling() {
+    use super::super::Case;
+    assert_eq!(Case::OriginalScalarGrant.pool_memory_percent(), SCALAR_QUEUE_POOL_MEMORY_PERCENT);
+    for case in
+        [Case::Reservations, Case::DrainOutput, Case::OriginalScalarCacheControl, Case::OriginalScalarSourcePhases]
+    {
+        assert_eq!(case.pool_memory_percent(), STANDARD_POOL_MEMORY_PERCENT);
+    }
+    let mut profile = ResourceProfile::new(
+        "culprit_smoke_0123456789abcdef01234567_grant_original_scalar",
+        Case::OriginalScalarGrant.pool_memory_percent(),
+    )
+    .unwrap();
+    let native = effective(&profile);
+    profile.proof = Some(profile.validate_effective(&native).unwrap());
+    let route = profile.route(MAX_FIXTURE_REQUESTS - 1).unwrap();
+    let mut actor_columns = native.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    actor_columns.push(("actor_application", Val::Text(route.application.clone())));
+    let actor = Rec::of(&actor_columns);
+    assert!(route.matches(&actor).unwrap());
+    assert_eq!(profile.snapshot()["pool_memory_percent"], SCALAR_QUEUE_POOL_MEMORY_PERCENT);
+    for observed_percent in [STANDARD_POOL_MEMORY_PERCENT, 0, 100] {
+        let changed = replace(&native, &[("max_memory_percent", Val::Int(observed_percent))]);
+        assert!(profile.validate_effective(&changed).is_err());
+        assert!(route.matches(&replace(&actor, &[("max_memory_percent", Val::Int(observed_percent))])).is_err());
+    }
+    let maximum_pool = MAX_FIXTURE_MEMORY_KIB / MAX_FIXTURE_REQUESTS as u64;
+    let at_limit = replace(
+        &native,
+        &[("max_memory_kb", Val::Int(maximum_pool as i64)), ("target_memory_kb", Val::Int(maximum_pool as i64))],
+    );
+    assert!(profile.validate_effective(&at_limit).is_ok());
+    let above_limit = replace(&at_limit, &[("max_memory_kb", Val::Int(maximum_pool as i64 + 1))]);
+    assert!(profile.validate_effective(&above_limit).is_err());
+    for invalid_percent in [0, 101] {
+        assert!(ResourceProfile::new("culprit_smoke_0123456789abcdef01234567", invalid_percent).is_err());
     }
 }

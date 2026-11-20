@@ -318,6 +318,6 @@ fn decode(
 }
 
 #[cfg(test)]
-mod native_tests;
+pub(crate) mod native_tests;
 #[cfg(test)]
 pub(crate) mod tests;

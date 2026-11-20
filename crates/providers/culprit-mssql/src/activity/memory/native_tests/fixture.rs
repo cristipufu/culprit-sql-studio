@@ -20,6 +20,8 @@ use futures_util::FutureExt;
 use std::{collections::BTreeMap, panic::AssertUnwindSafe, path::PathBuf, sync::Arc};
 use tokio::time::Instant;
 
+mod body;
+
 // The table, finite population, ordering and grant hints are unchanged from the existing reservation fixture.
 const SEED: &str = "CREATE TABLE dbo.request_memory_fixture(id int NOT NULL PRIMARY KEY,payload varchar(2000) NOT NULL);INSERT dbo.request_memory_fixture SELECT TOP(10000) ROW_NUMBER() OVER(ORDER BY a.object_id,b.object_id),REPLICATE('x',2000) FROM sys.all_objects a CROSS JOIN sys.all_objects b";
 
@@ -28,7 +30,7 @@ enum AdministrativePurpose {
     Teardown,
 }
 
-pub(super) struct Fixture {
+pub(crate) struct Fixture {
     pub cancellation: CollectionCancellation,
     pub directory: PathBuf,
     admitted: Option<OwnedSourceFixture>,
@@ -36,6 +38,7 @@ pub(super) struct Fixture {
     database: Option<String>,
     observer: Option<Arc<Pool>>,
     actor_pools: Vec<Pool>,
+    additional_actors: usize,
     profile: Option<ResourceProfile>,
     requests: Vec<FixtureRequest>,
     demands: BTreeMap<NativeActivityIdentity, u64>,
@@ -72,6 +75,7 @@ impl Fixture {
             database: None,
             observer: None,
             actor_pools: vec![],
+            additional_actors: 0,
             profile: None,
             requests: vec![],
             demands: BTreeMap::new(),
@@ -121,7 +125,7 @@ impl Fixture {
         self.database = Some(database.clone());
         self.admin_batch(&format!("CREATE DATABASE [{database}]"), AdministrativePurpose::Setup).await?;
         self.admin_batch(&format!("USE [{database}];{SEED};USE [master]"), AdministrativePurpose::Setup).await?;
-        self.profile = Some(ResourceProfile::new(&database)?);
+        self.profile = Some(ResourceProfile::new(&database, case.pool_memory_percent())?);
         self.install_profile().await?;
         save_cost_receipt(
             &self.directory,
@@ -246,9 +250,48 @@ impl Fixture {
         if self.cancellation.is_cancelled() {
             return Err(CollectionStop::Cancelled.error());
         }
-        if self.requests.len() >= MAX_FIXTURE_REQUESTS {
+        if self.requests.len() + self.additional_actors >= MAX_FIXTURE_REQUESTS {
             return Err(self.unexercised("no native waiting peer was observed with the three admitted fixture actors"));
         }
+        self.require_next_demand()?;
+        let index = self.requests.len();
+        let pool = self.actor_pools.get(index).ok_or_else(invalid_data)?;
+        let route = self.profile.as_ref().ok_or_else(invalid_data)?.route(index)?;
+        self.actor_start_unconfirmed = true;
+        let actor = FixtureRequest::start(pool, &route, &self.cancellation).await?;
+        self.requests.push(actor);
+        self.actor_start_unconfirmed = false;
+        Ok(())
+    }
+
+    /// The existing actor/profile/teardown owner also retains one scalar episode actor. Its original
+    /// response must settle and its client close before control_completed reopens owned DDL cleanup.
+    pub fn begin_scalar_actor(&mut self) -> Result<()> {
+        if self.requests.len() + self.additional_actors >= MAX_FIXTURE_REQUESTS {
+            return Err(invalid_data());
+        }
+        self.control_started()?;
+        self.additional_actors += 1;
+        Ok(())
+    }
+
+    pub fn original_context(&self) -> Result<(&OwnedSourceFixture, &str)> {
+        Ok((self.admitted.as_ref().ok_or_else(invalid_data)?, self.database.as_deref().ok_or_else(invalid_data)?))
+    }
+
+    pub fn scalar_application(&self) -> Result<String> {
+        Ok(self.profile.as_ref().ok_or_else(invalid_data)?.route(MAX_FIXTURE_REQUESTS - 1)?.application)
+    }
+
+    pub async fn verify_scalar_route(&self, client: &mut MsClient) -> Result<NativeActivityIdentity> {
+        let route = self.profile.as_ref().ok_or_else(invalid_data)?.route(MAX_FIXTURE_REQUESTS - 1)?;
+        tokio::time::timeout(CONTROL_TIMEOUT, super::actors::verify_route(client, &route, &self.cancellation))
+            .await
+            .map_err(|_| CollectionStop::CancellationUnconfirmed.error())?
+            .map(|(session, _)| session)
+    }
+
+    pub fn require_next_demand(&mut self) -> Result<()> {
         if let Some(previous) = self.requests.last() {
             let demand = self.demands.get(&previous.session).ok_or_else(invalid_data)?;
             let current = self
@@ -262,13 +305,31 @@ impl Fixture {
                 ));
             }
         }
-        let index = self.requests.len();
-        let pool = self.actor_pools.get(index).ok_or_else(invalid_data)?;
-        let route = self.profile.as_ref().ok_or_else(invalid_data)?.route(index)?;
-        self.actor_start_unconfirmed = true;
-        let actor = until_cancelled(&self.cancellation, FixtureRequest::start(pool, &route)).await?;
-        self.requests.push(actor);
-        self.actor_start_unconfirmed = false;
+        Ok(())
+    }
+
+    pub fn record_observed_request_demand(
+        &mut self,
+        session: NativeActivityIdentity,
+        request: &ExecutionGrantObservation,
+    ) -> Result<()> {
+        let demand = request
+            .requested_kibibytes
+            .as_deref()
+            .ok_or_else(invalid_data)?
+            .parse::<u64>()
+            .map_err(|_| invalid_data())?;
+        let current = self
+            .demands
+            .values()
+            .try_fold(0u64, |total, amount| total.checked_add(*amount))
+            .ok_or_else(invalid_data)?;
+        if demand == 0 || !current.checked_add(demand).is_some_and(|next| next <= MAX_FIXTURE_MEMORY_KIB) {
+            return Err(
+                self.unexercised("observed owned request demand exceeds the unchanged two-GiB fixture allowance")
+            );
+        }
+        self.demands.insert(session, demand);
         Ok(())
     }
 
@@ -277,7 +338,7 @@ impl Fixture {
         Error::invalid(format!("owned grant fixture control unexercised: {reason}"))
     }
 
-    pub async fn observe(&mut self) -> Result<NativePoint> {
+    pub(super) async fn observe(&mut self) -> Result<NativePoint> {
         if !self.can_observe() {
             return Err(self.observation_stop());
         }
@@ -304,7 +365,9 @@ impl Fixture {
     fn record_demands(&mut self, point: &NativePoint) -> Result<()> {
         let mut granted = 0u64;
         for actor in &self.requests {
-            let Some(row) = point.actor(&actor.session)? else { continue };
+            let Some(row) = point.actor(&actor.session)? else {
+                continue;
+            };
             let requested = row
                 .requested_kibibytes
                 .as_deref()
@@ -339,9 +402,8 @@ impl Fixture {
     }
 
     pub async fn drain_original_holder(&mut self) -> Result<u32> {
-        if self.cancellation.is_cancelled() {
-            return Err(CollectionStop::Cancelled.error());
-        }
+        // This retires the SAME original response and is permitted after cancellation. It starts no SQL
+        // and never turns cancellation into accepted intervention evidence.
         if !self.outputs_are_held() || self.original_holder_drained {
             return Err(invalid_data());
         }
@@ -420,9 +482,15 @@ impl Fixture {
 }
 
 pub(super) async fn run(case: Case) {
+    // The controller must return Pending before LocalSet polls the owned body task. Its large receipt/setup
+    // poll frame therefore cannot remain on the native connection stack while the body runs.
+    tokio::task::LocalSet::new().run_until(run_case(case)).await;
+}
+
+async fn run_case(case: Case) {
     let started = Instant::now();
     let deadline = started + CASE_TIMEOUT;
-    let mut fixture = Fixture::new(case);
+    let mut fixture = Box::new(Fixture::new(case));
     let cancellation = fixture.cancellation.clone();
     let (setup_expired, setup) = finish_case(
         started + SETUP_TIMEOUT,
@@ -430,29 +498,19 @@ pub(super) async fn run(case: Case) {
         Box::pin(AssertUnwindSafe(fixture.setup(case)).catch_unwind()),
     )
     .await;
-    let mut body_expired = false;
-    let body = match setup {
+    let (body_expired, body) = match setup {
         Ok(Ok(())) if !setup_expired => {
             let body_deadline = (Instant::now() + BODY_TIMEOUT).min(deadline - SETTLEMENT_TIMEOUT);
-            let result = finish_case(
-                body_deadline,
-                &cancellation,
-                Box::pin(
-                    AssertUnwindSafe(async {
-                        match case {
-                            Case::Reservations => super::reservations::prove(&mut fixture).await,
-                            Case::DrainOutput => super::drain::prove(&mut fixture).await,
-                        }
-                    })
-                    .catch_unwind(),
-                ),
-            )
-            .await;
-            body_expired = result.0;
-            result.1
+            // This is the only body task. It owns the existing fixture, catches the original body outcome
+            // and returns that same owner. Never abort or detach it: cancellation still awaits settlement.
+            let task = tokio::task::spawn_local(body::run(case, fixture));
+            let (expired, completed) = finish_case(body_deadline, &cancellation, task).await;
+            let (returned, outcome) = completed.expect("the owned body returns its fixture and caught outcome");
+            fixture = returned;
+            (expired, outcome)
         }
-        Ok(Ok(())) => Ok(Err(CollectionStop::TimedOut.error())),
-        result => result,
+        Ok(Ok(())) => (false, Ok(Err(CollectionStop::TimedOut.error()))),
+        result => (false, result),
     };
     let settlement = Box::pin(fixture.settle(deadline)).await;
     let elapsed = started.elapsed();
@@ -461,9 +519,12 @@ pub(super) async fn run(case: Case) {
         "case",
         &serde_json::json!({
             "case": case.name(),
+            "diagnostic_only":matches!(case,Case::OriginalScalarCacheControl | Case::OriginalScalarSourcePhases),
             "native_owned_baseline": fixture.admitted.as_ref().map(|owner| &owner.database),
             "owned_derived_database": fixture.database,
-            "workload_actors": fixture.requests.len(),
+            "workload_actors": fixture.requests.len() + fixture.additional_actors,
+            "held_output_actors": fixture.requests.len(),
+            "scalar_episode_actors": fixture.additional_actors,
             "actor_limit": MAX_FIXTURE_REQUESTS,
             "source_points_started": fixture.observations,
             "source_points_completed": fixture.completed_observations,
@@ -472,7 +533,7 @@ pub(super) async fn run(case: Case) {
             "source_query_count": (fixture.completed_observations == fixture.observations)
                 .then_some(fixture.completed_source_queries),
             "source_queries_upper_bound": fixture.observations * super::SOURCE_QUERY_LIMIT as usize,
-            "source_query_scope":"original capture SQL only; separately charged preparation and independent observer work are retained in each source-point receipt",
+            "source_query_scope":"measured-source points only; canonical Outbox captures retain their own source_queries in the episode manifests",
             "whole_login_or_cold_start_cost_proved":false,
             "rust_case_elapsed_ms": elapsed.as_secs_f64() * 1000.0,
             "rust_case_limit_seconds": CASE_TIMEOUT.as_secs(),
@@ -491,22 +552,32 @@ pub(super) async fn run(case: Case) {
         }),
     )
     .expect("write the private original case receipt after settlement");
-    assert!(settlement["cleanup_confirmed"].as_bool() == Some(true), "{settlement}");
-    assert!(!setup_expired && !body_expired && elapsed <= CASE_TIMEOUT, "owned case deadline reached");
+    require_case_success(body, &settlement, !setup_expired && !body_expired && elapsed <= CASE_TIMEOUT)
+        .expect("the owned case must establish its declared observations within the fixed bounds");
+}
+
+// Call only after the original settlement and case receipt have completed. Secondary cleanup or deadline
+// failure must not replace the original body error/panic; neither branch changes any native uncertainty flag.
+fn require_case_success(
+    body: std::thread::Result<Result<()>>,
+    settlement: &serde_json::Value,
+    within_deadline: bool,
+) -> Result<()> {
     match body {
-        Ok(result) => {
-            result.expect("native owned acceptance must establish the requested state within its fixed bounds")
-        }
-        Err(panic) => std::panic::resume_unwind(panic),
+        Ok(result) => result?,
+        Err(original) => std::panic::resume_unwind(original),
     }
+    assert!(settlement["cleanup_confirmed"].as_bool() == Some(true), "{settlement}");
+    assert!(within_deadline, "owned case deadline reached");
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Measured unboxed frames are 2.7 KiB for the case, 41–45 KiB for the boxed source phases and 4.1 KiB
-    // for settlement. These bounds catch frame growth; native execution and shutdown are separate checks.
+    // These measure stored futures, not active poll-stack allocations. The body scheduling controls and
+    // original native execution/settlement acceptance separately verify the owned runtime boundary.
     const MAX_CASE_FUTURE_BYTES: usize = 4 * 1024;
     const MAX_SOURCE_PHASE_FUTURE_BYTES: usize = 64 * 1024;
     const MAX_SETTLEMENT_FUTURE_BYTES: usize = 8 * 1024;
@@ -520,12 +591,51 @@ mod tests {
     }
 
     #[test]
+    fn native_body_error_remains_primary_after_failed_cleanup_and_deadline() {
+        let settlement = serde_json::json!({
+            "cleanup_confirmed":false,"administrative_shutdown_unconfirmed":true,"drop_withheld":true,
+        });
+        let unchanged = settlement.clone();
+        let error =
+            require_case_success(Ok(Err(CollectionStop::SourceUnavailable.error())), &settlement, false).unwrap_err();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceUnavailable);
+        assert_eq!(settlement, unchanged, "error precedence grants no new native completion authority");
+    }
+
+    #[test]
+    fn native_body_panic_payload_survives_secondary_cleanup_and_deadline_failure() {
+        let settlement = serde_json::json!({"cleanup_confirmed":false});
+        let panic = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            require_case_success(Err(Box::new("original native body panic")), &settlement, false)
+        }))
+        .unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"original native body panic"));
+    }
+
+    #[test]
+    fn a_successful_body_still_requires_confirmed_cleanup_and_its_original_deadline() {
+        for (cleanup, within_deadline) in [(false, true), (true, false)] {
+            let settlement = serde_json::json!({"cleanup_confirmed":cleanup});
+            assert!(
+                std::panic::catch_unwind(|| { require_case_success(Ok(Ok(())), &settlement, within_deadline) })
+                    .is_err()
+            );
+        }
+        let settlement = serde_json::json!({"cleanup_confirmed":true});
+        require_case_success(Ok(Ok(())), &settlement, true).unwrap();
+    }
+
+    #[test]
     fn native_fixture_future_frames_stay_within_their_owned_phase_budgets() {
         let case = frame_bytes("case", &run(Case::DrainOutput));
         let mut fixture = Fixture::unstarted(PathBuf::new());
         let setup = frame_bytes("setup", &fixture.setup(Case::DrainOutput));
         let reservations = frame_bytes("reservation proof", &super::super::reservations::prove(&mut fixture));
         let drain = frame_bytes("drain proof", &super::super::drain::prove(&mut fixture));
+        let scalar = frame_bytes(
+            "scalar grant episode",
+            &crate::relational_inputs::native_tests::scalar::retained::grant_pressure::prove(&mut fixture),
+        );
         let settlement = frame_bytes("settlement", &fixture.settle(Instant::now()));
         // Report every actual frame before any assertion, so a red first bound cannot hide later sizes.
         for (name, bytes, limit) in [
@@ -533,6 +643,7 @@ mod tests {
             ("setup", setup, MAX_SOURCE_PHASE_FUTURE_BYTES),
             ("reservation proof", reservations, MAX_SOURCE_PHASE_FUTURE_BYTES),
             ("drain proof", drain, MAX_SOURCE_PHASE_FUTURE_BYTES),
+            ("scalar grant episode", scalar, MAX_SOURCE_PHASE_FUTURE_BYTES),
             ("settlement", settlement, MAX_SETTLEMENT_FUTURE_BYTES),
         ] {
             assert!(bytes <= limit, "{name} future grew to {bytes} bytes (limit {limit}); box the actual owned phase");

@@ -593,9 +593,11 @@ class NativeSelection(unittest.TestCase):
         plain.test_environment = Mock(return_value={})
         strict_holder = "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request"
         strict_writer = "local_native_writer_plans_keep_targeted_writes_separate_from_readers_and_other_resources"
+        cache_control = "exact_original_scalar_metadata_is_observed_without_memory_collection"
+        phase_control = "exact_original_scalar_metadata_is_observed_between_memory_source_phases"
         for selection, expected in [
-            ("native_tests::", ["telemetry::replication::native_tests::", "jobs::", strict_holder, strict_writer]),
-            ("jobs::native_tests::", ["telemetry::replication::native_tests::", strict_holder, strict_writer]),
+            ("native_tests::", ["telemetry::replication::native_tests::", "jobs::", strict_holder, strict_writer, cache_control, phase_control]),
+            ("jobs::native_tests::", ["telemetry::replication::native_tests::", strict_holder, strict_writer, cache_control, phase_control]),
         ]:
             with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
                 plain.test("culprit-mssql", selection)
@@ -651,6 +653,22 @@ class NativeSelection(unittest.TestCase):
                 skips = run_tests.call_args.kwargs["skip"]
                 selected = [test for test in native_tests if selection in test and not any(skip in test for skip in skips)]
                 self.assertEqual(selected, expected)
+
+    def test_fixture_cache_diagnostics_require_their_exact_selectors(self):
+        database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql"))
+        database.test_environment = Mock(return_value={})
+        prefix = "activity::memory::native_tests::"
+        quiet = "exact_original_scalar_metadata_is_observed_without_memory_collection"
+        phases = "exact_original_scalar_metadata_is_observed_between_memory_source_phases"
+        acceptance = "original_scalar_grant_queue_and_unchanged_work_survive_holder_release_and_retained_recovery"
+        tests = [prefix + name for name in [quiet, phases, acceptance]]
+        for selection, expected in [("native_tests::", [prefix + acceptance]), (prefix, [prefix + acceptance]),
+                                    (quiet, [prefix + quiet]), (prefix + quiet, [prefix + quiet]),
+                                    (phases, [prefix + phases]), (prefix + phases, [prefix + phases])]:
+            with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                database.test("culprit-mssql", selection)
+                skips = run_tests.call_args.kwargs["skip"]
+                self.assertEqual([test for test in tests if selection in test and not any(skip in test for skip in skips)], expected)
 
     def test_broad_selection_excludes_optional_topologies_without_their_environment(self):
         database = smoke.Database(smoke.FIXTURES[1])

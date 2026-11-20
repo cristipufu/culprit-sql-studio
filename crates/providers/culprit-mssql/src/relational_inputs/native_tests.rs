@@ -24,7 +24,7 @@ const CURRENT_CLOCK_SQL: &str = "SELECT /* culprit */ CONVERT(varchar(40),SYSUTC
 mod expressions;
 mod fixture;
 mod reuse;
-mod scalar;
+pub(crate) mod scalar;
 
 async fn execute(client: &mut MsClient, tvp: bool) {
     batch(

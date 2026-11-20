@@ -324,6 +324,63 @@ async fn native_nulls_and_version_unavailable_fields_preserve_unknowns_without_i
 }
 
 #[tokio::test]
+async fn ungranted_native_null_and_zero_keep_the_same_waiter_but_distinct_granted_metrics_in_the_view() {
+    for (native_amount, expected) in [(Val::Null, None), (Val::Int(0), Some("0"))] {
+        let native = replace(
+            &row(),
+            &[
+                ("grant_granted_without_offset", Val::Null),
+                ("grant_granted_memory_kb", native_amount),
+                ("grant_used_memory_kb", Val::Null),
+                ("grant_wait_time_ms", Val::Int(40_000)),
+                ("wait_type", Val::Text("RESOURCE_SEMAPHORE".into())),
+                ("blocking_session_id", Val::Int(0)),
+                ("blocker_generation", Val::Null),
+            ],
+        );
+        let mut reader = reader(vec![
+            Ok(vec![crate::grants::tests::platform()]),
+            Ok(vec![context()]),
+            Ok(columns()),
+            Ok(vec![native]),
+            Ok(vec![details(42, "SELECT * FROM dbo.orders WHERE id=42")]),
+            Ok(vec![context()]),
+        ]);
+        let observed = async {
+            let captured = reader.capture_memory().await?;
+            let context = reader.verify_memory_context(&captured.owner).await?;
+            Ok::<_, culprit_core::Error>((captured, context))
+        }
+        .await;
+        let shutdown = reader.close().await;
+        let (captured, context) = observed.unwrap();
+        assert_eq!(shutdown, SourceShutdown::Quiescent);
+        assert_eq!(reader.query_count(), 6);
+        let grant = &captured.observations[0];
+        assert_eq!(grant.state, ExecutionGrantState::Waiting);
+        assert!(grant.granted_without_offset.is_none());
+        assert_eq!(grant.granted_kibibytes.as_deref(), expected);
+        assert_eq!(grant.wait_ms.as_deref(), Some("40000"));
+        assert_eq!(grant.request_association, RequestGrantAssociation::GenerationChecked);
+        assert_eq!(grant.statement_relationship, GrantStatementRelationship::ObservedCurrentStatement);
+        assert_eq!(grant.native_null_columns.iter().any(|name| name == "granted_memory_kb"), expected.is_none());
+        let original = grant.clone();
+        let report = culprit_checks::request_memory::explain(
+            culprit_checks::request_memory::RequestMemoryEvidence { context: &context, observations: &[grant] },
+            None,
+        )
+        .unwrap();
+        let [entry] = report.entries.as_slice() else { panic!("one decoded native waiter") };
+        assert_eq!(entry.qualified_request.as_ref(), grant.request.as_ref().map(|request| &request.key));
+        assert_eq!(entry.observation_identity, grant.identity);
+        assert!(entry.explanation.contains(&culprit_core::t!("view.request_memory.waiting.explanation")));
+        let known_zero_granted = culprit_core::t!("view.request_memory.metric.granted", n = "0");
+        assert_eq!(entry.explanation.contains(&known_zero_granted), expected == Some("0"));
+        assert_eq!(grant, &original, "rendering never normalizes native NULL into zero");
+    }
+}
+
+#[tokio::test]
 async fn queue_fields_keep_exact_zero_large_order_false_and_native_null_without_duplicate_properties() {
     for next in [Val::Int(0), Val::Int(1), Val::Null] {
         let native = replace(

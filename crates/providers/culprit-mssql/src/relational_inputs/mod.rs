@@ -2,7 +2,7 @@
 //! can be reused after ALTER/eviction; neither a plan handle nor identical statement text proves incarnation.
 
 #[cfg(test)]
-mod native_tests;
+pub(crate) mod native_tests;
 mod sql;
 #[cfg(test)]
 pub(crate) mod tests;

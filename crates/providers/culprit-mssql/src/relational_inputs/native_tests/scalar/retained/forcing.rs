@@ -31,7 +31,7 @@ struct Episode {
     configured_before: Captured,
     configured_after: Captured,
     unforced: Captured,
-    counterpart: RecordedRun,
+    counterpart: Box<RecordedRun>,
     summary: Value,
 }
 
