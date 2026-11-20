@@ -14,10 +14,13 @@ use std::{collections::BTreeMap, panic::AssertUnwindSafe, time::Duration};
 
 use super::super::{chronological, context, mapped_target, rows::PageAddress};
 
+mod branch;
+
 const TREE: &str = "page_fixture_topology_tree";
 const HEAP: &str = "page_fixture_topology_heap";
-const TARGETS: usize = 3;
-const HEADER_QUERIES: u32 = 9;
+const LOCKED_TARGETS: usize = 3;
+const TARGETS: usize = 4;
+const HEADER_QUERIES: u32 = 10;
 // Boxed authority 3, population 1, capture-end authority 3 and frozen final verification 3.
 // A capture-end point does not replace the delivery owner's independent final verification.
 const QUIET_QUERIES: u32 = 10;
@@ -68,13 +71,31 @@ struct LocatedPage {
     hobt: String,
     observed_at: String,
     table: &'static str,
+    branch: Option<branch::HeaderWitness>,
+}
+impl LocatedPage {
+    fn same_index(&self, other: &Self) -> bool {
+        self.object == other.object
+            && self.index == other.index
+            && self.partition == other.partition
+            && self.hobt == other.hobt
+            && self.table == other.table
+    }
 }
 fn positive(row: &Rec, column: &str) -> Result<i32> {
     let value = i32::try_from(integer(row, column)?).map_err(|_| invalid("native locator integer overflow"))?;
     (value > 0).then_some(value).ok_or_else(|| invalid("native locator identity unavailable"))
 }
+fn native_catalog_id(row: &Rec, column: &str) -> Result<String> {
+    let value = text(row, column)?;
+    value
+        .parse::<i64>()
+        .is_ok_and(|id| id > 0)
+        .then_some(value)
+        .ok_or_else(|| invalid("native locator catalog identity unavailable"))
+}
 fn pages(database: u32, rows: &[Rec]) -> Result<BTreeMap<PageAddress, LocatedPage>> {
-    if rows.len() != TARGETS {
+    if rows.len() != LOCKED_TARGETS {
         return Err(invalid(&format!(
             "native locator roster must contain exactly two tree pages and one heap page; received {} owned metadata rows: {rows:?}",
             rows.len()
@@ -117,12 +138,9 @@ fn pages(database: u32, rows: &[Rec]) -> Result<BTreeMap<PageAddress, LocatedPag
             }
             _ => return Err(invalid("native locator is outside the exact owned index roster")),
         };
-        let partition = text(row, "partition_id")?;
-        let hobt = text(row, "hobt_id")?;
-        if !partition.parse::<u64>().is_ok_and(|id| id > 0)
-            || !hobt.parse::<u64>().is_ok_and(|id| id > 0)
-            || hobt != text(row, "lock_hobt_id")?
-        {
+        let partition = native_catalog_id(row, "partition_id")?;
+        let hobt = native_catalog_id(row, "hobt_id")?;
+        if hobt != text(row, "lock_hobt_id")? {
             return Err(invalid("native PAGE locator has no exact partition/HoBT identity"));
         }
         // This DMV's native locator is right-padded with ASCII spaces. The strict shared
@@ -137,6 +155,7 @@ fn pages(database: u32, rows: &[Rec]) -> Result<BTreeMap<PageAddress, LocatedPag
             hobt,
             observed_at: canonical_time(&text(row, "observed_at")?)?,
             table,
+            branch: None,
         };
         if targets.insert(address, point).is_some() {
             return Err(invalid("duplicate native PAGE locator cannot supply another target"));
@@ -156,10 +175,14 @@ async fn mapping(reader: &mut ActivityReader) -> Result<Vec<MappedPageTarget>> {
         }
         let rows = reader
             .io
-            .query(LOCATORS, vec![Parameter::Integer((TARGETS + 1) as i64)], TARGETS + 1)
+            .query(LOCATORS, vec![Parameter::Integer((LOCKED_TARGETS + 1) as i64)], LOCKED_TARGETS + 1)
             .await
             .map_err(ReadError::into_error)?;
-        let locators = pages(initial.authority.database_id, &rows)?;
+        let mut locators = pages(initial.authority.database_id, &rows)?;
+        let (address, located) = Box::pin(branch::locate(reader, initial.authority.database_id, &locators)).await?;
+        if locators.insert(address, located).is_some() {
+            return Err(invalid("native branch locator duplicated an already located leaf or heap page"));
+        }
         let selected = locators.keys().copied().collect();
         let before = reader.page_headers(&selected, &initial).await?;
         let after = reader.page_headers(&selected, &initial).await?;
@@ -186,6 +209,7 @@ async fn mapping(reader: &mut ActivityReader) -> Result<Vec<MappedPageTarget>> {
                 || last.catalog.partition_id.as_ref() != Some(&located.partition)
                 || last.catalog.hobt_id.as_ref() != Some(&located.hobt)
                 || last.header.partition_id.as_ref() != Some(&located.partition)
+                || located.branch.as_ref().is_some_and(|witness| !witness.matches(first) || !witness.matches(last))
                 || first.header.next_file_id != last.header.next_file_id
                 || first.header.next_page_id != last.header.next_page_id
             {
@@ -206,6 +230,7 @@ fn require_shapes(targets: &[MappedPageTarget]) -> Result<()> {
     let mut heap = 0;
     let mut followed = 0;
     let mut end = 0;
+    let mut branch = 0;
     for target in targets {
         match (target.kind, target.header.level, target.header.index_id.as_deref()) {
             (PageWaitTargetKind::HeapData, Some(0), Some("0")) => heap += 1,
@@ -220,11 +245,12 @@ fn require_shapes(targets: &[MappedPageTarget]) -> Result<()> {
                     _ => return Err(invalid("native leaf successor/end identity unavailable")),
                 }
             }
-            _ => return Err(invalid("native target kind does not match the owned heap/leaf roster")),
+            (PageWaitTargetKind::IndexBranch, Some(level), Some("1")) if level > 0 => branch += 1,
+            _ => return Err(invalid("native target kind does not match the owned heap/leaf/branch roster")),
         }
     }
-    if targets.len() != TARGETS || (heap, followed, end) != (1, 1, 1) {
-        return Err(invalid("require one native heap, one followed leaf and one end leaf"));
+    if targets.len() != TARGETS || (heap, followed, end, branch) != (1, 1, 1, 1) {
+        return Err(invalid("require one native heap, one followed leaf, one end leaf and one branch"));
     }
     Ok(())
 }
@@ -306,7 +332,8 @@ async fn prove(fixture: &mut Fixture) -> Result<()> {
             "fixture_gate_connections":1,"fixture_gate_is_not_a_latch_holder":true,
             "gate_work":"one owned transaction; two exact clustered endpoint keys and one heap row",
             "native_mapping_only":true,"quiet_source_population_complete":false,"healthy_zero_inferred":false,"actual_page_wait_proved":false,"latch_holder_proved":false,
-            "branch_target_proved":false,"physical_io_proved":false,"causal_contribution_proved":false,
+            "branch_target_proved":true,"branch_locator_queries":1,"branch_locator_is_not_a_wait_or_holder":true,
+            "physical_io_proved":false,"causal_contribution_proved":false,
             "continuous_allocation_proved":false,"source_cost_qualified":false,
         }),
     )?;
@@ -314,7 +341,7 @@ async fn prove(fixture: &mut Fixture) -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "requires the existing nonce-owned loopback SQL2019+ fixture; native heap/leaf mapping and quiet-wait refusal only, no latch holder/cause qualification"]
+#[ignore = "requires the existing nonce-owned loopback SQL2019+ fixture; native heap/leaf/branch mapping and quiet-wait refusal only, no latch holder/cause qualification"]
 async fn local_owned_heap_and_leaf_mapping_require_exact_native_roster_without_wait_enrichment() {
     fixture::run(|fixture| Box::pin(prove(fixture))).await;
 }
@@ -324,7 +351,7 @@ mod tests {
     use super::*;
     use crate::{resources::test_support::replace, value::Val};
 
-    fn rows() -> Vec<Rec> {
+    pub(super) fn rows() -> Vec<Rec> {
         [(1001, 1, "1:128", "72001"), (1001, 1, "1:136", "72001"), (1002, 0, "1:144", "72002")]
             .map(|(object, index, page, hobt)| {
                 Rec::of(&[
@@ -351,7 +378,7 @@ mod tests {
     #[test]
     fn exact_granted_page_lock_roster_locates_two_tree_pages_and_one_heap_without_wait_facts() {
         let located = pages(9, &rows()).unwrap();
-        assert_eq!(located.len(), TARGETS);
+        assert_eq!(located.len(), LOCKED_TARGETS);
         assert_eq!(located.values().filter(|page| page.table == TREE).count(), 2);
         assert_eq!(located.values().filter(|page| page.table == HEAP).count(), 1);
         assert!(located.keys().all(|page| page.database == 9 && page.file == 1));
@@ -364,7 +391,7 @@ mod tests {
             let page = text(row, "file_page").unwrap();
             *row = replace(row, &[("file_page", Val::Text(format!("{page:<256}")))]);
         }
-        assert_eq!(pages(9, &padded).unwrap().len(), TARGETS);
+        assert_eq!(pages(9, &padded).unwrap().len(), LOCKED_TARGETS);
         for malformed in [" 1:128", "1:128\t", "1:128\n", "1:128 task=0x1234"] {
             let mut changed = padded.clone();
             changed[0] = replace(&changed[0], &[("file_page", Val::Text(malformed.into()))]);
@@ -419,6 +446,59 @@ mod tests {
             let mut changed = rows();
             changed[1] = replace(&changed[1], &[(column, value)]);
             assert!(pages(9, &changed).is_err(), "{column}");
+        }
+    }
+
+    fn shape(kind: PageWaitTargetKind, page: u32, level: u32, index: &str, next: (u32, u32)) -> MappedPageTarget {
+        MappedPageTarget {
+            scope: PageTargetScope::RequestDatabase,
+            identity_basis: PageTargetIdentityBasis::LocalDatabaseFileEpoch,
+            database: NativeIdentity::new("9").qualified("database_guid", "controlled-native-database"),
+            file: NativeIdentity::new("controlled-native-file"),
+            kind,
+            header: PageHeaderFacts {
+                database_id: 9,
+                file_id: 1,
+                page_id: page,
+                header_version: None,
+                page_type: Some(if kind == PageWaitTargetKind::IndexBranch { 2 } else { 1 }),
+                level: Some(level),
+                object_id: Some("1001".into()),
+                index_id: Some(index.into()),
+                partition_id: Some("72001".into()),
+                allocation_unit_id: Some("82001".into()),
+                lsn: None,
+                next_file_id: Some(next.0),
+                next_page_id: Some(next.1),
+            },
+            object: None,
+        }
+    }
+
+    #[test]
+    fn a_native_branch_is_required_in_addition_to_each_previously_accepted_mapping_shape() {
+        // Unit-only shape data exercises the acceptance roster, not native acquisition or authority.
+        let old = vec![
+            shape(PageWaitTargetKind::HeapData, 144, 0, "0", (0, 0)),
+            shape(PageWaitTargetKind::IndexLeaf, 128, 0, "1", (1, 136)),
+            shape(PageWaitTargetKind::IndexLeaf, 136, 0, "1", (0, 0)),
+        ];
+        assert!(old.iter().all(MappedPageTarget::is_valid));
+        assert!(require_shapes(&old).is_err(), "the original three positives cannot substitute for a native branch");
+        let mut complete = old.clone();
+        complete.push(shape(PageWaitTargetKind::IndexBranch, 150, 1, "1", (0, 0)));
+        assert!(complete.iter().all(MappedPageTarget::is_valid));
+        require_shapes(&complete).unwrap();
+        for change in ["leaf", "heap", "unknown", "duplicate-branch", "missing-end"] {
+            let mut changed = complete.clone();
+            match change {
+                "leaf" => changed[3] = shape(PageWaitTargetKind::IndexLeaf, 150, 0, "1", (0, 0)),
+                "heap" => changed[3] = shape(PageWaitTargetKind::HeapData, 150, 0, "0", (0, 0)),
+                "unknown" => changed[3].kind = PageWaitTargetKind::Unclassified,
+                "duplicate-branch" => changed.push(complete[3].clone()),
+                _ => changed[2] = complete[3].clone(),
+            }
+            assert!(require_shapes(&changed).is_err(), "{change}");
         }
     }
 
