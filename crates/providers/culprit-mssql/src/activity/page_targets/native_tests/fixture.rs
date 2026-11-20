@@ -45,6 +45,9 @@ pub(super) struct Fixture {
     owned_host: bool,
 }
 impl Fixture {
+    pub(super) fn database_name(&self) -> &str {
+        &self.name
+    }
     async fn open() -> Result<Self> {
         let setup_started = std::time::Instant::now();
         let port =
@@ -103,7 +106,7 @@ impl Fixture {
         crate::test_support::connect(&config(self.port, &self.name, &self.password, application), SessionKind::User)
             .await
     }
-    async fn execute(&mut self, sql: &str) -> Result<()> {
+    pub(super) async fn execute(&mut self, sql: &str) -> Result<()> {
         let mut admin = self.admin.take().ok_or_else(|| invalid("owned fixture admin connection was retired"))?;
         let result = execute(&mut admin, sql).await;
         // Only a fully drained successful batch permits reuse. Failure or cancellation retires this actor.
@@ -115,6 +118,12 @@ impl Fixture {
     /// The retained owner exists before connection or transaction work can be cancelled. Only this nonce
     /// fixture's seed table is locked; no page latch, task pointer or native holder relationship is imposed.
     pub async fn start_holder_gate(&mut self) -> Result<()> {
+        self.start_holder_gate_with_statement(
+            "SET LOCK_TIMEOUT 1000; BEGIN TRANSACTION; SELECT TOP(1) id FROM dbo.page_fixture_select WITH(TABLOCKX,HOLDLOCK);",
+        ).await
+    }
+    /// Only native fixture children provide this owned statement; the same retained gate owns every outcome.
+    pub(super) async fn start_holder_gate_with_statement(&mut self, statement: &str) -> Result<()> {
         if !self.owned_host || self.pool.is_none() || self.holder_gate.is_some() || self.has_workers() {
             return Err(invalid("owned holder gate requires an initialized idle fixture"));
         }
@@ -127,10 +136,7 @@ impl Fixture {
             .await
             .map_err(|_| invalid("owned holder gate connection exceeded its bound"))??;
         self.holder_gate.as_mut().ok_or_else(|| invalid("owned holder gate was retired"))?.client = Some(client);
-        self.holder_gate_command(
-            "SET LOCK_TIMEOUT 1000; BEGIN TRANSACTION; SELECT TOP(1) id FROM dbo.page_fixture_select WITH(TABLOCKX,HOLDLOCK);",
-        )
-        .await
+        self.holder_gate_command(statement).await
     }
 
     /// Borrow the already-owned admin so the wrong-target UPDATE remains pending without another actor

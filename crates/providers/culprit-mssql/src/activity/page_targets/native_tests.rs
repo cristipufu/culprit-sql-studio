@@ -5,6 +5,7 @@ mod fixture;
 mod focused;
 mod holders;
 mod shared_tempdb;
+mod topology;
 mod workload;
 mod writers;
 use super::*;
