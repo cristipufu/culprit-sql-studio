@@ -88,6 +88,7 @@ async fn export_vendor_field_conformance_from_canonical_original_evidence() {
         "recipes":culprit_mssql::telemetry_recipes(),
         "performance_counter_profile":{"native_object":profile.native_object, "selection":profile.selection, "fields":counters,"database_field_ids":profile.database_field_ids},
         "field_context_export_version":1,"field_context_contracts":field_context_contracts(),
+        "database_property_contract_export_version":1,"database_property_contracts":database_property_contracts(),
         "cases":cases,
     });
     let mut options = OpenOptions::new();
@@ -285,5 +286,17 @@ fn field_context_contracts() -> Vec<Value> {
         json!({"path":"crates/culprit-checks/src/views/performance_counters.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-checks/src/views/performance_counters.rs")))}),
         json!({"path":"crates/culprit-collector/src/analytical/database_counter_contexts.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/database_counter_contexts.rs")))}),
         json!({"path":"crates/culprit-collector/src/analytical/publication/context.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/publication/context.rs")))}),
+    ].into_iter().collect()
+}
+
+// Compiled owners of the existing property corpus and exact native Details projection.
+fn database_property_contracts() -> Vec<Value> {
+    [
+        json!({"path":"crates/providers/culprit-mssql/src/database_properties.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/database_properties.rs")))}),
+        json!({"path":"crates/culprit-core/src/telemetry/database_properties.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-core/src/telemetry/database_properties.rs")))}),
+        json!({"path":"crates/culprit-checks/src/views/database_properties.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-checks/src/views/database_properties.rs")))}),
+        json!({"path":"crates/culprit-collector/src/analytical/test_support/database_properties.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/test_support/database_properties.rs")))}),
+        json!({"path":"fixtures/database-properties.native.json","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../../fixtures/database-properties.native.json")))}),
+        json!({"path":"crates/culprit-collector/src/analytical/prepared.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/prepared.rs")))}),
     ].into_iter().collect()
 }
