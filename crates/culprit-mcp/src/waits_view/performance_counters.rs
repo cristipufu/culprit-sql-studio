@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 const ENTRY_LIMIT: usize = 5;
 
 pub(super) fn attach(response: &mut Value, report: &Report) {
-    if let Some(counters) = &report.performance_counters {
-        response["performance_counters"] = value(counters);
+    if !report.performance_counters.is_empty() {
+        response["performance_counters"] = Value::Array(report.performance_counters.iter().map(value).collect());
     } else if report
         .snapshot
         .sources
@@ -18,8 +18,13 @@ pub(super) fn attach(response: &mut Value, report: &Report) {
 
 pub(crate) fn value(counters: &PerformanceCounterReport) -> Value {
     json!({
+        "population":counters.population,
         "title":counters.title,"summary":counters.summary,"source_state":counters.source_state,
         "native_database_id":counters.native_database_id,"database":counters.database,
+        "read_bounds":counters.context.as_ref().map(|context| {
+            let (from, until) = context.bounds();
+            json!({"observed_from":from,"observed_until":until})
+        }),
         "read_complete":counters.read_complete,"native_observations":counters.native_observations,"observed_observations":counters.observed_observations,
         "native_counter_rows":counters.native_counter_rows,"observed_counter_rows":counters.observed_counter_rows,
         "presented_counter_rows":counters.presented_counter_rows,"returned_counter_rows":counters.entries.len().min(ENTRY_LIMIT),"omitted_counter_rows":counters.entries.len().saturating_sub(ENTRY_LIMIT),"entries_limited":counters.entries_limited || counters.entries.len()>ENTRY_LIMIT,

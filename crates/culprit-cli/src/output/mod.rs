@@ -434,6 +434,9 @@ impl Out {
         }
         println!();
         self.findings(report, Severity::Low);
+        if !report.performance_counters.is_empty() {
+            println!("\n{}", observations::performance_counter_populations(&report.performance_counters));
+        }
         if !s.notes.is_empty() {
             println!();
             for n in &s.notes {
@@ -778,6 +781,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "locked": report.locked,
         "assessments": report.assessments,
         "engine_limitations": s.server.engine.spec().limitations(),
+        "performance_counters": report.performance_counters,
         "notes": s.notes,
         "next": report.findings.iter().take(3).map(|f| format!("culprit show {} '{}'", s.connection, f.id)).collect::<Vec<_>>(),
     })

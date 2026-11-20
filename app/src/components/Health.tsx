@@ -146,6 +146,7 @@ export function HealthTab({
   const waitCounterRead = pressure?.wait_counters;
   const waitCounterIssue = observationReadIssue("waits", report.snapshot.sources ?? []);
   const performanceCounters = report.performance_counters;
+  const hasSharedPerformanceCounters = performanceCounters.some((counters) => counters.population === "shared-server");
   const performanceRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "performance counters");
   const performanceIssue = observationReadIssue("performance counters", report.snapshot.sources ?? [], performanceRecorded);
   const counterRatios = report.counter_ratios;
@@ -189,7 +190,7 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
   const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, databasePropertiesIssue, memoryClerkIssue, tempdbMetadataIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
@@ -264,12 +265,12 @@ export function HealthTab({
       {waitCounters && <WaitCounters key={report.snapshot.id} report={waitCounters} />}
       {!waitCounters && waitCounterIssue && <ObservationSourceIssue source={waitCounterIssue} title={t("view.wait_counters.title")} />}
       {!waitCounters && waitCounterRead && !waitCounterIssue && <ObservationExplanationIssue title={t("view.wait_counters.title")} reason={t("view.wait_counters.invalid")} />}
-      {performanceCounters && <PerformanceCounters key={report.snapshot.id} report={performanceCounters} />}
-      {!performanceCounters && performanceIssue && <ObservationSourceIssue source={performanceIssue} title={t("view.performance_counters.title")} />}
-      {!performanceCounters && performanceRecorded && !performanceIssue && <ObservationExplanationIssue title={t("view.performance_counters.title")} reason={t("view.performance_counters.invalid")} />}
-      {!performanceCounters?.ratios && counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
-      {!performanceCounters && !counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
-      {!performanceCounters && !counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
+      {performanceCounters.map((counters) => <PerformanceCounters key={`${report.snapshot.id}:${counters.population}`} report={counters} />)}
+      {!hasSharedPerformanceCounters && performanceIssue && <ObservationSourceIssue source={performanceIssue} title={t("view.performance_counters.title")} />}
+      {!hasSharedPerformanceCounters && performanceRecorded && !performanceIssue && <ObservationExplanationIssue title={t("view.performance_counters.title")} reason={t("view.performance_counters.invalid")} />}
+      {!performanceCounters.some((counters) => counters.ratios) && counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
+      {!hasSharedPerformanceCounters && !counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
+      {!hasSharedPerformanceCounters && !counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
       {instanceResources && <InstanceResources key={report.snapshot.id} report={instanceResources} />}
       {!instanceResources && instanceResourceIssue && <ObservationSourceIssue source={instanceResourceIssue} title={t("view.instance_resources.title")} />}
       {!instanceResources && (instanceResourceRead || instanceResourceRecorded) && !instanceResourceIssue && <ObservationExplanationIssue title={t("view.instance_resources.title")} reason={t("view.instance_resources.invalid")} />}

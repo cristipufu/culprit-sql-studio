@@ -38,6 +38,7 @@ test("withheld scalar descriptors remain an explanation with no invented zero en
 test("selected counters show their original database context as escaped text without borrowing a row label", () => {
   const report = performanceCounterReport(1);
   const database = "<img src=x onerror=alert(1)>";
+  report.population = "selected-database";
   report.database = database;
   report.native_database_id = "7";
   const html = renderToStaticMarkup(<PerformanceCounters report={report} />);
@@ -49,7 +50,8 @@ test("selected counters show their original database context as escaped text wit
   report.native_database_id = null;
   report.entries[0]!.native_instance = "some-other-database";
   const unknown = renderToStaticMarkup(<PerformanceCounters report={report} />);
-  expect(unknown).toContain(t("view.performance_counters.scope"));
+  expect(unknown).toContain(t("view.performance_counters.selected_scope"));
+  expect(unknown).not.toContain(t("view.performance_counters.scope"));
   expect(unknown).not.toContain(t("view.performance_counters.database", { database: "some-other-database", id: "7" }));
   expect(report.database).toBe(database);
 });
@@ -73,4 +75,57 @@ test("language changes reword interface labels without recomputing retained Rust
       expect(html).toContain(EXACT_PERFORMANCE_COUNTER);
     }
   } finally { setLanguage(previousLanguage); }
+});
+
+
+test("Health renders shared and selected counter populations independently with original times and exact text", () => {
+  const shared = performanceCounterReport(1);
+  const selected = performanceCounterReport(1);
+  selected.population = "selected-database";
+  selected.database = "original <database>";
+  selected.native_database_id = "7";
+  selected.context = { kind: "collector", observed_from: "2020-01-01T12:00:00Z", observed_until: "2020-01-01T12:00:01Z" };
+  selected.entries[0]!.metric.text = "9007199254740993 B";
+  selected.entries[0]!.scope = "database";
+  selected.limitations = [t("view.performance_counters.limit.historical")];
+  const report = performanceCounterHealthReport(shared);
+  report.performance_counters = [shared, selected];
+  const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server" />);
+  expect(html.match(/class="operational-health observation-list"/g)).toHaveLength(2);
+  expect(html).toContain(t("view.performance_counters.scope"));
+  expect(html).toContain("original &lt;database&gt;");
+  expect(html).toContain("2020-01-01T12:00:00Z");
+  expect(html).toContain("2020-01-01T12:00:01Z");
+  expect(html).toContain("9007199254740993 B");
+  expect(html).toContain(EXACT_PERFORMANCE_COUNTER);
+  expect(html).toContain(t("view.performance_counters.limit.historical"));
+});
+
+test("withdrawn selected counters stay an unavailable selected population alongside independent shared counters", () => {
+  const shared = performanceCounterReport(1);
+  const selected = performanceCounterReport(0);
+  selected.population = "selected-database";
+  selected.source_state = "unavailable";
+  selected.summary = t("view.performance_counters.sharing_withheld");
+  selected.native_counter_rows = null;
+  selected.native_observations = null;
+  selected.context = null;
+  const report = performanceCounterHealthReport(shared);
+  report.performance_counters = [shared, selected];
+  const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server" />);
+  expect(html).toContain(selected.summary);
+  expect(html).toContain(t("view.performance_counters.selected_scope"));
+  expect(html).toContain(t("ui.dashboard.status.unavailable"));
+  expect(html).toContain(EXACT_PERFORMANCE_COUNTER);
+  const withdrawn = renderToStaticMarkup(<PerformanceCounters report={selected} />);
+  expect(withdrawn).not.toContain(t("view.performance_counters.scope"));
+  expect(withdrawn).not.toContain("<article");
+});
+
+test("an empty counter collection does not itself suppress the Health empty state", () => {
+  const report = performanceCounterHealthReport(null);
+  report.snapshot.sources = [];
+  const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server" />);
+  expect(html).toContain(t("ui.health.empty"));
+  expect(html).not.toContain(t("view.performance_counters.title"));
 });

@@ -161,3 +161,31 @@ fn database_and_native_entry_labels_use_bounded_escaped_previews_without_mutatin
     assert!(!text.contains(&"界".repeat(101)));
     assert_eq!(serde_json::to_value(&report).unwrap(), original);
 }
+
+#[test]
+fn saved_report_populations_keep_each_native_scope_counts_bounds_and_detail_limit() {
+    let shared = report(PerformanceCounterCase::Exact, false);
+    let selected = database_report(DatabasePerformanceCounterCase::Partial);
+    let expected_shared = performance_counters(&shared);
+    let expected_selected = performance_counters(&selected);
+    let text = populations(&[shared, selected]);
+    assert_eq!(text, format!("{expected_shared}\n\n{expected_selected}"));
+    assert!(text.contains("9007199254740993 KiB"));
+    assert!(text.contains("9007199254740993 B"));
+    assert!(text.contains(&t!("view.performance_counters.database", database = "shop", id = "7")));
+    assert!(text.contains(&t!("evidence.cli.source_partial")));
+}
+
+#[test]
+fn withdrawn_selected_population_has_explicit_scope_and_unknown_original_counts() {
+    let reason = culprit_core::message!("view.performance_counters.sharing_withheld");
+    let selected =
+        culprit_checks::performance_counters::unavailable(PerformanceCounterPopulation::SelectedDatabase, &reason);
+    let text = populations(&[selected]);
+    assert!(text.contains(&t!("view.performance_counters.selected_scope")));
+    assert!(text.contains(&reason.render()));
+    assert!(text.contains(&t!("view.performance_counters.limit.historical")));
+    assert!(!text.contains(&t!("view.performance_counters.scope")));
+    assert!(!text.contains("SQLServer:Databases"));
+    assert!(!text.contains("9007199254740993"));
+}

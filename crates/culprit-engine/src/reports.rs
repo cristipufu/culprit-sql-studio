@@ -25,8 +25,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         instance_resources: &'a Option<Box<culprit_core::InstanceResourceReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         counter_ratios: &'a Option<Box<culprit_core::CounterRatioReport>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        performance_counters: &'a Option<Box<culprit_core::PerformanceCounterReport>>,
+        performance_counters: &'a [culprit_core::PerformanceCounterReport],
         #[serde(skip_serializing_if = "Option::is_none")]
         wait_counters: &'a Option<Box<culprit_core::WaitCounterReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]

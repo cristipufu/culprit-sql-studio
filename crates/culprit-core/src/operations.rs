@@ -42,6 +42,10 @@ pub struct OperationalStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub memory_clerks: Option<Box<crate::telemetry::CapturedOperationalRead>>,
+    /// Original selected-database counter context is historical, not current scan ownership.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub database_performance_counters: Option<crate::telemetry::RecordedPerformanceCounters>,
     /// Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -185,6 +189,7 @@ impl OperationalStats {
             statement_work: _,
             cached_runtime: _,
             memory_clerks: _,
+            database_performance_counters: _,
             tempdb_metadata_memory: _,
             storage: _,
             hyperscale_log_components: _,

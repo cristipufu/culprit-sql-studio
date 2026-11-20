@@ -22,6 +22,26 @@ impl Workspace {
         Ok(result)
     }
 
+    /// Retain one authenticated selected-database original after the normal scan owner settles. Its native
+    /// database, member, role and clocks remain historical; the current scan establishes none of them.
+    pub async fn scan_with_captured_database_performance_counters(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalSnapshotAnalysis,
+    ) -> Result<Report> {
+        if captured.original().connection() != name
+            || captured.report().kind() != crate::LocalCaptureAnalysisKind::PerformanceCounters
+        {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::database_performance_counters(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
     /// Attach the exact original database capture only after the ordinary native scan has settled.
     pub async fn scan_with_captured_hyperscale_log_components(
         &self,

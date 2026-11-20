@@ -52,7 +52,7 @@ mod counter_ratios;
 mod performance_counters;
 pub(crate) use configured_log_rates::configured_log_rates;
 pub(crate) use hyperscale_log_components::hyperscale_log_components;
-pub(crate) use performance_counters::performance_counters;
+pub(crate) use performance_counters::{performance_counters, populations as performance_counter_populations};
 mod wait_counters;
 pub(crate) use connection_outcomes::connection_outcomes;
 pub(crate) use counter_ratios::counter_ratios;

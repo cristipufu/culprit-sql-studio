@@ -3,6 +3,15 @@ use super::*;
 mod database;
 pub use database::*;
 
+/// A saved scan retains the indivisible original or an explicit population-specific evidence gap.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+#[ts(export)]
+pub enum RecordedPerformanceCounters {
+    Captured { read: Box<CapturedOperationalRead> },
+    Unavailable { reason: crate::i18n::Message },
+}
+
 pub const PERFORMANCE_COUNTER_PROFILE: &str = "sqlserver-performance-counters-v2";
 pub const PERFORMANCE_COUNTER_PROFILE_PROPERTY: &str = "performance_profile";
 pub const PERFORMANCE_COUNTER_CLOCK_PROPERTY: &str = "counter_observed_at";

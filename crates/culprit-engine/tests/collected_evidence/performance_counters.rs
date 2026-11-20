@@ -154,18 +154,19 @@ async fn authenticated_counter_sets_with_contradictory_native_semantics_are_refu
 }
 
 #[tokio::test]
-async fn public_report_display_omits_an_absent_counter_report_and_keeps_present_exact_text() {
+async fn public_report_display_keeps_a_counter_collection_and_present_exact_text() {
     let snapshot = serde_json::from_str(include_str!("../../../../fixtures/postgres-demo.json")).unwrap();
     let mut report = culprit_checks::analyze(snapshot);
-    assert!(
-        serde_json::to_value(culprit_engine::reports::display(&report)).unwrap().get("performance_counters").is_none()
+    assert_eq!(
+        serde_json::to_value(culprit_engine::reports::display(&report)).unwrap()["performance_counters"],
+        serde_json::json!([])
     );
     let (source, records) = test_support::performance_counter_evidence(PerformanceCounterCase::Exact);
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    report.performance_counters = Some(collected_resources::performance_counters(&capture).unwrap().report);
+    report.performance_counters = vec![*collected_resources::performance_counters(&capture).unwrap().report];
     let display = serde_json::to_value(culprit_engine::reports::display(&report)).unwrap();
-    assert_eq!(display["performance_counters"]["entries"][0]["raw_value"], "9007199254740993");
+    assert_eq!(display["performance_counters"][0]["entries"][0]["raw_value"], "9007199254740993");
 }
 
 #[tokio::test]

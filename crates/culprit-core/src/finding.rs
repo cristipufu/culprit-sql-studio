@@ -385,9 +385,7 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub storage: Option<Box<crate::StorageReport>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub performance_counters: Option<Box<crate::PerformanceCounterReport>>,
+    pub performance_counters: Vec<crate::PerformanceCounterReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub memory_clerks: Option<Box<crate::MemoryClerkReport>>,

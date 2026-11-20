@@ -98,14 +98,16 @@ fn value(raw: &str, unit: CounterUnit) -> String {
 pub(super) fn missing(
     profile: &PerformanceCounterProfile,
     samples: &[&NativeCounterSet],
-    database: bool,
+    population: PerformanceCounterPopulation,
 ) -> Vec<Metric> {
     if samples.is_empty() || samples.iter().any(|sample| !profile.declares_selection(sample)) {
         return Vec::new();
     }
     let mut missing = Vec::new();
     for field in profile.fields {
-        if database && !profile.database_field_ids.contains(&field.id) {
+        if population == PerformanceCounterPopulation::SelectedDatabase
+            && !profile.database_field_ids.contains(&field.id)
+        {
             continue;
         }
         let observed = |instance: Option<&str>| {
@@ -123,7 +125,7 @@ pub(super) fn missing(
                 })
             })
         };
-        if database {
+        if population == PerformanceCounterPopulation::SelectedDatabase {
             if !observed(None) {
                 missing.push(Metric::said_text(field.label_key, t!("view.performance_counters.unknown")));
             }

@@ -1,7 +1,7 @@
 //! Bounded output uses shared exact display values and keeps every finite qualification.
 use super::statement::preview;
 use super::{SourceQualification, Summary, render_summary};
-use culprit_core::{PerformanceCounterReport, format, t};
+use culprit_core::{PerformanceCounterPopulation, PerformanceCounterReport, format, t};
 
 pub(crate) fn performance_counters(report: &PerformanceCounterReport) -> String {
     let mut text = render_summary(
@@ -13,9 +13,15 @@ pub(crate) fn performance_counters(report: &PerformanceCounterReport) -> String 
         },
         |_| {},
     );
-    if let (Some(database), Some(id)) = (&report.database, &report.native_database_id) {
+    if report.population == PerformanceCounterPopulation::SelectedDatabase {
         text.push('\n');
-        text.push_str(&t!("view.performance_counters.database", database = preview(database), id = id));
+        let scope = match (&report.database, &report.native_database_id) {
+            (Some(database), Some(id)) => {
+                t!("view.performance_counters.database", database = preview(database), id = id)
+            }
+            _ => t!("view.performance_counters.selected_scope"),
+        };
+        text.push_str(&scope);
     }
     text.push('\n');
     text.push_str(&t!(
@@ -82,3 +88,8 @@ fn count(count: Option<u32>) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// Each native population retains the existing renderer's independent detail bound.
+pub(crate) fn populations(reports: &[PerformanceCounterReport]) -> String {
+    reports.iter().map(performance_counters).collect::<Vec<_>>().join("\n\n")
+}

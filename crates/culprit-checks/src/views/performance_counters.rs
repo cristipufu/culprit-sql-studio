@@ -1,10 +1,12 @@
 //! Native scalar inputs describe one shared population; they establish neither a recent rate nor a query cause.
 use culprit_core::{
-    Engine, Error, Metric, PerformanceCounterReport, Result, Snapshot, SourceOutcome, SourceState, format, t,
-    telemetry::*,
+    Engine, Error, Metric, PerformanceCounterPopulation, PerformanceCounterReport, Result, Snapshot, SourceOutcome,
+    SourceState, format, t, telemetry::*,
 };
 use std::collections::BTreeSet;
 mod entries;
+mod recorded;
+pub use recorded::{explain_database_captured, explain_recorded, unavailable};
 
 pub const MAX_PERFORMANCE_COUNTER_ENTRIES: usize = 256;
 
@@ -65,7 +67,7 @@ pub fn explain_source(
 pub fn explain(evidence: PerformanceCounterEvidence<'_>) -> Result<PerformanceCounterReport> {
     match evidence {
         PerformanceCounterEvidence::Snapshot { engine, samples, source } => {
-            render(engine, samples, source, None, false)
+            render(engine, samples, source, None, PerformanceCounterPopulation::SharedServer)
         }
         PerformanceCounterEvidence::Database { source, coverage, observations, read_complete } => {
             let context = database_performance_context(source).map_err(|_| invalid())?;
@@ -74,7 +76,13 @@ pub fn explain(evidence: PerformanceCounterEvidence<'_>) -> Result<PerformanceCo
                 || observations.iter().any(|row| !matches!(&row.fact, OperationalFact::CounterSet(sample) if database_performance_sample_fits_source(sample,source))) {
                 return Err(invalid());
             }
-            let mut report = captured(&context, coverage, observations, read_complete, true)?;
+            let mut report = captured(
+                &context,
+                coverage,
+                observations,
+                read_complete,
+                PerformanceCounterPopulation::SelectedDatabase,
+            )?;
             let SourceObservation::DatabasePerformanceCounters { native_database, .. } = &source.observation else {
                 return Err(invalid());
             };
@@ -83,7 +91,7 @@ pub fn explain(evidence: PerformanceCounterEvidence<'_>) -> Result<PerformanceCo
             Ok(report)
         }
         PerformanceCounterEvidence::Captured { context, coverage, observations, read_complete } => {
-            captured(context, coverage, observations, read_complete, false)
+            captured(context, coverage, observations, read_complete, PerformanceCounterPopulation::SharedServer)
         }
     }
 }
@@ -93,7 +101,7 @@ fn captured(
     coverage: &StateSourceCoverage,
     observations: &[&OperationalObservation],
     read_complete: bool,
-    database: bool,
+    population: PerformanceCounterPopulation,
 ) -> Result<PerformanceCounterReport> {
     let profile = context.target.engine().spec().performance_counters().ok_or_else(invalid)?;
     if !context.is_valid()
@@ -134,7 +142,7 @@ fn captured(
         },
         reason_message: None,
     };
-    let mut report = render(context.target.engine(), &samples, Some(&source), Some(read_complete), database)?;
+    let mut report = render(context.target.engine(), &samples, Some(&source), Some(read_complete), population)?;
     report.context = Some(ObservationReadContext::Native { context: Box::new(context.clone()) });
     report.native_source = Some(coverage.clone());
     report.native_observations = Some(coverage.records);
@@ -149,7 +157,7 @@ fn render(
     samples: &[&NativeCounterSet],
     source: Option<&SourceOutcome>,
     read_complete: Option<bool>,
-    database: bool,
+    population: PerformanceCounterPopulation,
 ) -> Result<PerformanceCounterReport> {
     let profile = engine.spec().performance_counters().ok_or_else(invalid)?;
     if samples.len() > CollectionBudget::upper_limits().max_snapshot_rows as usize
@@ -165,15 +173,7 @@ fn render(
     let mut withheld = false;
     let mut native_rows = Some(0_u32);
     for sample in samples {
-        if !sample.is_valid()
-            || sample.scope
-                != if database {
-                    culprit_core::MeasurementScope::Database
-                } else {
-                    culprit_core::MeasurementScope::Server
-                }
-            || !keys.insert(sample.key()?)
-        {
+        if !sample.is_valid() || sample.scope != population.scope() || !keys.insert(sample.key()?) {
             return Err(invalid());
         }
         if sample.properties.get(PERFORMANCE_COUNTER_WITHHELD_PROPERTY).is_some_and(|value| value == "true") {
@@ -202,7 +202,7 @@ fn render(
     let unavailable =
         source.is_some_and(|source| matches!(source.state, SourceState::Unavailable | SourceState::NotApplicable));
     let mut limitations = vec![
-        if database {
+        if population == PerformanceCounterPopulation::SelectedDatabase {
             t!("view.performance_counters.limit.database")
         } else {
             t!("view.performance_counters.limit.scope")
@@ -210,7 +210,7 @@ fn render(
         t!("view.performance_counters.limit.lifetime"),
         t!("view.performance_counters.limit.cause"),
     ];
-    if !database {
+    if population == PerformanceCounterPopulation::SharedServer {
         limitations.push(t!("view.performance_counters.limit.overlap"));
     }
     if read_complete.is_none() {
@@ -235,13 +235,14 @@ fn render(
     if samples.iter().any(|sample| !withheld && profile.observed_at(sample).ok().flatten().is_none()) {
         limitations.push(t!("view.performance_counters.limit.clock"));
     }
-    let missing_fields = if withheld { Vec::new() } else { entries::missing(profile, samples, database) };
+    let missing_fields = if withheld { Vec::new() } else { entries::missing(profile, samples, population) };
     let ratios = if samples.iter().any(|sample| !sample.ratios.is_empty()) {
         Some(Box::new(super::counter_ratios::explain_borrowed(samples, source, read_complete.unwrap_or(false))?))
     } else {
         None
     };
     Ok(PerformanceCounterReport {
+        population,
         native_database_id: None,
         database: None,
         context: None,

@@ -14,6 +14,7 @@ use culprit_core::{
 pub enum CompletedCaptureAnalysis {
     CachedRuntime,
     MemoryClerks,
+    DatabasePerformanceCounters,
     HyperscaleLogComponents,
 }
 impl CompletedCaptureAnalysis {
@@ -21,6 +22,7 @@ impl CompletedCaptureAnalysis {
         match self {
             Self::CachedRuntime => SnapshotDataset::CachedRuntime,
             Self::MemoryClerks => SnapshotDataset::Operational,
+            Self::DatabasePerformanceCounters => SnapshotDataset::DatabasePerformanceCounters,
             Self::HyperscaleLogComponents => SnapshotDataset::HyperscaleLogComponents,
         }
     }
@@ -54,6 +56,9 @@ impl CompletedCaptureScanInput<'_> {
             }
             CompletedCaptureAnalysis::HyperscaleLogComponents => {
                 super::CapturedScanEvidence::hyperscale_log_components(Box::new(captured.into_operational_read()?))?
+            }
+            CompletedCaptureAnalysis::DatabasePerformanceCounters => {
+                super::CapturedScanEvidence::database_performance_counters(Box::new(captured.into_operational_read()?))?
             }
             CompletedCaptureAnalysis::MemoryClerks => {
                 super::CapturedScanEvidence::memory_clerks(Box::new(captured.into_operational_read()?))?

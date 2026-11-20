@@ -3,10 +3,11 @@ import type { CounterRatioReport } from "./CounterRatioReport";
 import type { Metric } from "./Metric";
 import type { ObservationReadContext } from "./ObservationReadContext";
 import type { PerformanceCounterEntry } from "./PerformanceCounterEntry";
+import type { PerformanceCounterPopulation } from "./PerformanceCounterPopulation";
 import type { SourceState } from "./SourceState";
 import type { StateSourceCoverage } from "./StateSourceCoverage";
 
-export type PerformanceCounterReport = { 
+export type PerformanceCounterReport = { population: PerformanceCounterPopulation, 
 /**
  * Exact original native population labels; never populated for shared _Total rows.
  */

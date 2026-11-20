@@ -3,6 +3,23 @@ use crate::{MeasurementScope, Metric, ResetMarker, SourceState, telemetry::*};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Native populations remain distinct even when an original identity has been withheld.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum PerformanceCounterPopulation {
+    SharedServer,
+    SelectedDatabase,
+}
+impl PerformanceCounterPopulation {
+    pub fn scope(self) -> MeasurementScope {
+        match self {
+            Self::SharedServer => MeasurementScope::Server,
+            Self::SelectedDatabase => MeasurementScope::Database,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
@@ -39,6 +56,7 @@ pub struct PerformanceCounterEntry {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct PerformanceCounterReport {
+    pub population: PerformanceCounterPopulation,
     /// Exact original native population labels; never populated for shared _Total rows.
     pub native_database_id: Option<String>,
     pub database: Option<String>,

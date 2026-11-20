@@ -739,6 +739,7 @@
       ]
     }
   ],
+  "performance_counters": [],
   "provenance": {
     "analyzer": {
       "component": "culprit-checks",
@@ -1411,7 +1412,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 31,
+    "format": 32,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {

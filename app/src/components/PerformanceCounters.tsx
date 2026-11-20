@@ -9,8 +9,10 @@ import { ObservationList } from "./ObservationList";
 export function PerformanceCounters({ report }: { report: PerformanceCounterReport }) {
   const bounds = report.context?.kind === "native" ? report.context.context : report.context;
   const count = (value: number | null) => value == null ? t("view.performance_counters.unknown") : digits(String(value));
-  const scope = report.database != null && report.native_database_id != null
-    ? t("view.performance_counters.database", { database: report.database, id: report.native_database_id })
+  const scope = report.population === "selected-database"
+    ? report.database != null && report.native_database_id != null
+      ? t("view.performance_counters.database", { database: report.database, id: report.native_database_id })
+      : t("view.performance_counters.selected_scope")
     : t("view.performance_counters.scope");
   return <>
     <ObservationList collapseEntries source={t("view.performance_counters.source")}

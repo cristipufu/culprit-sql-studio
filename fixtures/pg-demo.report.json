@@ -1562,6 +1562,7 @@
       ]
     }
   ],
+  "performance_counters": [],
   "provenance": {
     "analyzer": {
       "component": "culprit-checks",
@@ -2370,7 +2371,7 @@
         "table": "order_items"
       }
     ],
-    "format": 31,
+    "format": 32,
     "histograms": null,
     "id": "20261011T115421.485Z",
     "identity": {

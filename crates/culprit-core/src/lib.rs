@@ -38,7 +38,7 @@ mod performance_counter_report;
 pub use database_properties_report::{DatabasePropertiesReport, DatabasePropertyField};
 pub use memory_clerk_report::{MemoryClerkEntry, MemoryClerkField, MemoryClerkReport};
 pub use performance_counter_report::{
-    PerformanceCounterAvailability, PerformanceCounterEntry, PerformanceCounterReport,
+    PerformanceCounterAvailability, PerformanceCounterEntry, PerformanceCounterPopulation, PerformanceCounterReport,
 };
 pub mod connection;
 pub mod connection_outcome_report;

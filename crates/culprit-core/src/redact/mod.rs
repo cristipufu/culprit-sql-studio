@@ -320,6 +320,13 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             }
         }
     }
+    if let Some(recorded) = &mut s.operations.database_performance_counters {
+        // An indivisible original cannot be masked and re-signed. Keep only this population's typed gap;
+        // its shared-counter sibling has independent source coverage and remains untouched.
+        *recorded = crate::telemetry::RecordedPerformanceCounters::Unavailable {
+            reason: crate::message!("view.performance_counters.sharing_withheld"),
+        };
+    }
     if s.operations.hyperscale_log_components.take().is_some() {
         s.record_unavailable_evidence(
             crate::telemetry::HYPERSCALE_LOG_COMPONENTS_SOURCE,

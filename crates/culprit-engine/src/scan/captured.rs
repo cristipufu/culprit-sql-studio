@@ -12,9 +12,15 @@ pub(crate) enum CapturedScanEvidence {
     CachedRuntime(Box<CachedRuntimeRead>),
     MemoryClerks(Box<CapturedOperationalRead>),
     TempdbMetadataMemory(Box<CapturedOperationalRead>),
+    DatabasePerformanceCounters(Box<CapturedOperationalRead>),
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
 impl CapturedScanEvidence {
+    pub(crate) fn database_performance_counters(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::performance_counters::explain_database_captured(&read)?;
+        Ok(Self::DatabasePerformanceCounters(read))
+    }
+
     pub(crate) fn tempdb_metadata_memory(read: Box<CapturedOperationalRead>) -> Result<Self> {
         culprit_checks::tempdb_metadata_memory::explain_captured(&read)?;
         Ok(Self::TempdbMetadataMemory(read))
@@ -53,6 +59,15 @@ impl CapturedScanEvidence {
                     return Err(DeliveryProblem::InvalidContract.error());
                 }
                 snapshot.operations.hyperscale_log_components = Some(read);
+            }
+            Self::DatabasePerformanceCounters(read) => {
+                if snapshot.operations.database_performance_counters.is_some() {
+                    return Err(DeliveryProblem::Conflict.error());
+                }
+                // The saved connection authorizes attachment, not continuity with the current native member/DB.
+                // The original is independently scoped and never enters shared counters or workload grading.
+                snapshot.operations.database_performance_counters =
+                    Some(culprit_core::telemetry::RecordedPerformanceCounters::Captured { read });
             }
             Self::TempdbMetadataMemory(read) => {
                 if snapshot.operations.tempdb_metadata_memory.is_some() {

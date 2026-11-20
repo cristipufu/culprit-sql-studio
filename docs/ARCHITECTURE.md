@@ -302,6 +302,14 @@ clerk allocations retain their independently captured shared-instance scope with
 scan's database, member or clocks. The collector-free host accepts opaque results from an explicitly injected
 `LocalCaptureReader`; ordinary scans do not discover captures or acquire clerk data.
 
+Selected-database performance-counter originals use that same attachment owner. The saved connection associates
+an original capture with the report; it does not prove continuity with the current scan's database or member.
+`OperationalStats.database_performance_counters` retains either the unchanged `CapturedOperationalRead` or a typed
+unavailable marker. Analysis keeps selected-database and shared-server reports in separate collection entries,
+with explicit native populations, original bounds and independent source outcomes. These historical inputs never
+enter workload grading, query joins or the shared-counter sample vector. Sharing withdraws the indivisible original
+and retains an unavailable selected-database population without reconstructing identity from the later scan.
+
 Cleanup explanations consume existing typed retention populations or native operational facts. SQL Server retains
 PVS and oldest-transaction facts through separate `CleanupSnapshot` reads, with independent acquisition bounds;
 PostgreSQL keeps its existing `RetentionSnapshot` once. One pure cleanup view serves scans and both warehouse

@@ -1284,6 +1284,7 @@
       ]
     }
   ],
+  "performance_counters": [],
   "provenance": {
     "analyzer": {
       "component": "culprit-checks",
@@ -1903,7 +1904,7 @@
         "table": "orders"
       }
     ],
-    "format": 31,
+    "format": 32,
     "histograms": [
       {
         "buckets": 4.0,

@@ -17,6 +17,7 @@ import type { NativeFailureSnapshot } from "./NativeFailureSnapshot";
 import type { NodeResources } from "./NodeResources";
 import type { OperationalCounter } from "./OperationalCounter";
 import type { PageWaitSnapshot } from "./PageWaitSnapshot";
+import type { RecordedPerformanceCounters } from "./RecordedPerformanceCounters";
 import type { SequenceCapacity } from "./SequenceCapacity";
 import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
@@ -31,6 +32,10 @@ export type OperationalStats = { storage?: StorageRead, cached_runtime?: CachedR
  * An independent original capture; its shared target and receipts are never current database ownership.
  */
 memory_clerks?: CapturedOperationalRead, 
+/**
+ * Original selected-database counter context is historical, not current scan ownership.
+ */
+database_performance_counters?: RecordedPerformanceCounters, 
 /**
  * Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
  */
