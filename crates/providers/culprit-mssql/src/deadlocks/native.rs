@@ -9,8 +9,6 @@ use culprit_core::{
 };
 
 pub(crate) const SERVER: &str = "SELECT /* culprit */ CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition,DB_NAME() AS db,CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at";
-pub(crate) const RING: &str = "SELECT /* culprit */ CAST(t.target_data AS nvarchar(max)) AS target_xml FROM sys.dm_xe_session_targets t JOIN sys.dm_xe_sessions s ON s.address=t.event_session_address WHERE s.name=N'system_health' AND t.target_name=N'ring_buffer'";
-const FILE_TARGET: &str = "SELECT TOP(1) /* culprit */ CAST(t.target_data AS xml).value('(EventFileTarget/File/@name)[1]','nvarchar(4000)') AS file_path FROM sys.dm_xe_session_targets t JOIN sys.dm_xe_sessions s ON s.address=t.event_session_address WHERE s.name=N'system_health' AND t.target_name=N'event_file'";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Origin {
@@ -38,31 +36,31 @@ pub(crate) async fn read<R: NativeRead>(
     if origin == Origin::DatabaseSession {
         return super::database::read(io, database, from, until, limit, newest_first).await;
     }
-    let sql = read_sql(newest_first);
-    let mut parameters =
-        vec![Parameter::Integer(limit as i64), Parameter::Text(from.into()), Parameter::Text(until.into())];
-    // Resolve the active target rather than relying on the process's default directory. A relative
-    // system_health wildcard can return an empty set even while the configured target contains events.
-    let target = io.query(FILE_TARGET, vec![], 1).await.map_err(ReadError::into_error)?;
-    let path = text(target.first().ok_or_else(invalid_data)?, "file_path")?;
-    parameters.push(Parameter::Text(file_pattern(&path)?));
-    let rows = io.query(&sql, parameters, limit).await.map_err(ReadError::into_error)?;
-    rows.iter().map(|row| decode(row, database)).collect()
-}
-fn file_pattern(path: &str) -> Result<String> {
-    let (stem, extension) = path.rsplit_once('.').ok_or_else(invalid_data)?;
-    let (numbered, timestamp) = stem.rsplit_once('_').ok_or_else(invalid_data)?;
-    let (prefix, number) = numbered.rsplit_once('_').ok_or_else(invalid_data)?;
-    if !extension.eq_ignore_ascii_case("xel")
-        || prefix.is_empty()
-        || prefix.contains(['*', '?'])
-        || number.is_empty()
-        || timestamp.is_empty()
-        || !number.bytes().chain(timestamp.bytes()).all(|byte| byte.is_ascii_digit())
-    {
-        return Err(invalid_data());
+    let original = super::system_health::ConfiguredTarget::read(io).await?;
+    let events = original.events(io, from, until, limit, newest_first).await?;
+    let current = super::system_health::ConfiguredTarget::read(io).await?;
+    if !original.confirmed_by(&current) {
+        return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
     }
-    Ok(format!("{prefix}_*.{extension}"))
+    Ok(events)
+}
+
+pub(super) async fn read_file<R: NativeRead>(
+    io: &mut R,
+    pattern: &str,
+    from: &str,
+    until: &str,
+    limit: usize,
+    newest_first: bool,
+) -> Result<Vec<Event>> {
+    let parameters = vec![
+        Parameter::Integer(limit as i64),
+        Parameter::Text(from.into()),
+        Parameter::Text(until.into()),
+        Parameter::Text(pattern.into()),
+    ];
+    let rows = io.query(&read_sql(newest_first), parameters, limit).await.map_err(ReadError::into_error)?;
+    rows.iter().map(decode).collect()
 }
 pub(super) fn read_sql(newest_first: bool) -> String {
     let direction = if newest_first { "DESC" } else { "ASC" };
@@ -74,7 +72,7 @@ pub(super) fn read_sql(newest_first: bool) -> String {
         "SELECT TOP (@P1) /* culprit */ x.file_name,x.file_offset,CONVERT(varchar(40),{timestamp},127)+'Z' AS at,CAST(x.event_data AS nvarchar(max)) AS event_xml FROM sys.fn_xe_file_target_read_file(@P4,NULL,NULL,NULL) x WHERE x.object_name=N'xml_deadlock_report' AND {timestamp}>=CONVERT(datetime2(7),@P2,127) AND {timestamp}<CONVERT(datetime2(7),@P3,127) ORDER BY {timestamp} {direction},x.file_name {direction},x.file_offset {direction},HASHBYTES('SHA2_256',CAST(x.event_data AS nvarchar(max))) {direction} OPTION(MAXDOP 1)"
     )
 }
-fn decode(row: &Rec, database: &str) -> Result<Event> {
+fn decode(row: &Rec) -> Result<Event> {
     let xml = text(row, "event_xml")?;
     let at = canonical_time(&text(row, "at")?)?;
     let offset = integer(row, "file_offset")?;
@@ -84,10 +82,7 @@ fn decode(row: &Rec, database: &str) -> Result<Event> {
     let file = text(row, "file_name")?;
     let position =
         digest(&serde_json::to_vec(&("xml_deadlock_report", &file, offset, &at, &xml)).map_err(|_| invalid_data())?);
-    let graphs = super::parse_with_time(&xml, "system_health", Some(&at))?
-        .into_iter()
-        .filter(|graph| super::involves(graph, database))
-        .collect();
+    let graphs = super::parse_with_time(&xml, "system_health", Some(&at))?;
     // Invalid/unparseable native XML must not look like an empty successful event.
     culprit_core::xml::read(&xml, |doc| doc.map(|_| ()).map_err(|_| invalid_data()))?;
     Ok(Event { position, file_id: digest(file.as_bytes()), offset: offset.to_string(), at, graphs })
@@ -104,10 +99,10 @@ mod tests {
         let at = "2026-10-11T12:05:01.1234567Z";
         let xml = event(at);
         let row = file_row(at, &xml);
-        let first = decode(&row, "shop").unwrap();
-        let replay = decode(&row, "shop").unwrap();
+        let first = decode(&row).unwrap();
+        let replay = decode(&row).unwrap();
         let later_at = "2026-10-11T12:05:01.1234568Z";
-        let later = decode(&file_row(later_at, &event(later_at)), "shop").unwrap();
+        let later = decode(&file_row(later_at, &event(later_at))).unwrap();
         assert_eq!(first.at, first.graphs[0].at.as_deref().unwrap());
         assert_eq!(first.at, "2026-10-11T12:05:01.123456700Z");
         assert_eq!(first.position, replay.position, "an identical native event replays the same position");
@@ -119,57 +114,115 @@ mod tests {
             &row,
             &[("file_name", Val::Text("/var/opt/mssql/log/system_health_1_134388425128000000.xel".into()))],
         );
-        let moved = decode(&moved, "shop").unwrap();
+        let moved = decode(&moved).unwrap();
         assert_ne!(first.position, moved.position, "native positions still include original file identity");
         assert_eq!(first.graphs[0].id, moved.graphs[0].id, "display replay matching never replaces native positions");
-        assert!(decode(&row, "another_database").unwrap().graphs.is_empty());
+        assert_eq!(decode(&row).unwrap().graphs.len(), 1, "shared file history is not attributed by database labels");
     }
 
     #[test]
     fn native_row_clock_precedes_identity_and_conflicting_or_invalid_event_clocks_are_refused() {
         let at = "2026-10-11T12:05:01.1234567Z";
-        let bare = decode(&file_row(at, KEY_LOOKUP_XDL), "shop").unwrap();
-        let wrapped = decode(&file_row(at, &event(at)), "shop").unwrap();
+        let bare = decode(&file_row(at, KEY_LOOKUP_XDL)).unwrap();
+        let wrapped = decode(&file_row(at, &event(at))).unwrap();
         assert_eq!(bare.graphs[0], wrapped.graphs[0]);
         assert_ne!(bare.position, wrapped.position, "original XML remains part of the native position");
         for event_at in ["2026-10-11T12:05:01.1234568Z", "2026-10-11T12:05:01.1234567", "bad-clock"] {
-            assert!(decode(&file_row(at, &event(event_at)), "shop").is_err());
+            assert!(decode(&file_row(at, &event(event_at))).is_err());
         }
-        assert!(decode(&file_row("2026-10-11T12:05:01.1234567", &event(at)), "shop").is_err());
+        assert!(decode(&file_row("2026-10-11T12:05:01.1234567", &event(at))).is_err());
         for missing in [
             r#"<event name="xml_deadlock_report" timestamp="2026-10-11T12:05:01.1234567Z"><data name="xml_report"><value/></data></event>"#,
             r#"<event name="xml_deadlock_report" timestamp="bad-clock"><data name="xml_report"><value/></data></event>"#,
         ] {
-            assert!(
-                decode(&file_row(at, missing), "shop").is_err(),
-                "a selected report without a graph is not empty success"
-            );
+            assert!(decode(&file_row(at, missing)).is_err(), "a selected report without a graph is not empty success");
         }
     }
 
     #[tokio::test]
-    async fn system_health_uses_its_observed_target_and_binds_the_rollover_pattern_as_data() {
-        for path in [
-            "/var/opt/mssql/log/system_health_0_134388425128000000.xel",
-            r"C:\SQL logs\health's events_3_134388425128000000.xel",
+    async fn system_health_uses_native_configured_paths_and_rechecks_the_same_owner_without_flushing_views() {
+        use crate::deadlocks::system_health::tests::configuration;
+        use crate::resources::test_support::replace;
+        for (path, pattern) in [
+            ("/var/opt/mssql/log/system_health.xel", "/var/opt/mssql/log/system_health_*.xel"),
+            (r"C:\SQL logs\health's events.xel", r"C:\SQL logs\health's events_*.xel"),
         ] {
-            let mut io = FakeRead::new(vec![Ok(vec![Rec::of(&[("file_path", Val::Text(path.into()))])]), Ok(vec![])]);
-            assert!(
-                read(&mut io, Origin::SystemHealth, "db", "2020-01-01T06:00:00Z", "2020-01-01T07:00:00Z", 10, false)
+            for newest_first in [false, true] {
+                let configured = replace(&configuration(), &[("file_path", Val::Text(path.into()))]);
+                let mut io = FakeRead::new(vec![Ok(vec![configured.clone()]), Ok(vec![]), Ok(vec![configured])]);
+                assert!(
+                    read(
+                        &mut io,
+                        Origin::SystemHealth,
+                        "unused-label",
+                        "2020-01-01T06:00:00Z",
+                        "2020-01-01T07:00:00Z",
+                        10,
+                        newest_first
+                    )
                     .await
                     .unwrap()
                     .is_empty()
-            );
-            assert_eq!(io.calls.len(), 2);
-            assert!(io.calls[0].sql.contains("event_file"));
-            assert!(io.calls[1].sql.contains("fn_xe_file_target_read_file(@P4"));
-            assert!(!io.calls[1].sql.contains(path));
-            assert!(
-                matches!(&io.calls[1].parameters[3],Parameter::Text(pattern) if pattern==&file_pattern(path).unwrap())
-            );
+                );
+                assert_eq!(io.calls.len(), 3);
+                assert!(matches!(&io.calls[1].parameters[3], Parameter::Text(bound) if bound==pattern));
+                assert!(!io.calls[1].sql.contains(path));
+                let order = if newest_first { " DESC" } else { " ASC" };
+                assert!(io.calls[1].sql.contains(order));
+                assert!(
+                    io.calls
+                        .iter()
+                        .all(|call| !call.sql.contains("dm_xe_session_targets") && !call.sql.contains("target_data"))
+                );
+            }
         }
-        for path in ["", "health.xel", "health_bad_123.xel", "health_0_bad.xel", "health*_0_123.xel"] {
-            assert!(file_pattern(path).is_err(), "unrecognized native target: {path}");
+    }
+
+    #[tokio::test]
+    async fn unavailable_or_changed_native_file_configuration_never_becomes_successful_empty_history() {
+        use crate::deadlocks::system_health::tests::configuration;
+        use crate::resources::test_support::replace;
+        let mut io = FakeRead::new(vec![Ok(vec![replace(
+            &configuration(),
+            &[("file_path", Val::Text("system_health.xel".into()))],
+        )])]);
+        assert_eq!(
+            read(&mut io, Origin::SystemHealth, "db", "2020-01-01T06:00:00Z", "2020-01-01T07:00:00Z", 10, false)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            culprit_core::ErrorCode::Unsupported
+        );
+        assert_eq!(io.calls.len(), 1);
+        let mut dropped = FakeRead::new(vec![Ok(vec![configuration()]), Ok(vec![]), Ok(vec![])]);
+        let missing =
+            read(&mut dropped, Origin::SystemHealth, "db", "2020-01-01T06:00:00Z", "2020-01-01T07:00:00Z", 10, false)
+                .await
+                .err()
+                .unwrap();
+        assert_eq!(missing.code, culprit_core::ErrorCode::Unsupported);
+        assert_eq!(dropped.calls.len(), 3);
+        for change in [
+            ("event_session_id", Val::Int(2)),
+            ("target_id", Val::Int(2)),
+            ("observed_at", Val::Text("2020-01-01T06:01:59Z".into())),
+        ] {
+            let mut io = FakeRead::new(vec![
+                Ok(vec![configuration()]),
+                Ok(vec![]),
+                Ok(vec![replace(&configuration(), &[(change.0, change.1)])]),
+            ]);
+            let error =
+                read(&mut io, Origin::SystemHealth, "db", "2020-01-01T06:00:00Z", "2020-01-01T07:00:00Z", 10, false)
+                    .await
+                    .err()
+                    .unwrap();
+            assert_eq!(
+                culprit_core::telemetry::CollectionStop::from_error(&error),
+                culprit_core::telemetry::CollectionStop::SourceChanged
+            );
+            assert_eq!(io.calls.len(), 3);
         }
     }
 }

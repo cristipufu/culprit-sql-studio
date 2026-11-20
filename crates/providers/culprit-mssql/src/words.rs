@@ -342,25 +342,14 @@ fn deadlock_sources() {
         database_session_unreadable(&"Invalid object name"),
         "Culprit couldn't read the configured deadlock event session (Invalid object name). Check its setup or import a deadlock graph (.xdl)."
     );
-    assert_eq!(origin(true, true), ("system_health event files and ring buffer".into(), None));
-    assert_eq!(origin(true, false), ("system_health event files".into(), None));
+    assert_eq!(system_health_files(), "system_health event files");
     assert_eq!(
-        origin(false, true),
-        (
-            "system_health ring buffer".into(),
-            Some("Read from system_health's in-memory buffer, which only keeps the most recent events.".into())
-        )
+        culprit_core::t!("provider.mssql.deadlocks.configured_file_recent"),
+        "Read from configured system_health event files; the retained history may be incomplete."
     );
     assert_eq!(
-        origin(false, false),
-        (
-            "system_health".into(),
-            Some(
-                "Reading deadlocks needs VIEW SERVER STATE (VIEW SERVER PERFORMANCE STATE on SQL Server 2022). Paste \
-                 a deadlock graph (.xdl) to have it explained."
-                    .into()
-            )
-        )
+        culprit_core::t!("provider.mssql.deadlocks.configured_file_unavailable"),
+        "Shared deadlock collection needs one readable absolute native event-file configuration. The available metadata does not establish that path."
     );
     let unreadable = said(&parse_deadlock_xml("not xml", "pasted").unwrap_err());
     assert!(unreadable.starts_with("This isn't a deadlock graph Culprit can read: "), "{unreadable}");

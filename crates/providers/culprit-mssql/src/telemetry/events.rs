@@ -2,13 +2,18 @@
 use super::description;
 use crate::{
     conn::Pool,
-    deadlocks::native,
+    deadlocks::{native, system_health},
     read::{NativeRead, ReadError, ReadSession, invalid_data, text},
 };
 use async_trait::async_trait;
 use culprit_core::{Result, telemetry::*};
 use std::sync::Arc;
 const ENVELOPE_ALLOWANCE: usize = 4096;
+const SHARED_EVENT_ROWS: u32 = 50;
+const SHARED_QUERIES: u32 = 8;
+const SHARED_TOTAL_BYTES: u32 = 16 * 1024 * 1024;
+const SHARED_STATEMENT_TIMEOUT_MS: u32 = 1_000;
+const SHARED_TOTAL_TIMEOUT_MS: u32 = 5_000;
 
 pub(super) struct EventSource<R = ReadSession> {
     request: CollectionRequest,
@@ -16,20 +21,55 @@ pub(super) struct EventSource<R = ReadSession> {
     port: u16,
     io: R,
     description: Option<CollectionDescription>,
-    physical: Option<String>,
+    owner: Option<EventOwner>,
     positions: Option<Vec<String>>,
     records: Vec<TelemetryRecord>,
     offset: usize,
     progress: super::progress::PagedProgress,
 }
+enum EventOwner {
+    Database { physical: String },
+    Instance { instance: crate::instance::Context, target: system_health::ConfiguredTarget },
+}
+
+pub(super) fn shared_budget(requested: &CollectionBudget) -> CollectionBudget {
+    CollectionBudget {
+        page_rows: requested.page_rows.min(SHARED_EVENT_ROWS),
+        max_snapshot_rows: requested.max_snapshot_rows.min(SHARED_EVENT_ROWS),
+        max_pages: requested.max_pages.min(SHARED_EVENT_ROWS),
+        total_bytes: requested.total_bytes.min(SHARED_TOTAL_BYTES),
+        max_queries: requested.max_queries.min(SHARED_QUERIES),
+        statement_timeout_ms: requested.statement_timeout_ms.min(SHARED_STATEMENT_TIMEOUT_MS),
+        total_timeout_ms: requested.total_timeout_ms.min(SHARED_TOTAL_TIMEOUT_MS),
+        ..requested.clone()
+    }
+}
+
+fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
+    request.validate()?;
+    let mut request = request.clone();
+    if let CollectionSubject::Shared { resource } = &request.subject {
+        if resource.engine != culprit_core::Engine::Mssql || resource.kind != SharedResourceKind::Instance {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                culprit_core::t!("collection.unsupported"),
+            ));
+        }
+        request.budget = shared_budget(&request.budget);
+        request.budget.validate()?;
+    }
+    Ok(request)
+}
+
 impl EventSource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::with_io(ReadSession::new(pool, request.budget.clone()), request, host, port)
+        let request = bounded_request(request)?;
+        Self::with_io(ReadSession::new(pool, request.budget.clone()), &request, host, port)
     }
 }
 impl<R: NativeRead> EventSource<R> {
     fn with_io(io: R, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        request.validate()?;
+        let request = bounded_request(request)?;
         if request.collection() != TelemetryCollection::DeadlockHistory {
             return Err(invalid_data());
         }
@@ -39,7 +79,7 @@ impl<R: NativeRead> EventSource<R> {
             port,
             io,
             description: None,
-            physical: None,
+            owner: None,
             positions: None,
             records: vec![],
             offset: 0,
@@ -69,19 +109,27 @@ impl<R: NativeRead> EventSource<R> {
     }
 
     async fn read_native(&mut self) -> Result<Vec<native::Event>> {
-        crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         let description = self.description.as_ref().ok_or_else(invalid_data)?;
         let (from, until) = self.request.bounds()?;
-        let events = native::read(
-            &mut self.io,
-            native::Origin::DatabaseSession,
-            &description.target.database().ok_or_else(invalid_data)?.database,
-            &from.to_rfc3339(),
-            &until.to_rfc3339(),
-            self.request.budget.max_snapshot_rows as usize + 1,
-            false,
-        )
-        .await?;
+        let limit = self.request.budget.max_snapshot_rows as usize + 1;
+        let events = match self.owner.as_ref().ok_or_else(invalid_data)? {
+            EventOwner::Database { .. } => {
+                crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
+                native::read(
+                    &mut self.io,
+                    native::Origin::DatabaseSession,
+                    &description.target.database().ok_or_else(invalid_data)?.database,
+                    &from.to_rfc3339(),
+                    &until.to_rfc3339(),
+                    limit,
+                    false,
+                )
+                .await?
+            }
+            EventOwner::Instance { target, .. } => {
+                target.events(&mut self.io, &from.to_rfc3339(), &until.to_rfc3339(), limit, false).await?
+            }
+        };
         if events.len() > self.request.budget.max_snapshot_rows as usize {
             return Err(CollectionStop::RowLimit.error());
         }
@@ -116,14 +164,42 @@ impl<R: NativeRead> EventSource<R> {
 impl<R: NativeRead> TelemetrySource for EventSource<R> {
     async fn describe(&mut self) -> Result<CollectionDescription> {
         self.progress.describing()?;
-        description::ensure_supported(&mut self.io).await?;
-        let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
-        let server = self.io.query(native::SERVER, vec![], 1).await.map_err(ReadError::into_error)?;
-        let at = canonical_time(&text(server.first().ok_or_else(invalid_data)?, "observed_at")?)?;
+        let (target, partition, at, owner) = match &self.request.subject {
+            CollectionSubject::Database => {
+                description::ensure_supported(&mut self.io).await?;
+                let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
+                let server = self.io.query(native::SERVER, vec![], 1).await.map_err(ReadError::into_error)?;
+                let at = canonical_time(&text(server.first().ok_or_else(invalid_data)?, "observed_at")?)?;
+                (database.into(), SourcePartition::Target, at, EventOwner::Database { physical })
+            }
+            CollectionSubject::Shared { .. } => {
+                let (instance, at) = crate::instance::read(&mut self.io).await?;
+                if !system_health::supported(&instance) {
+                    return Err(culprit_core::Error::new(
+                        culprit_core::ErrorCode::Unsupported,
+                        culprit_core::t!("collection.unsupported"),
+                    ));
+                }
+                let resource = CollectionTarget::Shared(instance.identity.clone());
+                if !self.request.subject.accepts(&resource) {
+                    return Err(CollectionStop::SourceChanged.error());
+                }
+                let target = system_health::ConfiguredTarget::read(&mut self.io).await?;
+                if ObservationBounds::new(&at, target.observed_at()).is_none() {
+                    return Err(CollectionStop::SourceChanged.error());
+                }
+                let partition = SourcePartition::InstanceLocal {
+                    member: Some(instance.identity.clone()),
+                    epoch: Some(target.capture_epoch(&instance)?),
+                };
+                let at = target.observed_at().to_owned();
+                (resource, partition, at, EventOwner::Instance { instance, target })
+            }
+        };
         let (from, until) = self.request.bounds()?;
         let value = CollectionDescription {
-            partition: culprit_core::telemetry::SourcePartition::Target,
-            target: database.into(),
+            partition,
+            target,
             source: culprit_core::source_id::DEADLOCKS.into(),
             observation: SourceObservation::RetainedEvents(EventHistoryDescription {
                 from: from.to_rfc3339(),
@@ -137,7 +213,7 @@ impl<R: NativeRead> TelemetrySource for EventSource<R> {
         if !value.matches_request(&self.request) {
             return Err(invalid_data());
         }
-        self.physical = Some(physical);
+        self.owner = Some(owner);
         self.description = Some(value.clone());
         self.progress.described();
         Ok(value)
@@ -156,17 +232,30 @@ impl<R: NativeRead> TelemetrySource for EventSource<R> {
 
     async fn finish(&mut self) -> Result<culprit_core::telemetry::SourceCompletion> {
         self.progress.verifying()?;
-        let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
-        if self.physical.as_ref() != Some(&physical)
-            || self.description.as_ref().is_none_or(|description| description.target.database() != Some(&database))
-        {
-            self.progress.verified();
-            return Ok(culprit_core::telemetry::SourceCompletion::Changed);
+        if let Some(EventOwner::Database { physical: expected }) = &self.owner {
+            let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
+            if expected != &physical
+                || self.description.as_ref().is_none_or(|description| description.target.database() != Some(&database))
+            {
+                self.progress.verified();
+                return Ok(SourceCompletion::Changed);
+            }
         }
         let events = self.read_native().await?;
+        let owner_matches = match self.owner.as_ref().ok_or_else(invalid_data)? {
+            EventOwner::Database { .. } => true,
+            EventOwner::Instance { instance: original, target: original_target } => {
+                let current_target = system_health::ConfiguredTarget::read(&mut self.io).await?;
+                let (current, at) = crate::instance::read(&mut self.io).await?;
+                original == &current
+                    && original_target.confirmed_by(&current_target)
+                    && ObservationBounds::new(current_target.observed_at(), &at).is_some()
+            }
+        };
         self.progress.verified();
         Ok(culprit_core::telemetry::SourceCompletion::verified_if(
-            self.positions.as_ref() == Some(&events.into_iter().map(|event| event.position).collect::<Vec<_>>()),
+            owner_matches
+                && self.positions.as_ref() == Some(&events.into_iter().map(|event| event.position).collect::<Vec<_>>()),
         ))
     }
     async fn close(&mut self) -> SourceShutdown {
@@ -318,3 +407,6 @@ mod tests {
         assert_eq!(source.io.calls.len(), 6);
     }
 }
+
+#[cfg(test)]
+mod shared_tests;

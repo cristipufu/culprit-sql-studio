@@ -1,5 +1,5 @@
-//! What blocked sessions wait for, and recent deadlocks: from the built-in system_health session, or on Azure SQL
-//! Database from an explicitly configured database-scoped event session. Both read DMVs and event targets only. The parser also
+//! What blocked sessions wait for, and recent deadlocks: from configured system_health event files, or on Azure SQL
+//! Database from an explicitly configured database-scoped event session. Server target-data views are never read. The parser also
 //! reads saved .xdl files; XML with a DTD is refused, so entities never resolve.
 
 use culprit_core::deadlock::classify;
@@ -13,6 +13,7 @@ use crate::read::rows as query;
 use crate::read::{NativeRead, ReadError, integer, invalid_data, text};
 mod database;
 pub(crate) mod native;
+pub(crate) mod system_health;
 #[cfg(test)]
 pub(crate) use database::tests as database_test_support;
 
@@ -70,26 +71,14 @@ pub(crate) fn database_session_unreadable(error: &dyn std::fmt::Display) -> Stri
     t!("provider.mssql.deadlocks.database_session_unreadable", error = error.to_string())
 }
 
-/// Where system_health's deadlocks were read from (its event files, its in-memory ring buffer, either or neither), and
-/// what the reader should know about that.
-pub(crate) fn origin(files: bool, ring: bool) -> (String, Option<String>) {
-    let read = match (files, ring) {
-        (true, true) => "both",
-        (true, false) => "files",
-        (false, true) => "ring",
-        (false, false) => "none",
-    };
-    let note = match (files, ring) {
-        (false, false) => Some(t!("provider.mssql.deadlocks.needs_permission")),
-        (false, true) => Some(t!("provider.mssql.deadlocks.ring_only")),
-        (true, _) => None,
-    };
-    (t!("provider.mssql.deadlocks.origin", read = read), note)
+/// The supported server-scoped configured-file source, named independently of its availability.
+pub(crate) fn system_health_files() -> String {
+    t!("provider.mssql.deadlocks.origin")
 }
 
-/// Deadlocks in the last `since_hours`. On SQL Server from system_health: its event files first (they keep days), the
-/// in-memory ring buffer when files can't be read. On Azure SQL Database from an explicit database event session. Permission
-/// problems come back as a note, not an error.
+/// Retained deadlocks in the last `since_hours`. SQL Server needs an absolute configured system_health file path;
+/// Azure SQL Database uses its explicit database event session. Unavailable configuration remains a note and unknown
+/// scope, without a runtime-target or server ring fallback. Neither source proves a complete retention horizon.
 pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Result<DeadlockReport> {
     let hours = since_hours.clamp(1.0, 24.0 * 30.0).round() as u32;
     let mut report = DeadlockReport { since_hours: hours as f64, ..Default::default() };
@@ -116,52 +105,21 @@ pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Resul
         report.recent_only = true;
         return Ok(report);
     }
-    report.scope = Some(MeasurementScope::Server);
-    let (mut files, mut ring) = (false, false);
-    if let Ok(events) = native::read(io, native::Origin::SystemHealth, &database, &from, &until, READ_LIMIT, true).await
-    {
-        files = true;
-        report.deadlocks.extend(events.into_iter().flat_map(|event| event.graphs));
-    }
-    if let Ok(graphs) = ring_deadlocks(io).await {
-        ring = true;
-        for graph in graphs {
-            let recent = graph
-                .at
-                .as_deref()
-                .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
-                .is_some_and(|time| time >= cutoff);
-            if recent && !report.deadlocks.iter().any(|known| known.id == graph.id) {
-                report.deadlocks.push(graph);
-            }
+    report.source = system_health_files();
+    match native::read(io, native::Origin::SystemHealth, &database, &from, &until, READ_LIMIT, true).await {
+        Ok(events) => {
+            report.scope = Some(MeasurementScope::Server);
+            report.deadlocks.extend(events.into_iter().flat_map(|event| event.graphs));
+            report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
+            report.deadlocks.truncate(READ_LIMIT);
+            report.note = Some(t!("provider.mssql.deadlocks.configured_file_recent"));
+            report.recent_only = true;
+        }
+        Err(_) => {
+            report.note = Some(t!("provider.mssql.deadlocks.configured_file_unavailable"));
         }
     }
-    report.deadlocks.retain(|graph| involves(graph, &database));
-    report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
-    report.deadlocks.truncate(READ_LIMIT);
-    (report.source, report.note) = origin(files, ring);
-    report.recent_only = !files && ring;
     Ok(report)
-}
-
-async fn ring_deadlocks(io: &mut impl NativeRead) -> Result<Vec<Deadlock>> {
-    let rows = io.query(native::RING, vec![], 1).await.map_err(ReadError::into_error)?;
-    let mut graphs = Vec::new();
-    for row in rows {
-        let found = parse_deadlock_xml(&text(&row, "target_xml")?, "system_health")?;
-        if found.iter().any(|graph| graph.at.is_none()) {
-            return Err(invalid_data());
-        }
-        graphs.extend(found);
-    }
-    Ok(graphs)
-}
-
-/// Retain graphs with this displayed database name or unresolved membership. This history filter does not establish
-/// that a graph belongs to the current database incarnation; the report remains server-scoped.
-fn involves(d: &Deadlock, database: &str) -> bool {
-    let mut named = d.processes.iter().filter_map(|p| p.database.as_deref()).peekable();
-    named.peek().is_none() || named.any(|db| db.eq_ignore_ascii_case(database))
 }
 
 /// Every deadlock in `xml`: a saved .xdl (`<deadlock-list>` or `<deadlock>`), a system_health event, or a ring buffer.
@@ -320,7 +278,7 @@ fn deadlock(node: Node, source: &str, at: Option<String>) -> Option<Deadlock> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{
         read::ReadResult,
@@ -352,14 +310,14 @@ mod tests {
  </resource-list>
 </deadlock></deadlock-list>"#;
 
-    pub(super) fn event(at: &str) -> String {
+    pub(crate) fn event(at: &str) -> String {
         format!(
             r#"<event name="xml_deadlock_report" timestamp="{at}"><data name="xml_report"><value>{}</value></data></event>"#,
             KEY_LOOKUP_XDL.replace("<deadlock-list>", "").replace("</deadlock-list>", "")
         )
     }
 
-    pub(super) fn file_row(at: &str, xml: &str) -> Rec {
+    pub(crate) fn file_row(at: &str, xml: &str) -> Rec {
         Rec::of(&[
             ("file_name", Val::Text("/var/opt/mssql/log/system_health_0_134388425128000000.xel".into())),
             ("file_offset", Val::Int(512)),
@@ -368,19 +326,23 @@ mod tests {
         ])
     }
 
-    fn recent_reader(file_events: ReadResult<Vec<Rec>>, ring: Option<&str>) -> FakeRead {
+    fn scan_configuration() -> Rec {
+        crate::resources::test_support::replace(
+            &system_health::tests::configuration(),
+            &[("observed_at", Val::Text("2026-10-11T12:10:00Z".into()))],
+        )
+    }
+
+    fn recent_reader(file_events: ReadResult<Vec<Rec>>, final_configuration: Rec) -> FakeRead {
         FakeRead::new(vec![
             Ok(vec![Rec::of(&[
                 ("edition", Val::Int(3)),
                 ("db", Val::Text("shop".into())),
                 ("observed_at", Val::Text("2026-10-11T12:10:00Z".into())),
             ])]),
-            Ok(vec![Rec::of(&[(
-                "file_path",
-                Val::Text("/var/opt/mssql/log/system_health_0_134388425128000000.xel".into()),
-            )])]),
+            Ok(vec![scan_configuration()]),
             file_events,
-            Ok(vec![Rec::of(&[("target_xml", ring.map_or(Val::Null, |xml| Val::Text(xml.into())))])]),
+            Ok(vec![final_configuration]),
         ])
     }
 
@@ -397,15 +359,6 @@ mod tests {
         assert_eq!(victim.isolation.as_deref(), Some("read committed"));
         assert!(victim.statement.as_deref().unwrap().starts_with("SELECT id, name"));
         assert_eq!(d.resources[0].holders[0].mode.as_deref(), Some("X"));
-    }
-
-    #[test]
-    fn the_history_name_filter_preserves_unresolved_membership_without_proving_database_scope() {
-        let found = parse_deadlock_xml(KEY_LOOKUP_XDL, "system_health").unwrap();
-        assert!(involves(&found[0], "SHOP"), "both process labels name shop");
-        assert!(!involves(&found[0], "billing"), "another database's deadlock");
-        let unnamed = parse_deadlock_xml(&KEY_LOOKUP_XDL.replace(r#" currentdbname="shop""#, ""), "pasted").unwrap();
-        assert!(involves(&unnamed[0], "billing"), "a graph without databases can't be placed, so it stays");
     }
 
     #[test]
@@ -499,25 +452,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn file_and_ring_merge_keeps_distinct_same_second_events_and_deduplicates_replays() {
-        let first = event("2026-10-11T12:05:01.1234567Z");
-        let ring = format!(
-            "<RingBufferTarget>{}{}{}</RingBufferTarget>",
-            event("2026-10-11T14:05:01.123456700+02:00"),
-            event("2026-10-11T12:05:01.1234568Z"),
-            event("2026-10-11T12:05:01.1234568Z"),
-        );
-        let mut io = recent_reader(Ok(vec![file_row("2026-10-11T12:05:01.1234567Z", &first)]), Some(&ring));
+    async fn configured_file_history_keeps_fractional_events_and_unresolved_membership_without_database_grading() {
+        let a = "2026-10-11T12:05:01.1234567Z";
+        let b = "2026-10-11T12:05:01.1234568Z";
+        let unnamed = event(b).replace(r#" currentdbname="shop""#, "");
+        let mut io = recent_reader(Ok(vec![file_row(a, &event(a)), file_row(b, &unnamed)]), scan_configuration());
         let report = recent(&mut io, 1.0).await.unwrap();
         assert_eq!(report.scope, Some(MeasurementScope::Server));
         assert_eq!(report.deadlocks.len(), 2);
-        assert_eq!(report.deadlocks[0].at.as_deref(), Some("2026-10-11T12:05:01.123456800Z"));
-        assert_eq!(report.deadlocks[1].at.as_deref(), Some("2026-10-11T12:05:01.123456700Z"));
         assert_ne!(report.deadlocks[0].id, report.deadlocks[1].id);
-        assert_eq!((report.source, report.note), origin(true, true));
-        assert!(!report.recent_only);
-        assert_eq!(io.calls.len(), 4, "the existing native query population is unchanged");
-        assert_eq!(io.closed, 0, "the caller still owns the original reader's close");
+        assert!(report.deadlocks.iter().any(|graph| graph.processes.iter().all(|process| process.database.is_none())));
+        assert!(report.recent_only && report.note.is_some());
+        assert_eq!(io.calls.len(), 4);
+        assert!(
+            io.calls
+                .iter()
+                .all(|call| !call.sql.contains("dm_xe_session_targets") && !call.sql.contains("target_data"))
+        );
+        assert_eq!(io.closed, 0, "scan caller retains close ownership");
     }
 
     #[tokio::test]
@@ -546,66 +498,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ring_only_events_preserve_native_precision_at_the_existing_recency_boundary() {
-        let ring = format!(
-            "<RingBufferTarget>{}{}</RingBufferTarget>",
-            event("2026-10-11T11:09:59.9999999Z"),
-            event("2026-10-11T11:10:00.0000001Z"),
-        );
-        let mut io = recent_reader(Err(invalid_data().into()), Some(&ring));
-        let report = recent(&mut io, 1.0).await.unwrap();
-        assert_eq!(report.deadlocks.len(), 1);
-        assert_eq!(report.deadlocks[0].at.as_deref(), Some("2026-10-11T11:10:00.000000100Z"));
-        assert_eq!((report.source, report.note), origin(false, true));
-        assert!(report.recent_only, "ring history still asserts only recent retained events");
-    }
-
-    #[tokio::test]
-    async fn a_valid_empty_ring_remains_distinct_from_an_unavailable_ring() {
-        let mut io = recent_reader(Err(invalid_data().into()), Some("<RingBufferTarget/>"));
-        let report = recent(&mut io, 1.0).await.unwrap();
-        assert!(report.deadlocks.is_empty());
-        assert_eq!((report.source, report.note), origin(false, true));
-        assert!(report.recent_only);
-    }
-
-    #[tokio::test]
-    async fn malformed_ring_results_are_unavailable_without_erasing_readable_files() {
-        let undated = format!("<RingBufferTarget>{KEY_LOOKUP_XDL}</RingBufferTarget>");
-        let malformed = format!("<RingBufferTarget>{}</RingBufferTarget>", event("bad-clock"));
-        let partial = format!(
-            "<RingBufferTarget>{}{}</RingBufferTarget>",
-            event("2026-10-11T12:05:01.1234568Z"),
-            event("bad-clock")
-        );
-        let partial_graph = format!(
-            r#"<RingBufferTarget>{}<event name="xml_deadlock_report" timestamp="2026-10-11T12:05:01.1234568Z"><data name="xml_report"><value><deadlock/></value></data></event></RingBufferTarget>"#,
-            event("2026-10-11T12:05:01.1234567Z")
-        );
-        let empty_report = r#"<event name="xml_deadlock_report" timestamp="bad-clock"><data name="xml_report"><value/></data></event>"#;
-        let partial_empty_report =
-            format!("<RingBufferTarget>{}{empty_report}</RingBufferTarget>", event("2026-10-11T12:05:01.1234567Z"));
-        for ring in [
-            None,
-            Some(undated.as_str()),
-            Some(malformed.as_str()),
-            Some(partial.as_str()),
-            Some(partial_graph.as_str()),
-            Some(empty_report),
-            Some(partial_empty_report.as_str()),
-            Some("<broken>"),
-        ] {
-            let first = event("2026-10-11T12:05:01.1234567Z");
-            let mut io = recent_reader(Ok(vec![file_row("2026-10-11T12:05:01.1234567Z", &first)]), ring);
+    async fn unavailable_relative_or_changed_file_configuration_does_not_claim_empty_server_history() {
+        use crate::resources::test_support::replace;
+        for configuration in
+            [vec![], vec![replace(&scan_configuration(), &[("file_path", Val::Text("system_health.xel".into()))])]]
+        {
+            let mut io = FakeRead::new(vec![
+                Ok(vec![Rec::of(&[
+                    ("edition", Val::Int(3)),
+                    ("db", Val::Text("shop".into())),
+                    ("observed_at", Val::Text("2026-10-11T12:10:00Z".into())),
+                ])]),
+                Ok(configuration),
+            ]);
             let report = recent(&mut io, 1.0).await.unwrap();
-            assert_eq!(report.deadlocks.len(), 1, "the independent file source remains readable");
-            assert_eq!((report.source, report.note), origin(true, false));
-            let mut io = recent_reader(Err(invalid_data().into()), ring);
-            let report = recent(&mut io, 1.0).await.unwrap();
-            assert!(report.deadlocks.is_empty());
-            assert_eq!((report.source, report.note), origin(false, false));
-            assert!(!report.recent_only, "an unreadable ring is not a successful empty retained feed");
+            assert_eq!(report.scope, None);
+            assert!(report.deadlocks.is_empty() && report.note.is_some());
+            assert_eq!(io.calls.len(), 2, "no ring/runtime path fallback");
         }
+        let mut io = recent_reader(Ok(vec![]), replace(&scan_configuration(), &[("event_session_id", Val::Int(2))]));
+        let changed = recent(&mut io, 1.0).await.unwrap();
+        assert_eq!(changed.scope, None);
+        assert!(changed.deadlocks.is_empty() && changed.note.is_some());
+        assert_eq!(io.calls.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn successful_empty_file_history_has_observed_server_scope_without_proving_retention() {
+        let mut io = recent_reader(Ok(vec![]), scan_configuration());
+        let report = recent(&mut io, 1.0).await.unwrap();
+        assert_eq!(report.scope, Some(MeasurementScope::Server));
+        assert!(report.deadlocks.is_empty() && report.recent_only && report.note.is_some());
+        assert_eq!(io.calls.len(), 4);
     }
 }
 

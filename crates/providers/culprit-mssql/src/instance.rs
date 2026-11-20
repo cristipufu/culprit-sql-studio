@@ -4,7 +4,7 @@ use crate::read::{NativeRead, integer, invalid_data, one, text};
 use culprit_core::{Engine, Error, ErrorCode, Result, telemetry::*};
 
 const MIN_SUPPORTED_MAJOR: u32 = 11;
-const SUPPORTED_EDITIONS: &[i64] = &[2, 3, 4, 8];
+pub(crate) const SUPPORTED_EDITIONS: &[i64] = &[2, 3, 4, 8];
 pub(crate) fn supports_profile(edition: i64, major: u32) -> bool {
     SUPPORTED_EDITIONS.contains(&edition) && major >= MIN_SUPPORTED_MAJOR
 }

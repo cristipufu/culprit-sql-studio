@@ -218,6 +218,18 @@ fn unregistered_datasets_or_subjects_return_unsupported_without_a_native_connect
 }
 
 #[test]
+fn configured_system_health_remains_an_explicit_unqualified_shared_investigation_with_finite_client_fences() {
+    let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.system-health-deadlocks").unwrap();
+    assert_eq!(recipe.subjects, [RecipeSubject::Shared(SharedResourceKind::Instance)]);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.budget.max_queries, 8);
+    assert_eq!(recipe.budget.max_snapshot_rows, 50);
+    assert_eq!(recipe.budget.statement_timeout_ms, 1000);
+    assert_eq!(recipe.budget.total_timeout_ms, 5000);
+}
+
+#[test]
 fn an_ordinary_writer_snapshot_without_original_selectors_is_rejected_before_a_factory_can_open() {
     let request = CollectionRequest {
         subject: CollectionSubject::Database,
@@ -307,6 +319,7 @@ async fn native_resource_discovery_derives_its_routes_from_registrations_and_obs
         let collections = collections_for(&instance, edition);
         let mut expected = vec![
             TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
+            TelemetryCollection::DeadlockHistory,
             TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
             TelemetryCollection::Snapshot(SnapshotDataset::Operational),
         ];
@@ -319,6 +332,10 @@ async fn native_resource_discovery_derives_its_routes_from_registrations_and_obs
                 subject: CollectionSubject::Shared { resource: instance.clone() },
                 selection: match collection {
                     TelemetryCollection::Snapshot(dataset) => CollectionSelection::Snapshot { dataset },
+                    TelemetryCollection::DeadlockHistory => CollectionSelection::DeadlockHistory {
+                        from: "2020-01-01T06:00:00Z".into(),
+                        until: "2020-01-01T07:00:00Z".into(),
+                    },
                     _ => panic!("registered instance snapshots"),
                 },
                 budget: CollectionBudget::default(),

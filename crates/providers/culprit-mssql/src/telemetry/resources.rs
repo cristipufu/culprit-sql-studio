@@ -194,7 +194,10 @@ async fn discover_with_io<R: NativeRead>(
         }
         SharedResourceKind::Instance => {
             let (instance, observed_at) = crate::instance::read(reader).await?;
-            let collections = super::recipes::collections_for(&instance.identity, instance.engine_edition());
+            let mut collections = super::recipes::collections_for(&instance.identity, instance.engine_edition());
+            if !crate::deadlocks::system_health::supported(&instance) {
+                collections.retain(|collection| *collection != TelemetryCollection::DeadlockHistory);
+            }
             vec![CollectionResource { identity: instance.identity, observed_at, collections }]
         }
         _ => {

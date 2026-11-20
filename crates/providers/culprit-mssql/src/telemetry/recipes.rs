@@ -137,6 +137,14 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .baseline(),
     Registration::database(
+        "mssql.system-health-deadlocks",
+        RecipeSelector::Collection(TelemetryCollection::DeadlockHistory),
+        |pool, request, host, port| Ok(Box::new(events::EventSource::new(pool, request, host, port)?)),
+    )
+    .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
+    .on_editions(crate::instance::SUPPORTED_EDITIONS)
+    .bounded(events::shared_budget),
+    Registration::database(
         "mssql.activity",
         RecipeSelector::Collection(TelemetryCollection::Activity),
         |pool, request, host, port| Ok(Box::new(activity::ActivitySource::new(pool, request, host, port)?)),

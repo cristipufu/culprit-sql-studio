@@ -107,7 +107,13 @@ Live and background activity capture use the same native reader and counter inte
 
 When query profiling is available, live progress shows measured operator activity. SQL Server offers **terminate** (`KILL`), not a separate cancel operation; Culprit exposes session actions outside production only.
 
-SQL Server and Managed Instance read the available `system_health` deadlock history. Azure SQL Database reads an explicitly configured database-scoped session, described below. A missing or truncated event source does not establish that no deadlocks happened.
+SQL Server 2017+ and Managed Instance read existing configured `system_health` event files when native metadata exposes one absolute target path. Scans and background collection share the file reader and recheck its native configuration. Configuration discovery reads persistent catalog metadata; it avoids `sys.dm_xe_session_targets`, whose reads [force collected-session data to flush to disk](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-xe-session-targets-transact-sql). Culprit never creates, starts or alters this session.
+
+Here an absolute path means a native filesystem path, including a Windows drive or UNC path. Blob URL targets, including Managed Instance URL configurations, are unsupported by this profile. Relative, hidden, missing or ambiguous file configuration is explicitly unavailable. Culprit does not guess a directory or fall back to runtime target data or the server ring buffer. Shared-server incidents remain inspectable, including unresolved database membership; database names and reused IDs cannot establish counts or findings for the current database.
+
+Configured files remain readable while the emitter is stopped or restarted. File retention and selection limits can omit incidents; current process and configuration witnesses do not establish an older event's original emitter generation or uninterrupted history. The `mssql.system-health-deadlocks` recipe remains cost-unqualified: row caps and timeouts do not prove bounded server file scanning or sorting.
+
+Azure SQL Database continues to read its explicitly configured database-scoped ring-buffer session, described below. A missing or truncated event source does not establish that no deadlocks happened.
 
 ### Observed page-wait targets
 
