@@ -172,6 +172,15 @@ fn catalog_source_with_native<D: SnapshotRecipe>(
     native_reads: CatalogReplies,
 ) -> StreamedSnapshot<D, StreamingRead> {
     let CatalogReplies { layout, final_proof } = native_reads;
+    let row = if matches!(D::ACQUISITION, SnapshotAcquisition::KnownReadableDatabaseCache) {
+        // This common synthetic fixture explicitly observes READ_WRITE at initial/frame/final points.
+        assert!(row.columns().all(|(name, _)| name != "updateability"));
+        let mut columns = row.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+        columns.push(("updateability", Val::Text("READ_WRITE".into())));
+        Rec::of(&columns)
+    } else {
+        row
+    };
     let mut replies = if D::ACQUISITION.uses_local_authority() {
         vec![
             Ok(vec![crate::grants::tests::platform()]),

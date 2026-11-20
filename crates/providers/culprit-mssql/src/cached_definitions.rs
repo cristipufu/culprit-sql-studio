@@ -26,8 +26,15 @@ impl Limits {
         Ok(Self { sql, plan })
     }
 }
+#[cfg(test)]
 pub(crate) fn select_sql(limits: &Limits) -> String {
-    let context = cached_statements::context_columns_from("qs", "qs", "qs.compilation_database_id");
+    select_projection(limits, cached_statements::acquisition_frame::Projection::Statement)
+}
+pub(crate) fn acquisition_sql(limits: &Limits) -> String {
+    select_projection(limits, cached_statements::acquisition_frame::Projection::AcquisitionFrame)
+}
+fn select_projection(limits: &Limits, projection: cached_statements::acquisition_frame::Projection) -> String {
+    let context = projection.context_columns("qs", "qs", "qs.compilation_database_id");
     let module = crate::relational_inputs::module_columns("qs");
     let current_types = crate::relational_inputs::type_schema::columns();
     let current_types_relation = crate::relational_inputs::type_schema::relation("qs");
@@ -37,14 +44,14 @@ pub(crate) fn select_sql(limits: &Limits) -> String {
         cached_payload::columns("body.statement_text", "statement_bytes", "statement_text", &limits.sql.to_string());
     let plan = cached_payload::columns("qp.query_plan", "plan_bytes", "query_plan", &limits.plan.to_string());
     let plan_read = cached_statements::statement_plan_relation("qs", "qp");
-    format!(
+    projection.batch(format!(
         r#"WITH selected AS ({selected})
 SELECT {context},{module},{current_types},qs.encrypted,CONVERT(varchar(18),qs.query_plan_hash,1) AS query_plan_hash,{sql},{plan}
 FROM selected qs OUTER APPLY(SELECT {statement} AS statement_text) body
 {plan_read}
 {current_types_relation}
 OPTION(MAXDOP 1)"#
-    )
+    ))
 }
 pub(crate) fn decode(
     row: &Rec,

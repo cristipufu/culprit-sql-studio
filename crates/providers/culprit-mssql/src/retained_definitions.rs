@@ -35,14 +35,21 @@ pub(crate) async fn layout(reader: &mut impl NativeRead, budget: &CollectionBudg
     }
     Ok(Some(Layout { maximum_bytes, maximum_statement_bytes, database_setting: retained::setting(reader).await? }))
 }
+#[cfg(test)]
 pub(crate) fn select_sql(layout: &Layout) -> String {
+    select_projection(layout, cached_statements::acquisition_frame::Projection::Statement)
+}
+pub(crate) fn acquisition_sql(layout: &Layout) -> String {
+    select_projection(layout, cached_statements::acquisition_frame::Projection::AcquisitionFrame)
+}
+fn select_projection(layout: &Layout, frame: cached_statements::acquisition_frame::Projection) -> String {
     let selected = cached_statements::selected_statements();
-    let context = cached_statements::context_columns_from("qs", "qs", "qs.compilation_database_id");
+    let context = frame.context_columns("qs", "qs", "qs.compilation_database_id");
     let projection = retained::projection(context, "qs", "qs.encrypted", &layout.maximum_bytes.to_string());
     let current_types_relation = crate::relational_inputs::type_schema::relation("qs");
-    format!(
+    frame.batch(format!(
         "WITH selected AS ({selected}) SELECT {projection} FROM selected qs OUTER APPLY sys.dm_exec_query_plan_stats(qs.plan_handle) ps {current_types_relation} OPTION(MAXDOP 1)"
-    )
+    ))
 }
 pub(crate) fn decode(
     row: &Rec,

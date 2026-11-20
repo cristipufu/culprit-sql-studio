@@ -5,7 +5,7 @@ pub(super) struct CachedRuntime;
 #[async_trait::async_trait]
 impl SnapshotRecipe for CachedRuntime {
     type Layout = cached_runtime::Layout;
-    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabaseCache;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::KnownReadableDatabaseCache;
     const DATASET: SnapshotDataset = SnapshotDataset::CachedRuntime;
     const NAME: &'static str = "statement-runtime-cache";
     const SOURCE: &'static Source = &crate::sources::PLAN_CACHE;
@@ -13,7 +13,7 @@ impl SnapshotRecipe for CachedRuntime {
         cached_runtime::Layout::read(reader).await.map(Some)
     }
     fn query(&self, layout: &Self::Layout) -> String {
-        cached_runtime::select_sql(layout)
+        cached_runtime::acquisition_sql(layout)
     }
     fn decode(&self, row: &Rec, _: &Self::Layout, _source: &CollectionDescription) -> Result<TelemetryRecord> {
         let runtime = cached_runtime::decode(row)?;

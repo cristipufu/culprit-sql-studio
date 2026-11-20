@@ -10,15 +10,24 @@ pub(super) struct Layout {
 #[async_trait::async_trait]
 impl SnapshotRecipe for CachedDefinitions {
     type Layout = Layout;
-    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabaseCache;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::KnownReadableDatabaseCache;
     const DATASET: SnapshotDataset = SnapshotDataset::CachedDefinitions;
     const NAME: &'static str = "cached-definitions-state";
     const SOURCE: &'static Source = &crate::sources::PLAN_CACHE;
+    fn require_platform(&self, context: &crate::local_source::Context) -> Result<()> {
+        if !crate::probe::supports_current_type_schema(context.activity.edition, context.activity.major) {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                culprit_core::t!("collection.unsupported"),
+            ));
+        }
+        Ok(())
+    }
     async fn layout<R: NativeRead>(&self, _: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>> {
         Ok(Some(Layout { limits: cached_definitions::Limits::from_budget(budget)?, bindings: Default::default() }))
     }
     fn query(&self, layout: &Self::Layout) -> String {
-        cached_definitions::select_sql(&layout.limits)
+        cached_definitions::acquisition_sql(&layout.limits)
     }
     fn decode(&self, row: &Rec, layout: &Self::Layout, source: &CollectionDescription) -> Result<TelemetryRecord> {
         let admitted = layout.bindings.contains(&crate::cached_statements::context(row)?);

@@ -40,6 +40,7 @@ mod resource_io;
 mod runtime_distributions;
 mod session_census;
 mod session_memory;
+mod source_partitions;
 mod statement_grants;
 mod statement_work;
 mod task_space;

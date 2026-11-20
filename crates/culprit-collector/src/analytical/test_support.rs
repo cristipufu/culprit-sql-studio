@@ -44,7 +44,8 @@ pub use source_overhead::{
 };
 mod source_partitions;
 pub use source_partitions::{
-    assert_replica_activity_capture, replica_activity_evidence_cases, replicated_history_evidence_cases,
+    assert_replica_activity_capture, replica_activity_evidence_cases, replica_workload_evidence_cases,
+    replicated_history_evidence_cases,
 };
 mod investigations;
 pub use investigations::{

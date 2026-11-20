@@ -179,3 +179,5 @@ async fn native_cached_spill_pages_preserve_all_four_counters_and_exact_context(
         resume_unwind(panic);
     }
 }
+
+mod replica_workload;

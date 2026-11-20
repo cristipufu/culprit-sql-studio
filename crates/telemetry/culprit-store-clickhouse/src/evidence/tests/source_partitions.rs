@@ -90,3 +90,34 @@ async fn replicated_history_uses_the_same_native_rows_across_read_members_and_lo
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{field}");
     }
 }
+
+#[tokio::test]
+async fn readable_member_activity_and_all_cache_families_replay_separate_native_populations() {
+    let cases = test_support::replica_workload_evidence_cases();
+    assert_eq!(cases.len(), 8);
+    for (index, (source, records)) in cases.iter().enumerate() {
+        let family = match records[0].stream() {
+            TelemetryStream::ActivityObservations => EvidenceFamily::ActivityObservations,
+            TelemetryStream::OperationalSamples => EvidenceFamily::OperationalSamples,
+            TelemetryStream::ObjectDefinitions => EvidenceFamily::ObjectDefinitions,
+            _ => panic!("local workload families only"),
+        };
+        assert_eq!(records.len(), if index < 4 { 1 } else { 2 });
+        if index >= 4 {
+            let other = &cases[index - 4].0;
+            assert_eq!(source.target, other.target);
+            assert_ne!(source.logical_source_id().unwrap(), other.logical_source_id().unwrap());
+            assert_ne!(source.captured_range().unwrap().scope_id, other.captured_range().unwrap().scope_id);
+        }
+        let fixture = Fixture::new_for_stream(source.clone(), records.clone(), family.stream()).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let capture = fixture
+            .reader
+            .read_capture(&fixture.range, &[family], EvidenceReadBudget { page_rows: 1, ..Default::default() }, None)
+            .await
+            .unwrap();
+        test_support::assert_operational_capture(&capture, source, records);
+        assert!(capture.source().is_partition_qualified());
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+    }
+}

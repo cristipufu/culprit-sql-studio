@@ -24,7 +24,14 @@ fn native_suffix(metric: CachedRuntimeMetric) -> &'static str {
         CachedRuntimeMetric::SpilledPages => "spills",
     }
 }
+#[cfg(test)]
 pub(crate) fn select_sql(layout: &Layout) -> String {
+    select_projection(layout, cached_statements::acquisition_frame::Projection::Statement)
+}
+pub(crate) fn acquisition_sql(layout: &Layout) -> String {
+    select_projection(layout, cached_statements::acquisition_frame::Projection::AcquisitionFrame)
+}
+fn select_projection(layout: &Layout, projection: cached_statements::acquisition_frame::Projection) -> String {
     let counters = CachedRuntimeMetric::ALL
         .into_iter()
         .flat_map(|metric| {
@@ -39,16 +46,16 @@ pub(crate) fn select_sql(layout: &Layout) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!(
+    projection.batch(format!(
         r#"SELECT TOP (@P1) {context},qs.execution_count,
  CONVERT(varchar(18),qs.query_plan_hash,1) AS query_plan_hash,
  CONVERT(varchar(40),qs.last_execution_time,126) AS last_execution,
  {counters}
  {relation} WHERE {database} OPTION(MAXDOP 1)"#,
-        context = cached_statements::context_columns(),
+        context = projection.context_columns("qs", "st", "pa.value"),
         relation = cached_statements::relation(),
         database = cached_statements::DATABASE_PREDICATE
-    )
+    ))
 }
 pub(crate) fn decode(row: &Rec) -> Result<CachedStatementRuntime> {
     let context = cached_statements::context(row)?;

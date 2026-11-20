@@ -121,9 +121,7 @@ impl Probe {
     /// Current table-type projection uses JSON grammar introduced by SQL Server 2016. Managed Azure variants
     /// expose that grammar independently of the boxed product major version. This says nothing about permissions.
     pub(crate) fn supports_current_type_schema(&self) -> bool {
-        const FIRST_JSON_MAJOR: u32 = 13;
-        self.major >= FIRST_JSON_MAJOR
-            || matches!(self.engine_edition, ENGINE_EDITION_AZURE_SQL_DATABASE | ENGINE_EDITION_MANAGED_INSTANCE)
+        supports_current_type_schema(self.engine_edition, self.major)
     }
 
     /// The exact statement an administrator should run to unlock the monitoring views.
@@ -258,6 +256,12 @@ pub(crate) fn server_info(p: &Probe, capabilities: Vec<Capability>, missing: Vec
         capabilities,
         missing,
     }
+}
+
+/// SQL grammar capability from the already-observed native platform, independent of permissions or role.
+pub(crate) fn supports_current_type_schema(edition: i64, major: u32) -> bool {
+    const FIRST_JSON_MAJOR: u32 = 13;
+    major >= FIRST_JSON_MAJOR || matches!(edition, ENGINE_EDITION_AZURE_SQL_DATABASE | ENGINE_EDITION_MANAGED_INSTANCE)
 }
 
 #[cfg(test)]

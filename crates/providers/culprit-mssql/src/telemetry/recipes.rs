@@ -285,13 +285,13 @@ const REGISTRATIONS: &[Registration] = &[
     streamed!("mssql.indexes", Indexes, indexes::Indexes),
     streamed!("mssql.check-constraints", CheckConstraints, check_constraints::CheckConstraints),
     streamed!("mssql.query-compilation", QueryCompilation, compilation::QueryCompilation).version(3),
-    streamed!("mssql.cached-runtime", CachedRuntime, cached_runtime::CachedRuntime),
+    streamed!("mssql.cached-runtime", CachedRuntime, cached_runtime::CachedRuntime).version(2),
     streamed!("mssql.objects", Objects, objects::Objects),
     streamed!("mssql.triggers", Triggers, triggers::Triggers),
     streamed!("mssql.partitions", Partitions, partitions::Partitions),
-    streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions).version(4),
+    streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions).version(5),
     streamed!("mssql.retained-plans", RetainedPlans, retained_definitions::RetainedPlans)
-        .version(5)
+        .version(6)
         .bounded(retained_definitions::bounded_budget),
 ];
 

@@ -1,4 +1,5 @@
 //! Native statement identity, database ownership and provenance shared by cache projections.
+pub(crate) mod acquisition_frame;
 mod details;
 mod statement;
 use crate::{

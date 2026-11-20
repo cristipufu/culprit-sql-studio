@@ -12,7 +12,7 @@ use culprit_core::{Result, Source, telemetry::*};
 pub(super) enum SnapshotAcquisition {
     AzureDatabase,
     AzureDatabaseCache,
-    ConnectedDatabaseCache,
+    KnownReadableDatabaseCache,
 }
 impl SnapshotAcquisition {
     fn uses_local_authority(self) -> bool {
@@ -30,8 +30,35 @@ impl SnapshotAcquisition {
             }
             // Context::read already observes and admits the native platform. Unsupported products never reach
             // this point; missing member/recovery evidence still withholds source qualification and plan proofs.
-            Self::AzureDatabaseCache | Self::ConnectedDatabaseCache => Ok(()),
+            Self::AzureDatabaseCache | Self::KnownReadableDatabaseCache => Ok(()),
         }
+    }
+
+    fn require_cache_owner(self, context: &crate::local_source::Context) -> Result<()> {
+        self.require_cache_platform(context)?;
+        match self {
+            Self::KnownReadableDatabaseCache => {
+                if !context.is_qualified() || !context.source_partition()?.is_qualified() {
+                    return Err(CollectionStop::SourceUnavailable.error());
+                }
+                Ok(())
+            }
+            Self::AzureDatabaseCache => crate::read::require_primary(context.activity.writable),
+            Self::AzureDatabase => Err(invalid_data()),
+        }
+    }
+
+    fn require_cache_row(self, row: &Rec, authority: &SnapshotAuthority) -> Result<()> {
+        if !matches!(self, Self::KnownReadableDatabaseCache) {
+            return Ok(());
+        }
+        let SnapshotAuthority::Local(context) = authority else { return Err(invalid_data()) };
+        crate::cached_statements::acquisition_frame::require_role(row, context.activity.writable)?;
+        let database_id = u32::try_from(crate::read::integer(row, "database_id")?).map_err(|_| invalid_data())?;
+        if database_id != context.database_id {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        Ok(())
     }
 }
 
@@ -44,6 +71,9 @@ pub(super) trait SnapshotRecipe: Send + Sync {
     const REQUIRES_FULL_METADATA: bool = false;
     const ACQUISITION: SnapshotAcquisition;
     const SOURCE_READ: Option<SourceReadQuestion> = None;
+    fn require_platform(&self, _context: &crate::local_source::Context) -> Result<()> {
+        Ok(())
+    }
     async fn layout<R: NativeRead>(&self, reader: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>>;
     fn query(&self, layout: &Self::Layout) -> String;
     fn decode(&self, row: &Rec, layout: &Self::Layout, source: &CollectionDescription) -> Result<TelemetryRecord>;
@@ -203,8 +233,8 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
                 (target, SourcePartition::Target, observed_from, visible)
             } else if D::ACQUISITION.uses_local_authority() {
                 let context = crate::local_source::Context::read(&mut self.io, &self.host, self.port).await?;
-                D::ACQUISITION.require_cache_platform(&context)?;
-                crate::read::require_primary(context.activity.writable)?;
+                D::ACQUISITION.require_cache_owner(&context)?;
+                self.recipe.require_platform(&context)?;
                 let partition = context.source_partition()?;
                 let observed_from = context.activity.at.clone();
                 let target = context.activity.database.clone().into();
@@ -258,6 +288,9 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
             return Ok(culprit_read::ReadBatch { rows: vec![], complete: true });
         }
         let batch = self.io.next_batch().await.map_err(ReadError::into_error)?;
+        for row in &batch.rows {
+            D::ACQUISITION.require_cache_row(row, &self.authority)?;
+        }
         let layout = self.layout.as_mut().ok_or_else(invalid_data)?;
         self.recipe.observe_batch(&batch.rows, layout)?;
         Ok(batch)
@@ -283,6 +316,15 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
                     None
                 };
             let after = before.recheck(&mut self.io, &self.host, self.port).await?;
+            if matches!(D::ACQUISITION, SnapshotAcquisition::KnownReadableDatabaseCache) && !before.same_source(&after)
+            {
+                return Ok(culprit_read::SnapshotRecheck {
+                    execution: None,
+                    unchanged: false,
+                    observed_until: String::new(),
+                    scopes: vec![],
+                });
+            }
             let context = match before.completed(&after) {
                 Ok(context) => context,
                 Err(error) if CollectionStop::from_error(&error) == CollectionStop::SourceChanged => {

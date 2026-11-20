@@ -34,7 +34,7 @@ pub(super) struct Layout {
 #[async_trait::async_trait]
 impl SnapshotRecipe for RetainedPlans {
     type Layout = Layout;
-    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::ConnectedDatabaseCache;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::KnownReadableDatabaseCache;
     const DATASET: SnapshotDataset = SnapshotDataset::RetainedPlans;
     const NAME: &'static str = "retained-plans-state";
     const SOURCE: &'static Source = &crate::sources::RETAINED_PLANS;
@@ -44,7 +44,7 @@ impl SnapshotRecipe for RetainedPlans {
             .map(|native| Layout { native, bindings: Default::default() }))
     }
     fn query(&self, layout: &Self::Layout) -> String {
-        retained_definitions::select_sql(&layout.native)
+        retained_definitions::acquisition_sql(&layout.native)
     }
     fn decode(&self, row: &Rec, layout: &Self::Layout, source: &CollectionDescription) -> Result<TelemetryRecord> {
         let admitted = layout.bindings.contains(&crate::cached_statements::context(row)?);

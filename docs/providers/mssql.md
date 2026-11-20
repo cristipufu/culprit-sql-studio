@@ -305,6 +305,15 @@ Compilation capture shares the scan's Query Store decoder. `--collection query-c
 
 `--collection cached-runtime` captures completed statement-cache work without Query Store: exact execution counts and total/last/minimum/maximum CPU, elapsed, CLR, read/write and row counters. The reader shares native statement context and database ownership with the scan and memory-grant capture.
 
+The three local cache collections admit a positively identified, readable connected member, including a read-only
+replica, with the same native member, process, database and updateability checked before and after acquisition.
+Unknown or changing authority is refused. Cached definitions require supported current-type JSON grammar; retained
+plans retain their own native feature and permission checks. Native plan-attribute database IDs qualify every row;
+NULL SQL-text database IDs never fall back to the connected database. Each member's cache population remains
+separate, and its observations neither cover other read-serving members nor duplicate database-wide Query Store
+history. These recipes remain cost-unqualified and require explicit admission: TOP limits the returned rows, not
+the work needed to search a server-wide cache or evaluate its native metadata functions.
+
 Where the native columns are available, the same cache read retains total/last/minimum/maximum spilled 8-KiB pages. Column discovery does not add another cache walk; unavailable spill counters remain unknown. These pages are distinct from current task allocations and do not establish spill duration, an operator or a memory setting.
 
 Local timestamps retain their missing offset; reset continuity remains unknown. Zero native plan handles leave unqualified counters unavailable. Cache eviction can remove history between observations. [Native counter meanings and limitations](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-query-stats-transact-sql).
