@@ -3,6 +3,15 @@ use super::*;
 use culprit_core::collected_resource_analysis::CollectedTuningAnalysis;
 
 pub fn tuning(capture: &EvidenceCapture) -> Result<CollectedTuningAnalysis> {
+    if matches!(capture.source().partition, SourcePartition::InstanceLocal { .. }) {
+        let original = NativeReadContext::from_snapshot(capture.source())?;
+        if original.target.engine() != Engine::Mssql
+            || !original.has_qualified_local_owner()
+            || !matches!(original.partition,SourcePartition::InstanceLocal{member:Some(ref member),..} if member.kind==SharedResourceKind::Instance)
+        {
+            return Err(invalid());
+        }
+    }
     let inputs = CapturedState::sources_for(capture, SnapshotDataset::Tuning, EvidenceFamily::TuningObservations)?;
     let mut observations = Vec::new();
     let mut sources = Vec::new();

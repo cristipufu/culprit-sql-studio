@@ -308,7 +308,7 @@ fn source(engine: Engine, dataset: SnapshotDataset, count: usize, state: SourceS
     }
 }
 
-fn qualified_source(dataset: SnapshotDataset, count: usize, state: SourceState) -> CollectionDescription {
+pub(super) fn qualified_source(dataset: SnapshotDataset, count: usize, state: SourceState) -> CollectionDescription {
     let mut source = source(Engine::Mssql, dataset, count, state);
     source.partition = SourcePartition::InstanceLocal {
         member: Some(SharedResourceIdentity {

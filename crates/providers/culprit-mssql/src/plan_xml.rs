@@ -127,6 +127,9 @@ pub fn parse(xml: &str) -> Result<Plan> {
     parse_statement(xml, None)
 }
 
+#[cfg(test)]
+pub(crate) use parameters::comparison::original_plan_hash;
+
 /// Recompare original selected runtime attributes transiently; detached JSON flags never assert equal inputs.
 pub fn runtime_input_pair<'a>(a: &'a Plan, b: &'a Plan) -> culprit_core::plan_compare::NativeRuntimeInputPair<'a> {
     parameters::comparison::compare(a, b)

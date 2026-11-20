@@ -38,6 +38,7 @@ impl Description {
 }
 
 pub(super) struct DatabaseProfile {
+    pub edition: i64,
     pub configured_log_rates: Result<bool>,
 }
 
@@ -46,6 +47,19 @@ pub(super) async fn ensure_supported<R: NativeRead>(session: &mut R) -> Result<(
 }
 
 pub(super) async fn supported_profile<R: NativeRead>(
+    session: &mut R,
+    detail: crate::database_identity::log_rates::Detail,
+) -> Result<DatabaseProfile> {
+    let profile = observed_profile(session, detail).await?;
+    if profile.edition != 5 {
+        return Err(Error::new(ErrorCode::Unsupported, t!("collection.azure_sql_only")));
+    }
+    Ok(profile)
+}
+
+/// Observe the native profile on this held reader. Eligibility belongs to the selected source owner;
+/// ordinary Azure-only sources continue through supported_profile above.
+pub(super) async fn observed_profile<R: NativeRead>(
     session: &mut R,
     detail: crate::database_identity::log_rates::Detail,
 ) -> Result<DatabaseProfile> {
@@ -58,19 +72,17 @@ pub(super) async fn supported_profile<R: NativeRead>(
         ),
     };
     let rows = session.query(&query, vec![], 1).await.map_err(ReadError::into_error)?;
-    let Some(row) = rows.first() else {
-        return Err(Error::new(ErrorCode::Unsupported, t!("collection.azure_sql_only")));
+    let [row] = rows.as_slice() else {
+        return Err(malformed());
     };
-    if integer(row, "edition")? != 5 {
-        return Err(Error::new(ErrorCode::Unsupported, t!("collection.azure_sql_only")));
-    }
+    let edition = integer(row, "edition")?;
     let configured_log_rates = match detail {
         crate::database_identity::log_rates::Detail::Identity => Ok(false),
         crate::database_identity::log_rates::Detail::ConfiguredLogRates => {
             crate::database_identity::log_rates::capability(row)
         }
     };
-    Ok(DatabaseProfile { configured_log_rates })
+    Ok(DatabaseProfile { edition, configured_log_rates })
 }
 
 pub(super) async fn read<R: NativeRead>(

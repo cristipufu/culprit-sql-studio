@@ -4,6 +4,7 @@ use crate::test_support::owned_captures::{Captured, OwnedCaptures};
 use culprit_core::telemetry::*;
 mod blocking;
 mod diagnostics;
+mod forcing;
 mod source_parameters;
 mod statistics;
 

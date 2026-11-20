@@ -272,7 +272,7 @@ const REGISTRATIONS: &[Registration] = &[
         .baseline(),
     state!("mssql.plan-cache-summary", PlanCacheSummary).baseline(),
     state!("mssql.missing-indexes", MissingIndexes),
-    state!("mssql.tuning", Tuning),
+    state!("mssql.tuning", Tuning).bounded(state::tuning_budget).version(2),
     state!("mssql.wait-counters", WaitCounters).baseline(),
     Registration::database(
         "mssql.replication",

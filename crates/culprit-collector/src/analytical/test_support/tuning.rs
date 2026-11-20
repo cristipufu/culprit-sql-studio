@@ -123,6 +123,8 @@ pub enum TuningCase {
     Empty,
     UnavailableSource,
     LargeDefinition,
+    LocalForcedPlan,
+    LocalForcedRecovery,
 }
 
 pub fn tuning_evidence_cases() -> Vec<(TuningCase, CollectionDescription, Vec<TelemetryRecord>)> {
@@ -132,6 +134,7 @@ pub fn tuning_evidence_cases() -> Vec<(TuningCase, CollectionDescription, Vec<Te
         TuningCase::UnavailableDefinitions,
         TuningCase::Empty,
         TuningCase::UnavailableSource,
+        TuningCase::LocalForcedPlan,
     ]
     .into_iter()
     .map(|case| {
@@ -142,6 +145,58 @@ pub fn tuning_evidence_cases() -> Vec<(TuningCase, CollectionDescription, Vec<Te
 }
 
 pub fn tuning_evidence(case: TuningCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    if matches!(case, TuningCase::LocalForcedPlan | TuningCase::LocalForcedRecovery) {
+        let (_, mut records) = tuning_evidence(if case == TuningCase::LocalForcedRecovery {
+            TuningCase::LargeDefinition
+        } else {
+            TuningCase::Complete
+        });
+        if case == TuningCase::LocalForcedPlan {
+            records.truncate(1);
+        }
+        for record in &mut records {
+            let TelemetryRecord::Tuning(row) = record else { unreachable!() };
+            match &mut row.fact {
+                TuningFact::ForcedPlan(value) => {
+                    value.plan_scope = QueryStoreScope::Local;
+                    value.failures = "0".into();
+                    value.last_failure_reason = None;
+                    value.last_execution_at = None;
+                }
+                TuningFact::Recommendation(value) => value.plan_scope = QueryStoreScope::Local,
+                TuningFact::QueryHint(value) => value.scope = QueryStoreScope::Local,
+                _ => {}
+            }
+        }
+        let mut source = super::object_definitions::qualified_source(
+            SnapshotDataset::Tuning,
+            records.len(),
+            culprit_core::SourceState::Collected,
+        );
+        source.source = "tuning-state".into();
+        let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+        snapshot.observed_from = "2020-01-01T11:59:00Z".into();
+        snapshot.observed_until = "2020-01-01T11:59:01Z".into();
+        snapshot.sources = [
+            source_id::FORCED_PLANS,
+            source_id::TUNING_RECOMMENDATIONS,
+            source_id::TUNING_OPTIONS,
+            source_id::QUERY_HINTS,
+        ]
+        .into_iter()
+        .map(|source| {
+            StateSourceCoverage::observed(
+                source.into(),
+                records
+                    .iter()
+                    .filter(|record| matches!(record,TelemetryRecord::Tuning(row) if row.source==source))
+                    .count() as u32,
+                true,
+            )
+        })
+        .collect();
+        return (source, records);
+    }
     if case == TuningCase::UnknownScopes {
         return tuning_scope_evidence();
     }

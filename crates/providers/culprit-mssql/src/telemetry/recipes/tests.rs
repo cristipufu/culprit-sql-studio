@@ -33,6 +33,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.operational", 6),
             ("mssql.shared-operational", 7),
             ("mssql.settings", 3),
+            ("mssql.tuning", 2),
             ("mssql.tables", 2),
             ("mssql.indexes", 2),
             ("mssql.query-compilation", 3),

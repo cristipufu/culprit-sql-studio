@@ -11,10 +11,14 @@ const CLOCK: &str = r#"SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME()
 const ENVELOPE_ALLOWANCE: usize = 4096;
 const MAX_BUFFERED_FAMILY_ROWS: usize = 10_000;
 const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
+mod tuning;
+pub(super) use tuning::bounded_budget as tuning_budget;
 
 fn native_budget(request: &CollectionRequest) -> CollectionBudget {
     if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::MemoryFailures }) {
         memory_failure_budget(&request.budget)
+    } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::Tuning }) {
+        tuning_budget(&request.budget)
     } else {
         request.budget.clone()
     }
@@ -36,6 +40,7 @@ pub(super) struct StateSource<R = ReadSession> {
     io: R,
     description: Option<CollectionDescription>,
     identity: Option<subject::Identity>,
+    database_authority: subject::DatabaseAuthority,
     rows: Vec<TelemetryRecord>,
     offset: usize,
     progress: Progress,
@@ -52,13 +57,20 @@ impl<R: NativeRead> StateSource<R> {
             return Err(invalid_data());
         };
         subject::validate_dataset(&request.subject, dataset)?;
+        let database_authority = subject::DatabaseAuthority::for_source(dataset, &request.subject)?;
+        let mut request = request.clone();
+        if dataset == SnapshotDataset::Tuning {
+            request.budget = tuning_budget(&request.budget);
+            request.budget.validate()?;
+        }
         Ok(Self {
-            request: request.clone(),
+            request,
             host,
             port,
             io,
             description: None,
             identity: None,
+            database_authority,
             rows: vec![],
             offset: 0,
             progress: Progress::New,
@@ -123,9 +135,7 @@ impl<R: NativeRead> StateSource<R> {
         }
         // Ordinary instance statistics are an explicitly selected bounded source family. They do not execute
         // application work or optional enrichment; Azure database reads retain their native pressure guard.
-        if self.identity.as_ref().ok_or_else(invalid_data)?.azure_guarded() {
-            crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
-        }
+        self.identity.as_ref().ok_or_else(invalid_data)?.admit(&mut self.io).await?;
         Ok(remaining)
     }
 }
@@ -177,7 +187,15 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         } else {
             crate::database_identity::log_rates::Detail::Identity
         };
-        let read = subject::read_detail(&mut self.io, &self.request.subject, &self.host, self.port, detail).await?;
+        let read = subject::read_detail(
+            &mut self.io,
+            &self.request.subject,
+            &self.host,
+            self.port,
+            detail,
+            self.database_authority,
+        )
+        .await?;
         let target = read.identity.target();
         self.identity = Some(read.identity);
         let (mut observed_from, metadata_visible, properties) = if !shared && dataset == SnapshotDataset::Operational {
@@ -240,14 +258,12 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         if let Some(source) = properties {
             sources.push(source);
         }
+        if !self.identity.as_ref().ok_or_else(invalid_data)?.accepts_observation_bounds(&observed_from, &observed_until)
+        {
+            return Err(CollectionStop::SourceChanged.error());
+        }
         let description = CollectionDescription {
-            partition: match self.identity.as_ref().ok_or_else(invalid_data)? {
-                subject::Identity::Instance(context) => SourcePartition::InstanceLocal {
-                    member: Some(context.identity.clone()),
-                    epoch: Some(context.capture_epoch()?),
-                },
-                _ => SourcePartition::Target,
-            },
+            partition: self.identity.as_ref().ok_or_else(invalid_data)?.partition()?,
             target,
             source: if shared {
                 if dataset == SnapshotDataset::MemoryFailures {
@@ -366,8 +382,15 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         self.progress = Progress::Failed;
         let identity =
             self.identity.as_ref().ok_or_else(invalid_data)?.recheck(&mut self.io, &self.host, self.port).await?;
+        let until = &self
+            .description
+            .as_ref()
+            .and_then(|source| source.observation.snapshot())
+            .ok_or_else(invalid_data)?
+            .observed_until;
+        let confirmed = self.identity.as_ref().ok_or_else(invalid_data)?.confirmed_by(&identity, until);
         self.progress = Progress::Finished;
-        Ok(culprit_core::telemetry::SourceCompletion::verified_if(self.identity.as_ref() == Some(&identity)))
+        Ok(culprit_core::telemetry::SourceCompletion::verified_if(confirmed))
     }
     async fn close(&mut self) -> SourceShutdown {
         self.progress = Progress::Closed;

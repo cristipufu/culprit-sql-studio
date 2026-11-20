@@ -15,6 +15,16 @@ pub(in crate::plan_xml) fn compare<'a>(a: &'a Plan, b: &'a Plan) -> NativeRuntim
     NativeRuntimeInputPair::from_native(a, b, relation)
 }
 
+/// An owned fixture can select Query Store metadata through this existing exact original-tree owner.
+/// Display properties or a second statement selector cannot provide that bridge.
+#[cfg(test)]
+pub(crate) fn original_plan_hash(plan: &Plan) -> Option<String> {
+    culprit_core::xml::read(plan.raw.as_deref()?, |document| {
+        let document = document.ok()?;
+        selected(&document, plan)?.attribute("QueryPlanHash").map(str::to_owned)
+    })
+}
+
 fn relation(a: &Plan, b: &Plan) -> Option<Relation> {
     if a.engine != Engine::Mssql || b.engine != a.engine || a.kind != PlanKind::Actual || b.kind != a.kind {
         return None;

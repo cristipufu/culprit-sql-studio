@@ -57,28 +57,30 @@ async fn changed_tuning_scopes_plan_ids_counts_keys_or_source_fail_the_original_
 
 #[tokio::test]
 async fn tuning_previews_stay_gaps_until_bounded_recovery_restores_the_exact_whole_batch() {
-    let (source, records) = test_support::tuning_evidence(test_support::TuningCase::LargeDefinition);
-    let fixture = Fixture::new(source.clone(), records.clone()).await;
-    let before = fixture.recovery.object_reads.load(Ordering::SeqCst);
-    fixture.replies(vec![fixture.rows.clone()]);
-    let preview = fixture.reader().read_capture(&fixture.range, FAMILIES, tuning_budget(), None).await.unwrap();
-    assert!(!preview.is_read_complete());
-    assert!(preview.gaps().iter().any(|gap| gap.reason == EvidenceGapReason::DetailInRecovery));
-    assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), before);
-    *fixture.recovery.fault.lock().unwrap() = Fault::None;
-    fixture.replies(vec![fixture.rows.clone()]);
-    let capture = fixture
-        .reader()
-        .read_capture(
-            &fixture.range,
-            FAMILIES,
-            EvidenceReadBudget { recovery_payloads: Some(RecoveryPayloadBudget::default()), ..tuning_budget() },
-            Some(fixture.recovery.as_ref()),
-        )
-        .await
-        .unwrap();
-    test_support::assert_tuning_capture(&capture, &source, &records);
-    assert_eq!(capture.metrics().recovery_objects, 1);
-    assert_eq!(capture.metrics().recovery_bytes, fixture.range.manifest().batches[0].bytes);
-    assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), before + 1);
+    for case in [test_support::TuningCase::LargeDefinition, test_support::TuningCase::LocalForcedRecovery] {
+        let (source, records) = test_support::tuning_evidence(case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let before = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        fixture.replies(vec![fixture.rows.clone()]);
+        let preview = fixture.reader().read_capture(&fixture.range, FAMILIES, tuning_budget(), None).await.unwrap();
+        assert!(!preview.is_read_complete());
+        assert!(preview.gaps().iter().any(|gap| gap.reason == EvidenceGapReason::DetailInRecovery));
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), before);
+        *fixture.recovery.fault.lock().unwrap() = Fault::None;
+        fixture.replies(vec![fixture.rows.clone()]);
+        let capture = fixture
+            .reader()
+            .read_capture(
+                &fixture.range,
+                FAMILIES,
+                EvidenceReadBudget { recovery_payloads: Some(RecoveryPayloadBudget::default()), ..tuning_budget() },
+                Some(fixture.recovery.as_ref()),
+            )
+            .await
+            .unwrap();
+        test_support::assert_tuning_capture(&capture, &source, &records);
+        assert_eq!(capture.metrics().recovery_objects, 1);
+        assert_eq!(capture.metrics().recovery_bytes, fixture.range.manifest().batches[0].bytes);
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), before + 1);
+    }
 }
