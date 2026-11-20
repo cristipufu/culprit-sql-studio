@@ -89,6 +89,7 @@ async fn export_vendor_field_conformance_from_canonical_original_evidence() {
         "performance_counter_profile":{"native_object":profile.native_object, "selection":profile.selection, "fields":counters,"database_field_ids":profile.database_field_ids},
         "field_context_export_version":1,"field_context_contracts":field_context_contracts(),
         "database_property_contract_export_version":1,"database_property_contracts":database_property_contracts(),
+        "suspect_page_contract_export_version":1,"suspect_page_contracts":suspect_page_contracts(),
         "cases":cases,
     });
     let mut options = OpenOptions::new();
@@ -166,6 +167,10 @@ fn inputs() -> Vec<(&'static str, String, CollectionDescription, Vec<TelemetryRe
     for case in corpus::DatabasePropertiesCase::ALL {
         let (s, r) = corpus::database_properties_evidence(case);
         cases.push(("database-properties", format!("{case:?}"), s, r));
+    }
+    for case in corpus::SuspectPageHistoryCase::ALL {
+        let (source, rows) = corpus::suspect_page_history_evidence(case);
+        cases.push(("suspect-page-history", format!("{case:?}"), source, rows));
     }
     for case in corpus::BackupHistoryCase::ALL {
         let (s, r) = corpus::backup_history_evidence(case);
@@ -299,4 +304,19 @@ fn database_property_contracts() -> Vec<Value> {
         json!({"path":"fixtures/database-properties.native.json","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../../fixtures/database-properties.native.json")))}),
         json!({"path":"crates/culprit-collector/src/analytical/prepared.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/prepared.rs")))}),
     ].into_iter().collect()
+}
+
+// These exact compiled owners bind the new existing corpus and its single native acquisition contract.
+fn suspect_page_contracts() -> Vec<Value> {
+    vec![
+        json!({"path":"crates/providers/culprit-mssql/src/operations/native/suspect_pages.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/operations/native/suspect_pages.rs")))}),
+        json!({"path":"crates/providers/culprit-mssql/src/operations/native.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/operations/native.rs")))}),
+        json!({"path":"crates/providers/culprit-mssql/src/operations.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/operations.rs")))}),
+        json!({"path":"crates/providers/culprit-mssql/src/telemetry/state/suspect_pages.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/telemetry/state/suspect_pages.rs")))}),
+        json!({"path":"crates/providers/culprit-mssql/src/telemetry/state/local_point.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/telemetry/state/local_point.rs")))}),
+        json!({"path":"crates/providers/culprit-mssql/src/telemetry/state.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/telemetry/state.rs")))}),
+        json!({"path":"crates/culprit-core/src/telemetry/suspect_pages.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-core/src/telemetry/suspect_pages.rs")))}),
+        json!({"path":"crates/culprit-checks/src/views/suspect_pages.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-checks/src/views/suspect_pages.rs")))}),
+        json!({"path":"crates/culprit-collector/src/analytical/test_support/suspect_pages.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/test_support/suspect_pages.rs")))}),
+    ]
 }
