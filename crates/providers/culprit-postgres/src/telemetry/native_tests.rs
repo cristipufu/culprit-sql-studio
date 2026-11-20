@@ -4,6 +4,7 @@ use culprit_collector::capture::{CollectionCancellation, SourceFactory, collect_
 use culprit_core::{ConnectionSpec, Engine, Provider};
 use culprit_read::admission::SourceGate;
 
+mod caller_context;
 mod case;
 mod copy;
 mod jobs;

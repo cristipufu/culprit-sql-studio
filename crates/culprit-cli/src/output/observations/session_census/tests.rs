@@ -37,7 +37,7 @@ fn idle_dormant_unknown_partial_and_unavailable_census_remains_informational_wit
         assert!(text.contains(&report.title));
         assert!(text.contains(&report.summary));
         assert!(text.contains(&report.limitations[0]));
-        assert!(text.contains(culprit_core::source_id::SESSIONS));
+        assert!(text.contains(&report.native_source.source));
         assert!(text.len() < 16_384);
     }
 }

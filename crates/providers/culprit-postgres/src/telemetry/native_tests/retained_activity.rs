@@ -9,6 +9,31 @@ pub(super) struct Original {
 }
 
 impl Original {
+    pub(super) fn capture(&self) -> &owned_fixture::Captured {
+        &self.capture
+    }
+    pub(super) async fn verify_retained(&mut self) {
+        self.capture.verify_original().await;
+    }
+
+    pub(super) async fn census(
+        &mut self,
+        specification: &ConnectionSpec,
+        cancellation: &CollectionCancellation,
+    ) -> owned_fixture::Captured {
+        self.capture
+            .followup(
+                specification,
+                CollectionRequest {
+                    subject: CollectionSubject::Database,
+                    selection: CollectionSelection::Activity,
+                    budget: CollectionBudget::default(),
+                },
+                cancellation,
+            )
+            .await
+    }
+
     pub(super) async fn blocking(
         &mut self,
         specification: &ConnectionSpec,

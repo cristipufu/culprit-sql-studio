@@ -28,6 +28,18 @@ pub(super) async fn finish<T>(
     }
 }
 
+/// Admission never polls a new fixture dispatch after cancellation. Started work keeps its original owner.
+pub(super) fn require_active(cancellation: &CollectionCancellation) -> culprit_core::Result<()> {
+    if cancellation.is_cancelled() { Err(culprit_core::telemetry::CollectionStop::Cancelled.error()) } else { Ok(()) }
+}
+pub(super) async fn admitted<T>(
+    cancellation: &CollectionCancellation,
+    work: impl Future<Output = culprit_core::Result<T>>,
+) -> culprit_core::Result<T> {
+    require_active(cancellation)?;
+    work.await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,5 +84,31 @@ mod tests {
         assert_eq!(completed.value, 42, "the completed owner's result is retained");
         assert!(completed.deadline_reached, "body-ready and deadline-ready must not accept an elapsed case");
         assert!(cancellation.is_cancelled());
+    }
+    #[tokio::test]
+    async fn cancelled_fixture_admission_starts_no_followup_and_retains_the_started_owner_result() {
+        let cancellation = CollectionCancellation::default();
+        let (started, observed) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let owner = admitted(&cancellation, async {
+            started.send(()).unwrap();
+            released.await.unwrap();
+            Err::<(), _>(CollectionStop::CancellationUnconfirmed.error())
+        });
+        let cancel = async {
+            observed.await.unwrap();
+            cancellation.cancel();
+            release.send(()).unwrap();
+        };
+        let (result, ()) = tokio::join!(owner, cancel);
+        assert_eq!(CollectionStop::from_error(&result.unwrap_err()), CollectionStop::CancellationUnconfirmed);
+        let polled = std::sync::atomic::AtomicBool::new(false);
+        let result = admitted(&cancellation, async {
+            polled.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        })
+        .await;
+        assert_eq!(CollectionStop::from_error(&result.unwrap_err()), CollectionStop::Cancelled);
+        assert!(!polled.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

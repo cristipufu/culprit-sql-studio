@@ -29,7 +29,13 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
         assert_eq!(value["local_verification_bytes"], bytes);
         assert_eq!(value["collected_from"], fixture.manifest.started_at);
         let encoded = value.to_string();
-        if !matches!(case, SessionCensusCase::Unknown | SessionCensusCase::Unavailable | SessionCensusCase::Empty) {
+        if !matches!(
+            case,
+            SessionCensusCase::Unknown
+                | SessionCensusCase::Unavailable
+                | SessionCensusCase::Empty
+                | SessionCensusCase::PostgresSharedLabels
+        ) {
             assert!(encoded.contains("9007199254740993"));
         }
         for private in [

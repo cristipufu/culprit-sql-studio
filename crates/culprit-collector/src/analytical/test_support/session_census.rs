@@ -1,5 +1,6 @@
 //! Native-shaped census facts without a live/native-cost or current-owner qualification claim.
 use super::*;
+mod postgres;
 
 #[derive(Clone, Copy, Debug)]
 pub enum SessionCensusCase {
@@ -10,13 +11,25 @@ pub enum SessionCensusCase {
     Partial,
     Unavailable,
     Empty,
+    PostgresSharedLabels,
 }
 impl SessionCensusCase {
-    pub const ALL: [Self; 7] =
-        [Self::Idle, Self::Dormant, Self::Mars, Self::Unknown, Self::Partial, Self::Unavailable, Self::Empty];
+    pub const ALL: [Self; 8] = [
+        Self::Idle,
+        Self::Dormant,
+        Self::Mars,
+        Self::Unknown,
+        Self::Partial,
+        Self::Unavailable,
+        Self::Empty,
+        Self::PostgresSharedLabels,
+    ];
 }
 
 pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    if matches!(case, SessionCensusCase::PostgresSharedLabels) {
+        return postgres::shared_labels();
+    }
     let mut read: ActivityCensusRead = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/session-census.native.json"
@@ -62,6 +75,7 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
             native.times.last_request_end_without_offset = None;
         }
         SessionCensusCase::Unavailable | SessionCensusCase::Empty => read.observations.clear(),
+        SessionCensusCase::PostgresSharedLabels => unreachable!(),
     }
     let SourceObservation::Activity(header) = &mut read.source.observation else { panic!() };
     header.observations = read.observations.len() as u32;

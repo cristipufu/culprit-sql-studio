@@ -88,7 +88,9 @@ async fn capture_reserved(
     assert_eq!(manifest.capture, identity);
     assert!(manifest.capture.revision.is_some(), "the actual acquisition owns its durable revision");
     lease.finish().await.unwrap();
-    assert_eq!(outbox.verify(&identity.observation_id).await.unwrap().capture, identity);
+    // Retain the sealed representation that later readback authenticates, including native numeric metadata.
+    let manifest = outbox.verify(&identity.observation_id).await.unwrap();
+    assert_eq!(manifest.capture, identity);
     completed(&output, manifest)
 }
 
@@ -116,6 +118,33 @@ fn completed(output: &std::path::Path, manifest: CollectionManifest) -> Captured
 }
 
 impl Captured {
+    pub(super) fn census(&self) -> culprit_core::SessionCensusReport {
+        let original = self
+            .records
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let TelemetryRecord::Activity(observation) = &row.record else { panic!("one native Activity source") };
+                (observation.as_ref(), self.reference(index))
+            })
+            .collect::<Vec<_>>();
+        let rows = original
+            .iter()
+            .map(|(observation, reference)| ActivityFrameRow { observation, reference: Some(reference) })
+            .collect::<Vec<_>>();
+        let frame = ActivityFrameEvidence::new(self.source(), &rows, true).unwrap();
+        culprit_checks::session_census::explain_frame(&frame).unwrap()
+    }
+
+    pub(super) async fn verify_original(&mut self) {
+        let (outbox, _) = self._owner.as_mut().expect("the original durable Outbox owner remains held");
+        let retained = outbox.verify(&self.manifest.capture.observation_id).await.unwrap();
+        assert_eq!(serde_json::to_value(retained).unwrap(), serde_json::to_value(&self.manifest).unwrap());
+        for (index, row) in self.records.iter().enumerate() {
+            self.reference(index).validate_canonical_record(self.source(), &row.record).unwrap();
+        }
+    }
+
     pub(super) async fn followup(
         &mut self,
         specification: &ConnectionSpec,
@@ -138,10 +167,16 @@ impl Captured {
     }
 }
 
+pub(super) fn metrics_are_settled(metrics: &ReadWorkMetrics, queries: u32) -> bool {
+    metrics.is_valid()
+        && !metrics.has_unconfirmed_work()
+        && metrics.active_tasks == 0
+        && metrics.untracked_tasks == 0
+        && metrics.templates.iter().map(|template| template.completed_tasks).sum::<u32>() == queries
+}
 pub(super) fn assert_settled(metrics: &ReadWorkMetrics, queries: u32) {
-    assert!(metrics.is_valid());
-    assert!(!metrics.has_unconfirmed_work());
-    assert_eq!(metrics.active_tasks, 0);
-    assert_eq!(metrics.untracked_tasks, 0);
-    assert_eq!(metrics.templates.iter().map(|template| template.completed_tasks).sum::<u32>(), queries);
+    assert!(
+        metrics_are_settled(metrics, queries),
+        "the original native metrics must prove every dispatched task settled"
+    );
 }

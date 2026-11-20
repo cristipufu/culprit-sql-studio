@@ -63,3 +63,45 @@ async fn missing_mars_request_body_preserves_original_native_population_and_does
     assert!(!analysis.report.read_complete);
     assert_eq!(fixture.recovery_object_reads(), opened);
 }
+
+#[tokio::test]
+async fn shared_postgres_caller_labels_keep_distinct_native_receipts_and_idle_last_sql_without_business_ownership() {
+    let (source, rows) = test_support::session_census_evidence(SessionCensusCase::PostgresSharedLabels);
+    let fixture = Fixture::new(source.clone(), rows).await;
+    let before = fixture.recovery_object_reads();
+    let capture = fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+    let analysis = culprit_engine::collected_resources::session_census(&capture).unwrap();
+    let report = &analysis.report;
+    assert_eq!((report.observed_sessions, report.observed_requests), (3, 2));
+    assert_eq!(report.context.target.engine(), culprit_core::Engine::Postgres);
+    assert!(report.limitations.contains(&culprit_core::t!("view.session_census.limit.client")));
+    let mut references = std::collections::BTreeSet::new();
+    for entry in &report.entries {
+        let field = |name: &str| entry.fields.iter().find(|field| field.key == name).unwrap().value.as_deref();
+        assert_eq!(field("application"), Some("fixture-shared-pooled-driver"));
+        assert_eq!(field("login"), Some("shared-login"));
+        assert_eq!(field("library"), None);
+        assert_eq!(field("session_cpu"), None);
+        let reference = entry.reference.as_ref().unwrap();
+        assert!(references.insert(serde_json::to_string(reference).unwrap()));
+        let exported = capture
+            .records()
+            .iter()
+            .find(|row| matches!(&row.row().record,TelemetryRecord::Activity(row) if row.key==entry.activity))
+            .unwrap();
+        reference.validate_canonical_record(&source, &exported.row().record).unwrap();
+        let TelemetryRecord::Activity(original) = &exported.row().record else { unreachable!() };
+        let mut another_generation = original.as_ref().clone();
+        another_generation.key.session.generation = "2020-01-01T11:58:00.000001Z".into();
+        assert!(reference.validate_canonical_record(&source, &TelemetryRecord::from(another_generation)).is_err());
+        if entry.idle {
+            assert!(entry.activity.request.is_none());
+            assert!(original.statement_identity.is_none());
+            assert!(matches!(
+                original.statement,
+                DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }
+            ));
+        }
+    }
+    assert_eq!(fixture.recovery_object_reads(), before);
+}
