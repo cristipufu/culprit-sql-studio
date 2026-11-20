@@ -1,5 +1,6 @@
 use super::*;
 use culprit_core::telemetry::*;
+mod request_context;
 
 fn observation() -> TaskSpaceObservation {
     TaskSpaceObservation {
@@ -136,7 +137,9 @@ fn checked_or_changed_current_sql_never_selects_the_allocating_mechanism_or_a_ma
     let checked = entry(&row);
     assert_eq!(checked.activity, TaskAllocationActivity::InternalObjects);
     assert!(checked.explanation.contains(&t!("view.task_space.context.checked")));
-    assert!(!serde_json::to_string(&checked).unwrap().contains("unrelated_context"));
+    assert!(
+        matches!(&checked.current_request.as_ref().unwrap().statement, DefinitionPayload::Available { text, .. } if text.contains("unrelated_context"))
+    );
 
     row.request.as_mut().unwrap().statement =
         DefinitionPayload::sql("ALTER INDEX ix_orders ON dbo.orders REBUILD", culprit_core::Engine::Mssql);

@@ -5,6 +5,7 @@ use culprit_core::{
     telemetry::{MAX_TASK_SPACE_OBSERVATIONS, TaskRequestContext, TaskSpaceObservation},
 };
 use std::collections::BTreeSet;
+mod request_context;
 
 pub fn explain(observations: &[&TaskSpaceObservation], source: Option<&SourceOutcome>) -> Result<TaskSpaceReport> {
     let expected =
@@ -19,6 +20,9 @@ pub fn explain(observations: &[&TaskSpaceObservation], source: Option<&SourceOut
     if observations.len() > MAX_TASK_SPACE_OBSERVATIONS || inconsistent {
         return Err(invalid());
     }
+    let refused = culprit_core::telemetry::ActivityEvidence::observed_session_generation_refusals(
+        observations.iter().filter_map(|row| row.request.as_ref()),
+    )?;
     let mut keys = BTreeSet::new();
     let entries = observations
         .iter()
@@ -35,6 +39,7 @@ pub fn explain(observations: &[&TaskSpaceObservation], source: Option<&SourceOut
                 observation_key: key,
                 task: row.task.clone(),
                 activity,
+                current_request: request_context::qualified(row, &refused),
                 title: t!(
                     "view.task_space.entry.title",
                     session = row.task.session_id.as_str(),

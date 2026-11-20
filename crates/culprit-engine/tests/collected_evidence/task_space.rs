@@ -69,7 +69,7 @@ async fn authenticated_task_investigation_reuses_pure_explanations_and_keeps_ori
         }
         let encoded = serde_json::to_value(&result).unwrap();
         assert!(encoded["report"].get("observations").is_none(), "native records live once in authenticated context");
-        assert!(!serde_json::to_string(&result.report).unwrap().contains("SELECT note"));
+        assert!(!serde_json::to_string(&result.report).unwrap().contains("9264"));
     }
 }
 
@@ -177,5 +177,83 @@ async fn task_analysis_rejects_wrong_dataset_subject_scope_and_independent_check
             if shape == "family" { EvidenceFamily::ResourceSamples } else { EvidenceFamily::OperationalSamples };
         let capture = fixture.read_families(&[family]).await;
         assert!(collected_resources::task_space(&capture).is_err(), "{shape}");
+    }
+}
+
+#[tokio::test]
+async fn authenticated_current_request_context_keeps_original_receipts_check_clocks_and_partial_native_coverage() {
+    for (source, rows) in task_space_evidence_cases().into_iter().take(2) {
+        let original = rows.clone();
+        let fixture = Fixture::new(source.clone(), rows).await;
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let result = collected_resources::task_space(&capture).unwrap();
+        assert_eq!(result.context.source, source);
+        assert_eq!(result.context.records.len(), original.len());
+        for row in observations(&original) {
+            let entry = result.report.entries.iter().find(|entry| entry.observation_key == row.key().unwrap()).unwrap();
+            if row.request_context() == TaskRequestContext::CheckedAtBounds {
+                let current = entry.current_request.as_ref().unwrap();
+                assert_eq!(current.request, row.request.as_ref().unwrap().key);
+                assert_eq!(current.observed_from, row.before_check.as_ref().unwrap().observed_at);
+                assert_eq!(current.observed_until, row.after_check.as_ref().unwrap().observed_at);
+                assert_ne!(current.observed_from, row.observed_at);
+                assert!(current.statement.is_available());
+            } else {
+                assert!(entry.current_request.is_none());
+            }
+            let retained = result
+                .context
+                .records
+                .iter()
+                .find(|record| match &record.row.record {
+                    TelemetryRecord::Operational(record) => record.key == entry.observation_key,
+                    _ => false,
+                })
+                .unwrap();
+            let TelemetryRecord::Operational(record) = &retained.row.record else { panic!() };
+            assert_eq!(record.fact, OperationalFact::TaskSpace(Box::new(row.clone())));
+        }
+        let encoded = serde_json::to_string(&result.report).unwrap();
+        assert!(encoded.contains("SELECT note FROM dbo.orders"));
+        assert!(!encoded.contains("9264"));
+        assert!(encoded.find("native-task-plan-handle").is_none());
+    }
+}
+
+#[tokio::test]
+async fn authenticated_missing_native_statement_or_negative_generation_never_borrows_another_workers_sql() {
+    for shape in ["missing-token", "foreign-token", "negative-generation"] {
+        let (source, mut rows) = task_space_evidence_cases().remove(0);
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::TaskSpace(row), .. }) =
+            &mut rows[0]
+        else {
+            panic!()
+        };
+        match shape {
+            "missing-token" => {
+                row.statement_identity = None;
+                row.plan_identity = None;
+            }
+            "foreign-token" => row.statement_identity = Some(NativeIdentity::new("other-original-statement")),
+            "negative-generation" => {
+                row.request.as_mut().unwrap().session_context = Some(Box::new(ActivitySessionContext {
+                    lifecycle: SessionLifecycle::PoolResetPrelogin,
+                    login_age_ms: None,
+                    last_request_end_age_ms: None,
+                    client_library: None,
+                    client_process_id: None,
+                    native: None,
+                }))
+            }
+            _ => unreachable!(),
+        }
+        assert!(row.is_valid());
+        let fixture = Fixture::new(source, rows).await;
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let result = collected_resources::task_space(&capture).unwrap();
+        assert_eq!(result.report.entries.len(), 2);
+        assert!(result.report.entries[0].current_request.is_none());
+        assert_eq!(result.report.entries[1].current_request.is_none(), shape == "negative-generation");
+        assert_eq!(result.context.records.len(), 2);
     }
 }

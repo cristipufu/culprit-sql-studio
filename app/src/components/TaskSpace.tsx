@@ -1,4 +1,6 @@
+import { contextPreview } from "../lib/context-preview";
 import type { TaskRequestCheck } from "../gen/TaskRequestCheck";
+import type { TaskSpaceCurrentRequest } from "../gen/TaskSpaceCurrentRequest";
 import type { TaskSpaceIdentity } from "../gen/TaskSpaceIdentity";
 import type { TaskSpaceObservation } from "../gen/TaskSpaceObservation";
 import type { TaskSpaceReport } from "../gen/TaskSpaceReport";
@@ -27,8 +29,7 @@ export function TaskSpace({ evidence, report }: { evidence: TaskSpaceSnapshot; r
 }
 
 function TaskCard({ row, entry }: { row: TaskSpaceObservation; entry: TaskSpaceReport["entries"][number] }) {
-  const checked = row.before_check?.state === "same-statement" && row.after_check?.state === "same-statement";
-  const request = row.request;
+  const current = entry.current_request;
   return <article className="operational-card">
     <h4>{entry.title}</h4><p>{entry.explanation}</p>
     <details>
@@ -42,26 +43,38 @@ function TaskCard({ row, entry }: { row: TaskSpaceObservation; entry: TaskSpaceR
         <NativeValue label={t("ui.task_space.native_database")} value={<code>{row.native_database_id}</code>} />
         <NativeValue label={t("ui.task_space.page_bytes")} value={digits(String(row.bytes_per_page))} />
         {COUNTERS.map(([field, label]) => <NativeValue key={field} label={t(label)} value={row[field] == null ? null : digits(row[field])} />)}
-        <NativeValue label={t("ui.memory_participants.generation")} value={request && <code>{request.key.session.generation}</code>} />
-        <NativeValue label={t("ui.memory_participants.request_generation")} value={request?.key.request && <code>{request.key.request.generation}</code>} />
-        <NativeValue label={t("ui.native_failures.database_context")} value={request?.database} />
-        <NativeValue label={t("ui.memory_participants.application")} value={request?.client?.application} />
+        <NativeValue label={t("ui.memory_participants.generation")} value={current && <code>{current.request.session.generation}</code>} />
+        <NativeValue label={t("ui.memory_participants.request_generation")} value={current?.request.request && <code>{current.request.request.generation}</code>} />
+        <NativeValue label={t("ui.native_failures.database_context")} value={current ? row.request?.database : null} />
       </dl>
       <details>
         <summary>{t("ui.task_space.checks")}</summary>
         <RequestCheck title={t("ui.task_space.before")} check={row.before_check} />
         <RequestCheck title={t("ui.task_space.after")} check={row.after_check} />
       </details>
-      {checked && <dl>
+      {current && <dl>
         {row.statement_identity && <NativeValue label={t("ui.page_waits.statement_identity")} value={<NativeReference identity={row.statement_identity} />} />}
         {row.statement_identity && row.plan_identity && <NativeValue label={t("ui.page_waits.plan_identity")} value={<NativeReference identity={row.plan_identity} />} />}
       </dl>}
-      {checked && request?.statement.state === "available" && <details>
-        <summary>{t("ui.task_space.current_statement")}</summary>
-        <pre className="observation-statement">{request.statement.text}</pre>
-      </details>}
+      {current && <CurrentRequest context={current} />}
     </details>
   </article>;
+}
+
+
+function CurrentRequest({ context }: { context: TaskSpaceCurrentRequest }) {
+  const statement = context.statement;
+  return <details>
+    <summary>{t("view.task_space.current_request.title")}</summary>
+    <p className="muted">{t("view.task_space.current_request.interval", { from: context.observed_from, until: context.observed_until })}</p>
+    <p className="muted">{t("view.task_space.current_request.qualification")}</p>
+    {statement.state === "available"
+      ? <pre className="observation-statement">{contextPreview(statement.text).text}</pre>
+      : <p className="muted">{t("ui.statement_grants.unavailable", { reason: statement.reason })}</p>}
+    {context.client?.application && <dl>
+      <NativeValue label={t("ui.memory_participants.application")} value={contextPreview(context.client.application).text} />
+    </dl>}
+  </details>;
 }
 
 const COUNTERS = [

@@ -1,3 +1,4 @@
+import { contextPreview } from "../lib/context-preview";
 import { useState } from "react";
 import type { ActivityScopeBasis } from "../gen/ActivityScopeBasis";
 import type { DefinitionPayload } from "../gen/DefinitionPayload";
@@ -39,8 +40,6 @@ export function PageWaitTargets({ evidence, report }: { evidence: PageWaitSnapsh
   </ObservationList>;
 }
 
-const RECORDED_SQL_PREVIEW_CHARACTERS = 512;
-
 function RecordedIncident({ incident }: { incident: NonNullable<PageWaitReport["recorded_incident"]> }) {
   return <article className="operational-card recorded-page-wait">
     <h4>{t("view.page_waits.recorded.title")}</h4>
@@ -69,7 +68,7 @@ function RecordedRequest({ request }: { request: PageWaitRecordedRequest }) {
 
 function RecordedStatement({ sql }: { sql: DefinitionPayload }) {
   const [showStatement, setShowStatement] = useState(false);
-  const excerpt = sql.state === "available" ? recordedSqlPreview(sql.text) : null;
+  const excerpt = sql.state === "available" ? contextPreview(sql.text) : null;
   return <>
     {sql.state === "available" && excerpt ? <>
       <pre className="observation-statement">{excerpt.text}</pre>
@@ -89,17 +88,6 @@ function RecordedApplication({ application }: { application: string | null | und
 
 function recordedContextKey(reference: DiagnosticEvidenceRef): string {
   return JSON.stringify([reference.capture.observation_id, reference.record_id, reference.manifest_sha256, reference.payload_sha256]);
-}
-
-function recordedSqlPreview(text: string): { text: string; truncated: boolean } {
-  let preview = "";
-  let characters = 0;
-  for (const character of text) {
-    if (characters === RECORDED_SQL_PREVIEW_CHARACTERS) return { text: `${preview}…`, truncated: true };
-    preview += character;
-    characters++;
-  }
-  return { text: preview, truncated: false };
 }
 
 function PageWaitCard({ row, entry }: { row: PageWaitObservation; entry: PageWaitExplanation }) {

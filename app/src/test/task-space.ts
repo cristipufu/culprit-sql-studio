@@ -8,6 +8,7 @@ export const TASK_SOURCE = "task space";
 export function taskSpace(execution = "0"): TaskSpaceObservation {
   const request = pageWait().request;
   request.wait = null;
+  request.statement_identity = { id: "task-native-statement", qualifiers: {} };
   return {
     source: TASK_SOURCE, observed_at: "2026-11-13T10:00:00.200000Z",
     task: { session_id: "42", request_id: "0", execution_context_id: execution },
@@ -32,6 +33,10 @@ export function taskSpaceReport(observations = [taskSpace()]): TaskSpaceReport {
     title: "Task tempdb activity", summary: `${observations.length} native task observations were retained.`,
     limitations: ["Current request context does not identify the allocating statement."],
     entries: observations.map((row, index) => ({ observation_key: `opaque-task-${index}`, task: structuredClone(row.task), activity: "mixed",
+      current_request: row.request && row.before_check && row.after_check ? {
+        request: structuredClone(row.request.key), observed_from: row.before_check.observed_at, observed_until: row.after_check.observed_at,
+        statement: structuredClone(row.request.statement), client: structuredClone(row.request.client ?? null),
+      } : null,
       title: `Native task ${index}`, explanation: "Allocation and deallocation counts remain independent of current SQL context.",
       investigation: "Measure a representative workload before changing memory settings.",
       verify: "Do not subtract capture-local counters between reads.",

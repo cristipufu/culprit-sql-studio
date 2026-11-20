@@ -20,6 +20,7 @@ pub(crate) mod page_server_reads;
 mod page_waits;
 pub(crate) mod performance_counters;
 mod statement_work;
+pub(crate) mod task_space;
 
 #[cfg(test)]
 mod compiler_admission_tests;
@@ -198,7 +199,7 @@ pub fn report(report: &Report) -> Value {
             "source_state": tasks.source_state,
             "source_reason": tasks.source_reason,
             "entries_retained": tasks.entries.len(),
-            "entries": tasks.entries.iter().take(PARTICIPANT_ENTRIES).collect::<Vec<_>>(),
+            "entries": tasks.entries.iter().take(PARTICIPANT_ENTRIES).map(task_space::entry).collect::<Vec<_>>(),
             "limitations": tasks.limitations,
         });
     }
@@ -323,6 +324,7 @@ mod tests {
                         execution_context_id: index.to_string(),
                     },
                     activity: TaskAllocationActivity::InternalObjects,
+                    current_request: None,
                     title: "Internal-object activity".into(),
                     explanation: "No spilled operator established.".into(),
                     investigation: "Inspect retained actual operators.".into(),

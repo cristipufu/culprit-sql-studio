@@ -63,6 +63,7 @@ fn observation(execution: &str) -> TaskSpaceObservation {
     let mut request = activity_sample();
     request.statement =
         DefinitionPayload::sql("SELECT note FROM dbo.orders WHERE id=9264", culprit_core::Engine::Mssql);
+    request.statement_identity = Some(NativeIdentity::new("native-task-sql-handle"));
     TaskSpaceObservation {
         source: culprit_core::source_id::TASK_SPACE.into(),
         observed_at: "2020-01-01T12:00:00.250000000Z".into(),

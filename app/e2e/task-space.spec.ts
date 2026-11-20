@@ -49,6 +49,7 @@ test("task tempdb counts retain exact native tuples and checked SQL context in c
   rows[1]!.statement_identity = null;
   rows[1]!.plan_identity = null;
   const view = taskSpaceReport(rows);
+  view.entries[1]!.current_request = null;
   view.title = TITLE;
   await inject(page, taskSpaceEvidence([...rows].reverse()), view, { source: TASK_SOURCE, state: "partial", reason: "The native task read was bounded." });
   await page.locator('[data-tile="health"]').click();
@@ -69,7 +70,7 @@ test("task tempdb counts retain exact native tuples and checked SQL context in c
   await first.getByText(english["ui.task_space.checks"], { exact: true }).click();
   await expect(first).toContainText("2026-11-13T10:00:00.300000Z");
   await expect(first).toContainText("2026-11-13T10:00:00.700000Z");
-  await first.getByText(english["ui.task_space.current_statement"], { exact: true }).click();
+  await first.getByText(english["view.task_space.current_request.title"], { exact: true }).click();
   await expect(first.locator("pre")).toHaveText("SELECT * FROM [orders] WHERE name=N'<script>canary</script>'");
   await expect(first.locator("script")).toHaveCount(0);
   const bounds = await region.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
@@ -77,7 +78,7 @@ test("task tempdb counts retain exact native tuples and checked SQL context in c
   await page.screenshot({ path: info.outputPath("task-space-native-context.png") });
   const changed = cards.nth(1);
   await changed.getByText(english["ui.memory_failures.investigation"], { exact: true }).click();
-  await expect(changed.getByText(english["ui.task_space.current_statement"], { exact: true })).toHaveCount(0);
+  await expect(changed.getByText(english["view.task_space.current_request.title"], { exact: true })).toHaveCount(0);
   await expect(changed).not.toContainText("task-native-statement");
   await region.getByRole("button", { name: "Next records", exact: true }).click();
   await expect(cards).toHaveCount(2);

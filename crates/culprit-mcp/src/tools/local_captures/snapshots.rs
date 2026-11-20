@@ -3,8 +3,7 @@ use crate::statement_context::statement as statement_context;
 use culprit_core::{
     Result,
     telemetry::{
-        CollectionTarget, DeliveryProblem, GrantStatementRelationship, OperationalFact, SourceObservation,
-        TaskRequestContext, digest,
+        CollectionTarget, DeliveryProblem, GrantStatementRelationship, OperationalFact, SourceObservation, digest,
     },
 };
 use culprit_engine::{LocalSnapshotAnalysis, LocalSnapshotReport};
@@ -270,11 +269,7 @@ fn task_space(analysis: &LocalSnapshotAnalysis, report: &culprit_core::TaskSpace
         let OperationalFact::TaskSpace(task) = super::context::single_source_fact(analysis, &entry.observation_key)? else {
             return Err(DeliveryProblem::Integrity.error());
         };
-        let participant = match task.request_context() {
-            TaskRequestContext::CheckedAtBounds => task.request.as_ref()
-                .map(|request| super::context::participant(request,&task.observed_at,Some(&request.statement))),
-            _ => None,
-        };
+
         Ok(json!({
             "reference":reference(analysis,&entry.observation_key),"task":entry.task,"activity":entry.activity,
             "title":entry.title,"explanation":entry.explanation,"investigation":entry.investigation,"verify":entry.verify,
@@ -284,7 +279,7 @@ fn task_space(analysis: &LocalSnapshotAnalysis, report: &culprit_core::TaskSpace
                 "internal_allocated_pages":task.internal_allocated_pages,"internal_deallocated_pages":task.internal_deallocated_pages,
                 "request_context":task.request_context(),
             },
-            "participant_context":participant,
+            "current_request":entry.current_request.as_ref().map(crate::waits_view::task_space::current_request),
         }))
     }).collect::<Result<Vec<_>>>()?;
     Ok(summary(

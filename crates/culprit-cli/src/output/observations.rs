@@ -1,9 +1,12 @@
 use culprit_core::{
     CachedPlanEntry, CachedPlanReport, CompilationReport, MemoryParticipantsReport, RetainedFailureReport,
-    RuntimeDistributionReport, SourceOutcome, SourceState, StatementWorkReport, TaskSpaceReport,
+    RuntimeDistributionReport, SourceOutcome, SourceState, StatementWorkReport,
     collected_analysis::{CollectedQueryAnalysis, CollectedQueryAnalysisResult, CollectedQueryPopulation},
     format, t,
 };
+
+#[cfg(test)]
+use culprit_core::TaskSpaceReport;
 
 const OBSERVATION_DETAIL_CHARS: usize = 1024;
 #[cfg(test)]
@@ -13,9 +16,11 @@ mod completed_spills;
 mod maintenance_tests;
 #[cfg(test)]
 mod participants_tests;
+mod task_space;
 #[cfg(test)]
 mod task_space_tests;
 pub(crate) use completed_spills::completed_spills;
+pub(crate) use task_space::task_space;
 mod page_server_reads;
 pub(crate) use page_server_reads::collected_page_server_reads;
 mod source_overhead;
@@ -534,18 +539,6 @@ pub(crate) fn participants(report: &MemoryParticipantsReport) -> String {
     );
     append_remaining_limitations(&mut text, &report.limitations);
     text
-}
-
-pub(crate) fn task_space(report: &TaskSpaceReport) -> String {
-    render_explanations(
-        Summary {
-            title: &report.title,
-            summary: &report.summary,
-            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
-            limitations: &report.limitations,
-        },
-        report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
-    )
 }
 
 pub(crate) fn statement_work(report: &StatementWorkReport) -> String {
@@ -1139,6 +1132,7 @@ mod tests {
             entries: (0..8)
                 .map(|index| culprit_core::TaskSpaceExplanation {
                     activity: culprit_core::TaskAllocationActivity::Unknown,
+                    current_request: None,
                     observation_key: format!("private-proof-{index}"),
                     task: culprit_core::telemetry::TaskSpaceIdentity {
                         session_id: "42".into(),
@@ -1168,7 +1162,7 @@ mod tests {
         assert!(
             text.lines()
                 .filter(|line| line.starts_with('•'))
-                .all(|line| { line.strip_prefix("• ").unwrap().chars().count() <= OBSERVATION_DETAIL_CHARS + 1 })
+                .all(|line| { line.strip_prefix("• ").unwrap().chars().count() <= 2 * OBSERVATION_DETAIL_CHARS + 4 })
         );
         assert!(text.contains("Recorded allocation"));
         assert!(!text.contains("private-proof"));

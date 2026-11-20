@@ -20,7 +20,7 @@ fn report(rows: &[TaskSpaceObservation], state: SourceState) -> TaskSpaceReport 
 }
 
 fn assert_no_native_payload(output: &str) {
-    for native in ["dbo.orders", "native-task-sql-handle", "native-task-plan-handle", "9007199254740993"] {
+    for native in ["native-task-sql-handle", "native-task-plan-handle", "9007199254740993", "9264"] {
         assert!(!output.contains(native), "{native}");
     }
 }
@@ -118,11 +118,79 @@ fn task_details_and_entry_counts_keep_the_common_cli_output_limits_without_expor
     let output = task_space(&report);
     let entries = output.lines().filter_map(|line| line.strip_prefix("• ")).collect::<Vec<_>>();
     assert_eq!(entries.len(), super::super::BRIEF_FINDING_LIMIT);
-    assert!(entries.iter().all(|line| line.chars().count() == OBSERVATION_DETAIL_CHARS + 1));
+    assert!(entries.iter().all(|line| line.chars().count() <= OBSERVATION_DETAIL_CHARS + 32));
     assert!(entries.iter().all(|line| line.ends_with('…')));
+    assert_eq!(
+        output.chars().filter(|character| *character == '列').count(),
+        super::super::BRIEF_FINDING_LIMIT * OBSERVATION_DETAIL_CHARS
+    );
+    assert!(output.contains(&t!("view.task_space.current_request.qualification")));
+    assert!(output.contains(&report.entries[0].verify));
     assert!(!output.contains("task-entry-3") && !output.contains("hidden-detail-tail"));
     for row in &rows {
         assert!(!output.contains(&row.key().unwrap()));
     }
+    assert_no_native_payload(&output);
+}
+
+#[test]
+fn qualified_current_statement_and_its_own_interval_are_visible_without_becoming_an_allocator() {
+    let row = observation();
+    let expected = row.clone();
+    let report = report(&[row], SourceState::Partial);
+    let context = report.entries[0].current_request.as_ref().unwrap();
+    let output = task_space(&report);
+    assert!(output.contains("SELECT note FROM dbo.orders"));
+    assert!(output.contains(&t!("view.task_space.current_request.title")));
+    assert!(output.contains(&t!("view.task_space.current_request.qualification")));
+    assert!(output.contains(&context.observed_from) && output.contains(&context.observed_until));
+    assert_ne!(context.observed_from, expected.observed_at);
+    assert_eq!(context.request, expected.request.unwrap().key);
+    assert_no_native_payload(&output);
+}
+
+#[test]
+fn unavailable_sql_reasons_and_withheld_context_have_distinct_cli_output() {
+    for reason in [
+        PayloadUnavailable::Restricted,
+        PayloadUnavailable::Encrypted,
+        PayloadUnavailable::Missing,
+        PayloadUnavailable::Oversized,
+        PayloadUnavailable::RedactionFailed,
+        PayloadUnavailable::NotCollected,
+        PayloadUnavailable::SourceUnavailable,
+    ] {
+        let mut row = observation();
+        row.request.as_mut().unwrap().statement = DefinitionPayload::Unavailable { reason };
+        row.statement_identity = None;
+        row.plan_identity = None;
+        let report = report(&[row], SourceState::Partial);
+        assert!(report.entries[0].current_request.is_some());
+        let output = task_space(&report);
+        assert!(output.contains(&statement::sql(Some(&DefinitionPayload::Unavailable { reason }))));
+        assert!(!output.contains("SELECT note"));
+    }
+    let row = observation();
+    let mut report = report(&[row], SourceState::Partial);
+    report.entries[0].current_request = None;
+    let output = task_space(&report);
+    assert!(!output.contains("SELECT note") && !output.contains(&t!("view.task_space.current_request.title")));
+}
+
+#[test]
+fn long_unicode_statement_and_client_context_are_bounded_without_hiding_verification() {
+    let mut row = observation();
+    let raw = format!("SELECT {} FROM dbo.orders WHERE id=9264", "長".repeat(1000));
+    row.request.as_mut().unwrap().statement = DefinitionPayload::sql(&raw, culprit_core::Engine::Mssql);
+    row.request.as_mut().unwrap().client =
+        Some(ActivityClient { application: Some("界".repeat(100)), user: None, host: None });
+    let report = report(&[row], SourceState::Collected);
+    let output = task_space(&report);
+    assert!(output.contains('…'));
+    assert!(!output.contains(&raw) && !output.contains("9264"));
+    assert!(output.chars().filter(|character| *character == '長').count() <= 100);
+    assert!(output.chars().filter(|character| *character == '界').count() <= 100);
+    assert!(output.contains(&report.entries[0].investigation));
+    assert!(output.contains(&report.entries[0].verify));
     assert_no_native_payload(&output);
 }
