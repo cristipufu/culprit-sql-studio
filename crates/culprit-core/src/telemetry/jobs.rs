@@ -4,6 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod points;
 pub use points::*;
+mod continuous_aggregates;
+pub use continuous_aggregates::*;
 mod agent;
 mod profile;
 pub use agent::*;
@@ -11,6 +13,7 @@ pub use profile::JobsSnapshot;
 
 pub const TIMESCALE_JOBS_SOURCE: &str = "timescale-jobs";
 pub const TIMESCALE_JOB_RUNS_SOURCE: &str = "timescale-job-runs";
+pub const TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE: &str = "timescale-continuous-aggregates";
 pub const MAX_TIMESCALE_JOB_OBSERVATIONS: usize = 512;
 pub const MAX_TIMESCALE_JOB_LABEL_BYTES: usize = 1024;
 pub const TIMESCALE_JOB_HISTORY_HOURS: i64 = 24;
@@ -23,6 +26,7 @@ pub enum TimescaleJobViewKind {
     Statistics,
     History,
     Errors,
+    ContinuousAggregates,
 }
 impl TimescaleJobViewKind {
     pub fn native_name(self) -> &'static str {
@@ -31,6 +35,7 @@ impl TimescaleJobViewKind {
             Self::Statistics => "job_stats",
             Self::History => "job_history",
             Self::Errors => "job_errors",
+            Self::ContinuousAggregates => "continuous_aggregates",
         }
     }
 }
@@ -116,7 +121,7 @@ impl TimescaleJobsMetadata {
         self.view(kind).is_some_and(|view| view.state == TimescaleJobViewState::Available)
     }
     pub fn is_valid(&self) -> bool {
-        if self.views.len() != 4 || ObservationBounds::new(&self.run_window.from, &self.run_window.until).is_none() {
+        if self.views.len() != 5 || ObservationBounds::new(&self.run_window.from, &self.run_window.until).is_none() {
             return false;
         }
         let mut kinds = BTreeSet::new();
@@ -179,6 +184,11 @@ impl TimescaleJobsMetadata {
                         _ => false,
                     }
             }
+            OperationalFact::TimescaleContinuousAggregate(point) => {
+                row.source == TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE
+                    && self.available(TimescaleJobViewKind::ContinuousAggregates)
+                    && bounds.is_some_and(|bounds| bounds.contains(&point.observed_at))
+            }
             _ => false,
         }
     }
@@ -187,9 +197,17 @@ impl TimescaleJobsMetadata {
             && snapshot.is_valid()
             && snapshot.dataset == SnapshotDataset::Jobs
             && snapshot.records as usize <= MAX_TIMESCALE_JOB_OBSERVATIONS
-            && snapshot.sources.len() == 2
+            && snapshot.sources.len() == 3
+            && snapshot.sources.iter().all(|source| {
+                source.source != TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE
+                    || source.records <= MAX_TIMESCALE_CONTINUOUS_AGGREGATE_ROWS
+            })
             && snapshot.sources.iter().map(|source| source.source.as_str()).collect::<BTreeSet<_>>()
-                == BTreeSet::from([TIMESCALE_JOBS_SOURCE, TIMESCALE_JOB_RUNS_SOURCE])
+                == BTreeSet::from([
+                    TIMESCALE_JOBS_SOURCE,
+                    TIMESCALE_JOB_RUNS_SOURCE,
+                    TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE,
+                ])
             && canonical_time(&self.run_window.until).ok() == canonical_time(&snapshot.observed_from).ok()
     }
     pub fn matches_source(&self, source: &CollectionDescription, snapshot: &StateSnapshotDescription) -> bool {
@@ -236,7 +254,7 @@ impl TimescaleJobsSnapshot {
         self.is_valid_read(true)
     }
     pub fn is_valid_read(&self, read_complete: bool) -> bool {
-        if self.sources.len() != 2
+        if self.sources.len() != 3
             || self.sources.iter().any(|source| source.records as usize > MAX_TIMESCALE_JOB_OBSERVATIONS)
         {
             return false;

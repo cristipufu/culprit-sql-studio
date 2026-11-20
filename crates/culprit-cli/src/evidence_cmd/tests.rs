@@ -1,3 +1,4 @@
+mod cdc;
 mod tempdb_metadata_memory;
 use super::*;
 use clap::Parser;

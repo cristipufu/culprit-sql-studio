@@ -8,6 +8,7 @@ use crate::{
 };
 use culprit_core::{IndexStat, Result, telemetry::*};
 
+mod columnstore;
 const APPLICATION_INDEXES: usize = 10_000;
 pub(crate) struct Layout {
     pub with_dmvs: bool,
@@ -34,18 +35,25 @@ pub(crate) fn select_sql(layout: &Layout) -> String {
     } else {
         ""
     };
-    format!(
-        r#"
+    columnstore::query(columnstore::QueryParts {
+        before_configuration: format!(
+            r#"
 WITH native_partitions AS ({relation})
 SELECT TOP (@P1) DB_ID() AS database_id,t.object_id,
  CONVERT(varchar(40),t.create_date,126) AS created_without_offset,
  CONVERT(varchar(40),t.modify_date,126) AS modified_without_offset,
  s.name AS schema_name,t.name AS table_name,i.name AS index_name,i.index_id,i.type,i.type_desc,
- t.is_memory_optimized,i.is_unique,i.is_primary_key,i.is_disabled,i.has_filter,{filter},
- (SELECT ic.index_column_id,c.column_id,c.name,ic.key_ordinal,
-         ic.is_descending_key AS descending,ic.is_included_column AS included
+ t.is_memory_optimized,i.is_unique,i.is_primary_key,i.is_disabled,i.has_filter,{filter},"#
+        ),
+        before_ordinals: format!(
+            " ISNULL((SELECT TOP({}) ic.index_column_id,c.column_id,c.name,ic.key_ordinal,
+         ic.is_descending_key AS descending,ic.is_included_column AS included,",
+            MAX_MSSQL_INDEX_COLUMNS + 1
+        ),
+        after_ordinals: format!(
+            r#"
   FROM sys.index_columns ic JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
-  WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id ORDER BY ic.index_column_id FOR JSON PATH) AS index_columns,
+  WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id ORDER BY ic.index_column_id FOR JSON PATH,INCLUDE_NULL_VALUES),N'[]') AS index_columns,
  CASE WHEN {measurable} THEN CONVERT(varchar(40),(SELECT SUM(p.reserved_pages)*{page_bytes} FROM native_partitions p WHERE p.object_id=i.object_id AND p.index_id=i.index_id)) END AS reserved_bytes,
  {usage_fields}
 FROM sys.indexes i JOIN sys.tables t ON t.object_id=i.object_id
@@ -53,7 +61,8 @@ JOIN sys.schemas s ON s.schema_id=t.schema_id {usage_join}
 WHERE t.is_ms_shipped=0 AND i.type>0 AND i.is_hypothetical=0
 ORDER BY i.object_id,i.index_id OPTION(MAXDOP 1)
 "#
-    )
+        ),
+    })
 }
 pub(crate) struct NativeIndex {
     pub snapshot: MssqlIndexSnapshot,
@@ -84,7 +93,8 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<NativeIndex> {
             reset: culprit_core::ResetMarker::Unknown,
         }))
     };
-    let snapshot = MssqlIndexSnapshot {
+    let columns = columnstore::columns(&text(row, "index_columns")?)?;
+    let mut snapshot = MssqlIndexSnapshot {
         table: MssqlObjectIdentity {
             database_id: narrow("database_id")?,
             object_id: narrow("object_id")?,
@@ -101,11 +111,13 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<NativeIndex> {
         unique: boolean(row, "is_unique")?,
         primary_key: boolean(row, "is_primary_key")?,
         disabled: boolean(row, "is_disabled")?,
-        columns: serde_json::from_str(&text(row, "index_columns")?).map_err(|_| invalid_data())?,
+        columns: columns.native,
+        columnstore: None,
         filter: crate::catalog_expression::decode(row, boolean(row, "has_filter")?, "filter", layout.expression_limit)?,
         reserved_bytes: optional_text(row, "reserved_bytes")?,
         usage,
     };
+    snapshot.columnstore = columnstore::configuration(row, &snapshot, columns.columnstore)?;
     if !snapshot.is_valid() {
         return Err(invalid_data());
     }
@@ -161,6 +173,7 @@ impl NativeIndex {
             .map(|column| if column.descending { format!("{} DESC", column.name) } else { column.name.clone() })
             .collect();
         Ok(IndexStat {
+            mssql_columnstore: index.columnstore,
             docdb: None,
             filter_facts: None,
             schema: index.schema,
@@ -195,3 +208,6 @@ impl NativeIndex {
 }
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod native_tests;

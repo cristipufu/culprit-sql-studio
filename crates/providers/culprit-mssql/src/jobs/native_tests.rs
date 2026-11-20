@@ -22,6 +22,7 @@ use std::{
     time::Duration,
 };
 use tokio::time::Instant;
+mod cdc;
 mod fixture;
 use fixture::AgentJob;
 const CASE_TIMEOUT: Duration = Duration::from_secs(90);

@@ -13,6 +13,8 @@ pub enum JobsCase {
     Unavailable,
     ExtensionMissing,
     Limited,
+    AggregateConfiguration,
+    AggregateNameMatchesCurrentJob,
 }
 impl JobsCase {
     pub const ALL: &[Self] = &[
@@ -26,6 +28,8 @@ impl JobsCase {
         Self::Unavailable,
         Self::ExtensionMissing,
         Self::Limited,
+        Self::AggregateConfiguration,
+        Self::AggregateNameMatchesCurrentJob,
     ];
 }
 pub fn jobs_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
@@ -61,6 +65,17 @@ pub fn jobs_evidence(case: JobsCase) -> (CollectionDescription, Vec<TelemetryRec
             point.statistics.as_mut().unwrap().total_runs = Some("9".into());
             rows.push(second);
         }
+        JobsCase::AggregateConfiguration => rows.push(aggregate()),
+        JobsCase::AggregateNameMatchesCurrentJob => {
+            let aggregate = aggregate();
+            let OperationalFact::TimescaleContinuousAggregate(point) = &aggregate.fact else { unreachable!() };
+            let mut current_job = state(1);
+            let OperationalFact::TimescaleJobState(job) = &mut current_job.fact else { unreachable!() };
+            job.hypertable =
+                Some(TimescaleJobProcedure { schema: point.view.schema.clone(), name: point.view.name.clone() });
+            current_job.key = job.key().unwrap();
+            rows.extend([aggregate, current_job, run(Some(false), true)]);
+        }
         JobsCase::OwnerFilteredEmpty => metadata.run_visibility = TimescaleJobRunVisibility::JobOwners,
         JobsCase::Empty => {}
         JobsCase::Unavailable => {
@@ -80,7 +95,7 @@ pub fn jobs_evidence(case: JobsCase) -> (CollectionDescription, Vec<TelemetryRec
             }
         }
     }
-    let sources = [TIMESCALE_JOBS_SOURCE, TIMESCALE_JOB_RUNS_SOURCE]
+    let sources = [TIMESCALE_JOBS_SOURCE, TIMESCALE_JOB_RUNS_SOURCE, TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE]
         .into_iter()
         .map(|source| {
             let count = rows.iter().filter(|row| row.source == source).count() as u32;
@@ -94,7 +109,7 @@ pub fn jobs_evidence(case: JobsCase) -> (CollectionDescription, Vec<TelemetryRec
                     coverage.stopped = Some(CollectionStop::RowLimit);
                     coverage
                 }
-                _ => StateSourceCoverage::observed(source.into(), count, source == TIMESCALE_JOBS_SOURCE),
+                _ => StateSourceCoverage::observed(source.into(), count, source != TIMESCALE_JOB_RUNS_SOURCE),
             }
         })
         .collect();
@@ -130,6 +145,7 @@ fn metadata() -> TimescaleJobsMetadata {
         TimescaleJobViewKind::Statistics,
         TimescaleJobViewKind::History,
         TimescaleJobViewKind::Errors,
+        TimescaleJobViewKind::ContinuousAggregates,
     ]
     .into_iter()
     .enumerate()
@@ -226,5 +242,25 @@ pub fn assert_jobs_capture(
         let expected=records.iter().find(|record|matches!((record,&actual.row().record),(TelemetryRecord::Operational(left),TelemetryRecord::Operational(right)) if left.source==right.source&&left.key==right.key)).unwrap();
         let exported = ExportedRecord::new(source, capture.capture(), expected.clone()).unwrap();
         assert_eq!(actual.row(), &exported);
+    }
+}
+
+fn aggregate() -> OperationalObservation {
+    let relation = |schema: &str, name: &str| TimescaleRelationLabel { schema: schema.into(), name: name.into() };
+    let point = TimescaleContinuousAggregate {
+        position: 1,
+        observed_at: FROM.into(),
+        view: relation("public", "hourly readings"),
+        source_hypertable: relation("public", "raw readings"),
+        materialization_hypertable: relation("_timescaledb_internal", "_materialized_hypertable_2"),
+        owner: "native-aggregate-owner".into(),
+        materialized_only: false,
+        compression_enabled: true,
+        granular_refresh_enabled: None,
+    };
+    OperationalObservation {
+        source: TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE.into(),
+        key: point.key().unwrap(),
+        fact: OperationalFact::TimescaleContinuousAggregate(Box::new(point)),
     }
 }

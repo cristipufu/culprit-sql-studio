@@ -1,11 +1,11 @@
-/** One native-context preview budget shared by recorded page and current task statements and clients. */
+/** Bound native text by Unicode code points; callers share a default display budget. */
 export const CONTEXT_PREVIEW_CHARACTERS = 512;
 
-export function contextPreview(text: string): { text: string; truncated: boolean } {
+export function contextPreview(text: string, maximumCharacters = CONTEXT_PREVIEW_CHARACTERS): { text: string; truncated: boolean } {
   let preview = "";
   let characters = 0;
   for (const character of text) {
-    if (characters === CONTEXT_PREVIEW_CHARACTERS) return { text: `${preview}…`, truncated: true };
+    if (characters === maximumCharacters) return { text: `${preview}…`, truncated: true };
     preview += character;
     characters++;
   }

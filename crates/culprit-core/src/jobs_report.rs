@@ -10,6 +10,7 @@ pub enum JobEntryKind {
     State,
     RetainedRun,
     AgentContext,
+    ContinuousAggregate,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

@@ -13,6 +13,7 @@ mod cached_runtime;
 mod cached_statements;
 mod catalog_expression;
 mod catalog_visibility;
+mod cdc;
 mod check_constraints;
 mod collect;
 mod columns;

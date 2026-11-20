@@ -21,7 +21,7 @@ fn enabled_disabled_tracking_and_last_crawl_remain_independent_native_catalog_va
                 ],
             );
             let state = decode(&row, 100).unwrap();
-            assert_eq!(state.availability, MssqlFullTextCatalogAvailability::Available);
+            assert_eq!(state.availability, MssqlCatalogAvailability::Available);
             let index = state.index.unwrap();
             assert_eq!(index.enabled, Some(enabled));
             assert_eq!(index.change_tracking, Some(tracking));
@@ -43,11 +43,11 @@ fn native_null_fields_do_not_erase_known_index_presence_or_become_false() {
     assert!(index.unique_index_id.is_none());
     assert!(index.catalog_id.is_none());
     let absent = decode(&without_full_text(0), 100).unwrap();
-    assert_eq!(absent.availability, MssqlFullTextCatalogAvailability::Available);
+    assert_eq!(absent.availability, MssqlCatalogAvailability::Available);
     assert!(absent.index.is_none());
     for availability in [1, 2, 3] {
         let unknown = decode(&without_full_text(availability), 100).unwrap();
-        assert_ne!(unknown.availability, MssqlFullTextCatalogAvailability::Available);
+        assert_ne!(unknown.availability, MssqlCatalogAvailability::Available);
         assert!(unknown.index.is_none());
     }
 }

@@ -17,7 +17,7 @@ fn snapshot(state: Option<MssqlTableFullText>) -> Snapshot {
 }
 fn present() -> MssqlTableFullText {
     MssqlTableFullText {
-        availability: MssqlFullTextCatalogAvailability::Available,
+        availability: MssqlCatalogAvailability::Available,
         index: Some(MssqlFullTextIndex {
             unique_index_id: Some(1),
             catalog_id: Some(3),
@@ -64,10 +64,10 @@ fn native_nulls_keep_the_index_present_and_each_value_unknown() {
 #[test]
 fn absence_unavailable_and_uncollected_do_not_collapse_into_a_healthy_zero() {
     for (availability, key) in [
-        (MssqlFullTextCatalogAvailability::Available, "view.table_full_text.absent"),
-        (MssqlFullTextCatalogAvailability::Unsupported, "view.table_full_text.unsupported"),
-        (MssqlFullTextCatalogAvailability::PermissionDenied, "view.table_full_text.denied"),
-        (MssqlFullTextCatalogAvailability::Unknown, "view.table_full_text.unknown"),
+        (MssqlCatalogAvailability::Available, "view.table_full_text.absent"),
+        (MssqlCatalogAvailability::Unsupported, "view.table_full_text.unsupported"),
+        (MssqlCatalogAvailability::PermissionDenied, "view.table_full_text.denied"),
+        (MssqlCatalogAvailability::Unknown, "view.table_full_text.unknown"),
     ] {
         let report =
             explain_snapshot(&snapshot(Some(MssqlTableFullText { availability, index: None }))).unwrap().unwrap();
@@ -104,7 +104,7 @@ fn all_tracking_modes_and_partial_source_are_context_without_changing_findings()
 #[test]
 fn invalid_payload_or_foreign_vendor_and_unavailable_source_cannot_supply_positive_catalog_context() {
     let mut invalid = present();
-    invalid.availability = MssqlFullTextCatalogAvailability::PermissionDenied;
+    invalid.availability = MssqlCatalogAvailability::PermissionDenied;
     assert!(explain_snapshot(&snapshot(Some(invalid))).is_err());
     let mut foreign = snapshot(Some(present()));
     foreign.server.engine = Engine::Postgres;

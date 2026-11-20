@@ -7,7 +7,10 @@ use culprit_core::{SourceState, telemetry::*};
 async fn installed_public_job_views_retain_paused_states_actual_failures_and_exact_native_counts() {
     let fixture = Fixture::open().await;
     let captured = capture(&fixture.admin, request()).await;
-    assert_eq!(captured.manifest.source_queries, 7, "setup, two metadata reads, two discoveries, states and history");
+    assert_eq!(
+        captured.manifest.source_queries, 8,
+        "setup, two metadata reads, two discoveries, states, history and aggregate configuration"
+    );
     let read = &captured.snapshot;
     assert_eq!(read.metadata.extension.as_ref().unwrap().qualifiers.get("version").map(String::as_str), Some("2.31.0"));
     assert_eq!(read.metadata.run_view, Some(TimescaleJobViewKind::History));
@@ -22,6 +25,27 @@ async fn installed_public_job_views_retain_paused_states_actual_failures_and_exa
         assert_eq!(view.state, TimescaleJobViewState::Available);
         assert!(view.identity.as_ref().unwrap().qualifiers.contains_key("columns"));
     }
+    let aggregates = read
+        .observations
+        .iter()
+        .filter_map(|row| match &row.fact {
+            OperationalFact::TimescaleContinuousAggregate(point) => Some(point.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(coverage(read, TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE).state, SourceState::Collected);
+    let aggregate = aggregates
+        .iter()
+        .find(|point| point.view.schema == "public" && point.view.name == "sensor_hourly")
+        .expect("the existing owned WITH NO DATA aggregate");
+    assert_eq!(aggregate.source_hypertable.schema, "public");
+    assert_eq!(aggregate.source_hypertable.name, "sensor_readings");
+    assert_eq!(aggregate.materialization_hypertable.schema, "_timescaledb_internal");
+    assert!(!aggregate.materialization_hypertable.name.is_empty());
+    assert_eq!(aggregate.owner, fixture.admin.user.as_deref().unwrap());
+    assert!(!aggregate.compression_enabled);
+    assert!(read.metadata.available(TimescaleJobViewKind::ContinuousAggregates));
+    // The existing fixture deliberately never refreshes this view. Settings must not imply materialized data.
     for id in fixture.jobs.values() {
         let point = state(read, id);
         assert!(!point.scheduled);
@@ -55,7 +79,7 @@ async fn limited_history_permission_uses_the_real_owner_filtered_error_view_with
     let fixture = Fixture::open().await;
     let captured = capture(&fixture.limited, request()).await;
     let read = &captured.snapshot;
-    assert_eq!(captured.manifest.source_queries, 7);
+    assert_eq!(captured.manifest.source_queries, 8);
     assert_eq!(
         read.metadata.view(TimescaleJobViewKind::History).unwrap().state,
         TimescaleJobViewState::PermissionDenied
@@ -105,7 +129,7 @@ async fn configured_validation_function_is_recorded_without_invocation_during_co
         assert_eq!(point.value("is_called"), Some(Some("t")), "registration genuinely invokes the checker");
         assert_eq!(point.unsigned_text("invocations").unwrap().as_deref(), Some("1"));
     }
-    assert_eq!(captured.manifest.source_queries, 7, "one source setup plus the unchanged six acquisition calls");
+    assert_eq!(captured.manifest.source_queries, 8, "one source setup plus seven bounded acquisition calls");
     assert_eq!(request().budget.max_queries, 8);
     assert_eq!(captured.manifest.status, CollectionStatus::Complete);
     let snapshot = &captured.snapshot;

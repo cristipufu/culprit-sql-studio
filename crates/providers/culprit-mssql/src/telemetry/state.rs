@@ -153,7 +153,7 @@ pub(super) fn record_family(
         Err(error) => source_failure(source, error),
     }
 }
-fn source_failure(source: String, error: culprit_core::Error) -> Result<StateSourceCoverage> {
+pub(super) fn source_failure(source: String, error: culprit_core::Error) -> Result<StateSourceCoverage> {
     let stopped = CollectionStop::from_error(&error);
     if stops_remaining_reads(&error) {
         return Err(error);
@@ -295,6 +295,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     SnapshotDataset::MemoryFailures
                     | SnapshotDataset::NativeFailures
                     | SnapshotDataset::Jobs
+                    | SnapshotDataset::Cdc
                     | SnapshotDataset::SessionMemory
                     | SnapshotDataset::PageWaitTargets
                     | SnapshotDataset::TaskSpace

@@ -4,16 +4,6 @@ use super::*;
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
-pub enum MssqlFullTextCatalogAvailability {
-    Available,
-    Unsupported,
-    PermissionDenied,
-    Unknown,
-}
-
-#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-#[ts(export)]
 pub enum MssqlFullTextChangeTracking {
     Manual,
     Automatic,
@@ -40,7 +30,7 @@ impl MssqlFullTextIndex {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct MssqlTableFullText {
-    pub availability: MssqlFullTextCatalogAvailability,
+    pub availability: MssqlCatalogAvailability,
     /// `None` establishes no index only when the catalog is available under complete database metadata visibility.
     /// An unavailable catalog never establishes absence. Individual index fields retain native NULLs.
     pub index: Option<MssqlFullTextIndex>,
@@ -48,7 +38,7 @@ pub struct MssqlTableFullText {
 impl MssqlTableFullText {
     pub fn is_valid(&self) -> bool {
         match self.availability {
-            MssqlFullTextCatalogAvailability::Available => self.index.as_ref().is_none_or(MssqlFullTextIndex::is_valid),
+            MssqlCatalogAvailability::Available => self.index.as_ref().is_none_or(MssqlFullTextIndex::is_valid),
             _ => self.index.is_none(),
         }
     }
@@ -80,8 +70,7 @@ mod tests {
                 last_crawl_completed: None,
             },
         ] {
-            let state =
-                MssqlTableFullText { availability: MssqlFullTextCatalogAvailability::Available, index: Some(index) };
+            let state = MssqlTableFullText { availability: MssqlCatalogAvailability::Available, index: Some(index) };
             assert!(state.is_valid());
             let bytes = serde_json::to_vec(&state).unwrap();
             assert_eq!(serde_json::from_slice::<MssqlTableFullText>(&bytes).unwrap(), state);
@@ -92,9 +81,9 @@ mod tests {
     #[test]
     fn unavailable_catalogs_cannot_claim_an_index_and_invalid_native_ids_are_not_repaired() {
         for availability in [
-            MssqlFullTextCatalogAvailability::Unsupported,
-            MssqlFullTextCatalogAvailability::PermissionDenied,
-            MssqlFullTextCatalogAvailability::Unknown,
+            MssqlCatalogAvailability::Unsupported,
+            MssqlCatalogAvailability::PermissionDenied,
+            MssqlCatalogAvailability::Unknown,
         ] {
             let mut state = MssqlTableFullText { availability, index: None };
             assert!(state.is_valid());
@@ -109,7 +98,7 @@ mod tests {
             value.catalog_id = Some(invalid);
             assert!(!value.is_valid());
         }
-        let absent = MssqlTableFullText { availability: MssqlFullTextCatalogAvailability::Available, index: None };
+        let absent = MssqlTableFullText { availability: MssqlCatalogAvailability::Available, index: None };
         assert!(absent.is_valid());
     }
 }

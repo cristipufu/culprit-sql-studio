@@ -10,6 +10,7 @@ fn metadata() -> TimescaleJobsMetadata {
             TimescaleJobViewKind::Statistics,
             TimescaleJobViewKind::History,
             TimescaleJobViewKind::Errors,
+            TimescaleJobViewKind::ContinuousAggregates,
         ]
         .into_iter()
         .enumerate()
@@ -111,6 +112,7 @@ fn report() -> Box<Report> {
         sources: vec![
             StateSourceCoverage::collected(TIMESCALE_JOBS_SOURCE.into(), 8),
             StateSourceCoverage::observed(TIMESCALE_JOB_RUNS_SOURCE.into(), 1, false),
+            StateSourceCoverage::observed(TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE.into(), 0, true),
         ],
         observations,
     };

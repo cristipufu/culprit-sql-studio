@@ -73,7 +73,7 @@ pub(super) async fn read<R: QueryRead>(reader: &mut R, database_oid: &str, ancho
     let anchor = canonical_time(anchor)?;
     // PostgreSQL's JSON conversion quotes oid values. Cast to bigint to preserve the numeric column-type contract.
     let sql = format!(
-        r#"WITH names(name) AS (VALUES ('jobs'),('job_stats'),('job_history'),('job_errors'))
+        r#"WITH names(name) AS (VALUES ('jobs'),('job_stats'),('job_history'),('job_errors'),('continuous_aggregates'))
       SELECT names.name AS view_name,e.oid::text AS extension_oid,e.extversion AS extension_version,
        c.oid::text AS view_oid,pg_catalog.has_table_privilege(c.oid,'SELECT') AS can_select,
        (SELECT pg_catalog.json_agg(pg_catalog.json_build_object('name',a.attname,'oid',a.atttypid::bigint) ORDER BY a.attnum)::text
@@ -92,8 +92,8 @@ pub(super) async fn read<R: QueryRead>(reader: &mut R, database_oid: &str, ancho
         iso(&format!("'{anchor}'::timestamptz - INTERVAL '{TIMESCALE_JOB_HISTORY_HOURS} hours'")),
         database_oid.parse::<u32>().map_err(|_| invalid())?
     );
-    let rows = reader.query(&sql, 5).await?;
-    if rows.len() != 4 {
+    let rows = reader.query(&sql, 6).await?;
+    if rows.len() != 5 {
         return Err(invalid());
     }
     let mut result: Option<Discovery> = None;
@@ -103,6 +103,7 @@ pub(super) async fn read<R: QueryRead>(reader: &mut R, database_oid: &str, ancho
             "job_stats" => TimescaleJobViewKind::Statistics,
             "job_history" => TimescaleJobViewKind::History,
             "job_errors" => TimescaleJobViewKind::Errors,
+            "continuous_aggregates" => TimescaleJobViewKind::ContinuousAggregates,
             _ => return Err(invalid()),
         };
         let extension = match (row.text("extension_oid"), row.text("extension_version")) {
@@ -205,6 +206,17 @@ fn supported(kind: TimescaleJobViewKind, columns: &BTreeMap<String, u32>) -> boo
             ("max_retries", &[23]),
             ("retry_period", &[1186]),
         ],
+        TimescaleJobViewKind::ContinuousAggregates => &[
+            ("hypertable_schema", &[19, 25]),
+            ("hypertable_name", &[19, 25]),
+            ("view_schema", &[19, 25]),
+            ("view_name", &[19, 25]),
+            ("view_owner", &[19, 25]),
+            ("materialized_only", &[16]),
+            ("compression_enabled", &[16]),
+            ("materialization_hypertable_schema", &[19, 25]),
+            ("materialization_hypertable_name", &[19, 25]),
+        ],
         TimescaleJobViewKind::Statistics => &[("job_id", &[23])],
         TimescaleJobViewKind::History => &[
             ("id", &[20, 23]),
@@ -236,6 +248,7 @@ fn supported(kind: TimescaleJobViewKind, columns: &BTreeMap<String, u32>) -> boo
             ("total_successes", &[20]),
             ("total_failures", &[20]),
         ],
+        TimescaleJobViewKind::ContinuousAggregates => &[("granular_refresh_enabled", &[16])],
         TimescaleJobViewKind::History | TimescaleJobViewKind::Errors => {
             &[("pid", &[23]), ("sqlerrcode", &[25]), ("proc_schema", &[19, 25]), ("proc_name", &[19, 25])]
         }

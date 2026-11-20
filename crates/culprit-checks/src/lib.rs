@@ -28,7 +28,7 @@ pub use checks::tuning;
 pub(crate) use checks::{config, deadlocks, index_health, indexes, pressure, queries, signals};
 pub(crate) use views::{advisor, brief, digest};
 pub use views::{
-    cache_entry_memory, cleanup, compilation, compiler_admission, completed_spills, configured_log_rates,
+    cache_entry_memory, cdc, cleanup, compilation, compiler_admission, completed_spills, configured_log_rates,
     connection_outcomes, counter_ratios, current_request_work, dashboard, database_properties, drift, focused_blocking,
     hyperscale_log_components, instance_resources, jobs, maintenance, maintenance_blocking, maintenance_progress,
     memory_clerks, memory_failures, native_failures, page_server_reads, page_waits, performance_counters,

@@ -4,6 +4,21 @@
 //! detail some checks use; without it those checks say less, never something wrong.
 
 use culprit_core::{Capability, Coverage, ErrorCode, Source, source_id};
+pub const CDC_STATUS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CDC_STATUS_SOURCE,
+    reads: culprit_core::key!("view.cdc.source.status"),
+    delivers: &[],
+};
+pub const CDC_SCANS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CDC_SCANS_SOURCE,
+    reads: culprit_core::key!("view.cdc.source.scans"),
+    delivers: &[],
+};
+pub const CDC_ERRORS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CDC_ERRORS_SOURCE,
+    reads: culprit_core::key!("view.cdc.source.errors"),
+    delivers: &[],
+};
 pub const AGENT_JOBS: Source = Source {
     name: culprit_core::telemetry::MSSQL_AGENT_JOBS_SOURCE,
     reads: culprit_core::key!("view.mssql_agent_jobs.source.jobs"),
@@ -416,6 +431,9 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    CDC_STATUS,
+    CDC_SCANS,
+    CDC_ERRORS,
     AGENT_JOBS,
     AGENT_STEPS,
     AGENT_HISTORY,

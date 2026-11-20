@@ -91,11 +91,11 @@ fn entry(
         return Err(invalid());
     }
     let summary = match state.availability {
-        MssqlFullTextCatalogAvailability::Unsupported => t!("view.table_full_text.unsupported"),
-        MssqlFullTextCatalogAvailability::PermissionDenied => t!("view.table_full_text.denied"),
-        MssqlFullTextCatalogAvailability::Unknown => t!("view.table_full_text.unknown"),
-        MssqlFullTextCatalogAvailability::Available if state.index.is_some() => t!("view.table_full_text.present"),
-        MssqlFullTextCatalogAvailability::Available => t!("view.table_full_text.absent"),
+        MssqlCatalogAvailability::Unsupported => t!("view.table_full_text.unsupported"),
+        MssqlCatalogAvailability::PermissionDenied => t!("view.table_full_text.denied"),
+        MssqlCatalogAvailability::Unknown => t!("view.table_full_text.unknown"),
+        MssqlCatalogAvailability::Available if state.index.is_some() => t!("view.table_full_text.present"),
+        MssqlCatalogAvailability::Available => t!("view.table_full_text.absent"),
     };
     let metrics = match &state.index {
         None => vec![],

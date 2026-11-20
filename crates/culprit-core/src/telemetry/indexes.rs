@@ -1,5 +1,8 @@
 //! Native index metadata and usage remain separate from app display strings and inferred reset clocks.
 use super::*;
+mod columnstore;
+pub use columnstore::*;
+pub const MAX_MSSQL_INDEX_COLUMNS: usize = 1024;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -67,6 +70,7 @@ pub struct MssqlIndexSnapshot {
     pub primary_key: bool,
     pub disabled: bool,
     pub columns: Vec<MssqlCatalogIndexColumn>,
+    pub columnstore: Option<Box<MssqlColumnstoreConfiguration>>,
     pub filter: Option<CatalogExpression>,
     pub reserved_bytes: Option<String>,
     pub usage: MssqlIndexUsage,
@@ -92,7 +96,7 @@ impl MssqlIndexSnapshot {
                 .into_iter()
                 .all(|name| !name.is_empty() && name.len() <= 2048)
             && super::catalog::local_time(&self.table_modified_without_offset)
-            && self.columns.len() <= 1024
+            && self.columns.len() <= MAX_MSSQL_INDEX_COLUMNS
             && self.columns.iter().all(|column| {
                 column.column_id > 0
                     && column.index_column_id > 0
@@ -101,6 +105,8 @@ impl MssqlIndexSnapshot {
                     && ordinals.insert(column.index_column_id)
                     && (column.key_ordinal == 0 || (!column.included && keys.insert(column.key_ordinal)))
             })
+            && (matches!(self.type_code, 5 | 6) == self.columnstore.is_some())
+            && self.columnstore.as_ref().is_none_or(|configuration| configuration.is_valid_for(self))
             && self.filter.as_ref().is_none_or(CatalogExpression::is_valid)
             && self.reserved_bytes.as_deref().is_none_or(valid_counter)
             && match &self.usage {

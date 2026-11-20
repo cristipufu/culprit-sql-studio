@@ -31,14 +31,12 @@ pub fn table_full_text_evidence(case: TableFullTextCase) -> (CollectionDescripti
     source.source = "table-state".into();
     source.partition = SourcePartition::Target;
     let (availability, index) = match case {
-        TableFullTextCase::Unsupported => (MssqlFullTextCatalogAvailability::Unsupported, None),
-        TableFullTextCase::Denied => (MssqlFullTextCatalogAvailability::PermissionDenied, None),
-        TableFullTextCase::Unknown => (MssqlFullTextCatalogAvailability::Unknown, None),
-        TableFullTextCase::Absent | TableFullTextCase::SourceDenied => {
-            (MssqlFullTextCatalogAvailability::Available, None)
-        }
+        TableFullTextCase::Unsupported => (MssqlCatalogAvailability::Unsupported, None),
+        TableFullTextCase::Denied => (MssqlCatalogAvailability::PermissionDenied, None),
+        TableFullTextCase::Unknown => (MssqlCatalogAvailability::Unknown, None),
+        TableFullTextCase::Absent | TableFullTextCase::SourceDenied => (MssqlCatalogAvailability::Available, None),
         _ => (
-            MssqlFullTextCatalogAvailability::Available,
+            MssqlCatalogAvailability::Available,
             Some(MssqlFullTextIndex {
                 unique_index_id: Some(1),
                 catalog_id: Some(3),

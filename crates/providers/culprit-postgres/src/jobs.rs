@@ -27,8 +27,11 @@ async fn collect_from<R: NativeRead>(
     let mut coverage = Coverage::default();
     let captured = match result {
         Ok(captured) if shutdown == SourceShutdown::Quiescent => {
-            for (source, state) in [(&sources::JOBS, &captured.sources[0]), (&sources::JOB_RUNS, &captured.sources[1])]
-            {
+            for (source, state) in [
+                (&sources::JOBS, &captured.sources[0]),
+                (&sources::JOB_RUNS, &captured.sources[1]),
+                (&sources::CONTINUOUS_AGGREGATES, &captured.sources[2]),
+            ] {
                 if matches!(state.state, culprit_core::SourceState::Collected | culprit_core::SourceState::Empty) {
                     coverage.recorded(source, state.state, None);
                 } else {
@@ -41,6 +44,7 @@ async fn collect_from<R: NativeRead>(
         Err(error) => {
             coverage.source_failed(&sources::JOBS, &error);
             coverage.source_failed(&sources::JOB_RUNS, &error);
+            coverage.source_failed(&sources::CONTINUOUS_AGGREGATES, &error);
             None
         }
     };
@@ -48,6 +52,7 @@ async fn collect_from<R: NativeRead>(
         let error = CollectionStop::CancellationUnconfirmed.error();
         coverage.source_failed(&sources::JOBS, &error);
         coverage.source_failed(&sources::JOB_RUNS, &error);
+        coverage.source_failed(&sources::CONTINUOUS_AGGREGATES, &error);
     }
     (captured, coverage)
 }

@@ -254,6 +254,12 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(cleanup::bounded_budget)
     .on_editions(crate::instance::SUPPORTED_EDITIONS),
+    Registration::database(
+        "mssql.cdc",
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cdc)),
+        |pool, request, host, port| Ok(Box::new(cdc::CdcSource::new(pool, request, host, port)?)),
+    )
+    .bounded(cdc::bounded_budget),
     state!("mssql.operational", Operational).baseline().version(6),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
@@ -282,7 +288,7 @@ const REGISTRATIONS: &[Registration] = &[
     streamed!("mssql.foreign-keys", ForeignKeys, foreign_keys::ForeignKeys),
     streamed!("mssql.columns", Columns, columns::Columns),
     streamed!("mssql.statistics", Statistics, statistics::Statistics),
-    streamed!("mssql.indexes", Indexes, indexes::Indexes),
+    streamed!("mssql.indexes", Indexes, indexes::Indexes).version(2),
     streamed!("mssql.check-constraints", CheckConstraints, check_constraints::CheckConstraints),
     streamed!("mssql.query-compilation", QueryCompilation, compilation::QueryCompilation).version(3),
     streamed!("mssql.cached-runtime", CachedRuntime, cached_runtime::CachedRuntime).version(2),

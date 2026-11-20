@@ -49,6 +49,14 @@ fn redact_timescale(
                 }
                 row.key = point.key()?;
             }
+            OperationalFact::TimescaleContinuousAggregate(point) => {
+                point.owner = opaque(&point.owner);
+                for relation in [&mut point.view, &mut point.source_hypertable, &mut point.materialization_hypertable] {
+                    relation.schema = shareable_name(&relation.schema);
+                    relation.name = shareable_name(&relation.name);
+                }
+                row.key = point.key()?;
+            }
             _ => return Err(CollectionStop::InvalidPage.error()),
         }
     }

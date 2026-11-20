@@ -846,7 +846,7 @@
         "table": "orders"
       }
     ],
-    "format": 27,
+    "format": 28,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -878,6 +878,7 @@
         "last_read": null,
         "lookups": null,
         "maintained": true,
+        "mssql_columnstore": null,
         "name": "sqlite_autoindex_customers_1",
         "opclasses": null,
         "partition_of": null,
@@ -910,6 +911,7 @@
         "last_read": null,
         "lookups": null,
         "maintained": true,
+        "mssql_columnstore": null,
         "name": "sqlite_autoindex_order_items_1",
         "opclasses": null,
         "partition_of": null,
@@ -941,6 +943,7 @@
         "last_read": null,
         "lookups": null,
         "maintained": true,
+        "mssql_columnstore": null,
         "name": "ix_orders_status_again",
         "opclasses": null,
         "partition_of": null,
@@ -972,6 +975,7 @@
         "last_read": null,
         "lookups": null,
         "maintained": true,
+        "mssql_columnstore": null,
         "name": "ix_orders_status",
         "opclasses": null,
         "partition_of": null,

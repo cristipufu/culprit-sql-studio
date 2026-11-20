@@ -1,6 +1,6 @@
 //! A one-to-zero-or-one persisted catalog companion, never a full-text population/queue traversal.
 use crate::{
-    read::{integer, invalid_data, optional_boolean, optional_integer, optional_text},
+    read::{invalid_data, optional_boolean, optional_integer, optional_text},
     value::Rec,
 };
 use culprit_core::{Result, telemetry::*};
@@ -18,13 +18,14 @@ const UNAVAILABLE_COLUMNS: &str = r#"CAST(NULL AS int) AS full_text_object_id,CA
 /// Both branches come from the SAME table projection. Only the selected branch compiles/executes.
 /// Fixed catalog-layout and permission checks do not dispatch a second read or retry an unavailable source.
 pub(super) fn query(table_query: impl Fn(&str, &str) -> String) -> String {
-    let joined = crate::statement_origin::monitoring_batch(&table_query(
+    let joined = crate::catalog_visibility::sql_literal(&crate::statement_origin::monitoring_batch(&table_query(
         COLUMNS,
         &format!("LEFT JOIN {CATALOG} ft ON ft.object_id=t.object_id"),
-    ))
-    .replace('\'', "''");
-    let unavailable =
-        crate::statement_origin::monitoring_batch(&table_query(UNAVAILABLE_COLUMNS, "")).replace('\'', "''");
+    )));
+    let unavailable = crate::catalog_visibility::sql_literal(&crate::statement_origin::monitoring_batch(&table_query(
+        UNAVAILABLE_COLUMNS,
+        "",
+    )));
     format!(
         r#"DECLARE /* culprit */ @culprit_full_text_metadata int=HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION');
 DECLARE /* culprit */ @culprit_full_text_select int=HAS_PERMS_BY_NAME(N'{CATALOG}',N'OBJECT',N'SELECT');
@@ -38,21 +39,15 @@ DECLARE /* culprit */ @culprit_full_text_availability int=CASE
     OR (name=N'change_tracking_state' AND system_type_id=TYPE_ID(N'char') AND max_length=1)))=6 THEN 0
  ELSE 1 END;
 IF @culprit_full_text_availability=0
- EXEC /* culprit */ sys.sp_executesql N'{joined}',N'@P1 int',@P1=@P1;
+ EXEC /* culprit */ sys.sp_executesql {joined},N'@P1 int',@P1=@P1;
 ELSE
- EXEC /* culprit */ sys.sp_executesql N'{unavailable}',N'@P1 int,@culprit_full_text_availability int',
+ EXEC /* culprit */ sys.sp_executesql {unavailable},N'@P1 int,@culprit_full_text_availability int',
   @P1=@P1,@culprit_full_text_availability=@culprit_full_text_availability;"#
     )
 }
 
 pub(super) fn decode(row: &Rec, table_object_id: u32) -> Result<MssqlTableFullText> {
-    let availability = match integer(row, "full_text_availability")? {
-        0 => MssqlFullTextCatalogAvailability::Available,
-        1 => MssqlFullTextCatalogAvailability::Unsupported,
-        2 => MssqlFullTextCatalogAvailability::PermissionDenied,
-        3 => MssqlFullTextCatalogAvailability::Unknown,
-        _ => return Err(invalid_data()),
-    };
+    let availability = crate::catalog_visibility::availability(row, "full_text_availability")?;
     let object_id = native_id(row, "full_text_object_id")?;
     let index = MssqlFullTextIndex {
         unique_index_id: native_id(row, "full_text_unique_index_id")?,
@@ -68,7 +63,7 @@ pub(super) fn decode(row: &Rec, table_object_id: u32) -> Result<MssqlTableFullTe
         last_crawl_completed: optional_boolean(row, "full_text_last_crawl_completed")?,
     };
     if object_id.is_some_and(|id| id != table_object_id)
-        || (availability != MssqlFullTextCatalogAvailability::Available && object_id.is_some())
+        || (availability != MssqlCatalogAvailability::Available && object_id.is_some())
     {
         return Err(invalid_data());
     }

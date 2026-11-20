@@ -34,13 +34,19 @@ A deadlock counter remains PostgreSQL's database counter; reconstructing a deadl
 
 `culprit scan metrics --collect-native-failures` also reads supported job diagnostics. Scans and
 `culprit collect once metrics --collection jobs` share one bounded reader of the installed public
-`timescaledb_information.jobs`, `job_stats`, `job_history` and `job_errors` views. Culprit discovers available
+`timescaledb_information.jobs`, `job_stats`, `job_history`, `job_errors` and `continuous_aggregates` views. Culprit discovers available
 columns and permissions before selecting a view; it never runs jobs or changes history logging.
 
 The result retains schedules, reported state, exact run/failure totals and recent retained runs or error codes.
-It reads at most 256 job-state rows and 256 run rows, with a one-second statement timeout and five-second total
-budget. A successful bounded read can still have incomplete native history because of owner visibility,
+It reads at most 256 job-state rows, 256 run rows and 64 continuous-aggregate configuration rows within the same
+512-row total allowance, with a one-second statement timeout and five-second total budget. A successful bounded read can still have incomplete native history because of owner visibility,
 retention or disabled success logging. `pg_monitor` alone does not grant database-owner visibility.
+
+Aggregate details retain current view/source/materialization names and materialized-only, compression and supported
+granular-refresh settings. A separate coverage result records missing, denied or truncated catalog reads. No view
+definition, job configuration, watermark function or application data is read for these settings. Catalog names do
+not attach historical jobs to current objects; the settings do not measure refresh lag, backlog or completeness.
+See the [public continuous-aggregate catalog](https://www.tigerdata.com/docs/reference/timescaledb/informational-views/continuous_aggregates).
 
 Health shows folded job details. CLI archive analysis uses `--analysis jobs`; MCP includes a bounded summary in
 `waits`. A reported running state does not identify a worker or query, and historical procedure labels do not

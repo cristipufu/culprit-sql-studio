@@ -5,6 +5,10 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod cdc;
+mod columnstore;
+pub use cdc::{CdcCase, cdc_evidence};
+pub use columnstore::columnstore_configuration_evidence_cases;
 mod table_full_text;
 pub use table_full_text::{TableFullTextCase, assert_table_full_text_capture, table_full_text_evidence};
 mod database_properties;

@@ -9,6 +9,7 @@ use culprit_core::{
 use culprit_engine::{LocalSnapshotAnalysis, LocalSnapshotReport};
 use serde_json::{Value, json};
 
+mod cdc;
 mod table_full_text;
 mod tempdb_metadata_memory;
 
@@ -42,6 +43,7 @@ pub(super) fn captured(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
 fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
     Ok(match analysis.report() {
         LocalSnapshotReport::PerformanceCounters(report) => performance_counters(report),
+        LocalSnapshotReport::Cdc(report) => cdc::value(analysis, report),
         LocalSnapshotReport::TempdbMetadataMemory(report) => tempdb_metadata_memory::value(analysis, report),
         LocalSnapshotReport::InstanceResources(report) => instance_resources(report),
         LocalSnapshotReport::DatabaseProperties(report) => database_properties(report),

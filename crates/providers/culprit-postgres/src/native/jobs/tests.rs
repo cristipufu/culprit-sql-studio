@@ -116,7 +116,10 @@ async fn absent_extension_and_denied_views_never_construct_a_native_data_select(
     assert!(snapshot.sources.iter().all(|source| source.state == culprit_core::SourceState::NotApplicable));
     assert!(io.calls.iter().all(|sql| !sql.contains("FROM timescaledb_information.")));
     let mut io = reader();
-    let denied = catalog().iter().map(|row| replace(row, "can_select", Some("f"))).collect::<Vec<_>>();
+    let denied = catalog()
+        .iter()
+        .map(|row| if row.text("view_oid").is_some() { replace(row, "can_select", Some("f")) } else { row.clone() })
+        .collect::<Vec<_>>();
     io.replies[1] = Ok(denied.clone());
     io.replies[5] = Ok(denied);
     io.replies.remove(3);

@@ -1,5 +1,6 @@
 use super::*;
 use crate::{Engine, ErrorCode, SourceState};
+mod continuous_aggregates;
 
 fn metadata() -> TimescaleJobsMetadata {
     let extension = NativeIdentity::new("17000").qualified("database_oid", "16384").qualified("version", "2.31.0");
@@ -8,6 +9,7 @@ fn metadata() -> TimescaleJobsMetadata {
         TimescaleJobViewKind::Statistics,
         TimescaleJobViewKind::History,
         TimescaleJobViewKind::Errors,
+        TimescaleJobViewKind::ContinuousAggregates,
     ]
     .into_iter()
     .enumerate()
@@ -62,6 +64,7 @@ fn source(rows: &[OperationalObservation]) -> CollectionDescription {
                 sources: vec![
                     StateSourceCoverage::observed(TIMESCALE_JOBS_SOURCE.into(), 0, true),
                     StateSourceCoverage::observed(TIMESCALE_JOB_RUNS_SOURCE.into(), rows.len() as u32, false),
+                    StateSourceCoverage::observed(TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE.into(), 0, true),
                 ],
             },
         },

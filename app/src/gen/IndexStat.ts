@@ -3,8 +3,13 @@ import type { DocdbIndex } from "./DocdbIndex";
 import type { IndexContention } from "./IndexContention";
 import type { IndexFilterFacts } from "./IndexFilterFacts";
 import type { IndexState } from "./IndexState";
+import type { MssqlColumnstoreConfiguration } from "./MssqlColumnstoreConfiguration";
 
-export type IndexStat = { schema: string, table: string, name: string, kind: string, columns: Array<string>, include: Array<string>, filter: string | null, is_unique: boolean, is_primary_key: boolean, is_clustered: boolean, is_disabled: boolean, 
+export type IndexStat = { 
+/**
+ * Persisted SQL Server columnstore configuration from the same native index read; not rowgroup health.
+ */
+mssql_columnstore: MssqlColumnstoreConfiguration | null, schema: string, table: string, name: string, kind: string, columns: Array<string>, include: Array<string>, filter: string | null, is_unique: boolean, is_primary_key: boolean, is_clustered: boolean, is_disabled: boolean, 
 /**
  * Engine-specific availability. `is_disabled` remains the compatibility flag for optimizer unavailability.
  */

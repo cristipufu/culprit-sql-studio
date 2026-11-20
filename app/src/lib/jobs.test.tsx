@@ -3,9 +3,38 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Jobs } from "../components/Jobs";
 import { HealthTab } from "../components/Health";
 import type { Report } from "../gen/Report";
+import type { OperationalObservation } from "../gen/OperationalObservation";
 import { partial } from "../test/fixtures";
 import { JOBS_SOURCE, jobPoint, jobsEvidence, jobsReport, agentJobEvidence, agentJobsReport } from "../test/jobs";
 import { t } from "./i18n";
+
+test("continuous-aggregate settings render as exact folded text without becoming a job or refresh verdict", () => {
+  const row = partial<OperationalObservation>({ source: "timescale-continuous-aggregates", key: "original-catalog-point", fact: { kind: "timescale-continuous-aggregate", data: {
+    position: 1, observed_at: "2026-11-15T12:00:00.123456Z", view: { schema: "public", name: "hourly <script>aggregate-canary</script>" },
+    source_hypertable: { schema: "public", name: "readings" }, materialization_hypertable: { schema: "_timescaledb_internal", name: "_materialized_hypertable_2" },
+    owner: "native_catalog_owner", materialized_only: false, compression_enabled: true, granular_refresh_enabled: null,
+  } } });
+  const evidence = jobsEvidence([row]);
+  const report = jobsReport([]);
+  report.native_rows = 1; report.observed_rows = 1;
+  report.entries = [{ source: row.source, observation_key: row.key, job_id: null, kind: "continuous-aggregate", title: "hourly <script>aggregate-canary</script>",
+    explanation: t("view.jobs.continuous_aggregates.explanation"), metrics: [], investigation: t("view.jobs.continuous_aggregates.investigate"), verify: t("view.jobs.continuous_aggregates.verify") }];
+  const html = renderToStaticMarkup(<Jobs evidence={evidence} report={report} />);
+  expect(html).toContain("hourly &lt;script&gt;aggregate-canary&lt;/script&gt;");
+  expect(html).not.toContain("<script>");
+  expect(html).toContain(t("view.jobs.continuous_aggregates.explanation"));
+  expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
+  report.entries[0]!.kind = "state";
+  expect(renderToStaticMarkup(<Jobs evidence={evidence} report={report} />)).toContain(t("ui.memory_failures.missing_row"));
+});
+
+test("an unavailable continuous-aggregate catalog remains visible in Health without a raw point", () => {
+  const report = partial<Report>({ snapshot: { server: { engine: "postgres" }, sources: [{ source: "timescale-continuous-aggregates", state: "unavailable", reason: "Native aggregate catalog permission denied." }],
+    operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
+  const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="PostgreSQL" />);
+  expect(html).toContain("Native aggregate catalog permission denied.");
+  expect(html).not.toContain(t("ui.health.empty"));
+});
 
 test("job points keep exact native counts in collapsed paged text without rendering read-owner metadata", () => {
   const rows = Array.from({ length: 12 }, (_, index) => jobPoint(index));

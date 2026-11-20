@@ -1,3 +1,4 @@
+mod columnstore;
 mod table_full_text;
 use super::*;
 use crate::test_support::{Blobs, Fault, Queries, Recovery, Reply, returned};

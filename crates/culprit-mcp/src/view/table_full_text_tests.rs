@@ -10,7 +10,7 @@ fn single_table_schema_projects_original_native_catalog_values_and_never_a_stale
     .unwrap();
     let table = &mut report.snapshot.tables[0];
     table.mssql_full_text = Some(MssqlTableFullText {
-        availability: MssqlFullTextCatalogAvailability::Available,
+        availability: MssqlCatalogAvailability::Available,
         index: Some(MssqlFullTextIndex {
             unique_index_id: Some(1),
             catalog_id: Some(2),

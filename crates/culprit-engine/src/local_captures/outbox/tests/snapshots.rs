@@ -7,7 +7,7 @@ pub(super) fn originals(kind: LocalCaptureAnalysisKind) -> (CollectionDescriptio
     let case = local_snapshot_evidence_cases()
         .into_iter()
         .find(|case| name == case.analysis)
-        .expect("every generic snapshot selector has one original corpus case");
+        .unwrap_or_else(|| panic!("missing original snapshot corpus for {name}"));
     (case.source, case.records)
 }
 async fn analyze(

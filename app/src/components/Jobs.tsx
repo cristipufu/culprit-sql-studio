@@ -6,7 +6,7 @@ import { observationRowsBySource } from "../lib/observation-rows";
 import { NativeValue } from "./NativeObservationFields";
 import { ObservationList } from "./ObservationList";
 
-export const JOBS_SOURCES = ["timescale-jobs", "timescale-job-runs", "mssql-agent-jobs", "mssql-agent-job-steps", "mssql-agent-job-history", "mssql-agent-context"] as const;
+export const JOBS_SOURCES = ["timescale-jobs", "timescale-job-runs", "mssql-agent-jobs", "mssql-agent-job-steps", "mssql-agent-job-history", "mssql-agent-context", "timescale-continuous-aggregates"] as const;
 
 /** Rust words the native conditions; references locate only the exact original row, never a current worker. */
 export function Jobs({ evidence, report }: { evidence: JobsSnapshot; report: JobsReport }) {
@@ -20,7 +20,8 @@ export function Jobs({ evidence, report }: { evidence: JobsSnapshot; report: Job
       const row = sources.get(entry.source)?.get(entry.observation_key);
       const matched = sameRead && row && ((entry.kind === "state" && ["timescale-job-state", "mssql-agent-job", "mssql-agent-step"].includes(row.fact.kind))
         || (entry.kind === "retained-run" && ["timescale-job-run", "mssql-agent-history"].includes(row.fact.kind))
-        || (entry.kind === "agent-context" && row.fact.kind === "mssql-agent-context"))
+        || (entry.kind === "agent-context" && row.fact.kind === "mssql-agent-context")
+        || (entry.kind === "continuous-aggregate" && row.fact.kind === "timescale-continuous-aggregate"))
         && ("job_id" in row.fact.data ? row.fact.data.job_id === entry.job_id : entry.job_id === null);
       return matched ? <article className="operational-card" key={`${entry.source}:${entry.observation_key}`}>
         <h4>{entry.title}</h4><p>{entry.explanation}</p>

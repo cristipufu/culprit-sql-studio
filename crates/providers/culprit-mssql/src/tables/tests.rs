@@ -117,9 +117,9 @@ async fn failed_or_oversized_table_reads_do_not_retry_or_fall_back_to_table_cont
 #[tokio::test]
 async fn unavailable_full_text_catalogs_preserve_the_same_bounded_table_projection() {
     for (native, expected) in [
-        (1, MssqlFullTextCatalogAvailability::Unsupported),
-        (2, MssqlFullTextCatalogAvailability::PermissionDenied),
-        (3, MssqlFullTextCatalogAvailability::Unknown),
+        (1, MssqlCatalogAvailability::Unsupported),
+        (2, MssqlCatalogAvailability::PermissionDenied),
+        (3, MssqlCatalogAvailability::Unknown),
     ] {
         let mut reader = FakeRead::new(vec![Ok(vec![metadata(true)]), Ok(vec![without_full_text(native)])]);
         let result = application(&mut reader, true).await.unwrap();

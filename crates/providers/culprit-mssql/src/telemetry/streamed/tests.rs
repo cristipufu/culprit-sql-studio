@@ -468,10 +468,10 @@ async fn table_capture_shares_native_decoding_and_requires_full_metadata_visibil
 async fn full_text_catalog_availability_survives_original_stream_sealing_without_an_extra_read() {
     use crate::telemetry::tables::Tables;
     for (native, expected) in [
-        (0, MssqlFullTextCatalogAvailability::Available),
-        (1, MssqlFullTextCatalogAvailability::Unsupported),
-        (2, MssqlFullTextCatalogAvailability::PermissionDenied),
-        (3, MssqlFullTextCatalogAvailability::Unknown),
+        (0, MssqlCatalogAvailability::Available),
+        (1, MssqlCatalogAvailability::Unsupported),
+        (2, MssqlCatalogAvailability::PermissionDenied),
+        (3, MssqlCatalogAvailability::Unknown),
     ] {
         let mut source =
             catalog_source(Tables, crate::tables::tests::without_full_text(native), true, true, Default::default());

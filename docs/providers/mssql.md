@@ -318,6 +318,17 @@ Where the native columns are available, the same cache read retains total/last/m
 
 Local timestamps retain their missing offset; reset continuity remains unknown. Zero native plan handles leave unqualified counters unavailable. Cache eviction can remove history between observations. [Native counter meanings and limitations](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-query-stats-transact-sql).
 
+The existing index read also retains current persisted columnstore configuration: native compression delay in
+minutes, ordered-column ordinals and data-clustering ordinals where the exact catalog layout supports them.
+Supported NULL compression delay (native automatic management) differs from an unsupported, denied or unknown
+field; observed ordinal zero remains zero. These facts keep the original database-local table/index/column IDs and
+catalog dates, appear in scan JSON and bounded per-index schema JSON, and are not original compile-schema proof.
+The same one-dispatch catalog query and decoder serve scans and index snapshots; optional layout, type, version
+and permission checks occur before optional identifiers compile. No rowgroup DMV or application rows are read,
+and configured ordering/delay does not establish physical ordering, refresh progress or columnstore health.
+Selected rowgroup population and native work qualification remain separate unfinished scope. The changed
+`mssql.indexes` recipe remains cost-Unqualified; output limits do not establish a native CPU/I/O quota.
+
 The advisor combines those requests with workload and plan evidence, unindexed foreign keys, and duplicate, overlapping or unused indexes. Disabling an eligible index keeps its definition and stops its maintenance; `ALTER INDEX … REBUILD` restores it. Clustered, unique and constraint-backed indexes are not treated as disposable unused indexes.
 
 Schema drift and migration linting use the saved catalog, actual table sizes and captured workload. The proposed SQL remains a suggestion for review.

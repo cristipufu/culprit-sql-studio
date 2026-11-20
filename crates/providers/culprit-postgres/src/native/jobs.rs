@@ -7,6 +7,7 @@ use culprit_core::{
     telemetry::*,
 };
 use std::collections::BTreeMap;
+mod continuous_aggregates;
 mod decode;
 mod discovery;
 mod sql;
@@ -51,6 +52,9 @@ pub(crate) async fn capture<R: NativeRead>(
     sources.push(states);
     let remaining = budget.max_snapshot_rows.saturating_sub(observations.len() as u32).min(MAX_JOB_RUN_ROWS);
     sources.push(read_runs(reader, &catalog, remaining, &mut observations).await?);
+    let remaining =
+        budget.max_snapshot_rows.saturating_sub(observations.len() as u32).min(MAX_TIMESCALE_CONTINUOUS_AGGREGATE_ROWS);
+    sources.push(continuous_aggregates::read(reader, &catalog, remaining, &mut observations).await?);
     let after = metadata::activity(reader, host, port).await?;
     if !before.same_activity_source(&after) || before.full_visibility != after.full_visibility {
         return Err(CollectionStop::SourceChanged.error());

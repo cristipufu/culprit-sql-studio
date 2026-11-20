@@ -18,10 +18,10 @@ fn report(state: MssqlTableFullText) -> TableFullTextReport {
 #[test]
 fn compact_catalog_output_retains_canonical_unknowns_and_caps_entries_without_private_receipts() {
     for availability in [
-        MssqlFullTextCatalogAvailability::Available,
-        MssqlFullTextCatalogAvailability::Unsupported,
-        MssqlFullTextCatalogAvailability::PermissionDenied,
-        MssqlFullTextCatalogAvailability::Unknown,
+        MssqlCatalogAvailability::Available,
+        MssqlCatalogAvailability::Unsupported,
+        MssqlCatalogAvailability::PermissionDenied,
+        MssqlCatalogAvailability::Unknown,
     ] {
         let report = report(MssqlTableFullText { availability, index: None });
         let output = value(&report);
@@ -41,7 +41,7 @@ fn compact_catalog_output_retains_canonical_unknowns_and_caps_entries_without_pr
         }
     }
     let mut report = report(MssqlTableFullText {
-        availability: MssqlFullTextCatalogAvailability::Available,
+        availability: MssqlCatalogAvailability::Available,
         index: Some(MssqlFullTextIndex {
             unique_index_id: Some(1),
             catalog_id: Some(3),

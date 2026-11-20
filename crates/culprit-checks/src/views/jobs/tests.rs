@@ -24,6 +24,7 @@ fn input() -> TimescaleJobsSnapshot {
             TimescaleJobViewKind::Statistics,
             TimescaleJobViewKind::History,
             TimescaleJobViewKind::Errors,
+            TimescaleJobViewKind::ContinuousAggregates,
         ]
         .into_iter()
         .enumerate()
@@ -70,6 +71,7 @@ fn input() -> TimescaleJobsSnapshot {
         sources: vec![
             StateSourceCoverage::observed(TIMESCALE_JOBS_SOURCE.into(), 0, true),
             StateSourceCoverage::observed(TIMESCALE_JOB_RUNS_SOURCE.into(), 1, false),
+            StateSourceCoverage::observed(TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE.into(), 0, true),
         ],
         observations: vec![observation],
     }
@@ -177,3 +179,5 @@ mod policy;
 mod agent;
 
 mod configuration_check;
+
+mod continuous_aggregates;

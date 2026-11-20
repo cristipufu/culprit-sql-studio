@@ -65,7 +65,9 @@ fn every_public_declaration_has_one_actual_offline_constructor_and_no_native_cos
         assert_eq!(descriptor.cost, RecipeCostQualification::Unqualified);
         assert_eq!(
             descriptor.version,
-            if matches!(registration.route, Route::Jobs | Route::Activity | Route::Snapshot(Recipe::Operational)) {
+            if matches!(registration.route, Route::Jobs) {
+                3
+            } else if matches!(registration.route, Route::Activity | Route::Snapshot(Recipe::Operational)) {
                 2
             } else {
                 1

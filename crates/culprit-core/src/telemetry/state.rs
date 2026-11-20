@@ -11,6 +11,7 @@ pub enum SnapshotDataset {
     StatementDefinitions,
     Sequences,
     Cleanup,
+    Cdc,
     Operational,
     HyperscaleLogComponents,
     WaitCounters,
@@ -58,6 +59,7 @@ impl SnapshotDataset {
             | Self::RuntimeDistributions
             | Self::Sequences
             | Self::Cleanup
+            | Self::Cdc
             | Self::Operational
             | Self::HyperscaleLogComponents
             | Self::PlanCacheSummary
@@ -470,10 +472,12 @@ pub enum OperationalFact {
     MssqlAgentContext(Box<MssqlAgentContext>),
     TimescaleJobState(Box<TimescaleJobState>),
     TimescaleJobRun(Box<TimescaleJobRun>),
+    TimescaleContinuousAggregate(Box<TimescaleContinuousAggregate>),
     StatementCounters(Box<StatementCounterSample>),
     RuntimeDistribution(Box<StatementRuntimeDistribution>),
     DiagnosticRevision(Box<DiagnosticRevision>),
     Queue(QueueSample),
+    MssqlCdc(Box<MssqlCdcObservation>),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
     MssqlPersistentVersionStore(Box<MssqlPersistentVersionStore>),
     MssqlStatementGrants(Box<StatementGrantStatistics>),
@@ -498,6 +502,7 @@ pub enum OperationalFact {
 impl OperationalFact {
     fn matches_key(&self, key: &str) -> bool {
         let expected = match self {
+            Self::MssqlCdc(point) => point.key(),
             Self::CounterSet(counters) => counters.key(),
             Self::CompilerWaiter(waiter) => waiter.key(),
             Self::MaintenanceProgress(point) => point.key(),
@@ -520,6 +525,7 @@ impl OperationalFact {
             Self::MssqlAgentContext(point) => point.key(),
             Self::TimescaleJobState(point) => point.key(),
             Self::TimescaleJobRun(point) => point.key(),
+            Self::TimescaleContinuousAggregate(point) => point.key(),
             Self::StatementCounters(counters) => counters.key(),
             Self::RuntimeDistribution(observation) => observation.key(),
             Self::DiagnosticRevision(revision) => Ok(revision.id.clone()),
@@ -551,7 +557,10 @@ impl OperationalFact {
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         match self {
             Self::CompilerWaiter(waiter) => waiter.request.redact(engine),
-            Self::ConfiguredLogRateLimits(_) | Self::HyperscaleLogComponent(_) | Self::DatabaseProperties(_) => {}
+            Self::MssqlCdc(_)
+            | Self::ConfiguredLogRateLimits(_)
+            | Self::HyperscaleLogComponent(_)
+            | Self::DatabaseProperties(_) => {}
             Self::MssqlIndex(index) => index.redact(engine),
             Self::CatalogCounters(counters) => counters.catalog.redact(engine),
             Self::ExecutionGrant(grant) => grant.redact(engine),
@@ -592,6 +601,7 @@ impl OperationalFact {
             | Self::MssqlAgentContext(_)
             | Self::TimescaleJobState(_)
             | Self::TimescaleJobRun(_)
+            | Self::TimescaleContinuousAggregate(_)
             | Self::DiagnosticRevision(_)
             | Self::CounterSet(_)
             | Self::Retention(_)
@@ -668,7 +678,9 @@ impl OperationalFact {
             Self::MssqlAgentContext(point) => point.is_valid(),
             Self::TimescaleJobState(point) => point.is_valid(),
             Self::TimescaleJobRun(point) => point.is_valid(),
+            Self::TimescaleContinuousAggregate(point) => point.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
+            Self::MssqlCdc(point) => point.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),
             Self::MssqlStatementGrants(grants) => grants.is_valid(),
@@ -711,12 +723,16 @@ impl OperationalObservation {
             && self.fact.is_valid()
             && self.fact.matches_key(&self.key)
             && match &self.fact {
+                OperationalFact::MssqlCdc(point) => self.source == point.source(),
                 OperationalFact::MssqlAgentJob(_) => self.source == MSSQL_AGENT_JOBS_SOURCE,
                 OperationalFact::MssqlAgentStep(_) => self.source == MSSQL_AGENT_STEPS_SOURCE,
                 OperationalFact::MssqlAgentHistory(_) => self.source == MSSQL_AGENT_HISTORY_SOURCE,
                 OperationalFact::MssqlAgentContext(_) => self.source == MSSQL_AGENT_CONTEXT_SOURCE,
                 OperationalFact::TimescaleJobState(_) => self.source == TIMESCALE_JOBS_SOURCE,
                 OperationalFact::TimescaleJobRun(_) => self.source == TIMESCALE_JOB_RUNS_SOURCE,
+                OperationalFact::TimescaleContinuousAggregate(_) => {
+                    self.source == TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE
+                }
                 OperationalFact::CompilerWaiter(_) => self.source == crate::source_id::COMPILATION_GATEWAYS,
                 OperationalFact::ConfiguredLogRateLimits(_) => self.source == CONFIGURED_LOG_RATES_SOURCE,
                 OperationalFact::HyperscaleLogComponent(_) => self.source == HYPERSCALE_LOG_COMPONENTS_SOURCE,

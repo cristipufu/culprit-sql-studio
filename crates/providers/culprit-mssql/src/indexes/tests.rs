@@ -7,6 +7,7 @@ use crate::{
 pub(crate) fn row() -> Rec {
     let filter = "([owner]=N'private-owner')";
     Rec::of(&[
+        ("compression_availability",Val::Int(0)),("ordering_availability",Val::Int(0)),("clustering_availability",Val::Int(0)),("compression_delay",Val::Null),
         ("database_id",Val::Int(5)),("object_id",Val::Int(100)),
         ("created_without_offset",Val::Text("2026-11-10T07:00:00.123".into())),
         ("modified_without_offset",Val::Text("2026-11-10T07:01:00.123".into())),
@@ -15,7 +16,7 @@ pub(crate) fn row() -> Rec {
         ("type",Val::Int(2)),("type_desc",Val::Text("NONCLUSTERED".into())),("is_memory_optimized",Val::Int(0)),
         ("is_unique",Val::Int(0)),("is_primary_key",Val::Int(0)),("is_disabled",Val::Int(0)),("has_filter",Val::Int(1)),
         ("filter_bytes",Val::Int(filter.encode_utf16().count() as i64*2)),("filter_value",Val::Text(filter.into())),
-        ("index_columns",Val::Text(r#"[{"index_column_id":1,"column_id":3,"name":"owner\u001fname","key_ordinal":2,"descending":true,"included":false},{"index_column_id":2,"column_id":1,"name":"id","key_ordinal":1,"descending":false,"included":false},{"index_column_id":3,"column_id":2,"name":"payload","key_ordinal":0,"descending":false,"included":true}]"#.into())),
+        ("index_columns",Val::Text(r#"[{"index_column_id":1,"column_id":3,"name":"owner\u001fname","key_ordinal":2,"descending":true,"included":false,"column_store_order_ordinal":0,"data_clustering_ordinal":0},{"index_column_id":2,"column_id":1,"name":"id","key_ordinal":1,"descending":false,"included":false,"column_store_order_ordinal":0,"data_clustering_ordinal":0},{"index_column_id":3,"column_id":2,"name":"payload","key_ordinal":0,"descending":false,"included":true,"column_store_order_ordinal":0,"data_clustering_ordinal":0}]"#.into())),
         ("reserved_bytes",Val::Text("81920".into())),("usage_row_present",Val::Int(1)),
         ("user_seeks",Val::Int(9_007_199_254_740_993)),("user_scans",Val::Int(0)),("user_lookups",Val::Int(0)),("user_updates",Val::Int(3)),
         ("last_user_seek",Val::Text("2026-11-10T07:00:10.123".into())),("last_user_scan",Val::Null),
@@ -115,4 +116,16 @@ async fn only_a_completed_permission_refusal_allows_catalog_fallback() {
         assert!(application(&mut reader, true).await.is_err());
         assert_eq!(reader.calls.len(), 1);
     }
+}
+
+pub(crate) fn columnstore_row() -> Rec {
+    replace(&crate::indexes::tests::row(), &[
+        ("type",Val::Int(5)),("type_desc",Val::Text("CLUSTERED COLUMNSTORE".into())),
+        ("has_filter",Val::Int(0)),("filter_bytes",Val::Null),("filter_value",Val::Null),
+        ("compression_delay",Val::Int(15)),("clustering_availability",Val::Int(1)),
+        ("index_columns",Val::Text(serde_json::json!([
+            {"index_column_id":1,"column_id":3,"name":"event_type","key_ordinal":0,"descending":false,"included":true,"column_store_order_ordinal":1,"data_clustering_ordinal":null},
+            {"index_column_id":2,"column_id":1,"name":"id","key_ordinal":0,"descending":false,"included":true,"column_store_order_ordinal":0,"data_clustering_ordinal":null}
+        ]).to_string())),
+    ])
 }

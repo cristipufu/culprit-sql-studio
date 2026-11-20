@@ -79,6 +79,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
             let native = JobsSnapshot::from_source(source, read.observations.clone(), read.read_complete)?;
             Ok(LocalSnapshotReport::Jobs(Box::new(culprit_checks::jobs::explain(&native)?)))
         }
+        LocalCaptureAnalysisKind::Cdc => {
+            Ok(LocalSnapshotReport::Cdc(Box::new(culprit_checks::cdc::explain_captured(read)?)))
+        }
         LocalCaptureAnalysisKind::StatementWork => {
             let native = StatementCounterSnapshot::from_source(source, read.observations.clone())?;
             Ok(LocalSnapshotReport::StatementWork(Box::new(culprit_checks::statement_work::explain(

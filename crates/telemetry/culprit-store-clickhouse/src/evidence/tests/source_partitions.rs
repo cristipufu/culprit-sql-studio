@@ -121,3 +121,29 @@ async fn readable_member_activity_and_all_cache_families_replay_separate_native_
         assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
     }
 }
+
+#[tokio::test]
+async fn cdc_native_snapshot_status_progress_errors_and_gaps_round_trip_without_recovery() {
+    for case in test_support::CdcCase::ALL {
+        let (source, records) = test_support::cdc_evidence(case);
+        let fixture =
+            Fixture::new_for_stream(source.clone(), records.clone(), TelemetryStream::OperationalSamples).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let capture = fixture
+            .reader
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..Default::default() },
+                None,
+            )
+            .await
+            .unwrap();
+        test_support::assert_operational_capture(&capture, &source, &records);
+        assert!(capture.is_read_complete());
+        assert!(capture.records().iter().all(|row| match &row.row().record {
+            TelemetryRecord::Operational(row) => matches!(row.fact, OperationalFact::MssqlCdc(_)),
+            _ => false,
+        }));
+    }
+}

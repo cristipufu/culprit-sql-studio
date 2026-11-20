@@ -69,7 +69,7 @@ async fn frozen_paging_finish_and_retirement_never_repeat_the_native_job_acquisi
     let mut source = provider.telemetry_source(&selected).unwrap();
     let description = source.describe().await.unwrap();
     let queries = source.query_count();
-    assert_eq!(queries, 7);
+    assert_eq!(queries, 8);
     let mut rows = Vec::new();
     let mut cursor = None;
     loop {

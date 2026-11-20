@@ -10,6 +10,7 @@ use culprit_core::{
 use serde_json::{Value, json};
 
 use crate::tools::TopBy;
+mod columnstore;
 mod type_schema;
 
 const TEXT_SHORT: usize = 300;
@@ -594,6 +595,7 @@ pub fn table(report: &Report, wanted: &str) -> Result<Value> {
             json!({
                 "name": i.name,
                 "kind": i.kind,
+                "columnstore_configuration": columnstore::configuration(s, i),
                 "columns": i.columns,
                 "include": (!i.include.is_empty()).then_some(&i.include),
                 "filter": i.filter,

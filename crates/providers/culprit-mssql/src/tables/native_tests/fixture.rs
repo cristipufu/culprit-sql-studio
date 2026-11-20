@@ -138,7 +138,7 @@ impl<'a> Fixture<'a> {
     pub(super) fn assert_available(&self, tables: &Tables, enabled: Option<bool>) {
         assert_eq!(tables.len(), 2);
         for (name, state) in tables {
-            assert_eq!(state.availability, MssqlFullTextCatalogAvailability::Available);
+            assert_eq!(state.availability, MssqlCatalogAvailability::Available);
             if name == &self.indexed_table()
                 && let Some(enabled) = enabled
             {
@@ -161,7 +161,7 @@ impl<'a> Fixture<'a> {
     pub(super) fn assert_denied(&self, tables: &Tables) {
         assert_eq!(tables.len(), 2);
         for state in tables.values() {
-            assert_eq!(state.availability, MssqlFullTextCatalogAvailability::PermissionDenied);
+            assert_eq!(state.availability, MssqlCatalogAvailability::PermissionDenied);
             assert!(
                 state.index.is_none(),
                 "NULL optional fields cannot become index absence under unavailable visibility"

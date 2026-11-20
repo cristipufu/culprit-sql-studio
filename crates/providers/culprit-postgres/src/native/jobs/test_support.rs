@@ -66,7 +66,7 @@ pub(crate) fn catalog() -> Vec<Row> {
             ],
         ),
     ];
-    columns
+    let mut result: Vec<Row> = columns
         .iter()
         .enumerate()
         .map(|(index, (name, columns))| {
@@ -87,7 +87,21 @@ pub(crate) fn catalog() -> Vec<Row> {
                 ("window_from", Some("2026-11-14T10:00:00.000003Z")),
             ])
         })
-        .collect()
+        .collect();
+    let missing = row(&[
+        ("view_name", Some("continuous_aggregates")),
+        ("extension_oid", Some("17000")),
+        ("extension_version", Some("2.31.0")),
+        ("view_oid", None),
+        ("can_select", None),
+        ("columns", None),
+        ("role", Some("owned_reader")),
+        ("database_owner", Some("f")),
+        ("successful_runs_logged", Some("off")),
+        ("window_from", Some("2026-11-14T10:00:00.000003Z")),
+    ]);
+    result.push(missing);
+    result
 }
 pub(crate) fn state() -> Row {
     state_with_configuration_check(Some("public"), Some("validate_owned_configuration"))

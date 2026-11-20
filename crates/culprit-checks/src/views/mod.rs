@@ -5,6 +5,7 @@
 pub(crate) mod advisor;
 pub(crate) mod brief;
 pub mod cache_entry_memory;
+pub mod cdc;
 pub mod cleanup;
 pub mod compilation;
 pub mod compiler_admission;

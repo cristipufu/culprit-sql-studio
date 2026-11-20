@@ -22,7 +22,7 @@ pub use workload::{
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
 /// or mean something else.
-pub const SNAPSHOT_FORMAT: u32 = 27;
+pub const SNAPSHOT_FORMAT: u32 = 28;
 
 /// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
 mod current_format {
@@ -467,6 +467,8 @@ impl TableStat {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct IndexStat {
+    /// Persisted SQL Server columnstore configuration from the same native index read; not rowgroup health.
+    pub mssql_columnstore: Option<Box<crate::telemetry::MssqlColumnstoreConfiguration>>,
     pub schema: String,
     pub table: String,
     pub name: String,

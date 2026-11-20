@@ -139,6 +139,12 @@ pub const JOB_RUNS: Source = Source {
     delivers: &[],
 };
 
+pub const CONTINUOUS_AGGREGATES: Source = Source {
+    name: culprit_core::telemetry::TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE,
+    reads: culprit_core::key!("provider.postgres.source.continuous_aggregates"),
+    delivers: &[],
+};
+
 pub const HYPERTABLES: Source = Source {
     name: source_id::TIMESCALE_HYPERTABLES,
     reads: culprit_core::key!("provider.postgres.source.hypertables"),
@@ -163,6 +169,7 @@ pub const MISC: &[Source] =
 pub const ALL: &[Source] = &[
     JOBS,
     JOB_RUNS,
+    CONTINUOUS_AGGREGATES,
     HYPERTABLES,
     CHUNKS,
     HYPERTABLE_INDEXES,

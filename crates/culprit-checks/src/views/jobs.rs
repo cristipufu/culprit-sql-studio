@@ -4,6 +4,7 @@ use culprit_core::{
 };
 use std::collections::BTreeMap;
 mod agent;
+mod continuous_aggregates;
 mod points;
 const MAX_JOB_ENTRIES: usize = 256;
 
@@ -71,6 +72,7 @@ fn explain_timescale_bounded(
                 Ok(points::state(row, point, state_ids.get(point.job_id.as_str()).copied().unwrap_or(0) > 1))
             }
             OperationalFact::TimescaleJobRun(point) => Ok(points::run(row, point)),
+            OperationalFact::TimescaleContinuousAggregate(point) => Ok(continuous_aggregates::entry(row, point)),
             _ => Err(Error::invalid(t!("view.jobs.invalid"))),
         })
         .collect::<Result<Vec<_>>>()?;
@@ -92,6 +94,9 @@ fn explain_timescale_bounded(
     if snapshot.metadata.successful_runs_logged != Some(true) {
         limitations.push(t!("view.jobs.limit.logging"));
     }
+    if snapshot.metadata.available(TimescaleJobViewKind::ContinuousAggregates) {
+        limitations.push(t!("view.jobs.continuous_aggregates.limit"));
+    }
     if !snapshot.metadata.available(TimescaleJobViewKind::Statistics) {
         limitations.push(t!("view.jobs.limit.statistics"));
     }
@@ -104,6 +109,7 @@ fn explain_timescale_bounded(
     if state_ids.values().any(|count| *count > 1) {
         limitations.push(t!("view.jobs.limit.duplicates"));
     }
+    let has_aggregate_configuration = counts.contains_key(TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE);
     Ok(JobsReport {
         context: snapshot.context.clone(),
         sources,
@@ -111,11 +117,17 @@ fn explain_timescale_bounded(
         native_rows: snapshot.sources.iter().map(|source| source.records).sum(),
         observed_rows: snapshot.observations.len() as u32,
         entries_limited,
-        title: t!("view.jobs.title"),
+        title: if has_aggregate_configuration {
+            t!("view.jobs.continuous_aggregates.report_title")
+        } else {
+            t!("view.jobs.title")
+        },
         summary: if snapshot.metadata.extension.is_none() {
             t!("view.jobs.summary.not_installed")
         } else if snapshot.observations.is_empty() {
             t!("view.jobs.summary.empty")
+        } else if has_aggregate_configuration {
+            t!("view.jobs.continuous_aggregates.summary")
         } else {
             t!(
                 "view.jobs.summary.rows",

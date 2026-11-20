@@ -971,7 +971,7 @@
         "table": "orders"
       }
     ],
-    "format": 27,
+    "format": 28,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -1011,6 +1011,7 @@
         "last_read": null,
         "lookups": null,
         "maintained": true,
+        "mssql_columnstore": null,
         "name": "customers_pkey",
         "opclasses": [
           ""
@@ -1050,6 +1051,7 @@
         "last_read": null,
         "lookups": null,
         "maintained": true,
+        "mssql_columnstore": null,
         "name": "orders_created_idx",
         "opclasses": [
           ""
@@ -1089,6 +1091,7 @@
         "last_read": null,
         "lookups": null,
         "maintained": true,
+        "mssql_columnstore": null,
         "name": "orders_pkey",
         "opclasses": [
           ""

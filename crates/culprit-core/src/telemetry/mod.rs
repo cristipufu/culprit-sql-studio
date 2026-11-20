@@ -35,8 +35,10 @@ pub use captured_reference::{
     CapturedPosition, CapturedReadBinding, CapturedReadRef, CapturedRecordReference, CapturedStreamRows,
 };
 mod catalog;
+mod cdc;
 mod check_constraints;
 mod cleanup;
+pub use cdc::*;
 mod columns;
 mod compilation;
 mod compiler_admission;
@@ -689,6 +691,7 @@ impl TelemetryRecord {
                         _,
                         OperationalFact::TimescaleJobState(_)
                         | OperationalFact::TimescaleJobRun(_)
+                        | OperationalFact::TimescaleContinuousAggregate(_)
                         | OperationalFact::MssqlAgentJob(_)
                         | OperationalFact::MssqlAgentStep(_)
                         | OperationalFact::MssqlAgentHistory(_)
@@ -713,6 +716,8 @@ impl TelemetryRecord {
                     }
                     (SourceObservation::MaintenanceProgress { .. }, _)
                     | (_, OperationalFact::MaintenanceProgress(_)) => false,
+                    (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),
+                    (SourceObservation::Snapshot(header), _) if header.dataset == SnapshotDataset::Cdc => false,
                     (_, OperationalFact::ConfiguredLogRateLimits(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::HyperscaleLogComponent(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::DatabaseProperties(point)) => accepted && point.fits_source(source),

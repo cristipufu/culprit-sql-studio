@@ -240,6 +240,7 @@ pub(crate) async fn indexes(
             )
         };
         out.push(IndexStat {
+            mssql_columnstore: None,
             docdb: None,
             filter_facts: None,
             schema: db.to_string(),

@@ -8,10 +8,12 @@ import { bytes, count, oneLine } from "../../lib/format";
 import { t } from "../../lib/i18n";
 import { indexKey, indexUsage, plannedQueryCount } from "../../lib/index-usage";
 import { setState } from "../../lib/store";
+import { ColumnstoreConfiguration } from "./ColumnstoreConfiguration";
 
 /** Each index: keys, the captured queries that use it, reads and writes, size, and what its counters do and don't show. */
 export function Indexes({ report, table, indexes }: { report: Report; table: TableStat; indexes: IndexStat[] }) {
   const engine = report.snapshot.server.engine;
+  const sourceState = report.snapshot.sources?.find((source) => source.source === "indexes")?.state ?? null;
   const usageId = useId();
   const usage = useMemo(() => indexUsage(report), [report]);
   const [open, setOpen] = useState<string | null>(null);
@@ -161,6 +163,7 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
                       </td>
                     </tr>
                   )}
+                  <ColumnstoreConfiguration engine={engine} index={i} sourceState={sourceState} />
                   {expanded && (
                     <tr className="ix-uses" id={usesId}>
                       <td colSpan={5}>

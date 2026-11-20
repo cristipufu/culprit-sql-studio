@@ -5282,12 +5282,21 @@ table.ix-grid tr.ix-notes td {
 }
 
 .ix-notes-inner,
-.ix-uses-inner {
+.ix-uses-inner,
+.index-columnstore {
   position: sticky;
   inset-inline-start: 10px;
   width: min(100%, calc(100cqi - var(--detail-padding) - var(--detail-padding) - 22px));
   min-width: 0;
 }
+
+.index-columnstore { white-space: normal; overflow-wrap: anywhere; }
+.index-columnstore dl { display: grid; gap: 4px; margin: 10px 0; }
+.index-columnstore dd { margin: 0 0 6px; }
+.index-columnstore table { width: 100%; table-layout: fixed; text-align: start; border-collapse: collapse; }
+table.ix-grid .index-columnstore th,
+table.ix-grid .index-columnstore td { padding: 4px; white-space: normal; overflow-wrap: anywhere; }
+.index-columnstore code { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .ix-uses-inner {
   overflow: hidden;

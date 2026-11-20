@@ -11,6 +11,36 @@ const PRIVATE: &str = "JOBS-REDACTION-PRIVATE";
 const FROM: &str = "2026-11-16T10:00:00.123456Z";
 const UNTIL: &str = "2026-11-16T10:00:01.123456Z";
 
+#[test]
+fn continuous_aggregate_sharing_withholds_paths_and_owner_but_preserves_logical_names_and_settings() {
+    let mut native = read();
+    let relation = |name: &str| TimescaleRelationLabel { schema: "public".into(), name: format!("/{name}") };
+    let point = TimescaleContinuousAggregate {
+        position: 1,
+        observed_at: FROM.into(),
+        view: relation("JOBS-REDACTION-PRIVATE-view"),
+        source_hypertable: TimescaleRelationLabel { schema: "public".into(), name: "safe_readings".into() },
+        materialization_hypertable: relation("JOBS-REDACTION-PRIVATE-materialization"),
+        owner: "JOBS-REDACTION-PRIVATE-owner".into(),
+        materialized_only: false,
+        compression_enabled: true,
+        granular_refresh_enabled: None,
+    };
+    native.observations.push(OperationalObservation {
+        source: TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE.into(),
+        key: point.key().unwrap(),
+        fact: OperationalFact::TimescaleContinuousAggregate(Box::new(point)),
+    });
+    native.sources[2] = StateSourceCoverage::collected(TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE.into(), 1);
+    assert!(native.is_valid());
+    let shared = redact_jobs(native).unwrap();
+    assert!(shared.is_valid());
+    assert!(!serde_json::to_string(&shared).unwrap().contains(PRIVATE));
+    let OperationalFact::TimescaleContinuousAggregate(point) = &shared.observations[2].fact else { panic!() };
+    assert!(!point.materialized_only && point.compression_enabled && point.granular_refresh_enabled.is_none());
+    assert_eq!(point.source_hypertable.name, "safe_readings");
+}
+
 fn procedure(name: &str) -> TimescaleJobProcedure {
     TimescaleJobProcedure { schema: "public".into(), name: format!("/JOBS-REDACTION-PRIVATE/{name}") }
 }
@@ -20,6 +50,7 @@ fn metadata() -> TimescaleJobsMetadata {
         TimescaleJobViewKind::Statistics,
         TimescaleJobViewKind::History,
         TimescaleJobViewKind::Errors,
+        TimescaleJobViewKind::ContinuousAggregates,
     ]
     .into_iter()
     .enumerate()
@@ -122,6 +153,7 @@ fn read() -> Box<TimescaleJobsSnapshot> {
                 sources: vec![
                     StateSourceCoverage::collected(TIMESCALE_JOBS_SOURCE.into(), 1),
                     StateSourceCoverage::observed(TIMESCALE_JOB_RUNS_SOURCE.into(), 1, false),
+                    StateSourceCoverage::observed(TIMESCALE_CONTINUOUS_AGGREGATES_SOURCE.into(), 0, true),
                 ],
             },
         },

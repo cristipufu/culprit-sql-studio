@@ -2,6 +2,7 @@
 mod cache_entry_memory;
 mod cached_definitions;
 mod cached_runtime;
+mod cdc;
 mod check_constraints;
 mod cleanup;
 mod columns;

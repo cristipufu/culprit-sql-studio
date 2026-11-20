@@ -2,6 +2,17 @@
 use super::*;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 
+/// Availability of a selected native catalog projection, independent of presence, configuration or health.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum MssqlCatalogAvailability {
+    Available,
+    Unsupported,
+    PermissionDenied,
+    Unknown,
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct MssqlObjectIdentity {

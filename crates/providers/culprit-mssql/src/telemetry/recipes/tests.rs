@@ -34,6 +34,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.shared-operational", 7),
             ("mssql.settings", 3),
             ("mssql.tables", 2),
+            ("mssql.indexes", 2),
             ("mssql.query-compilation", 3),
             ("mssql.cached-runtime", 2),
             ("mssql.cached-definitions", 5),
@@ -399,4 +400,22 @@ fn cleanup_recipe_keeps_its_local_three_family_envelope_separate_from_azure_oper
     assert_eq!(cleanup.budget.statement_timeout_ms, 1_000);
     assert_eq!(cleanup.budget.total_timeout_ms, 5_000);
     assert_ne!(cleanup.selector, recipes.iter().find(|recipe| recipe.id == "mssql.operational").unwrap().selector);
+}
+
+#[test]
+fn cdc_recipe_is_manual_unqualified_and_keeps_its_own_paid_native_roster() {
+    let recipes = declarations();
+    let cdc = recipes.iter().find(|recipe| recipe.id == "mssql.cdc").unwrap();
+    assert_eq!(cdc.version, 1);
+    assert_eq!(cdc.purpose, RecipePurpose::Investigation);
+    assert_eq!(cdc.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(cdc.subjects, vec![RecipeSubject::Database]);
+    assert_eq!(cdc.selector, RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cdc)));
+    assert_eq!(cdc.budget.max_queries, 12);
+    assert_eq!(cdc.budget.max_snapshot_rows, 98);
+    assert_eq!(cdc.budget.page_rows, 32);
+    assert_eq!(cdc.budget.page_bytes, 64 * 1024);
+    assert_eq!(cdc.budget.total_bytes, 256 * 1024);
+    assert_eq!(cdc.budget.statement_timeout_ms, 1000);
+    assert_eq!(cdc.budget.total_timeout_ms, 5000);
 }

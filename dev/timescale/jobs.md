@@ -46,9 +46,11 @@ Fixture-oracle reads and setup work are separate from the source's measured quer
 uses the existing native admission reader (setup plus one nonce/database read) and the existing fixture admin
 reader retained across capture (setup, job map and two counter reads: four dispatches). The latter keeps its
 one-second statement limit, eight-call cap and the existing 20-second fixture-case deadline; the production source
-still has its five-second total limit. The source receipt contains seven dispatches: one session setup and the
-unchanged six native acquisition calls. The source's eight-call cap and 256-row state cap plus one lookahead remain
-unchanged. Sequence registration and the five additional setup statements belong to the existing supervisor SQL
+still has its five-second total limit. The source receipt contains eight dispatches: one session setup and seven native acquisition calls,
+including one bounded read of the existing unpopulated continuous-aggregate catalog. The source's eight-call cap and 256-row state cap plus one lookahead remain
+unchanged. The aggregate read is capped at 64 rows plus one lookahead within the same total row/byte budget. It
+selects only public catalog names and settings; it never reads application rows or calls a refresh, watermark or
+size function. The catalog does not measure freshness or bind historical runs to current objects. Sequence registration and the five additional setup statements belong to the existing supervisor SQL
 connection and are outside that source receipt. Passing conformance does not qualify server cost.
 
 The supervisor skips these optional jobs cases in a broad ordinary PostgreSQL selection. Run the installed
