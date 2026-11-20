@@ -45,8 +45,8 @@ async fn every_shared_operational_report_reaches_the_existing_english_mcp_operat
         if let Some(entries) = report["entries"].as_array() {
             assert!(entries.len() <= 5);
             if let Some(available) = report["entries_available"].as_u64() {
-                assert_eq!(report["entries_presented"], entries.len());
-                assert_eq!(report["entries_omitted"], available - entries.len() as u64);
+                assert_eq!(report["entries_presented"], entries.len(), "{}", case.analysis);
+                assert_eq!(report["entries_omitted"], available - entries.len() as u64, "{}", case.analysis);
             }
         }
         let text = value.to_string();
