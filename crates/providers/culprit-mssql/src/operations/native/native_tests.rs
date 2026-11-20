@@ -64,7 +64,7 @@ async fn run(directory: &Path, cancellation: &CollectionCancellation) -> Result<
         budget,
     )
     .await?;
-    let file_template = digest(format!("{} OPTION(MAXDOP 1)", Kind::Filegroups.sql()).as_bytes());
+    let file_template = digest(Kind::Filegroups.sql().as_bytes());
     let target = io.scope().target.clone();
     let started = Instant::now();
     let mut watch = None;
@@ -115,7 +115,7 @@ async fn run(directory: &Path, cancellation: &CollectionCancellation) -> Result<
     }
     let metrics = io.read_metrics().ok_or_else(invalid_data)?;
     for kind in SOURCE_KINDS {
-        let template = digest(format!("{} OPTION(MAXDOP 1)", kind.sql()).as_bytes());
+        let template = digest(kind.sql().as_bytes());
         if !metrics
             .templates
             .iter()

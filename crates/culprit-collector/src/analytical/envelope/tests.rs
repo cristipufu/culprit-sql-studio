@@ -81,3 +81,77 @@ fn a_valid_receipt_cannot_bind_a_foreign_database_or_a_forged_native_record_id()
     let envelope = Envelope::new(&manifest, &row.batch_id).unwrap();
     assert!(envelope.input(1, &row).is_err(), "rebuilding receipts cannot authorize a non-native record id");
 }
+
+#[test]
+fn suspect_page_envelope_uses_original_current_clock_scope_without_private_history_or_native_proof() {
+    use crate::analytical::test_support::{self, Recovery, SuspectPageHistoryCase};
+    let (template, _) = fixture();
+    for case in SuspectPageHistoryCase::ALL {
+        let (source, rows) = test_support::suspect_page_history_evidence(case);
+        let recovery = Recovery::capture(
+            template.contract.destination(),
+            template.contract.schema_digest(),
+            source.clone(),
+            rows.clone(),
+            2,
+        );
+        let context = capture_context(&recovery.manifest, &"a".repeat(64)).unwrap();
+        let snapshot = source.observation.snapshot().unwrap();
+        assert_eq!(
+            context["dataset"],
+            serde_json::to_value(culprit_core::telemetry::SnapshotDataset::SuspectPages).unwrap()
+        );
+        assert_eq!(context["range_kind"], "current");
+        assert_eq!(context["observed_from"], snapshot.observed_from);
+        assert_eq!(context["observed_until"], snapshot.observed_until);
+        assert_eq!(context["source_id"], source.captured_range().unwrap().scope_id);
+        for absent in ["native_database", "database_guid", "recovery_fork_guid", "last_reported_time_without_offset"] {
+            assert!(context.get(absent).is_none(), "{absent}");
+        }
+        if let Some(record) = rows.first() {
+            let original = ExportedRecord::new(&source, &recovery.manifest.capture, record.clone()).unwrap();
+            let envelope = Envelope::new(&recovery.manifest, &original.batch_id).unwrap();
+            assert!(envelope.input(1, &original).is_ok());
+        }
+    }
+}
+#[test]
+fn a_changed_original_history_header_cannot_reuse_the_same_opaque_receipt_or_current_database_label() {
+    use crate::analytical::test_support::{self, Recovery, SuspectPageHistoryCase};
+    use culprit_core::telemetry::{SourceObservation, SourcePartition};
+    let (template, _) = fixture();
+    let (source, rows) = test_support::suspect_page_history_evidence(SuspectPageHistoryCase::Active);
+    let recovery = Recovery::capture(
+        template.contract.destination(),
+        template.contract.schema_digest(),
+        source.clone(),
+        rows.clone(),
+        2,
+    );
+    let original = ExportedRecord::new(&source, &recovery.manifest.capture, rows[0].clone()).unwrap();
+    for cause in ["proof", "id", "role", "generic"] {
+        let mut manifest = recovery.manifest.clone();
+        if cause == "generic" {
+            manifest.source.observation = SourceObservation::Snapshot(source.observation.snapshot().unwrap().clone());
+        } else {
+            let SourceObservation::SuspectPages { native_database, database_writable, .. } =
+                &mut manifest.source.observation
+            else {
+                panic!()
+            };
+            match cause {
+                "proof" => {
+                    native_database.qualifiers.insert("database_guid".into(), "foreign-current-guid".into());
+                }
+                "id" => native_database.id = "8".into(),
+                _ => *database_writable = false,
+            }
+            let SourcePartition::InstanceLocal { epoch, .. } = &mut manifest.source.partition else { panic!() };
+            *epoch = Some(native_database.key().unwrap());
+        }
+        match Envelope::new(&manifest, &original.batch_id) {
+            Err(_) => {}
+            Ok(envelope) => assert!(envelope.input(1, &original).is_err(), "{cause}"),
+        }
+    }
+}

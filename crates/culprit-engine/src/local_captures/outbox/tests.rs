@@ -1,4 +1,5 @@
 mod rowgroups_backup;
+mod suspect_pages;
 mod table_full_text;
 mod tempdb_metadata_memory;
 use super::*;

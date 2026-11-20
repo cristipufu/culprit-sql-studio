@@ -138,6 +138,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
         | SourceObservation::MssqlAgentJobs { snapshot, .. }
         | SourceObservation::BackupHistory { snapshot, .. }
         | SourceObservation::DatabasePerformanceCounters { snapshot, .. }
+        | SourceObservation::SuspectPages { snapshot, .. }
         | SourceObservation::FocusedPageWait { snapshot, .. }
         | SourceObservation::PageWaitWriters { snapshot, .. }
         | SourceObservation::PageTaskHolders { snapshot, .. }

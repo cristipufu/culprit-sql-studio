@@ -3,4 +3,7 @@ import type { CounterReading } from "./CounterReading";
 import type { FileScope } from "./FileScope";
 import type { OperationalCounterKind } from "./OperationalCounterKind";
 
+/**
+ * Native cumulative event counters. Mutable retained populations use their own typed historical reads.
+ */
 export type OperationalCounter = { kind: OperationalCounterKind, subject: string, scope: FileScope, count: number, since: string | null, last_event_at: string | null, before: CounterReading | null, };

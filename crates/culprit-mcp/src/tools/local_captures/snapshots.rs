@@ -51,6 +51,7 @@ fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
         LocalSnapshotReport::TempdbMetadataMemory(report) => tempdb_metadata_memory::value(analysis, report),
         LocalSnapshotReport::InstanceResources(report) => instance_resources(report),
         LocalSnapshotReport::DatabaseProperties(report) => database_properties(report),
+        LocalSnapshotReport::SuspectPages(report) => crate::waits_view::suspect_pages::value(report),
         LocalSnapshotReport::TableFullText(report) => table_full_text::value(report),
         LocalSnapshotReport::Compilation(report) => compilation(analysis, report),
         LocalSnapshotReport::ConfiguredLogRates(report) => configured_log_rates(report),

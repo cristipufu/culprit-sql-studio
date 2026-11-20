@@ -2,8 +2,8 @@
 pub(crate) mod native;
 use crate::{conn::Pool, probe::Probe, read::ReadSession};
 use culprit_core::{
-    Coverage, FileKind, FileScope, Snapshot,
-    operations::{OperationalCounter, OperationalCounterKind, SpacePart, SpaceUsage},
+    Coverage, FileKind, Snapshot,
+    operations::{SpacePart, SpaceUsage},
 };
 use std::sync::Arc;
 /// This database's transaction log, as a space.
@@ -65,15 +65,8 @@ fn attach(snapshot: &mut Snapshot, facts: native::Facts, source: &str) {
         native::Facts::Sequences(sequences) => {
             snapshot.operations.sequences.extend(sequences.into_iter().map(|fact| fact.capacity))
         }
-        native::Facts::SuspectPages(fact) if fact.count > 0 => snapshot.operations.counters.push(OperationalCounter {
-            kind: OperationalCounterKind::ChecksumFailures,
-            subject: snapshot.server.database.clone(),
-            scope: FileScope::Database,
-            count: fact.count as f64,
-            since: None,
-            last_event_at: None,
-            before: None,
-        }),
+        // Editable status/history rows are retained independently in SuspectPageHistoryRead.
+        // They are neither cumulative failure events nor evidence of current physical corruption.
         native::Facts::SuspectPages(_) => {}
     }
 }
@@ -135,6 +128,10 @@ async fn collect_with<R: crate::read::NativeRead>(
                 error
             }
         });
+        if kind == native::Kind::SuspectPages {
+            snapshot.operations.suspect_pages =
+                retain_suspect_pages(&target, &result, started, shutdown == SourceShutdown::Quiescent);
+        }
         if StorageRead::recognizes(kind.source().name) {
             sources.push(match &result {
                 Ok((facts, _)) => StateSourceCoverage::collected(kind.source().name.into(), facts.len() as u32),
@@ -180,6 +177,7 @@ async fn read_kind<R: crate::read::NativeRead>(
     if observations.iter().any(|row| match &row.fact {
         OperationalFact::Space(point) => point.database.as_deref().is_some_and(|name| name != database),
         OperationalFact::MssqlDatabaseFile(point) => point.database != database,
+        OperationalFact::SuspectPages(point) => point.database != database,
         _ => false,
     }) {
         return Err(CollectionStop::SourceChanged.error());
@@ -189,3 +187,46 @@ async fn read_kind<R: crate::read::NativeRead>(
 
 #[cfg(test)]
 mod tests;
+
+// Source failure remains independent of the other operation families; native positive clocks come from the row.
+fn retain_suspect_pages(
+    target: &culprit_core::telemetry::CollectionTarget,
+    result: &culprit_core::Result<(native::Facts, Vec<culprit_core::telemetry::OperationalObservation>)>,
+    started: std::time::SystemTime,
+    settled: bool,
+) -> Option<Box<culprit_core::telemetry::SuspectPageHistoryRead>> {
+    use culprit_core::telemetry::*;
+    let (source, observation, context) = match result {
+        Ok((native::Facts::SuspectPages(point), _)) => (
+            StateSourceCoverage::collected(culprit_core::source_id::SUSPECT_PAGES.into(), 1),
+            Some(Box::new(point.clone())),
+            Ok(ObservationReadContext::Native {
+                context: Box::new(NativeReadContext {
+                    target: target.clone(),
+                    partition: SourcePartition::Target,
+                    observed_from: point.observed_at.clone(),
+                    observed_until: point.observed_at.clone(),
+                    database_writable: point.database_writable,
+                }),
+            }),
+        ),
+        Err(error) => (
+            StateSourceCoverage::unavailable(
+                culprit_core::source_id::SUSPECT_PAGES.into(),
+                error.code,
+                Some(CollectionStop::from_error(error)),
+            ),
+            None,
+            ObservationReadContext::collector(started, std::time::SystemTime::now()),
+        ),
+        _ => return None,
+    };
+    let read = SuspectPageHistoryRead {
+        target: target.clone(),
+        context: context.ok()?,
+        source,
+        observation,
+        read_complete: settled && result.as_ref().err().is_none_or(|error| !crate::read::stops_remaining_reads(error)),
+    };
+    read.is_valid().then_some(Box::new(read))
+}

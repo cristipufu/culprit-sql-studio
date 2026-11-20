@@ -30,6 +30,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::TableFullText => Ok(LocalSnapshotReport::TableFullText(Box::new(
             crate::collected_resources::table_full_text::from_read(read)?,
         ))),
+        LocalCaptureAnalysisKind::SuspectPages => {
+            Ok(LocalSnapshotReport::SuspectPages(Box::new(culprit_checks::suspect_pages::explain_captured(read)?)))
+        }
         LocalCaptureAnalysisKind::DatabaseProperties => {
             required_source(read, DATABASE_PROPERTIES_SOURCE)?;
             let native = DatabasePropertiesRead::from_source(source, read.observations.clone(), read.read_complete)?;

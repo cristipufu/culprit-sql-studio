@@ -256,6 +256,8 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
                 | (crate::source_id::FILE_CAPACITY, "view.storage.invalid")
                 | (crate::source_id::FILE_CAPACITY, "view.storage.sharing_withheld")
                 | (crate::telemetry::DATABASE_PROPERTIES_SOURCE, "view.database_properties.sharing_withheld")
+                | (crate::source_id::SUSPECT_PAGES, "view.suspect_pages.invalid")
+                | (crate::source_id::SUSPECT_PAGES, "view.suspect_pages.sharing_withheld")
                 | (crate::source_id::WAITS, "view.wait_counters.invalid")
                 | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
                 | (crate::telemetry::MSSQL_AGENT_JOBS_SOURCE, "view.jobs.invalid")
@@ -351,6 +353,12 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         s.record_unavailable_evidence(
             crate::source_id::MEMORY_CLERKS,
             crate::message!("collected.memory_clerks.sharing_withheld"),
+        );
+    }
+    if s.operations.suspect_pages.take().is_some() {
+        s.record_unavailable_evidence(
+            crate::source_id::SUSPECT_PAGES,
+            crate::message!("view.suspect_pages.sharing_withheld"),
         );
     }
     if s.operations.database_properties.take().is_some() {

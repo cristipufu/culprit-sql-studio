@@ -107,3 +107,17 @@ async fn native_profile_and_canonical_admission_share_one_classification_and_rej
         assert_eq!(io.calls.len(), 1);
     }
 }
+
+#[test]
+fn complete_select_builders_preserve_all_existing_native_dispatch_bytes() {
+    for (kind, original) in [
+        (Kind::Log, log::query(Kind::Log)),
+        (Kind::TempLog, log::query(Kind::TempLog)),
+        (Kind::Filegroups, FILES_SQL.into()),
+        (Kind::Temp, TEMP_SQL.into()),
+        (Kind::Sequences, SEQUENCES_SQL.into()),
+    ] {
+        assert_eq!(kind.sql(), format!("{original} OPTION(MAXDOP 1)"), "{kind:?}");
+        assert_eq!(kind.sql().matches("OPTION(MAXDOP 1)").count(), 1, "{kind:?}: one complete serial SELECT");
+    }
+}

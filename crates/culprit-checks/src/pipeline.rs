@@ -38,6 +38,7 @@ mod replication;
 mod runtime_populations;
 mod statement_work;
 mod storage;
+mod suspect_pages;
 mod table_full_text;
 mod tempdb_metadata_memory;
 mod wait_counters;
@@ -292,6 +293,7 @@ impl Pipeline {
         let memory_clerks = memory_clerks::explain(&mut snapshot);
         let tempdb_metadata_memory = tempdb_metadata_memory::explain(&mut snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
+        let suspect_pages = suspect_pages::explain(&mut snapshot);
         let table_full_text = table_full_text::explain(&mut snapshot);
         let storage = storage::explain(&mut snapshot);
         let instance_resources = instance_resources::explain(&mut snapshot);
@@ -425,6 +427,7 @@ impl Pipeline {
             memory_clerks,
             tempdb_metadata_memory,
             database_properties,
+            suspect_pages,
             statement_work,
             page_server_reads,
             completed_spills,

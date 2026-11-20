@@ -397,6 +397,9 @@ pub struct Report {
     pub database_properties: Option<Box<crate::DatabasePropertiesReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub suspect_pages: Option<Box<crate::SuspectPageHistoryReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub wait_counters: Option<Box<crate::WaitCounterReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

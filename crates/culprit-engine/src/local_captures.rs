@@ -29,6 +29,7 @@ pub enum LocalCaptureAnalysisKind {
     HyperscaleLogComponents,
     PerformanceCounters,
     DatabaseProperties,
+    SuspectPages,
     TableFullText,
     InstanceResources,
     Compilation,
@@ -49,13 +50,14 @@ pub enum LocalCaptureAnalysisKind {
     SessionCensus,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::PageServerReads,
         Self::MemoryClerks,
         Self::TempdbMetadataMemory,
         Self::HyperscaleLogComponents,
         Self::PerformanceCounters,
         Self::DatabaseProperties,
+        Self::SuspectPages,
         Self::TableFullText,
         Self::InstanceResources,
         Self::Compilation,
@@ -93,6 +95,7 @@ impl LocalCaptureAnalysisKind {
             | Self::Storage => Snapshot(&[Dataset::Operational]),
             Self::PerformanceCounters => Snapshot(&[Dataset::Operational, Dataset::DatabasePerformanceCounters]),
             Self::HyperscaleLogComponents => Snapshot(&[Dataset::HyperscaleLogComponents]),
+            Self::SuspectPages => Snapshot(&[Dataset::SuspectPages]),
             Self::TableFullText => Snapshot(&[Dataset::Tables]),
             Self::Compilation => Snapshot(&[Dataset::QueryCompilation]),
             Self::Jobs => Snapshot(&[Dataset::Jobs]),

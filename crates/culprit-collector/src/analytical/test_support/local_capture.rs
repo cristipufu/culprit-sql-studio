@@ -44,6 +44,7 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
         case("jobs", super::jobs_evidence(super::JobsCase::Failed)),
         case("cdc", super::cdc_evidence(super::CdcCase::ErrorAndProgress)),
         case("columnstore_rowgroups", super::columnstore_rowgroup_evidence(super::ColumnstoreRowgroupCase::States)),
+        case("suspect_pages", super::suspect_page_history_evidence(super::SuspectPageHistoryCase::RepairedOnly)),
         case("backup_history", super::backup_history_evidence(super::BackupHistoryCase::MultipleRecords)),
         case("request_memory", super::request_memory_evidence_cases().remove(0)),
         case("task_space", super::task_space_evidence_cases().remove(0)),

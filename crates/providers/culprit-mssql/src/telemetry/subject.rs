@@ -87,7 +87,10 @@ impl DatabaseAuthority {
     pub fn for_source(dataset: SnapshotDataset, subject: &CollectionSubject) -> Result<Self> {
         if !matches!(
             dataset,
-            SnapshotDataset::Tuning | SnapshotDataset::Settings | SnapshotDataset::DatabasePerformanceCounters
+            SnapshotDataset::Tuning
+                | SnapshotDataset::Settings
+                | SnapshotDataset::DatabasePerformanceCounters
+                | SnapshotDataset::SuspectPages
         ) {
             return Ok(Self::AzureOnly);
         }

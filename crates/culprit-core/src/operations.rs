@@ -34,6 +34,9 @@ pub enum IndexUsageScope {
 pub struct OperationalStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub suspect_pages: Option<Box<crate::telemetry::SuspectPageHistoryRead>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub storage: Option<Box<crate::telemetry::StorageRead>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -194,6 +197,7 @@ impl OperationalStats {
             storage: _,
             hyperscale_log_components: _,
             database_properties: _,
+            suspect_pages: _,
             index_usage_scope,
             log_failures,
             spaces,
@@ -407,6 +411,7 @@ pub enum OperationalCounterKind {
     SubscriptionSyncErrors,
     StandbyConflicts,
     RedoLogWaits,
+    /// Cumulative failure events reported by a native statistics counter, not editable retained page-history rows.
     ChecksumFailures,
     ConnectionFailures,
 }
@@ -423,6 +428,7 @@ pub struct CounterReading {
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
+/// Native cumulative event counters. Mutable retained populations use their own typed historical reads.
 pub struct OperationalCounter {
     pub kind: OperationalCounterKind,
     pub subject: String,

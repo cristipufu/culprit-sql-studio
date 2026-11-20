@@ -31,7 +31,7 @@ fn replies() -> Vec<ReadResult<Vec<Rec>>> {
 }
 fn source(rows: Vec<ReadResult<Vec<Rec>>>, request: &CollectionRequest) -> StateSource<Reader> {
     let mut reader = Reader::new(rows);
-    reader.inner = reader.inner.with_query_limit(database_counter_budget(&request.budget).max_queries);
+    reader.inner = reader.inner.with_query_limit(local_point_budget(&request.budget).max_queries);
     StateSource::with_io(reader, request, "fixture.invalid".into(), 1433).unwrap()
 }
 async fn page(source: &mut StateSource<Reader>) -> Vec<TelemetryRecord> {
@@ -198,7 +198,7 @@ async fn unsupported_platform_unknown_or_readonly_owner_refuses_before_counter_d
 }
 #[test]
 fn independent_caller_limits_are_intersected_without_automatic_cost_or_default_admission() {
-    let upper = super::bounded_budget(&CollectionBudget::upper_limits());
+    let upper = super::super::local_point::bounded_budget(&CollectionBudget::upper_limits());
     assert_eq!(upper.max_queries, 12);
     assert_eq!(upper.max_snapshot_rows, 1);
     assert_eq!(upper.page_rows, 1);
@@ -212,7 +212,7 @@ fn independent_caller_limits_are_intersected_without_automatic_cost_or_default_a
         total_timeout_ms: 40,
         ..upper
     };
-    assert_eq!(super::bounded_budget(&lower), lower);
+    assert_eq!(super::super::local_point::bounded_budget(&lower), lower);
     assert!(point::shared_families(SnapshotDataset::DatabasePerformanceCounters).is_err());
 }
 #[tokio::test]

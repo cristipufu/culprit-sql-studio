@@ -434,6 +434,9 @@ impl Out {
         }
         println!();
         self.findings(report, Severity::Low);
+        if let Some(history) = &report.suspect_pages {
+            println!("\n{}", observations::suspect_pages(history));
+        }
         if !report.performance_counters.is_empty() {
             println!("\n{}", observations::performance_counter_populations(&report.performance_counters));
         }
@@ -782,6 +785,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "assessments": report.assessments,
         "engine_limitations": s.server.engine.spec().limitations(),
         "performance_counters": report.performance_counters,
+        "suspect_pages": report.suspect_pages.as_deref().map(observations::compact_suspect_pages),
         "notes": s.notes,
         "next": report.findings.iter().take(3).map(|f| format!("culprit show {} '{}'", s.connection, f.id)).collect::<Vec<_>>(),
     })
@@ -825,7 +829,19 @@ pub(super) fn markdown_report(report: &Report) -> String {
         out.push_str(&format!("\n## {}\n\n", t!("cli.findings.history", count = stopped.len().to_string())));
         table(&mut out, &stopped, active.len());
     }
+    if let Some(history) = &report.suspect_pages {
+        out.push_str("\n\n");
+        out.push_str(&markdown_text_block(&observations::suspect_pages(history)));
+    }
     out
+}
+
+/// A source label may contain Markdown fences; the enclosing fence must remain longer than every source run.
+fn markdown_text_block(text: &str) -> String {
+    const MINIMUM_FENCE_WIDTH: usize = 3;
+    let source_fence_width = text.split(|character| character != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(MINIMUM_FENCE_WIDTH.max(source_fence_width + 1));
+    format!("{fence}text\n{text}\n{fence}\n")
 }
 
 /// The engine as people know it: a MySQL connection whose last scan met MariaDB is MariaDB.

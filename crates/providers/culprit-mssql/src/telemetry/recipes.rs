@@ -97,7 +97,8 @@ macro_rules! state {
 const REGISTRATIONS: &[Registration] = &[
     state!("mssql.database-performance-counters", DatabasePerformanceCounters)
         .on_editions(&[2, 3, 4])
-        .bounded(state::database_counter_budget),
+        .bounded(state::local_point_budget),
+    state!("mssql.suspect-pages", SuspectPages).on_editions(&[2, 3, 4]).bounded(state::local_point_budget),
     Registration::database(
         "mssql.agent-jobs",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Jobs)),

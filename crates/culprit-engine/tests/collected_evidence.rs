@@ -47,6 +47,7 @@ mod session_memory;
 mod source_partitions;
 mod statement_grants;
 mod statement_work;
+mod suspect_pages;
 mod task_space;
 mod tempdb_metadata_memory;
 mod temporary_space;

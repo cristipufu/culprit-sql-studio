@@ -41,6 +41,8 @@ pub(crate) use backup_history::backup_history;
 pub(crate) use columnstore_rowgroups::columnstore_rowgroups;
 mod cdc;
 mod database_properties;
+mod suspect_pages;
+pub(crate) use suspect_pages::{compact as compact_suspect_pages, suspect_pages};
 mod hyperscale_log_components;
 mod memory_clerks;
 mod tempdb_metadata_memory;

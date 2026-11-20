@@ -9,6 +9,7 @@ use crate::{
 use culprit_core::{FileKind, FileScope, Result, operations::SequenceCapacity, telemetry::CollectionStop};
 const MAX_OPERATION_ROWS: usize = 10_000;
 mod log;
+pub(crate) mod suspect_pages;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -33,11 +34,11 @@ impl Kind {
     }
     fn sql(self) -> String {
         match self {
-            Self::Log | Self::TempLog => log::query(self),
-            Self::Filegroups => FILES_SQL.into(),
-            Self::Temp => TEMP_SQL.into(),
-            Self::Sequences => SEQUENCES_SQL.into(),
-            Self::SuspectPages => SUSPECT_PAGES_SQL.into(),
+            Self::Log | Self::TempLog => serial_select(&log::query(self)),
+            Self::Filegroups => serial_select(FILES_SQL),
+            Self::Temp => serial_select(TEMP_SQL),
+            Self::Sequences => serial_select(SEQUENCES_SQL),
+            Self::SuspectPages => suspect_pages::query(),
         }
     }
 }
@@ -73,12 +74,7 @@ pub(crate) struct SequenceFact {
     pub key: String,
     pub capacity: SequenceCapacity,
 }
-#[derive(Clone)]
-pub(crate) struct SuspectPages {
-    pub count: u64,
-    /// The native datetime has no offset; retain it without assigning a UTC timestamp.
-    pub last_native_at: Option<String>,
-}
+type SuspectPages = culprit_core::telemetry::MssqlSuspectPageHistory;
 #[derive(Clone)]
 pub(crate) enum Facts {
     Spaces(Vec<SpaceFact>),
@@ -114,17 +110,15 @@ impl Facts {
             Self::Sequences(facts) => {
                 facts.into_iter().map(|fact| wrap(fact.key, OperationalFact::Sequence(fact.capacity))).collect()
             }
-            Self::SuspectPages(fact) => vec![wrap(
-                "retained".into(),
-                OperationalFact::SuspectPages {
-                    count: fact.count.to_string(),
-                    last_reported_time_without_offset: fact.last_native_at,
-                    reset: culprit_core::ResetMarker::Unknown,
-                },
-            )],
+            Self::SuspectPages(fact) => vec![wrap(fact.key()?, OperationalFact::SuspectPages(Box::new(fact)))],
         })
     }
 }
+// Builders return complete executable SQL. A read owner must not append syntax after a batch.
+fn serial_select(select: &str) -> String {
+    format!("{select} OPTION(MAXDOP 1)")
+}
+
 pub(crate) async fn read<R: NativeRead>(io: &mut R, kind: Kind, limit: usize) -> Result<Facts> {
     if kind == Kind::TempLog {
         if limit == 0 {
@@ -132,7 +126,7 @@ pub(crate) async fn read<R: NativeRead>(io: &mut R, kind: Kind, limit: usize) ->
         }
         log::require_tempdb_layout(io).await?;
     }
-    let sql = format!("{} OPTION(MAXDOP 1)", kind.sql());
+    let sql = kind.sql();
     let rows = io.query(&sql, vec![], limit.min(MAX_OPERATION_ROWS) + 1).await.map_err(ReadError::into_error)?;
     if rows.len() > limit.min(MAX_OPERATION_ROWS) {
         return Err(CollectionStop::RowLimit.error());
@@ -164,15 +158,7 @@ pub(crate) async fn read<R: NativeRead>(io: &mut R, kind: Kind, limit: usize) ->
             Ok(Facts::Spaces(vec![space(row, kind)?]))
         }
         Kind::Sequences => rows.iter().map(sequence).collect::<Result<Vec<_>>>().map(Facts::Sequences),
-        Kind::SuspectPages => {
-            if rows.len() != 1 {
-                return Err(invalid_data());
-            }
-            Ok(Facts::SuspectPages(SuspectPages {
-                count: integer(&rows[0], "count")?.try_into().map_err(|_| invalid_data())?,
-                last_native_at: rows[0].str("last_native_at"),
-            }))
-        }
+        Kind::SuspectPages => suspect_pages::decode(&rows).map(Facts::SuspectPages),
     }
 }
 fn space(row: &Rec, kind: Kind) -> Result<SpaceFact> {
@@ -321,10 +307,6 @@ fn sequence(row: &Rec) -> Result<SequenceFact> {
         },
     })
 }
-const SUSPECT_PAGES_SQL: &str = "SELECT COUNT_BIG(*) AS count,
- CONVERT(varchar(30), MAX(last_update_date), 126) AS last_native_at
- FROM msdb.dbo.suspect_pages
- WHERE database_id = DB_ID() AND event_type IN (1, 2, 3)";
 
 // One existing catalog dispatch now keeps every visible file independently of the narrower growth population.
 const FILES_SQL: &str = "DECLARE /* culprit */ @observed_at varchar(40)=CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z';

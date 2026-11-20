@@ -16,6 +16,7 @@ pub enum SnapshotDataset {
     ColumnstoreRowgroups,
     Operational,
     DatabasePerformanceCounters,
+    SuspectPages,
     HyperscaleLogComponents,
     WaitCounters,
     Replication,
@@ -67,6 +68,7 @@ impl SnapshotDataset {
             | Self::ColumnstoreRowgroups
             | Self::Operational
             | Self::DatabasePerformanceCounters
+            | Self::SuspectPages
             | Self::HyperscaleLogComponents
             | Self::PlanCacheSummary
             | Self::CacheEntryMemory
@@ -501,12 +503,7 @@ pub enum OperationalFact {
     HyperscaleLogComponent(Box<HyperscaleLogComponent>),
     DatabaseProperties(Box<DatabasePropertiesObservation>),
     MssqlCachedRuntime(Box<CachedStatementRuntime>),
-    SuspectPages {
-        count: String,
-        /// The native datetime has no offset; it does not establish a UTC event timestamp.
-        last_reported_time_without_offset: Option<String>,
-        reset: crate::ResetMarker,
-    },
+    SuspectPages(Box<MssqlSuspectPageHistory>),
 }
 impl OperationalFact {
     fn matches_key(&self, key: &str) -> bool {
@@ -554,6 +551,7 @@ impl OperationalFact {
             Self::MssqlInstanceResources(point) => point.key(),
             Self::HyperscaleLogComponent(point) => point.key(),
             Self::DatabaseProperties(point) => point.key(),
+            Self::SuspectPages(point) => point.key(),
             Self::MssqlCachedRuntime(runtime) => runtime.context.identity.key(),
             Self::Space(_)
             | Self::Sequence(_)
@@ -561,8 +559,7 @@ impl OperationalFact {
             | Self::Counter(_)
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
-            | Self::MssqlPersistentVersionStore(_)
-            | Self::SuspectPages { .. } => return true,
+            | Self::MssqlPersistentVersionStore(_) => return true,
         };
         expected.is_ok_and(|expected| expected == key)
     }
@@ -629,7 +626,7 @@ impl OperationalFact {
             | Self::MssqlStatistics(_)
             | Self::MssqlMissingIndex(_)
             | Self::MssqlCachedRuntime(_)
-            | Self::SuspectPages { .. } => {}
+            | Self::SuspectPages(_) => {}
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -661,11 +658,7 @@ impl OperationalFact {
                         .into_iter()
                         .all(|value| value.len() <= 40 && value.parse::<i128>().is_ok())
             }
-            Self::SuspectPages { count, last_reported_time_without_offset, reset } => {
-                valid_counter(count)
-                    && last_reported_time_without_offset.as_deref().is_none_or(|value| value.len() <= 64)
-                    && valid_reset(reset)
-            }
+            Self::SuspectPages(point) => point.is_valid(),
             Self::FileIo(counters) => counters.is_valid(),
             Self::Counter(counter) => counter.is_valid(),
             Self::StatementCounters(counters) => counters.is_valid(),
@@ -758,6 +751,7 @@ impl OperationalObservation {
                 OperationalFact::ConfiguredLogRateLimits(_) => self.source == CONFIGURED_LOG_RATES_SOURCE,
                 OperationalFact::HyperscaleLogComponent(_) => self.source == HYPERSCALE_LOG_COMPONENTS_SOURCE,
                 OperationalFact::DatabaseProperties(_) => self.source == DATABASE_PROPERTIES_SOURCE,
+                OperationalFact::SuspectPages(_) => self.source == crate::source_id::SUSPECT_PAGES,
                 OperationalFact::MssqlDatabaseFile(_) => self.source == crate::source_id::FILE_CAPACITY,
                 OperationalFact::Space(space) if space.population == StoragePopulation::SharedTempdbTransactionLog => {
                     self.source == crate::source_id::LOG_CAPACITY

@@ -35,6 +35,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         database_properties: &'a Option<Box<culprit_core::DatabasePropertiesReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        suspect_pages: &'a Option<Box<culprit_core::SuspectPageHistoryReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         table_full_text: &'a Option<Box<culprit_core::TableFullTextReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
@@ -109,6 +111,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         memory_clerks,
         tempdb_metadata_memory,
         database_properties,
+        suspect_pages,
         table_full_text,
         maintenance_progress,
         replication,
@@ -146,6 +149,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         memory_clerks,
         tempdb_metadata_memory,
         database_properties,
+        suspect_pages,
         table_full_text,
         maintenance_progress,
         replication,

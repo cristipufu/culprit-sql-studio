@@ -1,4 +1,5 @@
 //! Real shared-state capture uses the owned loopback fixture, never a production endpoint.
+mod suspect_rows;
 use super::*;
 use crate::{
     MssqlProvider,
@@ -332,7 +333,7 @@ async fn owned_selected_database_performance_counters_use_the_real_factory_and_s
             assert!(set.ratios.is_empty());
             assert!(
                 captured.manifest.source_queries
-                    <= database_counter_budget(&CollectionBudget::upper_limits()).max_queries
+                    <= local_point_budget(&CollectionBudget::upper_limits()).max_queries
             );
             originals.verify_retained(&captured).await?;
             assert_eq!(factory.0.source_shutdown(), SourceShutdown::Quiescent);
@@ -345,5 +346,34 @@ async fn owned_selected_database_performance_counters_use_the_real_factory_and_s
     )
     .await;
     outcome.expect("all three genuine selected database native counters must be captured");
+    assert!(!expired);
+}
+
+#[tokio::test]
+#[ignore = "requires the existing nonce-owned SQL Server16+ fixture; history source cost remains unqualified"]
+async fn owned_suspect_page_history_uses_the_existing_reader_and_sealed_original_without_integrity_work() {
+    use crate::test_support::{owned_captures::OwnedCaptures, owned_case::finish_case};
+    use culprit_collector::capture::CollectionCancellation;
+    use std::time::Duration;
+    let cancellation = CollectionCancellation::default();
+    let (expired, fixture) = finish_case(
+        tokio::time::Instant::now() + Duration::from_secs(10),
+        &cancellation,
+        OwnedSourceFixture::open("culprit-suspect-pages"),
+    )
+    .await;
+    let fixture = fixture.expect("positively nonce-owned original fixture");
+    assert!(!expired);
+    let factory = Factory(provider(fixture.port, &fixture.database, fixture.password()));
+    let mut originals = OwnedCaptures::from_pool(fixture.pool.clone(), fixture.port).unwrap();
+    let (expired, outcome) = finish_case(
+        tokio::time::Instant::now() + Duration::from_secs(20),
+        &cancellation,
+        suspect_rows::run(&fixture, &cancellation, &factory, &mut originals),
+    )
+    .await;
+    outcome.expect(
+        "manufactured native history counts, excluded foreign/repair times, original proof and confirmed cleanup",
+    );
     assert!(!expired);
 }

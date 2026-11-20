@@ -120,11 +120,14 @@ fn foreign_facts_undeclared_sources_and_impossible_rosters_are_rejected() {
         let mut read = read();
         match change {
             "kind" => {
-                read.observations[0].fact = OperationalFact::SuspectPages {
-                    count: "1".into(),
-                    last_reported_time_without_offset: None,
-                    reset: crate::ResetMarker::Unknown,
-                }
+                read.observations[0].fact = OperationalFact::Counter(NativeCounterSample::gauge(
+                    "unrelated-native-counter",
+                    1,
+                    CounterUnit::Count,
+                    crate::MeasurementScope::Database,
+                    "unrelated_native_view",
+                    "native_value",
+                ))
             }
             "native-source" => read.observations[0].source = "undeclared-native-cache".into(),
             "key" => read.observations[0].key = digest(b"another-key"),
@@ -228,11 +231,16 @@ fn invalid_original_rows_are_withheld_before_masking_and_the_explicit_gap_surviv
         if malformed_key {
             read.observations[0].key = digest(b"changed-original-key");
         } else {
-            read.observations[0].fact = OperationalFact::SuspectPages {
+            read.observations[0].fact = OperationalFact::SuspectPages(Box::new(MssqlSuspectPageHistory {
+                database: "shop".into(),
+                native_database_id: "7".into(),
+                observed_at: "2020-01-01T00:00:00Z".into(),
+                database_writable: Some(true),
                 count: "1".into(),
+                retained_rows: "1".into(),
                 last_reported_time_without_offset: None,
                 reset: crate::ResetMarker::Generation("private-foreign-cache-fact".into()),
-            };
+            }));
         }
         assert!(!read.is_valid());
         let original = snapshot(read);

@@ -17,6 +17,10 @@ mod cache_entry_memory;
 mod cached_definitions;
 mod cached_runtime_read;
 mod captured_operational_read;
+mod suspect_pages;
+pub use suspect_pages::{
+    MssqlSuspectPageHistory, SuspectPageHistoryRead, suspect_page_context, suspect_pages_header_is_valid,
+};
 mod database_properties;
 pub use database_properties::{
     DATABASE_PROPERTIES_SOURCE, DatabasePropertiesObservation, DatabasePropertiesProfile, DatabasePropertiesRead,
@@ -742,6 +746,8 @@ impl TelemetryRecord {
                     (_, OperationalFact::ConfiguredLogRateLimits(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::HyperscaleLogComponent(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::DatabaseProperties(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::SuspectPages(point)) => accepted && point.fits_source(source),
+                    (SourceObservation::SuspectPages { .. }, _) => false,
                     (_, OperationalFact::Space(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::MssqlDatabaseFile(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::MssqlInstanceResources(point)) => accepted && point.fits_source(source),

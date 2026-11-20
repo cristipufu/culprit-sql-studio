@@ -1361,3 +1361,75 @@ fn large_btree_index_on_append_only_postgres_time_series_table_recommends_brin()
     assert!(f.title.contains("BRIN index would take < 1%"), "{}", f.title);
     assert!(f.fix.as_ref().unwrap().sql.as_deref().unwrap().contains("USING brin (created_at)"), "{:?}", f.fix);
 }
+
+fn checksum_counter_snapshot(at: &str, count: f64, since: Option<&str>) -> Snapshot {
+    use culprit_core::operations::{OperationalCounter, OperationalCounterKind};
+    let mut snapshot = snapshot_with(Engine::Postgres);
+    snapshot.taken_at = at.into();
+    snapshot.operations.counters = vec![OperationalCounter {
+        kind: OperationalCounterKind::ChecksumFailures,
+        subject: snapshot.server.database.clone(),
+        scope: culprit_core::FileScope::Database,
+        count,
+        since: since.map(str::to_owned),
+        last_event_at: Some(at.into()),
+        before: None,
+    }];
+    snapshot
+}
+
+#[test]
+fn genuine_cumulative_checksum_events_keep_exact_new_counts_and_database_attention() {
+    let reset = Some("2026-10-01T00:00:00Z");
+    let previous = checksum_counter_snapshot("2026-10-21T10:00:00Z", 3.0, reset);
+    let mut current = checksum_counter_snapshot("2026-10-21T11:00:00Z", 15.0, reset);
+    assert!(previous.same_database(&current));
+    culprit_core::operations::compare(&previous, &mut current);
+    assert_eq!(current.operations.counters[0].before.as_ref().unwrap().count, 3.0);
+    let findings = operational_errors::OperationalErrorsCheck.run(&current);
+    let [finding] = findings.as_slice() else { panic!("one genuine native checksum event counter") };
+    assert_eq!(
+        finding.title,
+        culprit_core::t!(
+            "check.operational_errors.title.new",
+            label = culprit_core::t!("check.operational_errors.label.checksum_failures"),
+            count = culprit_core::format::count(12.0)
+        )
+    );
+    assert_eq!(finding.severity, Severity::High);
+    assert_eq!(finding.actionability, culprit_core::Actionability::NeedsAttention);
+    let metric = finding.metrics.iter().find(|metric| metric.key == "check.operational_errors.metric.new").unwrap();
+    assert_eq!(metric.value, 12.0);
+    assert!(finding.summary.contains(&culprit_core::t!("check.operational_errors.summary.corruption")));
+    assert!(finding.fix.as_ref().unwrap().sql.is_none());
+}
+
+#[test]
+fn checksum_counter_reset_unknown_reset_and_shrink_do_not_manufacture_new_events() {
+    let previous = checksum_counter_snapshot("2026-10-21T10:00:00Z", 3.0, Some("2026-10-01T00:00:00Z"));
+    for (count, since) in [(15.0, Some("2026-10-21T10:30:00Z")), (15.0, None), (1.0, Some("2026-10-01T00:00:00Z"))] {
+        let mut current = checksum_counter_snapshot("2026-10-21T11:00:00Z", count, since);
+        culprit_core::operations::compare(&previous, &mut current);
+        assert!(current.operations.counters[0].before.is_none());
+        let findings = operational_errors::OperationalErrorsCheck.run(&current);
+        let [finding] = findings.as_slice() else { panic!("the genuine cumulative total remains visible") };
+        assert_eq!(
+            finding.title,
+            culprit_core::t!(
+                "check.operational_errors.title.history",
+                label = culprit_core::t!("check.operational_errors.label.checksum_failures"),
+                count = culprit_core::format::count(count)
+            )
+        );
+        assert_eq!(
+            finding
+                .metrics
+                .iter()
+                .filter(|metric| metric.key == "check.operational_errors.metric.total")
+                .map(|metric| metric.value)
+                .collect::<Vec<_>>(),
+            vec![count]
+        );
+        assert!(finding.metrics.iter().all(|metric| metric.key != "check.operational_errors.metric.new"));
+    }
+}

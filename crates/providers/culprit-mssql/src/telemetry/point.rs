@@ -11,6 +11,7 @@ pub(super) enum Family {
     FileIo,
     PerformanceCounters,
     DatabasePerformanceCounters,
+    SuspectPages,
     Queue(QueueKind),
     VersionStore,
     CleanupHorizon,
@@ -58,6 +59,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
             .chain([Family::VersionStore, Family::CleanupHorizon, Family::PersistentVersions])
             .collect(),
         SnapshotDataset::DatabasePerformanceCounters => vec![Family::DatabasePerformanceCounters],
+        SnapshotDataset::SuspectPages => vec![Family::SuspectPages],
         SnapshotDataset::PlanCacheSummary => vec![Family::PlanCacheSummary],
         SnapshotDataset::MissingIndexes => vec![Family::MissingIndexes],
         SnapshotDataset::Tuning => crate::query_store::tuning::Kind::ALL.into_iter().map(Family::Tuning).collect(),
@@ -131,6 +133,7 @@ impl Family {
         match self {
             Self::Operation(kind) => kind.source(),
             Self::FileIo => &sources::FILE_LATENCY,
+            Self::SuspectPages => &sources::SUSPECT_PAGES,
             Self::PerformanceCounters | Self::DatabasePerformanceCounters => &sources::PERFORMANCE_COUNTERS,
             Self::Queue(kind) => crate::queues::source(kind),
             Self::VersionStore => &sources::VERSION_STORE,
@@ -315,6 +318,12 @@ impl Family {
             Self::FileIo => {
                 let facts = crate::storage_io::read(reader, crate::storage_io::Selection::Database, limit).await?;
                 crate::storage_io::observations(facts).into_iter().map(TelemetryRecord::Operational).collect()
+            }
+            Self::SuspectPages => {
+                let Some(super::subject::Identity::LocalDatabase(owner)) = owner else {
+                    return Err(crate::read::invalid_data());
+                };
+                return super::state::suspect_pages::read(reader, owner).await;
             }
             Self::DatabasePerformanceCounters => {
                 let Some(super::subject::Identity::LocalDatabase(owner)) = owner else {

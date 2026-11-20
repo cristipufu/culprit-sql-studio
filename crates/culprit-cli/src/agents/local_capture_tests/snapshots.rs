@@ -33,6 +33,7 @@ async fn every_shared_operational_report_reaches_the_existing_english_mcp_operat
         assert_eq!(value["native_sources"].as_array().unwrap().len(), native.sources.len());
         let title_key = match kind {
             LocalCaptureAnalysisKind::DatabaseProperties => "view.database_properties.title",
+            LocalCaptureAnalysisKind::SuspectPages => "view.suspect_pages.title",
             LocalCaptureAnalysisKind::Compilation => "view.compilation.title",
             LocalCaptureAnalysisKind::PerformanceCounters => "view.performance_counters.title",
             LocalCaptureAnalysisKind::TempdbMetadataMemory => "view.tempdb_metadata_memory.title",

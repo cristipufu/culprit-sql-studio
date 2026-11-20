@@ -220,7 +220,7 @@ impl OperationalFact {
             | Self::MssqlCachedRuntime(_)
             | Self::MssqlOutOfMemory(_)
             | Self::MysqlErrorLog(_)
-            | Self::SuspectPages { .. } => None,
+            | Self::SuspectPages(_) => None,
         };
         payload.into_iter().collect()
     }

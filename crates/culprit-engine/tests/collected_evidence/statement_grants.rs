@@ -146,11 +146,16 @@ async fn wrong_dataset_family_subject_partition_or_native_fact_is_not_cached_gra
             2 => source.partition = SourcePartition::Target,
             _ => {
                 let TelemetryRecord::Operational(row) = &mut records[0] else { panic!() };
-                row.fact = OperationalFact::SuspectPages {
-                    count: "1".into(),
-                    last_reported_time_without_offset: None,
-                    reset: culprit_core::ResetMarker::Unknown,
-                };
+                // Suspect-page facts now require their dedicated original source. A generic native counter
+                // remains valid raw evidence here, so this still exercises the SDK's wrong-kind refusal.
+                row.fact = OperationalFact::Counter(NativeCounterSample::gauge(
+                    "unrelated-native-counter",
+                    1,
+                    CounterUnit::Count,
+                    culprit_core::MeasurementScope::Database,
+                    "unrelated_native_view",
+                    "native_value",
+                ));
             }
         }
         let fixture = Fixture::new(source, records).await;

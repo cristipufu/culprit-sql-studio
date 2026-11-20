@@ -5,6 +5,8 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod suspect_pages;
+pub use suspect_pages::{SuspectPageHistoryCase, assert_suspect_page_history_capture, suspect_page_history_evidence};
 mod backup_history;
 pub use backup_history::{BackupHistoryCase, assert_backup_history_capture, backup_history_evidence};
 mod cdc;

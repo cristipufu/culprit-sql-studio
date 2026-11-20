@@ -427,6 +427,11 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         metadata: Box<MysqlEventsMetadata>,
     },
+    SuspectPages {
+        snapshot: StateSnapshotDescription,
+        native_database: Box<NativeIdentity>,
+        database_writable: bool,
+    },
     DatabasePerformanceCounters {
         snapshot: StateSnapshotDescription,
         native_database: Box<NativeIdentity>,
@@ -540,6 +545,7 @@ impl SourceObservation {
             Self::Activity(_) | Self::FocusedBlocking { .. } => TelemetryCollection::Activity,
             Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
             Self::BackupHistory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory),
+            Self::SuspectPages { .. } => TelemetryCollection::Snapshot(SnapshotDataset::SuspectPages),
             Self::DatabasePerformanceCounters { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters)
             }
@@ -606,6 +612,7 @@ impl SourceObservation {
             | Self::MysqlEvents { .. }
             | Self::MssqlAgentJobs { .. }
             | Self::BackupHistory { .. }
+            | Self::SuspectPages { .. }
             | Self::DatabasePerformanceCounters { .. }
             | Self::Snapshot(_)
             | Self::PagedSnapshot(_) => TelemetryRange::Current,
@@ -633,6 +640,9 @@ impl SourceObservation {
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
             Self::BackupHistory { snapshot, .. } => backup_history_header_is_valid(snapshot),
+            Self::SuspectPages { snapshot, native_database, .. } => {
+                suspect_pages_header_is_valid(snapshot) && validate_database_performance_identity(native_database)
+            }
             Self::DatabasePerformanceCounters { snapshot, native_database, .. } => {
                 database_performance_header_is_valid(snapshot)
                     && validate_database_performance_identity(native_database)
@@ -737,6 +747,7 @@ impl SourceObservation {
             | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
+            | Self::SuspectPages { snapshot, .. }
             | Self::DatabasePerformanceCounters { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
@@ -759,6 +770,7 @@ impl SourceObservation {
             | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
+            | Self::SuspectPages { snapshot, .. }
             | Self::DatabasePerformanceCounters { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
@@ -801,6 +813,7 @@ impl SourceObservation {
             | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
+            | Self::SuspectPages { snapshot, .. }
             | Self::DatabasePerformanceCounters { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => {
@@ -1110,6 +1123,7 @@ impl CollectionDescription {
         if let (
             SourceObservation::Snapshot(snapshot)
             | SourceObservation::BackupHistory { snapshot, .. }
+            | SourceObservation::SuspectPages { snapshot, .. }
             | SourceObservation::DatabasePerformanceCounters { snapshot, .. },
             CollectionSelection::Snapshot { dataset },
         ) = (&self.observation, &request.selection)

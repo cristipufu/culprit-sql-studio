@@ -28,10 +28,8 @@ enum PublicObservation<'a> {
         snapshot: &'a StateSnapshotDescription,
         metadata: &'a MysqlEventsMetadata,
     },
-    DatabasePerformanceCountersContext {
-        snapshot: &'a StateSnapshotDescription,
-        database_writable: bool,
-    },
+    DatabasePerformanceCountersContext(LocalPointContext<'a>),
+    SuspectPagesContext(LocalPointContext<'a>),
     BackupHistory {
         snapshot: &'a StateSnapshotDescription,
         scope: &'a MssqlBackupHistoryScope,
@@ -134,6 +132,18 @@ struct Focus<'a> {
     resource: &'a ObservedWaitResource,
 }
 
+/// Only public acquisition coverage/role. Original database/member/fork proof stays in the private manifest.
+#[derive(Serialize)]
+struct LocalPointContext<'a> {
+    snapshot: &'a StateSnapshotDescription,
+    database_writable: bool,
+}
+impl<'a> LocalPointContext<'a> {
+    fn new(snapshot: &'a StateSnapshotDescription, database_writable: bool) -> Self {
+        Self { snapshot, database_writable }
+    }
+}
+
 pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
     let projected = match value {
         SourceObservation::QueryHistory(value) => PublicObservation::QueryHistory(value),
@@ -164,7 +174,10 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::Jobs { snapshot, metadata } => PublicObservation::Jobs { snapshot, metadata },
         SourceObservation::MysqlEvents { snapshot, metadata } => PublicObservation::MysqlEvents { snapshot, metadata },
         SourceObservation::DatabasePerformanceCounters { snapshot, database_writable, .. } => {
-            PublicObservation::DatabasePerformanceCountersContext { snapshot, database_writable: *database_writable }
+            PublicObservation::DatabasePerformanceCountersContext(LocalPointContext::new(snapshot, *database_writable))
+        }
+        SourceObservation::SuspectPages { snapshot, database_writable, .. } => {
+            PublicObservation::SuspectPagesContext(LocalPointContext::new(snapshot, *database_writable))
         }
         SourceObservation::BackupHistory { snapshot, scope, database_writable } => {
             PublicObservation::BackupHistory { snapshot, scope, database_writable: *database_writable }
@@ -276,5 +289,53 @@ mod database_counter_tests {
         ] {
             assert!(!text.contains(private));
         }
+    }
+}
+
+#[cfg(test)]
+mod suspect_page_tests {
+    use super::*;
+    use crate::analytical::test_support::{self, SuspectPageHistoryCase};
+    #[test]
+    fn each_retained_history_state_has_a_curated_header_without_private_native_authority() {
+        for case in SuspectPageHistoryCase::ALL {
+            let (source, _) = test_support::suspect_page_history_evidence(case);
+            let public = observation(&source.observation).unwrap();
+            assert_eq!(public["kind"], "suspect-pages-context");
+            assert_eq!(
+                public["data"]["snapshot"],
+                serde_json::to_value(source.observation.snapshot().unwrap()).unwrap()
+            );
+            assert_eq!(public["data"]["database_writable"], true);
+            let fields = public["data"].as_object().unwrap();
+            assert_eq!(fields.len(), 2);
+            assert!(fields.contains_key("snapshot") && fields.contains_key("database_writable"));
+            assert!(serde_json::from_value::<SourceObservation>(public.clone()).is_err());
+            let text = public.to_string();
+            for private in [
+                "native_database",
+                "private-database-guid-canary",
+                "private-fork-guid-canary",
+                "private-file-guid-canary",
+                "private-process-canary",
+            ] {
+                assert!(!text.contains(private), "{case:?}: {private}");
+            }
+        }
+    }
+    #[test]
+    fn selected_counter_and_history_public_discriminators_stay_distinct_with_identical_private_dto_shape() {
+        let (counter, _) =
+            test_support::database_performance_counter_evidence(test_support::DatabasePerformanceCounterCase::Exact);
+        let (history, _) = test_support::suspect_page_history_evidence(SuspectPageHistoryCase::Active);
+        let counter = observation(&counter.observation).unwrap();
+        let history = observation(&history.observation).unwrap();
+        assert_eq!(counter["kind"], "database-performance-counters-context");
+        assert_eq!(history["kind"], "suspect-pages-context");
+        assert_ne!(counter["data"]["snapshot"]["dataset"], history["data"]["snapshot"]["dataset"]);
+        assert_eq!(
+            counter["data"].as_object().unwrap().keys().collect::<Vec<_>>(),
+            history["data"].as_object().unwrap().keys().collect::<Vec<_>>()
+        );
     }
 }

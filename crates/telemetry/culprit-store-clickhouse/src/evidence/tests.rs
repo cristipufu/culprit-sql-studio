@@ -41,6 +41,7 @@ mod source_partitions;
 mod statement_grants;
 mod statement_outcomes;
 mod statement_work;
+mod suspect_pages;
 mod tempdb_metadata_memory;
 mod tuning;
 use crate::{catalog::SchemaCatalog, client::QueryRequest, response::QueryTable, schema::Schema};

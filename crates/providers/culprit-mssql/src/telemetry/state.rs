@@ -11,10 +11,13 @@ const CLOCK: &str = r#"SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME()
 const ENVELOPE_ALLOWANCE: usize = 4096;
 const MAX_BUFFERED_FAMILY_ROWS: usize = 10_000;
 const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
+#[cfg(test)]
 mod database_counters;
+mod local_point;
 mod settings;
+pub(super) mod suspect_pages;
 mod tuning;
-pub(super) use database_counters::bounded_budget as database_counter_budget;
+pub(super) use local_point::bounded_budget as local_point_budget;
 pub(super) use settings::bounded_budget as settings_budget;
 pub(super) use tuning::bounded_budget as tuning_budget;
 
@@ -25,8 +28,9 @@ fn native_budget(request: &CollectionRequest) -> CollectionBudget {
         tuning_budget(&request.budget)
     } else if request.selection
         == (CollectionSelection::Snapshot { dataset: SnapshotDataset::DatabasePerformanceCounters })
+        || request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::SuspectPages })
     {
-        database_counter_budget(&request.budget)
+        local_point_budget(&request.budget)
     } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings }) {
         settings_budget(&request.budget)
     } else {
@@ -71,7 +75,10 @@ impl<R: NativeRead> StateSource<R> {
         let mut request = request.clone();
         if matches!(
             dataset,
-            SnapshotDataset::Tuning | SnapshotDataset::Settings | SnapshotDataset::DatabasePerformanceCounters
+            SnapshotDataset::Tuning
+                | SnapshotDataset::Settings
+                | SnapshotDataset::DatabasePerformanceCounters
+                | SnapshotDataset::SuspectPages
         ) {
             request.budget = native_budget(&request);
             request.budget.validate()?;
@@ -212,8 +219,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         if dataset == SnapshotDataset::Settings {
             settings::require_profile(&read.identity)?;
         }
-        if dataset == SnapshotDataset::DatabasePerformanceCounters {
-            database_counters::require_profile(&read.identity)?;
+        if matches!(dataset, SnapshotDataset::DatabasePerformanceCounters | SnapshotDataset::SuspectPages) {
+            local_point::require_profile(&read.identity)?;
         }
         let target = read.identity.target();
         self.identity = Some(read.identity);
@@ -294,6 +301,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                 match dataset {
                     SnapshotDataset::Operational => "operational-state",
                     SnapshotDataset::DatabasePerformanceCounters => "database-performance-counter-state",
+                    SnapshotDataset::SuspectPages => "suspect-page-history-state",
                     SnapshotDataset::WaitCounters => "wait-counter-state",
                     SnapshotDataset::Replication => "replication-state",
                     SnapshotDataset::Settings => "settings-state",
@@ -343,7 +351,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             }
             .into(),
             continuity: SourceContinuity::Unverified,
-            observation: database_counters::observation(
+            observation: local_point::observation(
                 StateSnapshotDescription {
                     dataset,
                     observed_from,

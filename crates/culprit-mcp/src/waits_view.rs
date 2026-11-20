@@ -20,6 +20,7 @@ pub(crate) mod page_server_reads;
 mod page_waits;
 pub(crate) mod performance_counters;
 mod statement_work;
+pub(crate) mod suspect_pages;
 pub(crate) mod task_space;
 
 #[cfg(test)]
@@ -117,6 +118,7 @@ pub fn report(report: &Report) -> Value {
     connection_outcomes::attach(&mut response, report);
     counter_ratios::attach(&mut response, report);
     performance_counters::attach(&mut response, report);
+    suspect_pages::attach(&mut response, report);
     configured_log_rates::attach(&mut response, report);
     instance_resources::attach(&mut response, report);
     if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {

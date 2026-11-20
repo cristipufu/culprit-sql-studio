@@ -29,6 +29,8 @@ mod instance_resource_report;
 pub use instance_resource_report::{InstanceResourceField, InstanceResourceGroup, InstanceResourceReport};
 mod table_full_text_report;
 pub use table_full_text_report::{TableFullTextEntry, TableFullTextReport};
+mod suspect_page_history_report;
+pub use suspect_page_history_report::SuspectPageHistoryReport;
 mod database_properties_report;
 mod hyperscale_log_component_report;
 mod memory_clerk_report;

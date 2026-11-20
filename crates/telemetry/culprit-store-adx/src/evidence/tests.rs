@@ -50,6 +50,7 @@ mod source_overhead;
 mod source_partitions;
 mod statement_grants;
 mod statement_outcomes;
+mod suspect_pages;
 mod tempdb_metadata_memory;
 mod tuning;
 mod waits;

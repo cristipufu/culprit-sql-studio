@@ -492,10 +492,34 @@ fn selected_database_performance_counters_are_manual_unqualified_and_bounded_ind
         recipe.selector,
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters))
     );
-    assert_eq!(recipe.budget, super::super::state::database_counter_budget(&CollectionBudget::upper_limits()));
+    assert_eq!(recipe.budget, super::super::state::local_point_budget(&CollectionBudget::upper_limits()));
     let request = CollectionRequest {
         subject: CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::DatabasePerformanceCounters },
+        budget: CollectionBudget::default(),
+    };
+    let source =
+        open(Arc::new(Pool::new(tiberius::Config::new(), None)), &request, "original.invalid".into(), 1433).unwrap();
+    assert_eq!(source.query_count(), 0);
+}
+
+#[test]
+fn suspect_page_history_is_one_explicit_unqualified_local_point_without_operational_expansion() {
+    let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.suspect-pages").unwrap();
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, [RecipeSubject::Database]);
+    assert_eq!(
+        recipe.selector,
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::SuspectPages))
+    );
+    assert_eq!(recipe.budget, super::super::state::local_point_budget(&CollectionBudget::upper_limits()));
+    assert_eq!(super::super::point::families(SnapshotDataset::SuspectPages).unwrap().len(), 1);
+    assert!(super::super::point::shared_families(SnapshotDataset::SuspectPages).is_err());
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::SuspectPages },
         budget: CollectionBudget::default(),
     };
     let source =

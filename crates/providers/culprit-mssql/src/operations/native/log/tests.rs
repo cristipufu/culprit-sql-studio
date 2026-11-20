@@ -36,7 +36,7 @@ async fn shared_log_uses_the_original_bounded_projection_with_native_database_tw
 
 #[test]
 fn ordinary_database_log_template_and_default_scan_population_remain_byte_for_byte_unchanged() {
-    let sql = format!("{} OPTION(MAXDOP 1)", Kind::Log.sql());
+    let sql = Kind::Log.sql();
     assert_eq!(
         culprit_core::telemetry::digest(sql.as_bytes()),
         "3768ff0c254c704159ec14523d9647155ccf4d57f842e09d884d252441b606f4"
