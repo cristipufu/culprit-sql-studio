@@ -82,7 +82,15 @@ fn decode(row: &Rec) -> Result<Event> {
     let file = text(row, "file_name")?;
     let position =
         digest(&serde_json::to_vec(&("xml_deadlock_report", &file, offset, &at, &xml)).map_err(|_| invalid_data())?);
-    let graphs = super::parse_with_time(&xml, "system_health", Some(&at))?;
+    let mut graphs = super::parse_with_time(&xml, "system_health", Some(&at))?;
+    // Content/time/participants can repeat even within one native clock tick. Only this file decoder has
+    // the original event position; imported XML retains its independent content identity.
+    for (ordinal, graph) in graphs.iter_mut().enumerate() {
+        graph.id = digest(
+            &serde_json::to_vec(&("mssql-xel-deadlock-occurrence-v1", &position, ordinal))
+                .map_err(|_| invalid_data())?,
+        );
+    }
     // Invalid/unparseable native XML must not look like an empty successful event.
     culprit_core::xml::read(&xml, |doc| doc.map(|_| ()).map_err(|_| invalid_data()))?;
     Ok(Event { position, file_id: digest(file.as_bytes()), offset: offset.to_string(), at, graphs })
@@ -95,7 +103,7 @@ mod tests {
     use crate::{resources::test_support::FakeRead, value::Val};
 
     #[test]
-    fn full_native_clocks_keep_graph_identity_and_original_file_positions_separate() {
+    fn native_file_occurrence_identity_preserves_full_clocks_and_original_positions() {
         let at = "2026-10-11T12:05:01.1234567Z";
         let xml = event(at);
         let row = file_row(at, &xml);
@@ -116,7 +124,9 @@ mod tests {
         );
         let moved = decode(&moved).unwrap();
         assert_ne!(first.position, moved.position, "native positions still include original file identity");
-        assert_eq!(first.graphs[0].id, moved.graphs[0].id, "display replay matching never replaces native positions");
+        assert_ne!(first.graphs[0].id, moved.graphs[0].id, "a copied origin cannot borrow the original occurrence ID");
+        assert_eq!(first.graphs[0].processes, moved.graphs[0].processes);
+        assert_eq!(first.graphs[0].resources, moved.graphs[0].resources);
         assert_eq!(decode(&row).unwrap().graphs.len(), 1, "shared file history is not attributed by database labels");
     }
 
@@ -125,8 +135,11 @@ mod tests {
         let at = "2026-10-11T12:05:01.1234567Z";
         let bare = decode(&file_row(at, KEY_LOOKUP_XDL)).unwrap();
         let wrapped = decode(&file_row(at, &event(at))).unwrap();
-        assert_eq!(bare.graphs[0], wrapped.graphs[0]);
+        let mut same_content = wrapped.graphs[0].clone();
+        same_content.id = bare.graphs[0].id.clone();
+        assert_eq!(bare.graphs[0], same_content, "the graph content remains identical");
         assert_ne!(bare.position, wrapped.position, "original XML remains part of the native position");
+        assert_ne!(bare.graphs[0].id, wrapped.graphs[0].id, "different native positions are separate occurrences");
         for event_at in ["2026-10-11T12:05:01.1234568Z", "2026-10-11T12:05:01.1234567", "bad-clock"] {
             assert!(decode(&file_row(at, &event(event_at))).is_err());
         }
@@ -137,6 +150,93 @@ mod tests {
         ] {
             assert!(decode(&file_row(at, missing)).is_err(), "a selected report without a graph is not empty success");
         }
+    }
+
+    #[test]
+    fn same_instant_graphs_with_different_original_positions_have_distinct_replay_stable_occurrence_ids() {
+        use crate::resources::test_support::replace;
+        let at = "2026-10-11T12:05:01.1234567Z";
+        let xml = event(at);
+        let original = file_row(at, &xml);
+        let first = decode(&original).unwrap();
+        let moved_offset = replace(&original, &[("file_offset", Val::Int(1024))]);
+        let moved_file = replace(&original, &[("file_name", Val::Text("/var/opt/mssql/log/copied_health.xel".into()))]);
+        for row in [&moved_offset, &moved_file] {
+            let distinct = decode(row).unwrap();
+            assert_eq!(first.at, distinct.at);
+            assert_eq!(first.graphs[0].processes, distinct.graphs[0].processes);
+            assert_ne!(first.position, distinct.position);
+            assert_ne!(first.graphs[0].id, distinct.graphs[0].id);
+            assert_eq!(distinct.graphs, decode(row).unwrap().graphs, "an exact native row replays its original ID");
+        }
+        assert_eq!(first.graphs, decode(&original).unwrap().graphs);
+        let imported = super::super::parse_deadlock_xml(&xml, "pasted").unwrap();
+        assert_eq!(imported, super::super::parse_deadlock_xml(&xml, "pasted").unwrap());
+        assert_eq!(imported[0].id, super::super::parse_deadlock_xml(&xml, "system_health").unwrap()[0].id);
+        assert_ne!(first.graphs[0].id, imported[0].id, "a source label cannot supply native position authority");
+        assert_eq!(first.graphs[0].processes, imported[0].processes);
+    }
+
+    #[test]
+    fn identical_graphs_inside_one_native_event_have_distinct_deterministic_ordinals() {
+        let at = "2026-10-11T12:05:01.1234567Z";
+        let graph = KEY_LOOKUP_XDL.replace("<deadlock-list>", "").replace("</deadlock-list>", "");
+        let xml = format!(
+            r#"<event name="xml_deadlock_report" timestamp="{at}"><data name="xml_report"><value>{graph}{graph}</value></data></event>"#
+        );
+        let row = file_row(at, &xml);
+        let found = decode(&row).unwrap();
+        let replay = decode(&row).unwrap();
+        assert_eq!(found.graphs.len(), 2);
+        assert_eq!(found.graphs, replay.graphs);
+        assert_ne!(found.graphs[0].id, found.graphs[1].id);
+        let mut second = found.graphs[1].clone();
+        second.id = found.graphs[0].id.clone();
+        assert_eq!(found.graphs[0], second, "only the native occurrence ordinal separates identical graphs");
+        let imported = super::super::parse_deadlock_xml(&xml, "pasted").unwrap();
+        assert_eq!(imported[0].id, imported[1].id, "imports keep their original content-ID contract");
+    }
+
+    #[tokio::test]
+    async fn interactive_report_preserves_the_same_distinct_ids_as_the_shared_native_file_reader() {
+        use crate::deadlocks::system_health::tests::configuration;
+        use crate::resources::test_support::replace;
+        use crate::value::Rec;
+        let at = "2020-01-01T06:00:01.1234567Z";
+        let first = file_row(at, &event(at));
+        let second = replace(&first, &[("file_offset", Val::Int(1024))]);
+        let rows = vec![first, second];
+        let mut native = FakeRead::new(vec![Ok(rows.clone())]);
+        let direct = read_file(
+            &mut native,
+            "/configured/system_health_*.xel",
+            "2020-01-01T06:00:00Z",
+            "2020-01-01T06:02:00Z",
+            50,
+            false,
+        )
+        .await
+        .unwrap();
+        let server = Rec::of(&[
+            ("edition", Val::Int(3)),
+            ("db", Val::Text("display-only-db".into())),
+            ("observed_at", Val::Text("2020-01-01T06:02:00Z".into())),
+        ]);
+        let mut interactive =
+            FakeRead::new(vec![Ok(vec![server]), Ok(vec![configuration()]), Ok(rows), Ok(vec![configuration()])]);
+        let report = super::super::recent(&mut interactive, 1.0).await.unwrap();
+        assert_eq!(report.deadlocks.len(), 2);
+        let mut expected =
+            direct.iter().flat_map(|event| &event.graphs).map(|graph| graph.id.clone()).collect::<Vec<_>>();
+        let mut actual = report.deadlocks.iter().map(|graph| graph.id.clone()).collect::<Vec<_>>();
+        expected.sort();
+        actual.sort();
+        assert_eq!(actual, expected, "scan and collector native reads share one occurrence decoder");
+        assert_ne!(actual[0], actual[1]);
+        assert_eq!(report.scope, Some(culprit_core::MeasurementScope::Server));
+        assert!(report.recent_only && report.note.is_some());
+        assert_eq!((native.calls.len(), interactive.calls.len()), (1, 4));
+        assert_eq!((native.closed, interactive.closed), (0, 0), "the same caller retains close ownership");
     }
 
     #[tokio::test]
