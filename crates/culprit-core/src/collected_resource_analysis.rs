@@ -296,3 +296,10 @@ pub struct CollectedSuspectPageHistoryAnalysis {
     pub context: crate::collected_analysis::CollectedEvidenceContext,
     pub report: Box<crate::SuspectPageHistoryReport>,
 }
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedTableMemoryAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::TableMemoryReport>,
+}

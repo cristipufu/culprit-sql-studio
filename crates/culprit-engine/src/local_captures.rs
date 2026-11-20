@@ -38,6 +38,7 @@ pub enum LocalCaptureAnalysisKind {
     Jobs,
     Cdc,
     ColumnstoreRowgroups,
+    TableMemory,
     BackupHistory,
     RequestMemory,
     TaskSpace,
@@ -50,7 +51,7 @@ pub enum LocalCaptureAnalysisKind {
     SessionCensus,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::PageServerReads,
         Self::MemoryClerks,
         Self::TempdbMetadataMemory,
@@ -66,6 +67,7 @@ impl LocalCaptureAnalysisKind {
         Self::Jobs,
         Self::Cdc,
         Self::ColumnstoreRowgroups,
+        Self::TableMemory,
         Self::BackupHistory,
         Self::RequestMemory,
         Self::TaskSpace,
@@ -101,6 +103,7 @@ impl LocalCaptureAnalysisKind {
             Self::Jobs => Snapshot(&[Dataset::Jobs]),
             Self::Cdc => Snapshot(&[Dataset::Cdc]),
             Self::ColumnstoreRowgroups => Snapshot(&[Dataset::ColumnstoreRowgroups]),
+            Self::TableMemory => Snapshot(&[Dataset::TableMemory]),
             Self::BackupHistory => Snapshot(&[Dataset::BackupHistory]),
             Self::RequestMemory => Snapshot(&[Dataset::CurrentRequestMemory]),
             Self::TaskSpace => Snapshot(&[Dataset::TaskSpace]),

@@ -8,6 +8,19 @@ use culprit_engine::collected_resources;
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
 
 #[tokio::test]
+async fn original_cdc_enrollment_replays_without_inventing_job_progress_or_live_reads() {
+    use culprit_collector::analytical::test_support::{TableCdcCase, table_cdc_evidence};
+    for case in TableCdcCase::ALL {
+        let (source, records) = table_cdc_evidence(case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let recovery_reads = fixture.recovery_object_reads();
+        let capture = fixture.read_families(FAMILY).await;
+        assert_table_metadata_capture(&capture, &source, &records);
+        assert_eq!(fixture.recovery_object_reads(), recovery_reads);
+    }
+}
+
+#[tokio::test]
 async fn original_table_catalog_states_share_the_scan_interpretation_without_current_database_or_recovery() {
     for case in TableFullTextCase::ALL {
         let (source, records) = table_full_text_evidence(case);

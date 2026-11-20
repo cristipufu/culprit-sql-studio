@@ -60,6 +60,9 @@ pub enum CollectionSelection {
     CacheEntryMemory {
         focus: Box<CacheEntryMemoryFocus>,
     },
+    TableMemory {
+        target: Box<MssqlObjectIdentity>,
+    },
     ColumnstoreRowgroups {
         target: Box<MssqlColumnstoreTarget>,
     },
@@ -121,6 +124,7 @@ impl CollectionSelection {
                 TelemetryCollection::Snapshot(SnapshotDataset::CompilerAdmission)
             }
             Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
+            Self::TableMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::TableMemory),
             Self::ColumnstoreRowgroups { .. } => TelemetryCollection::Snapshot(SnapshotDataset::ColumnstoreRowgroups),
             Self::FocusedPageWait { .. } | Self::SharedPageWaitFocus { .. } | Self::PageWaitTasks { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)
@@ -450,6 +454,12 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         focus: Box<CacheEntryMemoryFocus>,
     },
+    TableMemory {
+        snapshot: StateSnapshotDescription,
+        target: Box<MssqlObjectIdentity>,
+        metadata: Box<MssqlTableMemoryMetadata>,
+        database_writable: bool,
+    },
     ColumnstoreRowgroups {
         snapshot: StateSnapshotDescription,
         target: Box<MssqlColumnstoreTarget>,
@@ -549,6 +559,7 @@ impl SourceObservation {
             Self::DatabasePerformanceCounters { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters)
             }
+            Self::TableMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::TableMemory),
             Self::ColumnstoreRowgroups { .. } => TelemetryCollection::Snapshot(SnapshotDataset::ColumnstoreRowgroups),
             Self::PageWaitTargets { .. } | Self::FocusedPageWait { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)
@@ -585,6 +596,7 @@ impl SourceObservation {
             Self::Activity(_) => TelemetryRange::Current,
             Self::FocusedBlocking { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::CacheEntryMemory { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
+            Self::TableMemory { target, .. } => TelemetryRange::Focused { key: target.key()? },
             Self::ColumnstoreRowgroups { target, .. } => TelemetryRange::Focused { key: target.key()? },
             Self::FocusedPageWait { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::PageWaitWriters { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
@@ -652,6 +664,9 @@ impl SourceObservation {
             Self::MysqlEvents { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::Activity(snapshot) => snapshot.is_valid(),
             Self::FocusedBlocking { snapshot, result } => result.is_valid_header(snapshot),
+            Self::TableMemory { snapshot, target, metadata, .. } => {
+                table_memory_header_is_valid(snapshot) && target.is_valid() && metadata.is_valid()
+            }
             Self::ColumnstoreRowgroups { snapshot, target, index_type, .. } => {
                 columnstore_rowgroup_header_is_valid(snapshot) && target.is_valid() && matches!(*index_type, 5 | 6)
             }
@@ -758,6 +773,7 @@ impl SourceObservation {
             | Self::MaintenanceProgress { snapshot, .. }
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
+            | Self::TableMemory { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => Some(snapshot),
             _ => None,
         }
@@ -781,6 +797,7 @@ impl SourceObservation {
             | Self::MaintenanceProgress { snapshot, .. }
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
+            | Self::TableMemory { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => snapshot.accepts(stream, source),
             Self::Diagnostics(_) => stream == TelemetryStream::OperationalSamples && source == DIAGNOSTICS_SOURCE,
             Self::PagedSnapshot(snapshot) | Self::PagedSourceRead { snapshot, .. } => snapshot.accepts(stream, source),
@@ -816,6 +833,7 @@ impl SourceObservation {
             | Self::SuspectPages { snapshot, .. }
             | Self::DatabasePerformanceCounters { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
+            | Self::TableMemory { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
@@ -1061,6 +1079,20 @@ impl CollectionDescription {
                 && &description.step_id == step_id
                 && description.records.saturating_add(description.checkpoint_records)
                     <= request.budget.max_snapshot_rows;
+        }
+        if matches!(&request.selection, CollectionSelection::TableMemory { .. })
+            || matches!(&self.observation, SourceObservation::TableMemory { .. })
+        {
+            let (
+                SourceObservation::TableMemory { snapshot, target: original, .. },
+                CollectionSelection::TableMemory { target },
+            ) = (&self.observation, &request.selection)
+            else {
+                return false;
+            };
+            return original == target
+                && table_memory_context(self).is_ok()
+                && snapshot.records <= request.budget.max_snapshot_rows;
         }
         if let (
             SourceObservation::ColumnstoreRowgroups { snapshot, target: original, .. },

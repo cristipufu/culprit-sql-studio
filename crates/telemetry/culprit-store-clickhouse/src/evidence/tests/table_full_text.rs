@@ -1,7 +1,7 @@
 use super::*;
 use test_support::{
-    TableFullTextCase, TableStorageCase, assert_table_metadata_capture, table_full_text_evidence,
-    table_storage_evidence,
+    TableCdcCase, TableFullTextCase, TableStorageCase, assert_table_metadata_capture, table_cdc_evidence,
+    table_full_text_evidence, table_storage_evidence,
 };
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
 #[tokio::test]
@@ -10,6 +10,7 @@ async fn original_full_text_catalog_states_round_trip_without_recovery_or_curren
         .into_iter()
         .map(table_full_text_evidence)
         .chain(TableStorageCase::ALL.into_iter().map(table_storage_evidence))
+        .chain(TableCdcCase::ALL.into_iter().map(table_cdc_evidence))
     {
         let fixture =
             Fixture::new_for_stream(source.clone(), records.clone(), TelemetryStream::OperationalSamples).await;

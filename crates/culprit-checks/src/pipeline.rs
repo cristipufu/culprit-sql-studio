@@ -34,12 +34,14 @@ mod maintenance_progress;
 mod memory_clerks;
 mod page_server_reads;
 mod performance_counters;
+mod recorded_operational;
 mod replication;
 mod runtime_populations;
 mod statement_work;
 mod storage;
 mod suspect_pages;
 mod table_full_text;
+mod table_memory;
 mod tempdb_metadata_memory;
 mod wait_counters;
 
@@ -292,6 +294,7 @@ impl Pipeline {
         let hyperscale_log_components = hyperscale_log_components::explain(&mut snapshot);
         let memory_clerks = memory_clerks::explain(&mut snapshot);
         let tempdb_metadata_memory = tempdb_metadata_memory::explain(&mut snapshot);
+        let table_memory = table_memory::explain(&mut snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
         let suspect_pages = suspect_pages::explain(&mut snapshot);
         let table_full_text = table_full_text::explain(&mut snapshot);
@@ -426,6 +429,7 @@ impl Pipeline {
             hyperscale_log_components,
             memory_clerks,
             tempdb_metadata_memory,
+            table_memory,
             database_properties,
             suspect_pages,
             statement_work,

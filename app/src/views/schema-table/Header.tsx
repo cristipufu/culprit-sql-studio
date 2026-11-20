@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { TableSignalFacts } from "../../components/BeyondTime";
 import { FullText } from "./FullText";
 import { StorageConfiguration } from "./StorageConfiguration";
+import { CdcEnrollment } from "./CdcEnrollment";
 import type { Report } from "../../gen/Report";
 import type { TableStat } from "../../gen/TableStat";
 import { copyAndTell } from "../../lib/clipboard";
@@ -17,6 +18,7 @@ import { setState } from "../../lib/store";
 export function Header({ report, table, findings }: { report: Report; table: TableStat; findings: ReturnType<typeof tableFindings> }) {
   const [all, setAll] = useState(false);
   const { snapshot } = report;
+  const tableSourceState = snapshot.sources?.find((source) => source.source === "tables")?.state ?? null;
   const fullText = report.table_full_text;
   const fullTextEntries = fullText?.entries.filter((entry) => entry.schema === table.schema && entry.table === table.name) ?? [];
   const fullTextEntry = fullTextEntries.length === 1 ? fullTextEntries[0] : null;
@@ -125,7 +127,8 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
         <TableSignalFacts report={report} table={table} />
       </div>
       <HypertableChunks key={tableKey(table)} table={table} />
-      <StorageConfiguration key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_storage_configuration])} engine={snapshot.server.engine} table={table} sourceState={snapshot.sources?.find((source) => source.source === "tables")?.state ?? null} />
+      <StorageConfiguration key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_storage_configuration])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} />
+      <CdcEnrollment key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_tracked_by_cdc])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} />
       {fullText && fullTextEntry && <FullText key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_full_text])} report={fullText} entry={fullTextEntry} />}
       {findings.length > 0 && (
         <div className="td-findings">

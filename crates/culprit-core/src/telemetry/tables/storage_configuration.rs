@@ -31,12 +31,6 @@ impl MssqlTableStorageConfiguration {
     }
 }
 
-fn required_nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
-    reader: D,
-) -> std::result::Result<Option<T>, D::Error> {
-    Option::<T>::deserialize(reader)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1412,7 +1412,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 34,
+    "format": 35,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {
@@ -1952,7 +1952,8 @@
       "multixacts": [],
       "sequences": [],
       "spaces": [],
-      "sqlite": null
+      "sqlite": null,
+      "table_memory": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -5153,6 +5154,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "customers",
         "overflow_bytes": null,
         "partition_of": null,
@@ -5184,6 +5186,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "order_items",
         "overflow_bytes": null,
         "partition_of": null,
@@ -5215,6 +5218,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "orders",
         "overflow_bytes": null,
         "partition_of": null,
@@ -5246,6 +5250,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "products",
         "overflow_bytes": null,
         "partition_of": null,
@@ -5277,6 +5282,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "support_tickets",
         "overflow_bytes": null,
         "partition_of": null,
@@ -5308,6 +5314,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "ticket_events",
         "overflow_bytes": null,
         "partition_of": null,

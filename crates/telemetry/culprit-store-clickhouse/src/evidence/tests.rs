@@ -1,6 +1,7 @@
 mod columnstore;
 mod columnstore_rowgroups;
 mod table_full_text;
+mod table_memory;
 use super::*;
 mod activity;
 mod backup_history;

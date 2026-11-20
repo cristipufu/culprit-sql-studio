@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use crate::tools::TopBy;
 mod columnstore;
-mod table_storage;
+mod table_catalog;
 mod type_schema;
 
 const TEXT_SHORT: usize = 300;
@@ -661,8 +661,11 @@ pub fn table(report: &Report, wanted: &str) -> Result<Value> {
         "foreign_keys": foreign_keys,
         "note": format!("used_by_captured_plans covers the {planned} query plans captured in this scan; an index missing there may still serve other queries."),
     });
-    if let Some(configuration) = table_storage::configuration(s, t) {
+    if let Some(configuration) = table_catalog::configuration(s, t) {
         out["storage_configuration"] = configuration;
+    }
+    if let Some(enrollment) = table_catalog::change_data_capture(s, t) {
+        out["change_data_capture"] = enrollment;
     }
     if let Some(full_text) = culprit_engine::explain_table_full_text(s, t)? {
         let entry = &full_text.entries[0];

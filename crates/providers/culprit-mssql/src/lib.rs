@@ -35,6 +35,7 @@ mod jobs;
 mod live;
 mod local_source;
 mod qualification;
+mod table_memory;
 pub use qualification::assess_recipe_qualification;
 mod memory_clerks;
 mod memory_failures;

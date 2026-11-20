@@ -83,7 +83,7 @@ async function injectMemory(page: Page, evidence: MemoryFailureSnapshot | null, 
     report.snapshot.pressure = null;
     report.snapshot.resources = [];
     report.snapshot.operations = {
-      log_failures: [], spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null,
+      log_failures: [], table_memory: [], spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null,
       memory_failures: evidence ?? undefined,
     };
     report.snapshot.sources = [source];

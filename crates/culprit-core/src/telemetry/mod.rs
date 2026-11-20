@@ -31,7 +31,9 @@ pub use cached_runtime_read::{
     CACHED_RUNTIME_READ_SOURCE, CachedRuntimeRead, CachedRuntimeReadOrigin, cached_statement_read_id,
     cached_statement_read_key,
 };
-pub use captured_operational_read::CapturedOperationalRead;
+pub use captured_operational_read::{
+    CapturedOperationalRead, MAX_RECORDED_OPERATIONAL_READS, RecordedOperationalRead, append_recorded_operational_read,
+};
 pub use captured_snapshot::{CapturedSnapshotOrigin, CapturedSnapshotPosition};
 mod cached_statements;
 mod captured_reference;
@@ -42,7 +44,9 @@ mod backup_history;
 mod catalog;
 mod cdc;
 mod columnstore_rowgroups;
+mod table_memory;
 pub use columnstore_rowgroups::*;
+pub use table_memory::*;
 mod check_constraints;
 mod cleanup;
 pub use backup_history::*;
@@ -365,12 +369,19 @@ impl CollectionRequest {
                 dataset:
                     SnapshotDataset::CacheEntryMemory
                     | SnapshotDataset::ColumnstoreRowgroups
+                    | SnapshotDataset::TableMemory
                     | SnapshotDataset::MaintenanceProgress
                     | SnapshotDataset::CurrentRequestWork
                     | SnapshotDataset::PageWaitWriters
                     | SnapshotDataset::PageTaskHolders,
             } => {
                 return Err(CollectionStop::InvalidPage.error());
+            }
+            CollectionSelection::TableMemory { target } => {
+                self.subject.require_database()?;
+                if !target.is_valid() || target.database_id > i32::MAX as u32 || target.object_id > i32::MAX as u32 {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
             }
             CollectionSelection::ColumnstoreRowgroups { target } => {
                 self.subject.require_database()?;
@@ -733,6 +744,8 @@ impl TelemetryRecord {
                     }
                     (SourceObservation::MaintenanceProgress { .. }, _)
                     | (_, OperationalFact::MaintenanceProgress(_)) => false,
+                    (_, OperationalFact::MssqlTableMemory(point)) => accepted && point.fits_source(source),
+                    (SourceObservation::TableMemory { .. }, _) => false,
                     (_, OperationalFact::MssqlColumnstoreRowgroup(point)) => accepted && point.fits_source(source),
                     (SourceObservation::ColumnstoreRowgroups { .. }, _) => false,
                     (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),

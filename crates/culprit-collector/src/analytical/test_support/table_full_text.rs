@@ -73,6 +73,7 @@ pub fn table_full_text_evidence(case: TableFullTextCase) -> (CollectionDescripti
         has_primary_key: Some(true),
         is_heap: Some(false),
         size_source: MssqlTableSizeSource::Unavailable,
+        tracked_by_cdc: Some(false),
         full_text: MssqlTableFullText { availability, index },
         storage_configuration: MssqlTableStorageConfiguration {
             memory_optimized: Some(false),

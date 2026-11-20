@@ -58,6 +58,26 @@ impl Workspace {
             .await
             .map(|reports| *reports.requested)
     }
+    /// Retain the original selected native table and acquisition interval after the normal scan owner ends.
+    /// The saved connection authorizes lookup; no current table-name, database or member association is inferred.
+    pub async fn scan_with_captured_table_memory(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalSnapshotAnalysis,
+    ) -> Result<Report> {
+        if captured.original().connection() != name
+            || captured.report().kind() != crate::LocalCaptureAnalysisKind::TableMemory
+        {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::table_memory(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
     /// Attach one original shared tempdb read after the normal scan owner ends. Current database identity and
     /// host clocks neither qualify nor relabel this historical shared instance/process observation.
     pub async fn scan_with_captured_tempdb_metadata_memory(

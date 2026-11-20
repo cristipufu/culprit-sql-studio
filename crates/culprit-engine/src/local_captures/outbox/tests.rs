@@ -1,6 +1,7 @@
 mod rowgroups_backup;
 mod suspect_pages;
 mod table_full_text;
+mod table_memory;
 mod tempdb_metadata_memory;
 use super::*;
 use culprit_collector::analytical::test_support::{LocalCaptureFixture, page_server_read_evidence_cases};

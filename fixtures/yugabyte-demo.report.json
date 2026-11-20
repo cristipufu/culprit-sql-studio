@@ -972,7 +972,7 @@
         "table": "orders"
       }
     ],
-    "format": 34,
+    "format": 35,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -3498,6 +3498,7 @@
       "sequences": [],
       "spaces": [],
       "sqlite": null,
+      "table_memory": [],
       "termination_history": {
         "events": [
           {
@@ -5248,6 +5249,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "customers",
         "overflow_bytes": null,
         "partition_of": null,
@@ -5294,6 +5296,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "orders",
         "overflow_bytes": null,
         "partition_of": null,

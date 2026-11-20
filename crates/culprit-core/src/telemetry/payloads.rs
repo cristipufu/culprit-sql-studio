@@ -208,6 +208,7 @@ impl OperationalFact {
             | Self::MssqlCdc(_)
             | Self::MssqlBackupHistory(_)
             | Self::MssqlColumnstoreRowgroup(_)
+            | Self::MssqlTableMemory(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::ConfiguredLogRateLimits(_)
             | Self::HyperscaleLogComponent(_)

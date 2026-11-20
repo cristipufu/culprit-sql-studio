@@ -1,9 +1,11 @@
 use super::*;
 #[test]
 fn selected_rowgroups_and_backup_archive_analyses_select_only_original_operational_rows() {
-    for (name, kind) in
-        [("columnstore-rowgroups", Analysis::ColumnstoreRowgroups), ("backup-history", Analysis::BackupHistory)]
-    {
+    for (name, kind) in [
+        ("columnstore-rowgroups", Analysis::ColumnstoreRowgroups),
+        ("backup-history", Analysis::BackupHistory),
+        ("table-memory", Analysis::TableMemory),
+    ] {
         for (options, format) in [(&["--json"][..], Format::Json), (&[][..], Format::Text)] {
             let args = analyze_args(name, options);
             assert!(args.analysis == kind);

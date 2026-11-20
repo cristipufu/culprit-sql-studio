@@ -34,6 +34,15 @@ pub struct MssqlTableSnapshot {
     pub size_source: MssqlTableSizeSource,
     pub full_text: MssqlTableFullText,
     pub storage_configuration: MssqlTableStorageConfiguration,
+    /// Current native table enrollment only, not CDC processing progress or retained change history.
+    #[serde(deserialize_with = "required_nullable")]
+    pub tracked_by_cdc: Option<bool>,
+}
+
+fn required_nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    reader: D,
+) -> std::result::Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(reader)
 }
 impl MssqlTableSnapshot {
     pub fn is_valid(&self) -> bool {

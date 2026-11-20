@@ -13,6 +13,7 @@ mod backup_history;
 mod cdc;
 mod columnstore_rowgroups;
 mod table_full_text;
+mod table_memory;
 mod tempdb_metadata_memory;
 
 const ENTRY_LIMIT: usize = 5;
@@ -46,6 +47,7 @@ fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
     Ok(match analysis.report() {
         LocalSnapshotReport::PerformanceCounters(report) => performance_counters(report),
         LocalSnapshotReport::Cdc(report) => cdc::value(analysis, report),
+        LocalSnapshotReport::TableMemory(report) => table_memory::value(analysis, report)?,
         LocalSnapshotReport::ColumnstoreRowgroups(report) => columnstore_rowgroups::value(analysis, report),
         LocalSnapshotReport::BackupHistory(report) => backup_history::value(analysis, report),
         LocalSnapshotReport::TempdbMetadataMemory(report) => tempdb_metadata_memory::value(analysis, report),

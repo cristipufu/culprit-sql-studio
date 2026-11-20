@@ -22,6 +22,7 @@ mod replication;
 mod request_memory;
 mod retained_definitions;
 mod streamed;
+mod table_memory;
 mod task_space;
 mod triggers;
 use crate::query_store::{catalog_sql as sql, decode};

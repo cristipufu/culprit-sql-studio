@@ -2371,7 +2371,7 @@
         "table": "order_items"
       }
     ],
-    "format": 34,
+    "format": 35,
     "histograms": null,
     "id": "20261011T115421.485Z",
     "identity": {
@@ -2814,7 +2814,8 @@
       "multixacts": [],
       "sequences": [],
       "spaces": [],
-      "sqlite": null
+      "sqlite": null,
+      "table_memory": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -3316,6 +3317,7 @@
         "modifications_since_analyze": 0.0,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "orders",
         "overflow_bytes": null,
         "partition_of": null,
@@ -3355,6 +3357,7 @@
         "modifications_since_analyze": 0.0,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "customers",
         "overflow_bytes": null,
         "partition_of": null,
@@ -3394,6 +3397,7 @@
         "modifications_since_analyze": 0.0,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "order_items",
         "overflow_bytes": null,
         "partition_of": null,
@@ -3433,6 +3437,7 @@
         "modifications_since_analyze": 2.0,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "products",
         "overflow_bytes": null,
         "partition_of": null,
@@ -3472,6 +3477,7 @@
         "modifications_since_analyze": 0.0,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "events",
         "overflow_bytes": null,
         "partition_of": null,
@@ -3511,6 +3517,7 @@
         "modifications_since_analyze": 105000.0,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "wide",
         "overflow_bytes": null,
         "partition_of": null,

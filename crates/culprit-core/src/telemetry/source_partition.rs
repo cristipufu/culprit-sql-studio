@@ -152,6 +152,9 @@ impl CollectionDescription {
                 && self.partition == original.partition
                 && matches!(self.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) });
         }
+        if matches!(self.observation, SourceObservation::TableMemory { .. }) && table_memory_context(self).is_err() {
+            return false;
+        }
         if matches!(self.observation, SourceObservation::ColumnstoreRowgroups { .. })
             && columnstore_rowgroup_context(self).is_err()
         {

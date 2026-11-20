@@ -394,6 +394,9 @@ pub struct Report {
     pub tempdb_metadata_memory: Option<Box<crate::TempdbMetadataMemoryReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub table_memory: Option<Vec<crate::TableMemoryReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub database_properties: Option<Box<crate::DatabasePropertiesReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

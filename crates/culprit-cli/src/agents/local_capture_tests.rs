@@ -6,6 +6,7 @@ mod hyperscale_log_components;
 mod participant_context;
 mod rowgroups_backup;
 mod snapshots;
+mod table_memory;
 mod tempdb_metadata_memory;
 use super::*;
 use clap::Parser;

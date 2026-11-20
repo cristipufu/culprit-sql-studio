@@ -34,7 +34,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.shared-operational", 7),
             ("mssql.settings", 4),
             ("mssql.tuning", 2),
-            ("mssql.tables", 3),
+            ("mssql.tables", 4),
             ("mssql.indexes", 2),
             ("mssql.query-compilation", 3),
             ("mssql.cached-runtime", 2),
@@ -114,6 +114,9 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
         }
         RecipeSelector::FocusedBlocking => {
             panic!("the SQL Server catalog does not declare focused blocking")
+        }
+        RecipeSelector::TableMemory => {
+            CollectionSelection::TableMemory { target: Box::new(crate::table_memory::tests::selection()) }
         }
         RecipeSelector::ColumnstoreRowgroups => CollectionSelection::ColumnstoreRowgroups {
             target: Box::new(crate::columnstore_rowgroups::tests::selection()),
@@ -525,4 +528,34 @@ fn suspect_page_history_is_one_explicit_unqualified_local_point_without_operatio
     let source =
         open(Arc::new(Pool::new(tiberius::Config::new(), None)), &request, "original.invalid".into(), 1433).unwrap();
     assert_eq!(source.query_count(), 0);
+}
+
+#[test]
+fn selected_table_memory_recipe_uses_actual_bounded_factory_and_remains_manual_unqualified() {
+    let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.table-memory").unwrap();
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.selector, RecipeSelector::TableMemory);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.subjects, [RecipeSubject::Database]);
+    assert_eq!(recipe.budget.max_queries, 12);
+    assert_eq!(recipe.budget.max_snapshot_rows, 1);
+    assert_eq!(recipe.budget.page_rows, 1);
+    assert_eq!(recipe.budget.page_bytes, 64 * 1024);
+    assert_eq!(recipe.budget.total_bytes, 64 * 1024);
+    assert_eq!(recipe.budget.statement_timeout_ms, 1000);
+    assert_eq!(recipe.budget.total_timeout_ms, 5000);
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::TableMemory { target: Box::new(crate::table_memory::tests::selection()) },
+        budget: CollectionBudget::default(),
+    };
+    let source =
+        open(Arc::new(Pool::new(tiberius::Config::new(), None)), &request, "original.invalid".into(), 1433).unwrap();
+    assert_eq!(source.query_count(), 0);
+    let broad = CollectionRequest {
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::TableMemory },
+        ..request
+    };
+    assert!(open(Arc::new(Pool::new(tiberius::Config::new(), None)), &broad, "original.invalid".into(), 1433).is_err());
 }

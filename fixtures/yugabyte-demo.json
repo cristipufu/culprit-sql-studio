@@ -1,5 +1,6 @@
 {
   "operations": {
+    "table_memory": [],
     "log_failures": [],
     "spaces": [],
     "counters": [],
@@ -2572,7 +2573,7 @@
       ]
     }
   },
-  "format": 34,
+  "format": 35,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

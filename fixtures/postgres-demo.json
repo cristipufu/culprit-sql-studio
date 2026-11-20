@@ -1,5 +1,6 @@
 {
   "operations": {
+    "table_memory": [],
     "index_usage_scope": "all-read-members",
     "log_failures": [],
     "spaces": [],
@@ -41,7 +42,7 @@
       "reason": null
     }
   ],
-  "format": 34,
+  "format": 35,
   "id": "20261011T115421.485Z",
   "connection": "pg-demo",
   "environment": "local",

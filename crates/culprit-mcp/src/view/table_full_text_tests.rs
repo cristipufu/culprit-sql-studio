@@ -87,7 +87,7 @@ fn selected_table_storage_configuration_preserves_native_nulls_scope_and_unavail
     assert_eq!(partial["storage_configuration"]["source_state"], "partial");
     assert_eq!(
         partial["storage_configuration"]["source_qualification"],
-        culprit_core::t!("view.table_storage.partial")
+        culprit_core::t!("view.table_catalog.partial")
     );
     report.snapshot.sources.iter_mut().find(|source| source.source == culprit_core::source_id::TABLES).unwrap().state =
         culprit_core::SourceState::Unavailable;
@@ -97,7 +97,7 @@ fn selected_table_storage_configuration_preserves_native_nulls_scope_and_unavail
     assert_eq!(unknown["storage_configuration"]["source_state"], Value::Null);
     assert_eq!(
         unknown["storage_configuration"]["source_qualification"],
-        culprit_core::t!("view.table_storage.unknown_source")
+        culprit_core::t!("view.table_catalog.unknown_source")
     );
     report.snapshot.server.engine = culprit_core::Engine::Postgres;
     assert!(super::table(&report, &name).unwrap().get("storage_configuration").is_none());
@@ -128,4 +128,31 @@ fn storage_configuration_is_selected_by_its_original_table_and_invalid_native_pa
     report.snapshot.tables[0].mssql_storage_configuration.as_mut().unwrap().durability_desc =
         Some("SCHEMA_AND_DATA".into());
     assert!(super::table(&report, &name).unwrap().get("storage_configuration").is_none());
+}
+
+#[test]
+fn selected_table_cdc_enrollment_keeps_unknown_and_partial_catalogs_distinct_from_job_health() {
+    let mut report: Report = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/mssql-demo.report.json"
+    )))
+    .unwrap();
+    let name = report.snapshot.tables[0].qualified();
+    for tracked in [Some(true), Some(false), None] {
+        report.snapshot.tables[0].mssql_tracked_by_cdc = tracked;
+        let output = super::table(&report, &name).unwrap();
+        assert_eq!(output["change_data_capture"]["tracked_by_cdc"], json!(tracked));
+        assert_eq!(output["change_data_capture"]["qualification"], culprit_core::t!("view.table_cdc.qualification"));
+    }
+    report.snapshot.sources.iter_mut().find(|source| source.source == culprit_core::source_id::TABLES).unwrap().state =
+        culprit_core::SourceState::Partial;
+    let partial = super::table(&report, &name).unwrap();
+    assert_eq!(partial["change_data_capture"]["source_state"], "partial");
+    report.snapshot.sources.iter_mut().find(|source| source.source == culprit_core::source_id::TABLES).unwrap().state =
+        culprit_core::SourceState::Unavailable;
+    assert!(super::table(&report, &name).unwrap().get("change_data_capture").is_none());
+    report.snapshot.sources.retain(|source| source.source != culprit_core::source_id::TABLES);
+    assert_eq!(super::table(&report, &name).unwrap()["change_data_capture"]["source_state"], Value::Null);
+    report.snapshot.server.engine = culprit_core::Engine::Postgres;
+    assert!(super::table(&report, &name).unwrap().get("change_data_capture").is_none());
 }

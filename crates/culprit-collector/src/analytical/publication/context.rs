@@ -65,6 +65,12 @@ enum PublicObservation<'a> {
         #[serde(flatten)]
         context: FocusedRequestContext<'a>,
     },
+    TableMemoryContext {
+        snapshot: &'a StateSnapshotDescription,
+        target_key: String,
+        metadata: &'a MssqlTableMemoryMetadata,
+        database_writable: bool,
+    },
     ColumnstoreRowgroupsContext {
         snapshot: &'a StateSnapshotDescription,
         target_key: String,
@@ -184,6 +190,14 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         }
         SourceObservation::MssqlAgentJobs { snapshot, metadata } => {
             PublicObservation::MssqlAgentJobs { snapshot, metadata }
+        }
+        SourceObservation::TableMemory { snapshot, target, metadata, database_writable } => {
+            PublicObservation::TableMemoryContext {
+                snapshot,
+                target_key: target.key()?,
+                metadata,
+                database_writable: *database_writable,
+            }
         }
         SourceObservation::ColumnstoreRowgroups { snapshot, target, index_type, database_writable } => {
             PublicObservation::ColumnstoreRowgroupsContext {
@@ -337,5 +351,39 @@ mod suspect_page_tests {
             counter["data"].as_object().unwrap().keys().collect::<Vec<_>>(),
             history["data"].as_object().unwrap().keys().collect::<Vec<_>>()
         );
+    }
+}
+
+#[cfg(test)]
+mod table_memory_tests {
+    use super::*;
+    use crate::analytical::test_support::{TableMemoryCase, table_memory_evidence};
+    #[test]
+    fn public_selected_table_context_keeps_exact_target_digest_not_private_member_epoch_proof() {
+        for case in TableMemoryCase::ALL {
+            let (source, _) = table_memory_evidence(case);
+            let SourceObservation::TableMemory { target, metadata, snapshot, database_writable } = &source.observation
+            else {
+                panic!()
+            };
+            let public = observation(&source.observation).unwrap();
+            assert_eq!(public["kind"], "table-memory-context");
+            assert_eq!(public["data"]["target_key"], target.key().unwrap());
+            assert_eq!(public["data"]["metadata"], serde_json::to_value(metadata).unwrap());
+            assert_eq!(public["data"]["snapshot"], serde_json::to_value(snapshot).unwrap());
+            assert_eq!(public["data"]["database_writable"], *database_writable);
+            assert_eq!(public["data"].as_object().unwrap().len(), 4);
+            assert!(serde_json::from_value::<SourceObservation>(public.clone()).is_err());
+            for private in [
+                "private-machine-canary",
+                "private-instance-canary",
+                "private-process-and-database-canary",
+                "created_without_offset",
+                "object_id",
+                "native_database",
+            ] {
+                assert!(!public.to_string().contains(private), "{case:?}: {private}");
+            }
+        }
     }
 }

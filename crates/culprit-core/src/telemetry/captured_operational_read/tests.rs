@@ -65,6 +65,14 @@ fn bind(
         observation_id: "a".repeat(32),
         revision: Some(CaptureRevision { outbox_id: "b".repeat(32), owner_epoch: "3".into(), sequence: "4".into() }),
     };
+    bind_original(description, observations, complete, identity)
+}
+fn bind_original(
+    description: CollectionDescription,
+    observations: Vec<OperationalObservation>,
+    complete: bool,
+    identity: CaptureIdentity,
+) -> CapturedOperationalRead {
     let capture = DiagnosticCaptureRef {
         capture: identity.clone(),
         manifest_sha256: digest(b"original-immutable-manifest"),
@@ -377,4 +385,98 @@ fn captured_origin_has_no_native_read_fallback_or_unknown_proof_fields() {
     let mut changed = original;
     changed["origin"]["positions"][0]["stream"] = serde_json::Value::String("activity-observations".into());
     assert!(serde_json::from_value::<CapturedOperationalRead>(changed).is_err());
+}
+
+fn another_capture(original: &CapturedOperationalRead, ordinal: usize) -> CapturedOperationalRead {
+    let mut identity = original.origin.capture.capture.clone();
+    identity.observation_id = format!("{ordinal:032x}");
+    bind_original(original.description.clone(), original.observations.clone(), original.read_complete, identity)
+}
+fn conflicting_original(original: &CapturedOperationalRead) -> CapturedOperationalRead {
+    let mut observations = original.observations.clone();
+    let OperationalFact::CounterSet(counters) = &mut observations[0].fact else { panic!("native gauge fixture") };
+    counters.counters[0] = NativeCounterSample::gauge(
+        "exact-native-count",
+        17,
+        CounterUnit::Count,
+        MeasurementScope::Server,
+        "private-native-object",
+        "private-native-column",
+    );
+    bind_original(
+        original.description.clone(),
+        observations,
+        original.read_complete,
+        original.origin.capture.capture.clone(),
+    )
+}
+
+#[test]
+fn replay_deduplicates_exact_originals_after_json_without_merging_distinct_captures_or_unavailable_markers() {
+    let first = read();
+    let second = another_capture(&first, 1);
+    assert!(first.is_valid() && second.is_valid());
+    let mut originals = vec![
+        RecordedOperationalRead::Captured { read: Box::new(first.clone()) },
+        RecordedOperationalRead::Unavailable { reason: crate::message!("view.table_memory.sharing_withheld") },
+        RecordedOperationalRead::Captured { read: Box::new(second) },
+        RecordedOperationalRead::Captured { read: Box::new(first.clone()) },
+        RecordedOperationalRead::Unavailable { reason: crate::message!("view.table_memory.sharing_withheld") },
+    ];
+    let before = serde_json::to_vec(&originals).unwrap();
+    originals = serde_json::from_slice(&before).unwrap();
+    let positions =
+        RecordedOperationalRead::replay_positions(&originals).into_iter().collect::<Result<Vec<_>>>().unwrap();
+    assert_eq!(positions, vec![0, 1, 2, 4]);
+    append_recorded_operational_read(&mut originals, Box::new(first)).unwrap();
+    assert_eq!(serde_json::to_vec(&originals).unwrap(), before);
+}
+
+#[test]
+fn both_orders_of_same_original_contradiction_withdraw_every_copy_and_append_cannot_choose_a_survivor() {
+    let first = read();
+    let conflicting = conflicting_original(&first);
+    assert!(first.is_valid() && conflicting.is_valid());
+    assert_ne!(first, conflicting);
+    for (left, right) in [(first.clone(), conflicting.clone()), (conflicting, first.clone())] {
+        let mut originals = vec![
+            RecordedOperationalRead::Captured { read: Box::new(left.clone()) },
+            RecordedOperationalRead::Captured { read: Box::new(left) },
+            RecordedOperationalRead::Captured { read: Box::new(right) },
+        ];
+        let before = originals.clone();
+        let positions = RecordedOperationalRead::replay_positions(&originals);
+        assert_eq!(positions.len(), 1);
+        assert!(matches!(
+            positions[0].as_ref().unwrap_err().detail,
+            Some(crate::ErrorDetail::Delivery(DeliveryProblem::Conflict))
+        ));
+        let error = append_recorded_operational_read(&mut originals, Box::new(first.clone())).unwrap_err();
+        assert_eq!(error.detail, Some(crate::ErrorDetail::Delivery(DeliveryProblem::Conflict)));
+        assert_eq!(originals, before);
+        // Other original identities remain independent of this refusal.
+        append_recorded_operational_read(&mut originals, Box::new(another_capture(&first, 1))).unwrap();
+        let positions = RecordedOperationalRead::replay_positions(&originals);
+        assert!(positions[0].is_err());
+        assert_eq!(*positions[1].as_ref().unwrap(), 3);
+    }
+}
+
+#[test]
+fn replay_finds_a_contradiction_beyond_display_limit_without_erasing_overflow_originals() {
+    let first = read();
+    let mut originals = vec![RecordedOperationalRead::Captured { read: Box::new(first.clone()) }];
+    for ordinal in 1..=MAX_RECORDED_OPERATIONAL_READS {
+        originals.push(RecordedOperationalRead::Captured { read: Box::new(another_capture(&first, ordinal)) });
+    }
+    originals.push(RecordedOperationalRead::Captured { read: Box::new(conflicting_original(&first)) });
+    let before = serde_json::to_vec(&originals).unwrap();
+    let positions = RecordedOperationalRead::replay_positions(&originals);
+    assert_eq!(positions.len(), MAX_RECORDED_OPERATIONAL_READS + 1);
+    assert!(positions[0].is_err(), "the visible prefix cannot lend a measured conflicting original");
+    for position in positions.into_iter().filter_map(Result::ok) {
+        let RecordedOperationalRead::Captured { read: selected } = &originals[position] else { panic!() };
+        assert_ne!(selected.origin.capture.capture, first.origin.capture.capture);
+    }
+    assert_eq!(serde_json::to_vec(&originals).unwrap(), before);
 }

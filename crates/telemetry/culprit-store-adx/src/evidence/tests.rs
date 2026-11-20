@@ -1,6 +1,7 @@
 mod columnstore;
 mod columnstore_rowgroups;
 mod table_full_text;
+mod table_memory;
 use super::*;
 use crate::test_support::{Blobs, Fault, Queries, Recovery, Reply, returned};
 use culprit_collector::{

@@ -22,6 +22,10 @@ mssql_full_text: MssqlTableFullText | null,
  */
 mssql_storage_configuration: MssqlTableStorageConfiguration | null, 
 /**
+ * SQL Server's table enrollment at this catalog observation; NULL remains unknown.
+ */
+mssql_tracked_by_cdc: boolean | null, 
+/**
  * Bytes of the table's own rows (its heap or clustered index) kept in the rows' pages. With `lob_bytes` and
  * `overflow_bytes`, how its data splits between the rows and the large values kept apart from them. `None` where
  * the engine doesn't say.

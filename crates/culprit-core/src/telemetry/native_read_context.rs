@@ -72,7 +72,8 @@ impl NativeReadContext {
                 SourceObservation::SuspectPages { database_writable, .. }
                 | SourceObservation::DatabasePerformanceCounters { database_writable, .. }
                 | SourceObservation::BackupHistory { database_writable, .. }
-                | SourceObservation::ColumnstoreRowgroups { database_writable, .. } => Some(*database_writable),
+                | SourceObservation::ColumnstoreRowgroups { database_writable, .. }
+                | SourceObservation::TableMemory { database_writable, .. } => Some(*database_writable),
                 SourceObservation::Jobs { metadata, .. } => metadata.database_writable,
                 SourceObservation::MysqlEvents { metadata, .. } => Some(metadata.database_writable),
                 SourceObservation::MaintenanceProgress { result, .. }

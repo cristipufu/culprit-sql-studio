@@ -36,6 +36,7 @@ pub mod request_memory;
 pub mod runtime_distributions;
 pub mod session_census;
 pub mod session_memory;
+pub mod table_memory;
 use crate::support::source_coverage;
 pub mod source_overhead;
 pub mod sql_lint;

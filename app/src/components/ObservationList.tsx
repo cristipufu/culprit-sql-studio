@@ -45,11 +45,11 @@ export function ObservationList<Entry>({ source, time, report, scope, renderEntr
     <p>{report.summary}</p>
     <p className="muted">{source} · {scope}</p>
     {time != null && <p className="muted">{time}</p>}
-    <ReadQualifications sources={sources} />
+    <ObservationReadQualifications sources={sources} />
     {children}
     <details>
       <summary>{t("ui.memory_failures.limitations")}</summary>
-      <ReadReasons sources={sources} />
+      <ObservationReadReasons sources={sources} />
       {report.limitations.map((limitation, index) => <p className="muted" key={index}>{limitation}</p>)}
     </details>
     {collapseEntries && report.entries.length > 0 ? <details>
@@ -74,10 +74,10 @@ export function ObservationSourceIssue(props: { title: string } & ({ source: Sou
   const sources = "sources" in props ? props.sources : [props.source];
   return <section className="operational-health observation-list" aria-label={props.title}>
     <h3>{props.title}</h3>
-    <ReadQualifications sources={sources} />
+    <ObservationReadQualifications sources={sources} />
     <details>
       <summary>{t("ui.memory_failures.limitations")}</summary>
-      <ReadReasons sources={sources} showUnknown />
+      <ObservationReadReasons sources={sources} showUnknown />
     </details>
   </section>;
 }
@@ -89,14 +89,14 @@ export function ObservationExplanationIssue({ title, reason }: { title: string; 
   </section>;
 }
 
-function ReadQualifications({ sources }: { sources: ReadSource[] }) {
+export function ObservationReadQualifications({ sources }: { sources: ReadSource[] }) {
   return sources.map((source) => {
     const qualification = readQualification(source.state);
     return qualification && <p className="muted" key={source.source}>{sources.length > 1 && <>{source.source} · </>}{qualification}</p>;
   });
 }
 
-function ReadReasons({ sources, showUnknown = false }: { sources: ReadSource[]; showUnknown?: boolean }) {
+export function ObservationReadReasons({ sources, showUnknown = false }: { sources: ReadSource[]; showUnknown?: boolean }) {
   return sources.map((source) => {
     const reason = source.reason ?? (showUnknown ? t("ui.observation_list.source_unknown") : null);
     return reason && <p className="muted" key={source.source}>{sources.length > 1 && <>{source.source} · </>}{reason}</p>;

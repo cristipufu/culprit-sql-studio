@@ -30,6 +30,7 @@ import type { StorageReport } from "./StorageReport";
 import type { Summary } from "./Summary";
 import type { SuspectPageHistoryReport } from "./SuspectPageHistoryReport";
 import type { TableFullTextReport } from "./TableFullTextReport";
+import type { TableMemoryReport } from "./TableMemoryReport";
 import type { TaskSpaceReport } from "./TaskSpaceReport";
 import type { TempdbMetadataMemoryReport } from "./TempdbMetadataMemoryReport";
 import type { WaitCounterReport } from "./WaitCounterReport";
@@ -37,7 +38,7 @@ import type { WaitCounterReport } from "./WaitCounterReport";
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { table_full_text?: TableFullTextReport, instance_resources?: InstanceResourceReport, storage?: StorageReport, performance_counters: Array<PerformanceCounterReport>, memory_clerks?: MemoryClerkReport, tempdb_metadata_memory?: TempdbMetadataMemoryReport, database_properties?: DatabasePropertiesReport, suspect_pages?: SuspectPageHistoryReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
+export type Report = { table_full_text?: TableFullTextReport, instance_resources?: InstanceResourceReport, storage?: StorageReport, performance_counters: Array<PerformanceCounterReport>, memory_clerks?: MemoryClerkReport, tempdb_metadata_memory?: TempdbMetadataMemoryReport, table_memory?: Array<TableMemoryReport>, database_properties?: DatabasePropertiesReport, suspect_pages?: SuspectPageHistoryReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */

@@ -652,7 +652,7 @@
     "escalations_before": null,
     "evictions_before": null,
     "foreign_keys": [],
-    "format": 34,
+    "format": 35,
     "histograms": null,
     "id": "20261023T213241Z",
     "identity": {
@@ -857,7 +857,8 @@
         }
       ],
       "spaces": [],
-      "sqlite": null
+      "sqlite": null,
+      "table_memory": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -1466,6 +1467,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "sensor_readings",
         "overflow_bytes": null,
         "partition_of": null,
@@ -1613,6 +1615,7 @@
         "modifications_since_analyze": 0.0,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_tracked_by_cdc": null,
         "name": "devices",
         "overflow_bytes": null,
         "partition_of": null,

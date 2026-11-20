@@ -26,6 +26,7 @@ pub(crate) fn row() -> Rec {
         ("is_memory_optimized", Val::Int(0)),
         ("durability", Val::Int(0)),
         ("durability_desc", Val::Text("SCHEMA_AND_DATA".into())),
+        ("is_tracked_by_cdc", Val::Int(0)),
         ("has_primary_key", Val::Int(1)),
         ("is_heap", Val::Int(0)),
         ("full_text_availability", Val::Int(0)),
@@ -50,6 +51,30 @@ pub(crate) fn without_full_text(availability: i64) -> Rec {
             ("full_text_last_crawl_completed", Val::Null),
         ],
     )
+}
+
+#[tokio::test]
+async fn cdc_enrollment_preserves_native_nulls_and_uses_the_existing_table_read() {
+    for (native, expected) in [(Val::Int(0), Some(false)), (Val::Int(1), Some(true)), (Val::Null, None)] {
+        let row = replace(&without_full_text(2), &[("is_tracked_by_cdc", native)]);
+        let original = decode(&row, &Layout::new(true)).unwrap();
+        assert_eq!(original.tracked_by_cdc, expected);
+        let mut saved = serde_json::to_value(&original).unwrap();
+        saved.as_object_mut().unwrap().remove("tracked_by_cdc");
+        assert!(serde_json::from_value::<MssqlTableSnapshot>(saved).is_err());
+        let mut reader = FakeRead::new(vec![Ok(vec![metadata(true)]), Ok(vec![row])]);
+        let tables = application(&mut reader, true).await.unwrap().tables;
+        assert_eq!(tables[0].mssql_tracked_by_cdc, expected);
+        assert_eq!(
+            tables[0].mssql_full_text.as_ref().unwrap().availability,
+            MssqlCatalogAvailability::PermissionDenied
+        );
+        assert_eq!(reader.calls.len(), 2, "enrollment adds no native dispatch");
+        assert!(reader.calls[1].sql.contains("t.is_tracked_by_cdc"));
+    }
+    for malformed in [Val::Int(2), Val::Text("true".into())] {
+        assert!(decode(&replace(&row(), &[("is_tracked_by_cdc", malformed)]), &Layout::new(true)).is_err());
+    }
 }
 #[tokio::test]
 async fn scan_projection_uses_the_same_exact_native_values_and_declares_limited_metadata() {

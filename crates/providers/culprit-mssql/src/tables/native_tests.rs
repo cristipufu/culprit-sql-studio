@@ -170,6 +170,7 @@ async fn stream_tables(
             }
             fixture.assert_identity(&table);
             assert_rowstore_configuration(&table.storage_configuration);
+            assert_eq!(table.tracked_by_cdc, Some(false));
             if denied {
                 for name in [
                     "full_text_object_id",

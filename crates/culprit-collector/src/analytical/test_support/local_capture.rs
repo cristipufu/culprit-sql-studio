@@ -101,6 +101,7 @@ impl LocalCaptureFixture {
 fn selection(source: &CollectionDescription) -> CollectionSelection {
     match &source.observation {
         SourceObservation::Activity(_) => CollectionSelection::Activity,
+        SourceObservation::TableMemory { target, .. } => CollectionSelection::TableMemory { target: target.clone() },
         SourceObservation::ColumnstoreRowgroups { target, .. } => {
             CollectionSelection::ColumnstoreRowgroups { target: target.clone() }
         }

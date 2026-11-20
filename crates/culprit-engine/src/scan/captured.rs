@@ -12,6 +12,7 @@ pub(crate) enum CapturedScanEvidence {
     CachedRuntime(Box<CachedRuntimeRead>),
     MemoryClerks(Box<CapturedOperationalRead>),
     TempdbMetadataMemory(Box<CapturedOperationalRead>),
+    TableMemory(Box<CapturedOperationalRead>),
     DatabasePerformanceCounters(Box<CapturedOperationalRead>),
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
@@ -19,6 +20,11 @@ impl CapturedScanEvidence {
     pub(crate) fn database_performance_counters(read: Box<CapturedOperationalRead>) -> Result<Self> {
         culprit_checks::performance_counters::explain_database_captured(&read)?;
         Ok(Self::DatabasePerformanceCounters(read))
+    }
+
+    pub(crate) fn table_memory(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::table_memory::explain_captured(&read)?;
+        Ok(Self::TableMemory(read))
     }
 
     pub(crate) fn tempdb_metadata_memory(read: Box<CapturedOperationalRead>) -> Result<Self> {
@@ -68,6 +74,10 @@ impl CapturedScanEvidence {
                 // The original is independently scoped and never enters shared counters or workload grading.
                 snapshot.operations.database_performance_counters =
                     Some(culprit_core::telemetry::RecordedPerformanceCounters::Captured { read });
+            }
+            Self::TableMemory(read) => {
+                // Saved-connection admission does not establish a match to current scan tables or native members.
+                culprit_core::telemetry::append_recorded_operational_read(&mut snapshot.operations.table_memory, read)?;
             }
             Self::TempdbMetadataMemory(read) => {
                 if snapshot.operations.tempdb_metadata_memory.is_some() {

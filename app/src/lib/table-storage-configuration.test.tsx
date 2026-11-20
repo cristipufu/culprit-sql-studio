@@ -39,8 +39,8 @@ test("native NULLs remain unknown rather than rowstore or default durability", (
 test("source refusal withholds settings while partial and unknown scope keep their original qualification", () => {
   const value = table(true, 1, "SCHEMA_ONLY");
   for (const state of ["unavailable", "not-applicable", "empty"] as const) expect(render(value, state)).toBe("");
-  expect(render(value, "partial")).toContain(t("view.table_storage.partial"));
-  expect(render(value, null)).toContain(t("view.table_storage.unknown_source"));
+  expect(render(value, "partial")).toContain(t("view.table_catalog.partial"));
+  expect(render(value, null)).toContain(t("view.table_catalog.unknown_source"));
   expect(render(value, "collected", "postgres")).toBe("");
   expect(render(partial<TableStat>({ mssql_storage_configuration: null }))).toBe("");
 });

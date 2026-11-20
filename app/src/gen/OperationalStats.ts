@@ -17,6 +17,7 @@ import type { NativeFailureSnapshot } from "./NativeFailureSnapshot";
 import type { NodeResources } from "./NodeResources";
 import type { OperationalCounter } from "./OperationalCounter";
 import type { PageWaitSnapshot } from "./PageWaitSnapshot";
+import type { RecordedOperationalRead } from "./RecordedOperationalRead";
 import type { RecordedPerformanceCounters } from "./RecordedPerformanceCounters";
 import type { SequenceCapacity } from "./SequenceCapacity";
 import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
@@ -37,6 +38,10 @@ memory_clerks?: CapturedOperationalRead,
  * Original selected-database counter context is historical, not current scan ownership.
  */
 database_performance_counters?: RecordedPerformanceCounters, 
+/**
+ * One authenticated selected-table memory original, independent of a later scan's table/member identities.
+ */
+table_memory: Array<RecordedOperationalRead>, 
 /**
  * Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
  */

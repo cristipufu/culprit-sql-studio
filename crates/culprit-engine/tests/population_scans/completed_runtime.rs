@@ -12,6 +12,7 @@ use culprit_read::admission::SourceGate;
 mod database_performance_counters;
 mod hyperscale_log_components;
 mod memory_clerks;
+mod table_memory;
 mod tempdb_metadata_memory;
 
 #[derive(Clone)]
@@ -79,7 +80,12 @@ impl Captured {
         };
         let request = CollectionRequest {
             subject,
-            selection: CollectionSelection::Snapshot { dataset },
+            selection: match &source.observation {
+                SourceObservation::TableMemory { target, .. } => {
+                    CollectionSelection::TableMemory { target: target.clone() }
+                }
+                _ => CollectionSelection::Snapshot { dataset },
+            },
             budget: CollectionBudget::default(),
         };
         let mut lease = outbox.reserve(connection, &request).await.unwrap();

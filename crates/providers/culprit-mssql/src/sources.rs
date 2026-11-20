@@ -9,6 +9,12 @@ pub const BACKUP_HISTORY: Source = Source {
     reads: culprit_core::key!("view.backup_history.source"),
     delivers: &[],
 };
+pub const TABLE_MEMORY: Source = Source {
+    name: culprit_core::telemetry::MSSQL_TABLE_MEMORY_SOURCE,
+    reads: culprit_core::key!("provider.mssql.source.table_memory"),
+    delivers: &[],
+};
+
 pub const COLUMNSTORE_ROWGROUPS: Source = Source {
     name: culprit_core::telemetry::MSSQL_COLUMNSTORE_ROWGROUPS_SOURCE,
     reads: culprit_core::key!("provider.mssql.source.columnstore_rowgroups"),
@@ -444,6 +450,7 @@ pub const SIGNAL_READS: &[Source] = &[
 pub const ALL: &[Source] = &[
     BACKUP_HISTORY,
     COLUMNSTORE_ROWGROUPS,
+    TABLE_MEMORY,
     CDC_STATUS,
     CDC_SCANS,
     CDC_ERRORS,
