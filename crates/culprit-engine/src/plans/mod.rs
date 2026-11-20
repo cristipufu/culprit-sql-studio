@@ -8,6 +8,7 @@ use culprit_core::PlanKind;
 use culprit_core::{Engine, Error, Plan, PlanNode, Result, t};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use ts_rs::TS;
 
 #[cfg(test)]
@@ -476,13 +477,34 @@ fn culprit_json(text: &str) -> Result<Plan> {
             Error::invalid(e.to_string())
         }
     })?;
-    fn renumber(node: &mut PlanNode, next: &mut u32) {
-        node.id = *next;
-        *next += 1;
-        node.children.iter_mut().for_each(|c| renumber(c, next));
-    }
-    renumber(&mut plan.root, &mut 0);
+    let original_ids = unique_node_ids(&plan);
+    renumber(&mut plan.root, &mut 0, original_ids.as_ref());
     Ok(plan)
+}
+
+fn unique_node_ids(plan: &Plan) -> Option<BTreeMap<u32, u32>> {
+    let mut ids = BTreeMap::new();
+    for (next, node) in plan.nodes().into_iter().enumerate() {
+        if ids.insert(node.id, u32::try_from(next).ok()?).is_some() {
+            return None;
+        }
+    }
+    Some(ids)
+}
+
+fn renumber(node: &mut PlanNode, next: &mut u32, original_ids: Option<&BTreeMap<u32, u32>>) {
+    // Resolve the supplied role against original unique direct children before any child IDs change. Missing,
+    // dangling or ambiguous references remain unknown; renumbering cannot create or choose native ownership.
+    let build = node.facts().hash_build_input.and_then(|original| {
+        if node.children.iter().filter(|child| child.id == original).count() != 1 {
+            return None;
+        }
+        original_ids?.get(&original).copied()
+    });
+    node.facts_mut().hash_build_input = build;
+    node.id = *next;
+    *next += 1;
+    node.children.iter_mut().for_each(|child| renumber(child, next, original_ids));
 }
 
 fn contains_key(value: &Value, key: &str) -> bool {

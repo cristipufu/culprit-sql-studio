@@ -277,6 +277,13 @@ impl PlanNode {
         Some(if actual >= estimated { actual / estimated } else { -(estimated / actual) })
     }
 
+    pub(crate) fn has_unique_node_ids(&self) -> bool {
+        fn visit(node: &PlanNode, ids: &mut std::collections::BTreeSet<u32>) -> bool {
+            ids.insert(node.id) && node.children.iter().all(|child| visit(child, ids))
+        }
+        visit(self, &mut std::collections::BTreeSet::new())
+    }
+
     /// The operators at or below this one whose actual rows are [`MISESTIMATE_FACTOR`] or more away from the estimate
     /// for the runs that happened, as (node id, signed factor). Fewer rows than estimated is no evidence where the
     /// operator may have been stopped early, because its estimate is for a full run: below a Limit or Top, on the inner
@@ -286,6 +293,11 @@ impl PlanNode {
     /// estimates of the scan and of what passes its rows on leave the bitmap out. The one rule behind the Misestimate
     /// warning on every engine and the misestimate insight.
     pub fn misestimates(&self) -> Vec<(u32, f64)> {
+        // Every result is attributed by NodeId. Duplicate identities cannot lend one operator's factor to
+        // another operator or mark its accurate counters as a native mismatch.
+        if !self.has_unique_node_ids() {
+            return Vec::new();
+        }
         fn probed(n: &PlanNode) -> bool {
             n.predicate.as_deref().is_some_and(|p| p.contains("PROBE(")) || n.children.iter().any(probed)
         }

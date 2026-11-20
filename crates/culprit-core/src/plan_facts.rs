@@ -215,6 +215,11 @@ pub struct PlanNodeFacts {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub inner_join: Option<bool>,
+    /// Native build-input ownership for a nonadaptive inner hash join. This names its original direct child,
+    /// not an inferred role from a generic join shape. Serial execution and complete input remain independent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hash_build_input: Option<u32>,
     #[serde(default, skip_serializing_if = "is_false")]
     #[ts(as = "Option<bool>", optional)]
     pub estimated_rows_unavailable: bool,

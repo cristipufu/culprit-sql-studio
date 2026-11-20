@@ -417,6 +417,7 @@ pub fn is_system_object(object: &str) -> bool {
 struct Cx<'a> {
     plan: &'a Plan,
     nodes: Vec<&'a PlanNode>,
+    node_ids_unique: bool,
     parent: HashMap<u32, &'a PlanNode>,
     total: f64,
     /// Whether the plan does real work (see `MATERIAL_MS`).
@@ -441,6 +442,7 @@ impl<'a> Cx<'a> {
         Cx {
             plan,
             nodes,
+            node_ids_unique: plan.root.has_unique_node_ids(),
             parent,
             total: if total > 0.0 { total } else { 1.0 },
             material: does_real_work(plan),

@@ -7,6 +7,7 @@ use culprit_core::{
 mod cte;
 mod derived;
 mod expressions;
+mod hash_build;
 mod loops;
 mod projection;
 

@@ -161,9 +161,8 @@ fn exact_observed_rows(rows: f64) -> bool {
 /// TVP table scan, actual before-filter counts, and an enclosing path without repetition or early-stop semantics.
 fn completed_tvp_input(cx: &Cx, node: &PlanNode, accessed: f64, output: Option<f64>) -> bool {
     use crate::plan_facts::RelationalInputKind;
-    let mut identities = std::collections::BTreeSet::new();
     cx.plan.kind == PlanKind::Actual
-        && cx.nodes.iter().all(|node| identities.insert(node.id))
+        && cx.node_ids_unique
         && node
             .facts()
             .relational_input
@@ -177,11 +176,43 @@ fn completed_tvp_input(cx: &Cx, node: &PlanNode, accessed: f64, output: Option<f
         && node.facts().scan_completion.as_ref().is_some_and(|completion| completion.is_single_completed_serial_scan())
         && exact_observed_rows(accessed)
         && output.is_some_and(exact_observed_rows)
-        && cx.ancestors(node).all(|parent| {
-            matches!(parent.kind, NodeKind::Sort | NodeKind::Aggregate | NodeKind::Compute)
-                && parent.facts().estimated_rows_without_goal.is_none()
-                && serial_executions(parent) == Some(1.0)
-        })
+        && complete_input_path(cx, node)
+}
+
+fn complete_input_path(cx: &Cx, input: &PlanNode) -> bool {
+    let mut child = input.id;
+    for parent in cx.ancestors(input) {
+        if parent.facts().estimated_rows_without_goal.is_some()
+            || parent.facts().parallel_operator == Some(true)
+            || serial_executions(parent) != Some(1.0)
+            || !consumes_complete_input(parent, child)
+        {
+            return false;
+        }
+        child = parent.id;
+    }
+    true
+}
+
+fn consumes_complete_input(parent: &PlanNode, child: u32) -> bool {
+    match parent.kind {
+        NodeKind::Sort | NodeKind::Aggregate | NodeKind::Compute => {
+            matches!(parent.children.as_slice(), [input] if input.id == child)
+        }
+        NodeKind::Join => {
+            parent.facts().hash_build_input == Some(child)
+                && parent.facts().inner_join == Some(true)
+                && parent.facts().parallel_operator == Some(false)
+                && parent.children.len() == 2
+                && parent.children.iter().any(|input| input.id == child)
+                && parent.children.iter().all(|input| {
+                    input.facts().parallel_operator == Some(false)
+                        && input.facts().estimated_rows_without_goal.is_none()
+                        && serial_executions(input) == Some(1.0)
+                })
+        }
+        _ => false,
+    }
 }
 
 const MAX_EXACT_COUNT: u64 = (1 << 53) - 1;

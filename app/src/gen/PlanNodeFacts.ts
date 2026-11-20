@@ -45,7 +45,12 @@ serial_execution_count?: string,
 /**
  * Native logical join semantics. Unknown or absent semantics cannot authorize an inner-join diagnosis.
  */
-inner_join?: boolean, estimated_rows_unavailable?: boolean, 
+inner_join?: boolean, 
+/**
+ * Native build-input ownership for a nonadaptive inner hash join. This names its original direct child,
+ * not an inferred role from a generic join shape. Serial execution and complete input remain independent.
+ */
+hash_build_input?: number, estimated_rows_unavailable?: boolean, 
 /**
  * The native operator's declared parallel execution context. This does not count observed workers or
  * establish an actual serial execution population. Missing or malformed native declarations stay unknown.

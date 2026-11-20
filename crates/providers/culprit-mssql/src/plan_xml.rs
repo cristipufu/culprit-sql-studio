@@ -6,6 +6,7 @@ use culprit_core::{
 use roxmltree::{Document, Node};
 
 mod cached_definitions;
+mod hash_join;
 mod memory_feedback;
 #[cfg(test)]
 mod original_batch;
@@ -651,6 +652,7 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
     let mut facts = culprit_core::PlanNodeFacts {
         parallel_operator: relop.attribute("Parallel").and_then(native_boolean),
         relational_input: operator.and_then(relational_inputs::from_operator),
+        hash_build_input: hash_join::build_input(relop),
         serial_execution_count: execution_population
             .as_ref()
             .and_then(|population| scan_completion::serial_execution_count(relop, population)),

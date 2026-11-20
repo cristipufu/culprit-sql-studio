@@ -5,10 +5,13 @@ use crate::test_support::{OwnedSourceFixture, actual_plans, verify_owned_source}
 use culprit_core::{NodeKind, telemetry::CachedStatementIdentity};
 
 const INPUT_ROWS: usize = 20_000;
+const HASH_PRIME_ROWS: usize = 128;
 const SCOPED_READER_QUERY_LIMIT: u32 = 24;
 const INNER_ROWS_PER_SEEK: usize = 200;
 const GRANT_STATEMENT: &str = "SELECT DISTINCT r.pad AS tvp_original_header_probe FROM @Rows r";
 const SELECTIVITY_STATEMENT: &str = "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM @Rows r WHERE r.id=1";
+const HASH_STATEMENT: &str =
+    "SELECT COUNT_BIG(*) AS tvp_original_header_probe FROM @Rows r JOIN dbo.HashItems i ON r.id=i.id WHERE r.id>10000";
 
 struct RecordedRun {
     plan: Plan,
@@ -121,7 +124,7 @@ fn input(plan: &Plan) -> &culprit_core::PlanNode {
 }
 
 fn populate(procedure: &str, rows: usize, shape: InputShape) -> String {
-    assert!(matches!(rows, 1 | INPUT_ROWS));
+    assert!(matches!(rows, 1 | HASH_PRIME_ROWS | INPUT_ROWS));
     let relation = "WITH digits(n) AS (SELECT n FROM (VALUES(0),(1),(2),(3),(4),(5),(6),(7),(8),(9)) d(n)), numbers AS (SELECT TOP(20000) ROW_NUMBER() OVER(ORDER BY a.n,b.n,c.n,d.n,e.n) n FROM digits a CROSS JOIN digits b CROSS JOIN digits c CROSS JOIN digits d CROSS JOIN digits e)";
     let columns = shape.columns();
     let table_type = shape.table_type();
@@ -323,4 +326,119 @@ async fn owned_large_to_small_tvp_reuse_links_overallocation_and_fresh_compilati
 #[ignore = "requires SQL Server2022+ nonce-owned loopback fixture and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
 async fn owned_equal_tvp_input_sizes_with_different_distributions_are_selectivity_not_input_growth() {
     super::fixture::run("skew", compare_equal_input_different_distribution).await;
+}
+
+fn assert_input_population(run: &RecordedRun, estimated: usize) -> &culprit_core::PlanNode {
+    let tvp = input(&run.plan);
+    let access = tvp.facts().access_rows.unwrap();
+    assert_eq!(access.estimated_per_execution, Some(estimated as f64));
+    assert_eq!(access.actual_total, Some(INPUT_ROWS as f64));
+    assert_eq!(tvp.act_rows, Some(10_000.0), "filtered output remains separate from consumed TVP input");
+    assert_eq!(tvp.facts().serial_execution_count.as_deref(), Some("1"));
+    assert_eq!(run.plan.root.act_rows, Some(1.0), "COUNT_BIG emits one row, not the TVP population");
+    tvp
+}
+
+fn assert_hash_input(run: &RecordedRun, estimated: usize) -> &culprit_core::PlanNode {
+    let tvp = assert_input_population(run, estimated);
+    let nodes = run.plan.nodes();
+    let mut ids = std::collections::BTreeSet::new();
+    assert!(nodes.iter().all(|node| ids.insert(node.id)), "original native operator IDs are unique");
+    let assert_serial = |node: &culprit_core::PlanNode| {
+        assert_eq!(node.facts().parallel_operator, Some(false));
+        assert_eq!(node.facts().serial_execution_count.as_deref(), Some("1"));
+        assert_eq!(node.act_executions, Some(1.0));
+        assert!(node.facts().parallel_threads.is_none());
+        assert!(node.facts().estimated_rows_without_goal.is_none());
+        assert!(node.act_rows.is_some_and(f64::is_finite));
+    };
+    assert_serial(tvp);
+    let mut build = tvp;
+    let hash = loop {
+        let parents = nodes
+            .iter()
+            .copied()
+            .filter(|node| node.children.iter().any(|child| child.id == build.id))
+            .collect::<Vec<_>>();
+        let [parent] = parents.as_slice() else { panic!("one original native parent on the TVP build path") };
+        let parent = *parent;
+        if parent.facts().hash_build_input == Some(build.id) {
+            break parent;
+        }
+        assert!(matches!(parent.kind, NodeKind::Aggregate | NodeKind::Compute | NodeKind::Sort));
+        let [child] = parent.children.as_slice() else { panic!("only a unary native build wrapper is admitted") };
+        assert_eq!(child.id, build.id);
+        assert_serial(parent);
+        build = parent;
+    };
+    assert_eq!(hash.kind, NodeKind::Join);
+    assert_eq!(hash.op, "Hash Match");
+    assert_eq!(hash.facts().inner_join, Some(true));
+    assert_eq!(hash.children.len(), 2);
+    assert_eq!(hash.children[0].id, build.id, "the native direct first input remains the build owner");
+    assert_eq!(hash.facts().hash_build_input, Some(build.id), "a wrapper's native role never moves to the leaf");
+    assert_serial(hash);
+    for child in &hash.children {
+        assert_serial(child);
+    }
+    assert_eq!(hash.act_rows, Some(10_000.0));
+    tvp
+}
+
+async fn compare_complete_hash_build_after_fresh_compilation(fixture: &OwnedSourceFixture, database: &str) {
+    let (mut application, pool) = actors(fixture, database).await;
+    batch(
+        &mut application,
+        "CREATE TYPE dbo.RowsType AS TABLE(id int NOT NULL);CREATE TABLE dbo.HashItems(id int NOT NULL)",
+    )
+    .await;
+    // Only this nonce-owned fixture creates the fixed 40k-row heap; no join hint changes the original statement.
+    batch(&mut application, "WITH digits(n) AS (SELECT n FROM (VALUES(0),(1),(2),(3),(4),(5),(6),(7),(8),(9)) d(n)) INSERT dbo.HashItems SELECT TOP(40000) CONVERT(int,ROW_NUMBER() OVER(ORDER BY a.n,b.n,c.n,d.n,e.n)) FROM digits a CROSS JOIN digits b CROSS JOIN digits c CROSS JOIN digits d CROSS JOIN digits e").await;
+    batch(
+        &mut application,
+        &format!("CREATE PROCEDURE dbo.hash_probe @Rows dbo.RowsType READONLY AS {HASH_STATEMENT}"),
+    )
+    .await;
+    batch(&mut application, &populate("hash_probe", HASH_PRIME_ROWS, InputShape::DistinctIds)).await;
+    let large = populate("hash_probe", INPUT_ROWS, InputShape::DistinctIds);
+    let reused = record_run(&mut application, &pool, "hash_probe", &large, Some(fixture)).await;
+    let tvp = assert_hash_input(&reused, HASH_PRIME_ROWS);
+    let concern = culprit_core::insights::insights(&reused.plan)
+        .into_iter()
+        .find(|insight| {
+            matches!(insight.rule.as_str(), "misestimate" | "relational-input-access")
+                && insight.nodes.contains(&tvp.id)
+        })
+        .expect("the native underestimated hash build must retain the measured input distinction");
+    assert!(concern.detail.contains(&culprit_core::t!(
+        "insight.relational_input.completed_input_counts",
+        estimated = culprit_core::format::count(HASH_PRIME_ROWS as f64),
+        actual = culprit_core::format::count(INPUT_ROWS as f64)
+    )));
+    assert!(concern.detail.contains(&culprit_core::t!("insight.relational_input.root_output", actual = "1")));
+    assert!(concern.fix.ends_with(&culprit_core::t!("insight.misestimate.fix.tvp", table = "@Rows")));
+    assert!(concern.fix_sql.is_none());
+
+    // An owned intervention checks the same input with independent original source/cache authority. It does not
+    // establish production harm, a grant-sizing cause or the safety of automatic recompilation.
+    batch(&mut application, "EXEC sys.sp_recompile N'dbo.hash_probe'").await;
+    batch(&mut application, &large).await;
+    let fresh = record_run(&mut application, &pool, "hash_probe", &large, Some(fixture)).await;
+    // The accurate counterpart may choose a different native join path; its original counts remain required.
+    let fresh_input = assert_input_population(&fresh, INPUT_ROWS);
+    assert_ne!(reused.identity, fresh.identity);
+    assert!(!culprit_core::insights::insights(&fresh.plan).iter().any(|insight| {
+        matches!(insight.rule.as_str(), "misestimate" | "relational-input-access")
+            && insight.nodes.contains(&fresh_input.id)
+    }));
+    eprintln!(
+        "owned TVP hash build: input20k/filtered10k/hash10k/aggregate1; original estimated128->fresh20k; no causal or throughput claim"
+    );
+    application.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires SQL Server2022+ nonce-owned loopback fixture and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
+async fn owned_serial_hash_build_retains_complete_tvp_input_and_a_healthy_fresh_control() {
+    super::fixture::run("hash", compare_complete_hash_build_after_fresh_compilation).await;
 }

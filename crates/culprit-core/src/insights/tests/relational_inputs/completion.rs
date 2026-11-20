@@ -1,6 +1,8 @@
 use super::*;
 use crate::plan_facts::{PlanScanCompletion, PlanScanThread};
 
+mod hash_build;
+
 fn completion() -> PlanScanCompletion {
     PlanScanCompletion {
         parallel: Some(false),

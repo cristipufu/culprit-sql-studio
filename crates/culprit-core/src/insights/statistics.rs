@@ -4,6 +4,9 @@
 use super::*;
 
 pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
+    if !cx.node_ids_unique {
+        return Vec::new();
+    }
     let mut concerns = output_misestimates(cx);
     concerns.extend(relational_inputs::access_misestimates(cx, &concerns));
     concerns
