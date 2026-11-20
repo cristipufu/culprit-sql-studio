@@ -160,6 +160,11 @@ impl CollectionDescription {
         {
             return false;
         }
+        if matches!(self.observation, SourceObservation::FullTextPopulations { .. })
+            && full_text_population_context(self).is_err()
+        {
+            return false;
+        }
         if let SourceObservation::CacheEntryMemory { snapshot, focus } = &self.observation
             && (!focus.is_valid()
                 || focus.context.target != self.target

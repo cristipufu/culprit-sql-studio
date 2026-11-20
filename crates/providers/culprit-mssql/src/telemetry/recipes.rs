@@ -271,6 +271,14 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(columnstore_rowgroups::bounded_budget),
     Registration::database(
+        "mssql.full-text-populations",
+        RecipeSelector::FullTextPopulations,
+        |pool, request, host, port| {
+            Ok(Box::new(full_text_populations::FullTextPopulationSource::new(pool, request, host, port)?))
+        },
+    )
+    .bounded(full_text_populations::bounded_budget),
+    Registration::database(
         "mssql.cdc",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cdc)),
         |pool, request, host, port| Ok(Box::new(cdc::CdcSource::new(pool, request, host, port)?)),

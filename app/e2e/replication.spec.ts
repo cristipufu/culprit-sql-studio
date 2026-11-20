@@ -16,7 +16,7 @@ async function inject(page: Page, view: ReplicationReport) {
     report.snapshot.pressure = null;
     report.snapshot.resources = [];
     report.snapshot.sources = [];
-    report.snapshot.operations = { log_failures: [], table_memory: [], spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null };
+    report.snapshot.operations = { log_failures: [], full_text_populations: [], table_memory: [], spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null };
     report.findings = [];
     report.replication = view;
     setState({ report: { ...state.report, report } });

@@ -327,6 +327,11 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             reason: crate::message!("view.table_memory.sharing_withheld"),
         };
     }
+    for recorded in &mut s.operations.full_text_populations {
+        *recorded = crate::telemetry::RecordedOperationalRead::Unavailable {
+            reason: crate::message!("view.full_text_populations.sharing_withheld"),
+        };
+    }
     if let Some(recorded) = &mut s.operations.database_performance_counters {
         // An indivisible original cannot be masked and re-signed. Keep only this population's typed gap;
         // its shared-counter sibling has independent source coverage and remains untouched.

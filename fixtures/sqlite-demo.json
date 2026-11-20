@@ -1,5 +1,6 @@
 {
   "operations": {
+    "full_text_populations": [],
     "table_memory": [],
     "log_failures": [],
     "spaces": [],
@@ -36,7 +37,7 @@
       "reason": null
     }
   ],
-  "format": 35,
+  "format": 36,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",

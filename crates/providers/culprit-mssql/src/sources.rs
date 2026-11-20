@@ -21,6 +21,12 @@ pub const COLUMNSTORE_ROWGROUPS: Source = Source {
     delivers: &[],
 };
 
+pub const FULL_TEXT_POPULATIONS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_FULL_TEXT_POPULATIONS_SOURCE,
+    reads: culprit_core::key!("provider.mssql.source.full_text_populations"),
+    delivers: &[],
+};
+
 pub const CDC_STATUS: Source = Source {
     name: culprit_core::telemetry::MSSQL_CDC_STATUS_SOURCE,
     reads: culprit_core::key!("view.cdc.source.status"),
@@ -450,6 +456,7 @@ pub const SIGNAL_READS: &[Source] = &[
 pub const ALL: &[Source] = &[
     BACKUP_HISTORY,
     COLUMNSTORE_ROWGROUPS,
+    FULL_TEXT_POPULATIONS,
     TABLE_MEMORY,
     CDC_STATUS,
     CDC_SCANS,

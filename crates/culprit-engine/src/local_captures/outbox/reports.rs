@@ -83,6 +83,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::ColumnstoreRowgroups => Ok(LocalSnapshotReport::ColumnstoreRowgroups(Box::new(
             culprit_checks::columnstore_rowgroups::explain_captured(read)?,
         ))),
+        LocalCaptureAnalysisKind::FullTextPopulations => Ok(LocalSnapshotReport::FullTextPopulations(Box::new(
+            culprit_checks::full_text_populations::explain_captured(read)?,
+        ))),
         LocalCaptureAnalysisKind::BackupHistory => {
             Ok(LocalSnapshotReport::BackupHistory(Box::new(culprit_checks::backup_history::explain_captured(read)?)))
         }

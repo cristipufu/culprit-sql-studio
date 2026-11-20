@@ -246,6 +246,7 @@ enum Analysis {
     Cleanup,
     Cdc,
     ColumnstoreRowgroups,
+    FullTextPopulations,
     TableMemory,
     BackupHistory,
     Tuning,
@@ -282,6 +283,7 @@ impl Analysis {
             | Self::MemoryClerks
             | Self::Cdc
             | Self::ColumnstoreRowgroups
+            | Self::FullTextPopulations
             | Self::TableMemory
             | Self::BackupHistory
             | Self::TempdbMetadataMemory
@@ -489,6 +491,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::ColumnstoreRowgroups) => {
             let analysis = culprit_engine::collected_resources::columnstore_rowgroups(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::columnstore_rowgroups(&analysis.report))?;
+        }
+        Some(Analysis::FullTextPopulations) => {
+            let analysis = culprit_engine::collected_resources::full_text_populations(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::full_text_populations(&analysis.report))?;
         }
         Some(Analysis::BackupHistory) => {
             let analysis = culprit_engine::collected_resources::backup_history(&capture)?;

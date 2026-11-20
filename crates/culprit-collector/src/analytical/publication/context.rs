@@ -77,6 +77,12 @@ enum PublicObservation<'a> {
         index_type: u8,
         database_writable: bool,
     },
+    FullTextPopulationsContext {
+        snapshot: &'a StateSnapshotDescription,
+        metadata: &'a MssqlFullTextPopulationMetadata,
+        target_key: String,
+        database_writable: bool,
+    },
     CacheEntryMemoryContext {
         snapshot: &'a StateSnapshotDescription,
         focus_key: String,
@@ -204,6 +210,14 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
                 snapshot,
                 target_key: target.key()?,
                 index_type: *index_type,
+                database_writable: *database_writable,
+            }
+        }
+        SourceObservation::FullTextPopulations { snapshot, target, metadata, database_writable } => {
+            PublicObservation::FullTextPopulationsContext {
+                snapshot,
+                metadata,
+                target_key: target.key()?,
                 database_writable: *database_writable,
             }
         }

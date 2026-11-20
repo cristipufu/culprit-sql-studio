@@ -397,6 +397,9 @@ pub struct Report {
     pub table_memory: Option<Vec<crate::TableMemoryReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub full_text_populations: Option<Vec<crate::FullTextPopulationReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub database_properties: Option<Box<crate::DatabasePropertiesReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

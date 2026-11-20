@@ -27,6 +27,7 @@ mod database_properties;
 pub mod deadlocks;
 mod deployment;
 mod foreign_keys;
+mod full_text_populations;
 mod grants;
 mod index_operations;
 mod indexes;

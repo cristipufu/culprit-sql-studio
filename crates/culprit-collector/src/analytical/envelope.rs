@@ -147,6 +147,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
         | SourceObservation::MaintenanceProgress { snapshot, .. }
         | SourceObservation::CurrentRequestWork { snapshot, .. }
         | SourceObservation::ColumnstoreRowgroups { snapshot, .. }
+        | SourceObservation::FullTextPopulations { snapshot, .. }
         | SourceObservation::TableMemory { snapshot, .. }
         | SourceObservation::CacheEntryMemory { snapshot, .. } => {
             context["dataset"] = json!(snapshot.dataset);

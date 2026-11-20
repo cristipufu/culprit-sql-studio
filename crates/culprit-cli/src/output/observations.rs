@@ -37,6 +37,8 @@ mod table_full_text;
 pub(crate) use table_full_text::table_full_text;
 mod backup_history;
 mod columnstore_rowgroups;
+mod full_text_populations;
+pub(crate) use full_text_populations::full_text_populations;
 mod table_memory;
 pub(crate) use backup_history::backup_history;
 pub(crate) use columnstore_rowgroups::columnstore_rowgroups;

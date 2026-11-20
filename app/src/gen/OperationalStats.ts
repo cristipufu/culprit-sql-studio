@@ -41,7 +41,7 @@ database_performance_counters?: RecordedPerformanceCounters,
 /**
  * One authenticated selected-table memory original, independent of a later scan's table/member identities.
  */
-table_memory: Array<RecordedOperationalRead>, 
+table_memory: Array<RecordedOperationalRead>, full_text_populations: Array<RecordedOperationalRead>, 
 /**
  * Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
  */

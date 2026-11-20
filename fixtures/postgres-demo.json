@@ -1,5 +1,6 @@
 {
   "operations": {
+    "full_text_populations": [],
     "table_memory": [],
     "index_usage_scope": "all-read-members",
     "log_failures": [],
@@ -42,7 +43,7 @@
       "reason": null
     }
   ],
-  "format": 35,
+  "format": 36,
   "id": "20261011T115421.485Z",
   "connection": "pg-demo",
   "environment": "local",

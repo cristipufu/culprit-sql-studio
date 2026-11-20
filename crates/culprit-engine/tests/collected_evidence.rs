@@ -23,6 +23,7 @@ mod current_request_work;
 mod database_properties;
 mod file_io;
 mod fixture;
+mod full_text_populations;
 mod hyperscale_log_components;
 mod maintenance;
 mod maintenance_blocking;

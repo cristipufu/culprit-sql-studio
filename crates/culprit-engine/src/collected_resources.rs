@@ -21,6 +21,8 @@ mod backup_history;
 pub use backup_history::backup_history;
 mod cdc;
 mod columnstore_rowgroups;
+mod full_text_populations;
+pub use full_text_populations::full_text_populations;
 mod table_memory;
 pub use columnstore_rowgroups::columnstore_rowgroups;
 pub use table_memory::table_memory;

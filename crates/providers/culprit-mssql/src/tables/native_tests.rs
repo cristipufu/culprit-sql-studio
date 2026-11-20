@@ -5,6 +5,7 @@ use futures_util::FutureExt;
 use std::{collections::BTreeMap, panic::AssertUnwindSafe, sync::Arc};
 
 mod fixture;
+mod populations;
 use fixture::Fixture;
 
 type Tables = BTreeMap<String, MssqlTableFullText>;
@@ -42,6 +43,9 @@ async fn run(indexed: bool) {
         fixture.initialize(indexed).await?;
         let enabled = compare_read_modes(&fixture, false).await;
         fixture.assert_available(&enabled, indexed.then_some(true));
+        if indexed {
+            populations::verify(&mut fixture).await?;
+        }
         let denied = compare_read_modes(&fixture, true).await;
         fixture.assert_denied(&denied);
         if indexed {

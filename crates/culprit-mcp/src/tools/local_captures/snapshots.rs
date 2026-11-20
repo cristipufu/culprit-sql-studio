@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 mod backup_history;
 mod cdc;
 mod columnstore_rowgroups;
+mod full_text_populations;
 mod table_full_text;
 mod table_memory;
 mod tempdb_metadata_memory;
@@ -49,6 +50,7 @@ fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
         LocalSnapshotReport::Cdc(report) => cdc::value(analysis, report),
         LocalSnapshotReport::TableMemory(report) => table_memory::value(analysis, report)?,
         LocalSnapshotReport::ColumnstoreRowgroups(report) => columnstore_rowgroups::value(analysis, report),
+        LocalSnapshotReport::FullTextPopulations(report) => full_text_populations::value(analysis, report),
         LocalSnapshotReport::BackupHistory(report) => backup_history::value(analysis, report),
         LocalSnapshotReport::TempdbMetadataMemory(report) => tempdb_metadata_memory::value(analysis, report),
         LocalSnapshotReport::InstanceResources(report) => instance_resources(report),

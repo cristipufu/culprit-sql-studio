@@ -19,6 +19,7 @@ pub mod dashboard;
 pub(crate) mod digest;
 pub mod drift;
 pub mod focused_blocking;
+pub mod full_text_populations;
 pub mod jobs;
 pub mod maintenance;
 pub mod maintenance_blocking;

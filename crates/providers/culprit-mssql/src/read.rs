@@ -172,6 +172,19 @@ struct StreamingRead {
 }
 
 impl ReadSession {
+    const SESSION_SETUP_QUERIES: u32 = 1;
+
+    /// Reserve the owned session's SET batch from the same source allowance before native acquisition.
+    pub(crate) fn budget_after_setup(mut budget: CollectionBudget) -> Result<CollectionBudget> {
+        budget.max_queries = budget
+            .max_queries
+            .checked_sub(Self::SESSION_SETUP_QUERIES)
+            .filter(|remaining| *remaining > 0)
+            .ok_or_else(|| CollectionStop::QueryLimit.error())?;
+        budget.validate()?;
+        Ok(budget)
+    }
+
     pub(crate) fn application(pool: Arc<Pool>) -> Self {
         Self::new(pool, Self::application_budget())
     }

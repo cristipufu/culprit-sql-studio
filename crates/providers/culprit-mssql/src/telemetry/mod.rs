@@ -10,6 +10,7 @@ mod columns;
 mod columnstore_rowgroups;
 mod compilation;
 mod compiler_admission;
+mod full_text_populations;
 mod grants;
 mod hyperscale_log_components;
 mod index_operations;

@@ -118,6 +118,9 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
         RecipeSelector::TableMemory => {
             CollectionSelection::TableMemory { target: Box::new(crate::table_memory::tests::selection()) }
         }
+        RecipeSelector::FullTextPopulations => CollectionSelection::FullTextPopulations {
+            target: Box::new(crate::full_text_populations::tests::selection()),
+        },
         RecipeSelector::ColumnstoreRowgroups => CollectionSelection::ColumnstoreRowgroups {
             target: Box::new(crate::columnstore_rowgroups::tests::selection()),
         },

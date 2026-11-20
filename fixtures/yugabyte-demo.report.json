@@ -972,7 +972,7 @@
         "table": "orders"
       }
     ],
-    "format": 35,
+    "format": 36,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -3458,6 +3458,7 @@
       },
       "cluster": null,
       "counters": [],
+      "full_text_populations": [],
       "log_failures": [],
       "multixacts": [],
       "node_resources": {

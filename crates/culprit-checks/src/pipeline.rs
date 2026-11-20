@@ -27,6 +27,7 @@ mod configured_log_rates;
 mod connection_outcomes;
 mod counter_ratios;
 mod database_properties;
+mod full_text_populations;
 mod hyperscale_log_components;
 mod instance_resources;
 mod jobs;
@@ -295,6 +296,7 @@ impl Pipeline {
         let memory_clerks = memory_clerks::explain(&mut snapshot);
         let tempdb_metadata_memory = tempdb_metadata_memory::explain(&mut snapshot);
         let table_memory = table_memory::explain(&mut snapshot);
+        let full_text_populations = full_text_populations::explain(&mut snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
         let suspect_pages = suspect_pages::explain(&mut snapshot);
         let table_full_text = table_full_text::explain(&mut snapshot);
@@ -430,6 +432,7 @@ impl Pipeline {
             memory_clerks,
             tempdb_metadata_memory,
             table_memory,
+            full_text_populations,
             database_properties,
             suspect_pages,
             statement_work,

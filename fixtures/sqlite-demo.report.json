@@ -847,7 +847,7 @@
         "table": "orders"
       }
     ],
-    "format": 35,
+    "format": 36,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -1000,6 +1000,7 @@
     "operations": {
       "cluster": null,
       "counters": [],
+      "full_text_populations": [],
       "log_failures": [],
       "multixacts": [],
       "sequences": [],

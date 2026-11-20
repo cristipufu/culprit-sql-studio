@@ -46,6 +46,7 @@ pub enum RecipeSelector {
     CacheEntryMemory,
     ColumnstoreRowgroups,
     TableMemory,
+    FullTextPopulations,
     FocusedPageWait,
     FocusedPageWaitWriters,
     FocusedPageTaskHolders,
@@ -89,7 +90,9 @@ impl RecipeSelector {
             (Self::TableMemory, CollectionSelection::TableMemory { .. }) => true,
             (Self::Collection(_), CollectionSelection::TableMemory { .. }) => false,
             (Self::ColumnstoreRowgroups, CollectionSelection::ColumnstoreRowgroups { .. }) => true,
+            (Self::FullTextPopulations, CollectionSelection::FullTextPopulations { .. }) => true,
             (Self::Collection(_), CollectionSelection::ColumnstoreRowgroups { .. }) => false,
+            (Self::Collection(_), CollectionSelection::FullTextPopulations { .. }) => false,
             (Self::CacheEntryMemory, CollectionSelection::CacheEntryMemory { .. }) => true,
             (Self::Collection(_), CollectionSelection::CacheEntryMemory { .. }) => false,
             (

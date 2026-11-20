@@ -1,5 +1,6 @@
 mod columnstore;
 mod columnstore_rowgroups;
+mod full_text_populations;
 mod table_full_text;
 mod table_memory;
 use super::*;

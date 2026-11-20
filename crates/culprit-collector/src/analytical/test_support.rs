@@ -12,9 +12,11 @@ pub use backup_history::{BackupHistoryCase, assert_backup_history_capture, backu
 mod cdc;
 mod columnstore;
 mod columnstore_rowgroups;
+mod full_text_populations;
 pub use cdc::{CdcCase, cdc_evidence};
 pub use columnstore::columnstore_configuration_evidence_cases;
 pub use columnstore_rowgroups::{ColumnstoreRowgroupCase, columnstore_rowgroup_evidence};
+pub use full_text_populations::{FullTextPopulationCase, full_text_population_evidence};
 mod table_memory;
 pub use table_memory::{TableMemoryCase, table_memory_evidence};
 mod table_storage;

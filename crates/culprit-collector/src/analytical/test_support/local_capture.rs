@@ -36,6 +36,7 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
             super::tempdb_metadata_memory_evidence(super::TempdbMetadataMemoryCase::Reserved),
         ),
         case("table_memory", super::table_memory_evidence(super::TableMemoryCase::Exact)),
+        case("full_text_populations", super::full_text_population_evidence(super::FullTextPopulationCase::Processing)),
         case("instance_resources", super::instance_resource_evidence(super::InstanceResourceCase::Exact)),
         case("database_properties", super::database_properties_evidence(super::DatabasePropertiesCase::Exact)),
         case("table_full_text", super::table_full_text_evidence(super::TableFullTextCase::Enabled)),
@@ -103,6 +104,9 @@ fn selection(source: &CollectionDescription) -> CollectionSelection {
     match &source.observation {
         SourceObservation::Activity(_) => CollectionSelection::Activity,
         SourceObservation::TableMemory { target, .. } => CollectionSelection::TableMemory { target: target.clone() },
+        SourceObservation::FullTextPopulations { target, .. } => {
+            CollectionSelection::FullTextPopulations { target: target.clone() }
+        }
         SourceObservation::ColumnstoreRowgroups { target, .. } => {
             CollectionSelection::ColumnstoreRowgroups { target: target.clone() }
         }

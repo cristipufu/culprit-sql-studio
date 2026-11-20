@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 // Context3 + target1 + pressure1 + DMV/frame1 + clock1 + final target1/Context3 = 11 reads.
 // The held session's single SET batch is separately reserved, never a renewed source allowance.
-const SESSION_SETUP_QUERIES: u32 = 1;
 const MAX_QUERIES: u32 = 12;
 const MAX_BYTES: u32 = 64 * 1024;
 pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
@@ -32,14 +31,7 @@ pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
     }
 }
 fn reader_budget(requested: &CollectionBudget) -> Result<CollectionBudget> {
-    let mut budget = bounded_budget(requested);
-    budget.max_queries = budget
-        .max_queries
-        .checked_sub(SESSION_SETUP_QUERIES)
-        .filter(|remaining| *remaining > 0)
-        .ok_or_else(|| CollectionStop::QueryLimit.error())?;
-    budget.validate()?;
-    Ok(budget)
+    ReadSession::budget_after_setup(bounded_budget(requested))
 }
 pub(super) struct TableMemorySource<R: NativeRead = ReadSession> {
     inner: culprit_read::FrozenSource<TableMemoryReader<R>>,

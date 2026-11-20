@@ -13,12 +13,15 @@ struct NativeIds {
     unique_index: u32,
     catalog: Option<u32>,
     last_crawl_completed: Option<bool>,
+    created_without_offset: String,
+    modified_without_offset: String,
 }
 
 pub(super) struct Fixture<'a> {
     owned: &'a OwnedSourceFixture,
     prefix: String,
     owns_objects: bool,
+    population_capture_unsettled: bool,
     ids: Option<NativeIds>,
 }
 impl<'a> Fixture<'a> {
@@ -26,7 +29,7 @@ impl<'a> Fixture<'a> {
         let owner = std::env::var("CULPRIT_SMOKE_OWNER").unwrap();
         let prefix =
             format!("culprit_fts_{owner}_{}_{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap());
-        Self { owned, prefix, owns_objects: false, ids: None }
+        Self { owned, prefix, owns_objects: false, population_capture_unsettled: false, ids: None }
     }
     fn name(&self, suffix: &str) -> String {
         format!("{}_{suffix}", self.prefix)
@@ -85,7 +88,7 @@ impl<'a> Fixture<'a> {
         )).await;
         // Independent fixture oracle, outside source-query accounting. Only these exact owned catalog keys are read.
         let ids = crate::conn::query_one(&mut client, &format!(
-            "SELECT /* culprit fixture identity */ DB_ID() AS database_id, OBJECT_ID(N'dbo.{plain}',N'U') AS plain_id, OBJECT_ID(N'dbo.{table}',N'U') AS indexed_id, (SELECT index_id FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U') AND name=N'{key}') AS unique_index_id, (SELECT fulltext_catalog_id FROM sys.fulltext_catalogs WHERE name=N'{catalog}') AS catalog_id, (SELECT has_crawl_completed FROM sys.fulltext_indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS last_crawl_completed"
+            "SELECT /* culprit fixture identity */ DB_ID() AS database_id, OBJECT_ID(N'dbo.{plain}',N'U') AS plain_id, OBJECT_ID(N'dbo.{table}',N'U') AS indexed_id, (SELECT index_id FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U') AND name=N'{key}') AS unique_index_id, (SELECT fulltext_catalog_id FROM sys.fulltext_catalogs WHERE name=N'{catalog}') AS catalog_id, (SELECT has_crawl_completed FROM sys.fulltext_indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS last_crawl_completed, (SELECT CONVERT(varchar(40),create_date,126) FROM sys.tables WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS created_without_offset, (SELECT CONVERT(varchar(40),modify_date,126) FROM sys.tables WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS modified_without_offset"
         )).await.unwrap();
         self.ids = Some(NativeIds {
             database: crate::read::integer(&ids, "database_id")?.try_into().unwrap(),
@@ -94,6 +97,8 @@ impl<'a> Fixture<'a> {
             unique_index: crate::read::integer(&ids, "unique_index_id")?.try_into().unwrap(),
             catalog: crate::read::optional_integer(&ids, "catalog_id")?.map(|value| value.try_into().unwrap()),
             last_crawl_completed: crate::read::optional_boolean(&ids, "last_crawl_completed")?,
+            created_without_offset: crate::read::text(&ids, "created_without_offset")?,
+            modified_without_offset: crate::read::text(&ids, "modified_without_offset")?,
         });
         client.close().await.unwrap();
         Ok(())
@@ -113,6 +118,10 @@ impl<'a> Fixture<'a> {
         Ok(())
     }
     pub(super) async fn cleanup(&mut self) -> Result<()> {
+        if self.population_capture_unsettled {
+            // No further fixture SQL after an interrupted or failed capture. The nonce supervisor destroys it.
+            return Err(crate::read::invalid_data());
+        }
         if !self.owns_objects {
             return Ok(());
         }
@@ -128,6 +137,31 @@ impl<'a> Fixture<'a> {
         client.close().await.unwrap();
         self.owns_objects = false;
         Ok(())
+    }
+    pub(super) fn begin_population_capture(&mut self) {
+        self.population_capture_unsettled = true;
+    }
+    pub(super) fn population_capture_settled(&mut self) {
+        self.population_capture_unsettled = false;
+    }
+    pub(super) fn population_target(&self) -> MssqlFullTextPopulationTarget {
+        let ids = self.ids.as_ref().unwrap();
+        MssqlFullTextPopulationTarget {
+            table: MssqlObjectIdentity {
+                database_id: ids.database,
+                object_id: ids.indexed,
+                created_without_offset: ids.created_without_offset.clone(),
+            },
+            table_modified_without_offset: ids.modified_without_offset.clone(),
+            catalog_id: ids.catalog.unwrap(),
+            unique_index_id: ids.unique_index,
+        }
+    }
+    pub(super) fn population_captures(&self) -> Result<crate::test_support::owned_captures::OwnedCaptures> {
+        crate::test_support::owned_captures::OwnedCaptures::from_pool(
+            Arc::new(Pool::new(self.config(), None)),
+            self.owned.port,
+        )
     }
     pub(super) fn assert_identity(&self, table: &MssqlTableSnapshot) {
         let ids = self.ids.as_ref().unwrap();

@@ -303,3 +303,10 @@ pub struct CollectedTableMemoryAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: Box<crate::TableMemoryReport>,
 }
+
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct CollectedFullTextPopulationAnalysis {
+    pub context: crate::collected_analysis::CollectedEvidenceContext,
+    pub report: Box<crate::FullTextPopulationReport>,
+}

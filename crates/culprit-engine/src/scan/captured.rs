@@ -13,6 +13,7 @@ pub(crate) enum CapturedScanEvidence {
     MemoryClerks(Box<CapturedOperationalRead>),
     TempdbMetadataMemory(Box<CapturedOperationalRead>),
     TableMemory(Box<CapturedOperationalRead>),
+    FullTextPopulations(Box<CapturedOperationalRead>),
     DatabasePerformanceCounters(Box<CapturedOperationalRead>),
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
@@ -25,6 +26,10 @@ impl CapturedScanEvidence {
     pub(crate) fn table_memory(read: Box<CapturedOperationalRead>) -> Result<Self> {
         culprit_checks::table_memory::explain_captured(&read)?;
         Ok(Self::TableMemory(read))
+    }
+    pub(crate) fn full_text_populations(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::full_text_populations::explain_captured(&read)?;
+        Ok(Self::FullTextPopulations(read))
     }
 
     pub(crate) fn tempdb_metadata_memory(read: Box<CapturedOperationalRead>) -> Result<Self> {
@@ -78,6 +83,13 @@ impl CapturedScanEvidence {
             Self::TableMemory(read) => {
                 // Saved-connection admission does not establish a match to current scan tables or native members.
                 culprit_core::telemetry::append_recorded_operational_read(&mut snapshot.operations.table_memory, read)?;
+            }
+            Self::FullTextPopulations(read) => {
+                // Saved-connection admission does not establish a match to current scan tables or native members.
+                culprit_core::telemetry::append_recorded_operational_read(
+                    &mut snapshot.operations.full_text_populations,
+                    read,
+                )?;
             }
             Self::TempdbMetadataMemory(read) => {
                 if snapshot.operations.tempdb_metadata_memory.is_some() {

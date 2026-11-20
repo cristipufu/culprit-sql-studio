@@ -44,8 +44,10 @@ mod backup_history;
 mod catalog;
 mod cdc;
 mod columnstore_rowgroups;
+mod full_text_populations;
 mod table_memory;
 pub use columnstore_rowgroups::*;
+pub use full_text_populations::*;
 pub use table_memory::*;
 mod check_constraints;
 mod cleanup;
@@ -370,6 +372,7 @@ impl CollectionRequest {
                     SnapshotDataset::CacheEntryMemory
                     | SnapshotDataset::ColumnstoreRowgroups
                     | SnapshotDataset::TableMemory
+                    | SnapshotDataset::FullTextPopulations
                     | SnapshotDataset::MaintenanceProgress
                     | SnapshotDataset::CurrentRequestWork
                     | SnapshotDataset::PageWaitWriters
@@ -384,6 +387,12 @@ impl CollectionRequest {
                 }
             }
             CollectionSelection::ColumnstoreRowgroups { target } => {
+                self.subject.require_database()?;
+                if !target.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::FullTextPopulations { target } => {
                 self.subject.require_database()?;
                 if !target.is_valid() {
                     return Err(CollectionStop::InvalidPage.error());
@@ -747,7 +756,9 @@ impl TelemetryRecord {
                     (_, OperationalFact::MssqlTableMemory(point)) => accepted && point.fits_source(source),
                     (SourceObservation::TableMemory { .. }, _) => false,
                     (_, OperationalFact::MssqlColumnstoreRowgroup(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::MssqlFullTextPopulation(point)) => accepted && point.fits_source(source),
                     (SourceObservation::ColumnstoreRowgroups { .. }, _) => false,
+                    (SourceObservation::FullTextPopulations { .. }, _) => false,
                     (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::CounterSet(sample)) if database_performance_candidate(sample) => {
                         accepted && database_performance_sample_fits_source(sample, source)

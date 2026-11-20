@@ -66,6 +66,9 @@ pub enum CollectionSelection {
     ColumnstoreRowgroups {
         target: Box<MssqlColumnstoreTarget>,
     },
+    FullTextPopulations {
+        target: Box<MssqlFullTextPopulationTarget>,
+    },
     FocusedPageWait {
         focus: Box<ActivityWaitFocus>,
     },
@@ -126,6 +129,7 @@ impl CollectionSelection {
             Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
             Self::TableMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::TableMemory),
             Self::ColumnstoreRowgroups { .. } => TelemetryCollection::Snapshot(SnapshotDataset::ColumnstoreRowgroups),
+            Self::FullTextPopulations { .. } => TelemetryCollection::Snapshot(SnapshotDataset::FullTextPopulations),
             Self::FocusedPageWait { .. } | Self::SharedPageWaitFocus { .. } | Self::PageWaitTasks { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)
             }
@@ -466,6 +470,12 @@ pub enum SourceObservation {
         index_type: u8,
         database_writable: bool,
     },
+    FullTextPopulations {
+        snapshot: StateSnapshotDescription,
+        target: Box<MssqlFullTextPopulationTarget>,
+        metadata: Box<MssqlFullTextPopulationMetadata>,
+        database_writable: bool,
+    },
     /// Native page/task sample from one held source. Updateability belongs only to a database target.
     PageWaitTargets {
         snapshot: StateSnapshotDescription,
@@ -561,6 +571,7 @@ impl SourceObservation {
             }
             Self::TableMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::TableMemory),
             Self::ColumnstoreRowgroups { .. } => TelemetryCollection::Snapshot(SnapshotDataset::ColumnstoreRowgroups),
+            Self::FullTextPopulations { .. } => TelemetryCollection::Snapshot(SnapshotDataset::FullTextPopulations),
             Self::PageWaitTargets { .. } | Self::FocusedPageWait { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)
             }
@@ -598,6 +609,7 @@ impl SourceObservation {
             Self::CacheEntryMemory { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
             Self::TableMemory { target, .. } => TelemetryRange::Focused { key: target.key()? },
             Self::ColumnstoreRowgroups { target, .. } => TelemetryRange::Focused { key: target.key()? },
+            Self::FullTextPopulations { target, .. } => TelemetryRange::Focused { key: target.key()? },
             Self::FocusedPageWait { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::PageWaitWriters { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
             Self::PageTaskHolders { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
@@ -669,6 +681,9 @@ impl SourceObservation {
             }
             Self::ColumnstoreRowgroups { snapshot, target, index_type, .. } => {
                 columnstore_rowgroup_header_is_valid(snapshot) && target.is_valid() && matches!(*index_type, 5 | 6)
+            }
+            Self::FullTextPopulations { snapshot, target, metadata, .. } => {
+                full_text_population_header_is_valid(snapshot, metadata) && target.is_valid()
             }
             Self::CacheEntryMemory { snapshot, focus } => {
                 snapshot.is_valid() && focus.is_valid() && snapshot.dataset == SnapshotDataset::CacheEntryMemory
@@ -774,6 +789,7 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::FullTextPopulations { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => Some(snapshot),
             _ => None,
         }
@@ -798,6 +814,7 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::FullTextPopulations { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => snapshot.accepts(stream, source),
             Self::Diagnostics(_) => stream == TelemetryStream::OperationalSamples && source == DIAGNOSTICS_SOURCE,
             Self::PagedSnapshot(snapshot) | Self::PagedSourceRead { snapshot, .. } => snapshot.accepts(stream, source),
@@ -834,6 +851,7 @@ impl SourceObservation {
             | Self::DatabasePerformanceCounters { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::FullTextPopulations { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
@@ -1101,6 +1119,15 @@ impl CollectionDescription {
         {
             return original == target
                 && columnstore_rowgroup_context(self).is_ok()
+                && snapshot.records <= request.budget.max_snapshot_rows;
+        }
+        if let (
+            SourceObservation::FullTextPopulations { snapshot, target: original, .. },
+            CollectionSelection::FullTextPopulations { target },
+        ) = (&self.observation, &request.selection)
+        {
+            return original == target
+                && full_text_population_context(self).is_ok()
                 && snapshot.records <= request.budget.max_snapshot_rows;
         }
         if let (

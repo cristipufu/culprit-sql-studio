@@ -10,6 +10,7 @@ use culprit_engine::{CompletedCaptureAnalysis, CompletedCaptureScanInput};
 use culprit_read::admission::SourceGate;
 
 mod database_performance_counters;
+mod full_text_populations;
 mod hyperscale_log_components;
 mod memory_clerks;
 mod table_memory;
@@ -81,6 +82,9 @@ impl Captured {
         let request = CollectionRequest {
             subject,
             selection: match &source.observation {
+                SourceObservation::FullTextPopulations { target, .. } => {
+                    CollectionSelection::FullTextPopulations { target: target.clone() }
+                }
                 SourceObservation::TableMemory { target, .. } => {
                     CollectionSelection::TableMemory { target: target.clone() }
                 }
