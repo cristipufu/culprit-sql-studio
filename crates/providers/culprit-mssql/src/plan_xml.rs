@@ -419,9 +419,8 @@ fn read_statement(
                 props.insert(key.into(), v.into());
             }
         }
-        // The showplan schema gives the wait for a memory grant in seconds.
-        if let Some(seconds) = grant.attribute("GrantWaitTime").and_then(|v| v.parse::<f64>().ok()) {
-            props.insert("MemoryGrantWaitMs".into(), (seconds * 1000.0).to_string());
+        if let Some(milliseconds) = memory_grant_wait_ms(grant) {
+            props.insert("MemoryGrantWaitMs".into(), milliseconds.to_string());
         }
     }
     if let Some(time) = child(query_plan, "QueryTimeStats") {
@@ -495,6 +494,12 @@ fn read_statement(
     Ok(plan)
 }
 
+/// Native response-window controls establish milliseconds despite the seconds annotation in the published
+/// SQL Server 2022 XSD: https://schemas.microsoft.com/sqlserver/2004/07/showplan/sql2022/showplanxml.xsd
+fn memory_grant_wait_ms(grant: Node) -> Option<f64> {
+    grant.attribute("GrantWaitTime")?.parse::<f64>().ok().and_then(culprit_core::plan_facts::nonnegative)
+}
+
 fn statement_facts(statement: Node, plan: Node) -> culprit_core::PlanFacts {
     use culprit_core::plan_facts::{count, nonnegative};
     let number = |node: Node, key: &str| node.attribute(key).and_then(|v| v.parse::<f64>().ok()).and_then(nonnegative);
@@ -547,7 +552,7 @@ fn statement_facts(statement: Node, plan: Node) -> culprit_core::PlanFacts {
         memory_requested_kb: memory("RequestedMemory"),
         memory_granted_kb: memory("GrantedMemory"),
         memory_max_used_kb: memory("MaxUsedMemory"),
-        memory_grant_wait_ms: memory("GrantWaitTime").and_then(|seconds| nonnegative(seconds * 1000.0)),
+        memory_grant_wait_ms: grant.and_then(memory_grant_wait_ms),
         memory_grant_feedback: memory_feedback::read(plan),
         udf_elapsed_ms: timing("UdfElapsedTime"),
         udf_cpu_ms: timing("UdfCpuTime"),
@@ -1405,7 +1410,7 @@ mod tests {
     }
 
     #[test]
-    fn actual_counts_are_totals_and_units_follow_the_schema() {
+    fn actual_counts_are_totals_and_native_time_units_are_preserved() {
         let xml = r#"<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan"><BatchSequence><Batch><Statements>
           <StmtSimple StatementText="SELECT 1" StatementSubTreeCost="20">
             <QueryPlan>
@@ -1448,8 +1453,8 @@ mod tests {
           </StmtSimple>
         </Statements></Batch></BatchSequence></ShowPlanXML>"#;
         let plan = parse(xml).unwrap();
-        // The showplan schema gives GrantWaitTime in seconds.
-        assert_eq!(plan.props.get("MemoryGrantWaitMs").map(String::as_str), Some("2000"));
+        assert_eq!(plan.props.get("MemoryGrantWaitMs").map(String::as_str), Some("2"));
+        assert_eq!(plan.facts().memory_grant_wait_ms, Some(2.0));
         assert_eq!(plan.props.get("UdfElapsedMs").map(String::as_str), Some("450"));
         let gather = &plan.root.children[0];
         // An exchange spill isn't a sort or hash short of memory.
@@ -1477,6 +1482,48 @@ mod tests {
         let lookup = &estimated.root.children[1];
         assert_eq!(lookup.est_executions, 40.0);
         assert_eq!(estimated.root.children[0].rows_read, Some(1_800_000.0));
+    }
+
+    #[test]
+    fn native_grant_wait_milliseconds_are_shared_by_typed_facts_and_display() {
+        for milliseconds in [0, 2, 320] {
+            let grant = format!(r#"<MemoryGrantInfo GrantWaitTime="{milliseconds}" />"#);
+            let plan = grant_wait_plan(&grant);
+            assert_eq!(plan.kind, PlanKind::Actual);
+            assert_eq!(plan.facts().memory_grant_wait_ms, Some(f64::from(milliseconds)));
+            assert_eq!(plan.props.get("MemoryGrantWaitMs"), Some(&milliseconds.to_string()));
+            // QueryTimeStats measures its own execution interval, not an upper bound on admission delay.
+            assert_eq!(plan.facts().elapsed_ms, Some(95.0));
+        }
+    }
+
+    #[test]
+    fn native_grant_wait_missing_or_invalid_is_unknown_in_facts_and_display() {
+        let mut grants = vec![String::new(), "<MemoryGrantInfo />".into()];
+        for value in ["", "-1", "NaN", "inf", "-inf", "1e309", "invalid"] {
+            grants.push(format!(r#"<MemoryGrantInfo GrantWaitTime="{value}" />"#));
+        }
+        for grant in grants {
+            let plan = grant_wait_plan(&grant);
+            assert_eq!(plan.facts().memory_grant_wait_ms, None, "{grant}");
+            assert!(!plan.props.contains_key("MemoryGrantWaitMs"), "{grant}");
+        }
+    }
+
+    fn grant_wait_plan(grant: &str) -> Plan {
+        let xml = format!(
+            r#"<ShowPlanXML><BatchSequence><Batch><Statements>
+              <StmtSimple StatementText="SELECT 1" QueryHash="0x01" StatementSubTreeCost="1">
+                <QueryPlan>{grant}<QueryTimeStats ElapsedTime="95" CpuTime="95" />
+                  <RelOp NodeId="0" PhysicalOp="Constant Scan" LogicalOp="Constant Scan" EstimateRows="1" EstimatedTotalSubtreeCost="1">
+                    <RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1" ActualExecutions="1" /></RunTimeInformation>
+                    <ConstantScan />
+                  </RelOp>
+                </QueryPlan>
+              </StmtSimple>
+            </Statements></Batch></BatchSequence></ShowPlanXML>"#,
+        );
+        parse_native_statement(&xml, Some("0x01")).unwrap()
     }
 
     #[test]

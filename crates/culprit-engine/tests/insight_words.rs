@@ -84,10 +84,6 @@ note: Estimated plan: misestimates, spills, unused memory grants and uneven thre
   detail: ix_orders_status finds the rows but doesn't hold customer_id, channel, total, created_at and shipped_at, so SQL Server goes back to shop.orders for each one (Key Lookup). Together that's 100% of this plan's work.
   fix: Add customer_id, channel, total, created_at and shipped_at to ix_orders_status as included columns (keep its keys and its existing included columns) so the seek answers the query by itself, or select fewer columns.
   verify: Explain again: the Key Lookup is gone and ix_orders_status returns the rows by itself.
-[memory-grant] Waited 3.0 s for an execution memory grant
-  detail: The native plan records memory-grant admission delay for this execution. It does not identify the limiting resource or a competing request.
-  fix: Inspect the incident’s grant queue, resource or workload-group limits and concurrent demand. Test a change supported by those observations under comparable load.
-  verify: Compare native grant waits, requested/granted/used memory, elapsed time, CPU and spills under equivalent input and concurrency; a zero wait is not required.
 [parallel-skew] One thread of 14 handled 94% of the rows in Key Lookup
   detail: Parallel work is only as fast as its busiest thread; the others finished early and waited.
   fix: Uneven work usually means one key value holds most of the rows (check the distribution of the join or filter column) or a parallel scan over a small range; update statistics and consider filtering that value separately.
@@ -161,10 +157,6 @@ note: Estimated plan: misestimates, spills, unused memory grants and uneven thre
   detail: Sort used tempdb for part of this execution’s work. The spill alone does not establish its elapsed cost or underlying cause. This actual plan records a statement memory grant of 7.2 MB, above the request of 3.2 MB. Statement memory values do not establish this operator’s allocation, sufficient memory or the spill’s cause.
   fix: Compare input rows and width with estimates, then inspect requested, granted and used memory, applicable limits and concurrent demand. Reduce unnecessary input work where possible; check native memory grant feedback eligibility and status before relying on it. For this sort, test whether an access path can supply the required order.
   verify: Compare representative runs under equivalent load: spill warnings or volume, elapsed time, CPU and grant waiting. Fewer spills alone do not establish a better result; a larger grant can increase concurrency pressure.
-[memory-grant] Waited 3.0 s for an execution memory grant
-  detail: The native plan records memory-grant admission delay for this execution. It does not identify the limiting resource or a competing request.
-  fix: Inspect the incident’s grant queue, resource or workload-group limits and concurrent demand. Test a change supported by those observations under comparable load.
-  verify: Compare native grant waits, requested/granted/used memory, elapsed time, CPU and spills under equivalent input and concurrency; a zero wait is not required.
 [parallelism-blocked] This plan runs on one CPU because its statement says OPTION (MAXDOP 1)
   detail: Its estimated cost is 19. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), so whether it would split depends on that setting; the whole run happens on a single core instead.
   fix: Remove OPTION (MAXDOP 1) from the statement, unless something needs it to run on one CPU.

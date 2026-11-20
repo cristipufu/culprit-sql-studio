@@ -108,13 +108,12 @@ fn sql_server_shapes() {
     assert!(hint.fix_sql.as_deref().unwrap().starts_with("CREATE NONCLUSTERED INDEX"));
     assert!(find("mssql-sort-spill.sqlplan", "spill").title.contains("tempdb"));
     assert!(find("mssql-grant.sqlplan", "memory-grant").title.starts_with("Reserves 41.5 MB"));
-    // GrantWaitTime is in seconds (showplan schema): these runs waited 3 s for their grant.
-    let wait = insights(&load("mssql-sort-spill.sqlplan")).into_iter().find(|i| i.title.starts_with("Waited"));
-    let wait = wait.expect("the native actual plan records the grant admission delay");
-    assert_eq!(wait.title, "Waited 3.0 s for an execution memory grant");
-    assert_eq!(wait.detail, culprit_core::t!("insight.memory_grant.wait.detail"));
-    assert_eq!(wait.fix, culprit_core::t!("insight.memory_grant.wait.fix"));
-    assert_eq!(wait.verify, culprit_core::t!("insight.memory_grant.wait.verify"));
+    let spill = load("mssql-sort-spill.sqlplan");
+    assert_eq!(spill.facts().memory_grant_wait_ms, Some(3.0));
+    assert!(
+        !rules_of(&spill).contains(&"memory-grant".into()),
+        "the saved 3ms native wait is below the existing admission-delay threshold, not a 3s incident"
+    );
     let reservation = find("mssql-grant.sqlplan", "memory-grant");
     assert_eq!(reservation.fix, culprit_core::t!("insight.memory_grant.oversized.fix"));
     assert!(
