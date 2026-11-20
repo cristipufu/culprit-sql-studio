@@ -5,6 +5,7 @@ mod activity;
 mod actual;
 mod ado;
 mod advice;
+mod backup_history;
 mod cache_entry_memory;
 mod cache_summary;
 mod cached_definitions;

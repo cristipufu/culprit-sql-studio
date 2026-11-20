@@ -313,6 +313,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::Jobs
                     | SnapshotDataset::ColumnstoreRowgroups
                     | SnapshotDataset::Cdc
+                    | SnapshotDataset::BackupHistory
                     | SnapshotDataset::SessionMemory
                     | SnapshotDataset::PageWaitTargets
                     | SnapshotDataset::TaskSpace

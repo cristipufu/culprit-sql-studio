@@ -1,4 +1,5 @@
 //! Native collection adapters over bounded statistics readers and stable parameterized queries.
+mod backup_history;
 mod cache_entry_memory;
 mod cached_definitions;
 mod cached_runtime;

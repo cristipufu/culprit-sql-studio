@@ -268,6 +268,13 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(cdc::CdcSource::new(pool, request, host, port)?)),
     )
     .bounded(cdc::bounded_budget),
+    Registration::database(
+        "mssql.backup-history",
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory)),
+        |pool, request, host, port| Ok(Box::new(backup_history::BackupHistorySource::new(pool, request, host, port)?)),
+    )
+    .bounded(backup_history::bounded_budget)
+    .on_editions(&[2, 3, 4, 5, 8]),
     state!("mssql.operational", Operational).baseline().version(6),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])

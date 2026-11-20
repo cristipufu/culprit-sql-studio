@@ -5,6 +5,8 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod backup_history;
+pub use backup_history::{BackupHistoryCase, assert_backup_history_capture, backup_history_evidence};
 mod cdc;
 mod columnstore;
 mod columnstore_rowgroups;

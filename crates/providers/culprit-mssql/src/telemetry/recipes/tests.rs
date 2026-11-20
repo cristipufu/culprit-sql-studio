@@ -425,6 +425,27 @@ fn cdc_recipe_is_manual_unqualified_and_keeps_its_own_paid_native_roster() {
 }
 
 #[test]
+fn backup_history_is_an_explicit_manual_profile_with_no_baseline_or_cost_approval() {
+    let recipes = declarations();
+    let recipe = recipes.iter().find(|recipe| recipe.id == "mssql.backup-history").unwrap();
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, vec![RecipeSubject::Database]);
+    assert_eq!(
+        recipe.selector,
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory))
+    );
+    assert_eq!(recipe.budget.max_queries, 12);
+    assert_eq!(recipe.budget.max_snapshot_rows, 64);
+    assert_eq!(recipe.budget.page_rows, 16);
+    assert_eq!(recipe.budget.page_bytes, 256 * 1024);
+    assert_eq!(recipe.budget.total_bytes, 512 * 1024);
+    assert_eq!(recipe.budget.statement_timeout_ms, 1000);
+    assert_eq!(recipe.budget.total_timeout_ms, 5000);
+}
+
+#[test]
 fn selected_columnstore_rowgroups_recipe_requires_native_target_and_stays_manual_unqualified() {
     let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.columnstore-rowgroups").unwrap();
     assert_eq!(recipe.version, 1);

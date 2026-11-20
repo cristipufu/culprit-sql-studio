@@ -423,6 +423,11 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         metadata: Box<TimescaleJobsMetadata>,
     },
+    BackupHistory {
+        snapshot: StateSnapshotDescription,
+        scope: Box<MssqlBackupHistoryScope>,
+        database_writable: bool,
+    },
     MssqlAgentJobs {
         snapshot: StateSnapshotDescription,
         metadata: Box<MssqlAgentJobsMetadata>,
@@ -525,6 +530,7 @@ impl SourceObservation {
             Self::RetainedEvents(_) => TelemetryCollection::DeadlockHistory,
             Self::Activity(_) | Self::FocusedBlocking { .. } => TelemetryCollection::Activity,
             Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
+            Self::BackupHistory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory),
             Self::ColumnstoreRowgroups { .. } => TelemetryCollection::Snapshot(SnapshotDataset::ColumnstoreRowgroups),
             Self::PageWaitTargets { .. } | Self::FocusedPageWait { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)
@@ -584,6 +590,7 @@ impl SourceObservation {
             Self::PageWaitTargets { .. }
             | Self::Jobs { .. }
             | Self::MssqlAgentJobs { .. }
+            | Self::BackupHistory { .. }
             | Self::Snapshot(_)
             | Self::PagedSnapshot(_) => TelemetryRange::Current,
         })
@@ -609,6 +616,7 @@ impl SourceObservation {
             Self::RetainedSamples(history) => history.covers_request(),
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
+            Self::BackupHistory { snapshot, .. } => backup_history_header_is_valid(snapshot),
             Self::Jobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::MssqlAgentJobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::Activity(snapshot) => snapshot.is_valid(),
@@ -706,6 +714,7 @@ impl SourceObservation {
             | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
+            | Self::BackupHistory { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
             | Self::PageWaitWriters { snapshot, .. }
@@ -725,6 +734,7 @@ impl SourceObservation {
             | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
+            | Self::BackupHistory { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
             | Self::PageWaitWriters { snapshot, .. }
@@ -764,6 +774,7 @@ impl SourceObservation {
             }
             Self::Jobs { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
+            | Self::BackupHistory { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
@@ -1062,8 +1073,10 @@ impl CollectionDescription {
                 && self.observation.covers_request()
                 && snapshot.records <= request.budget.max_snapshot_rows;
         }
-        if let (SourceObservation::Snapshot(snapshot), CollectionSelection::Snapshot { dataset }) =
-            (&self.observation, &request.selection)
+        if let (
+            SourceObservation::Snapshot(snapshot) | SourceObservation::BackupHistory { snapshot, .. },
+            CollectionSelection::Snapshot { dataset },
+        ) = (&self.observation, &request.selection)
         {
             return self.observation.covers_request()
                 && snapshot.dataset == *dataset

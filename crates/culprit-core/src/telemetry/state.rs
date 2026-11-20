@@ -12,6 +12,7 @@ pub enum SnapshotDataset {
     Sequences,
     Cleanup,
     Cdc,
+    BackupHistory,
     ColumnstoreRowgroups,
     Operational,
     HyperscaleLogComponents,
@@ -61,6 +62,7 @@ impl SnapshotDataset {
             | Self::Sequences
             | Self::Cleanup
             | Self::Cdc
+            | Self::BackupHistory
             | Self::ColumnstoreRowgroups
             | Self::Operational
             | Self::HyperscaleLogComponents
@@ -480,6 +482,7 @@ pub enum OperationalFact {
     DiagnosticRevision(Box<DiagnosticRevision>),
     Queue(QueueSample),
     MssqlCdc(Box<MssqlCdcObservation>),
+    MssqlBackupHistory(Box<MssqlBackupHistoryObservation>),
     MssqlColumnstoreRowgroup(Box<MssqlColumnstoreRowgroup>),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
     MssqlPersistentVersionStore(Box<MssqlPersistentVersionStore>),
@@ -506,6 +509,7 @@ impl OperationalFact {
     fn matches_key(&self, key: &str) -> bool {
         let expected = match self {
             Self::MssqlCdc(point) => point.key(),
+            Self::MssqlBackupHistory(point) => point.key(),
             Self::MssqlColumnstoreRowgroup(point) => point.key(),
             Self::CounterSet(counters) => counters.key(),
             Self::CompilerWaiter(waiter) => waiter.key(),
@@ -562,6 +566,7 @@ impl OperationalFact {
         match self {
             Self::CompilerWaiter(waiter) => waiter.request.redact(engine),
             Self::MssqlCdc(_)
+            | Self::MssqlBackupHistory(_)
             | Self::MssqlColumnstoreRowgroup(_)
             | Self::ConfiguredLogRateLimits(_)
             | Self::HyperscaleLogComponent(_)
@@ -686,6 +691,7 @@ impl OperationalFact {
             Self::TimescaleContinuousAggregate(point) => point.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
             Self::MssqlCdc(point) => point.is_valid(),
+            Self::MssqlBackupHistory(point) => point.is_valid(),
             Self::MssqlColumnstoreRowgroup(point) => point.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),
@@ -730,6 +736,7 @@ impl OperationalObservation {
             && self.fact.matches_key(&self.key)
             && match &self.fact {
                 OperationalFact::MssqlCdc(point) => self.source == point.source(),
+                OperationalFact::MssqlBackupHistory(_) => self.source == MSSQL_BACKUP_HISTORY_SOURCE,
                 OperationalFact::MssqlColumnstoreRowgroup(_) => self.source == MSSQL_COLUMNSTORE_ROWGROUPS_SOURCE,
                 OperationalFact::MssqlAgentJob(_) => self.source == MSSQL_AGENT_JOBS_SOURCE,
                 OperationalFact::MssqlAgentStep(_) => self.source == MSSQL_AGENT_STEPS_SOURCE,

@@ -69,6 +69,14 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
+        if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory)
+            && !matches!(self.observation, SourceObservation::BackupHistory { .. })
+        {
+            return false;
+        }
+        if matches!(self.observation, SourceObservation::BackupHistory { .. }) {
+            return backup_history_context(self).is_ok();
+        }
         if matches!(&self.observation, SourceObservation::Snapshot(snapshot) if snapshot.dataset == SnapshotDataset::PageWaitTargets)
         {
             return false;

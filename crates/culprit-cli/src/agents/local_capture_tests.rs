@@ -4,6 +4,7 @@ mod cdc;
 mod grant_output;
 mod hyperscale_log_components;
 mod participant_context;
+mod rowgroups_backup;
 mod snapshots;
 mod tempdb_metadata_memory;
 use super::*;

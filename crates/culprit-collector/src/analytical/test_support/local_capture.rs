@@ -43,6 +43,8 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
         case("connection_outcomes", super::connection_outcome_evidence_cases().remove(0)),
         case("jobs", super::jobs_evidence(super::JobsCase::Failed)),
         case("cdc", super::cdc_evidence(super::CdcCase::ErrorAndProgress)),
+        case("columnstore_rowgroups", super::columnstore_rowgroup_evidence(super::ColumnstoreRowgroupCase::States)),
+        case("backup_history", super::backup_history_evidence(super::BackupHistoryCase::MultipleRecords)),
         case("request_memory", super::request_memory_evidence_cases().remove(0)),
         case("task_space", super::task_space_evidence_cases().remove(0)),
         case("current_request_work", super::current_request_work_evidence_cases().remove(0)),
@@ -98,6 +100,9 @@ impl LocalCaptureFixture {
 fn selection(source: &CollectionDescription) -> CollectionSelection {
     match &source.observation {
         SourceObservation::Activity(_) => CollectionSelection::Activity,
+        SourceObservation::ColumnstoreRowgroups { target, .. } => {
+            CollectionSelection::ColumnstoreRowgroups { target: target.clone() }
+        }
         SourceObservation::FocusedBlocking { result, .. } => {
             CollectionSelection::FocusedBlocking { focus: Box::new(result.focus.clone()) }
         }

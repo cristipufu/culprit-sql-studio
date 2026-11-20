@@ -79,6 +79,12 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
             let native = JobsSnapshot::from_source(source, read.observations.clone(), read.read_complete)?;
             Ok(LocalSnapshotReport::Jobs(Box::new(culprit_checks::jobs::explain(&native)?)))
         }
+        LocalCaptureAnalysisKind::ColumnstoreRowgroups => Ok(LocalSnapshotReport::ColumnstoreRowgroups(Box::new(
+            culprit_checks::columnstore_rowgroups::explain_captured(read)?,
+        ))),
+        LocalCaptureAnalysisKind::BackupHistory => {
+            Ok(LocalSnapshotReport::BackupHistory(Box::new(culprit_checks::backup_history::explain_captured(read)?)))
+        }
         LocalCaptureAnalysisKind::Cdc => {
             Ok(LocalSnapshotReport::Cdc(Box::new(culprit_checks::cdc::explain_captured(read)?)))
         }

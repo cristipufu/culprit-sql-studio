@@ -1,3 +1,4 @@
+mod rowgroups_backup;
 mod table_full_text;
 mod tempdb_metadata_memory;
 use super::*;

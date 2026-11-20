@@ -245,6 +245,8 @@ enum Analysis {
     WaitCounters,
     Cleanup,
     Cdc,
+    ColumnstoreRowgroups,
+    BackupHistory,
     Tuning,
 }
 impl Analysis {
@@ -278,6 +280,8 @@ impl Analysis {
             | Self::PerformanceCounters
             | Self::MemoryClerks
             | Self::Cdc
+            | Self::ColumnstoreRowgroups
+            | Self::BackupHistory
             | Self::TempdbMetadataMemory
             | Self::InstanceResources
             | Self::DatabaseProperties
@@ -475,6 +479,14 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::MemoryClerks) => {
             let analysis = culprit_engine::collected_resources::memory_clerks(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::memory_clerks(&analysis.report))?;
+        }
+        Some(Analysis::ColumnstoreRowgroups) => {
+            let analysis = culprit_engine::collected_resources::columnstore_rowgroups(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::columnstore_rowgroups(&analysis.report))?;
+        }
+        Some(Analysis::BackupHistory) => {
+            let analysis = culprit_engine::collected_resources::backup_history(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::backup_history(&analysis.report))?;
         }
         Some(Analysis::Cdc) => {
             let analysis = culprit_engine::collected_resources::cdc(&capture)?;

@@ -1,9 +1,11 @@
 pub mod actual;
 pub mod advice;
+mod backup_history_report;
 pub mod blocking;
 pub mod blocking_report;
 pub mod cache_entry_memory_report;
 pub mod cached_plan_report;
+pub use backup_history_report::{BackupHistoryEntry, BackupHistoryReport};
 mod cdc_report;
 mod columnstore_rowgroup_report;
 pub use columnstore_rowgroup_report::{ColumnstoreRowgroupEntry, ColumnstoreRowgroupReport};

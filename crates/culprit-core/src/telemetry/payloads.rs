@@ -205,6 +205,7 @@ impl OperationalFact {
             | Self::RetentionCoverage(_)
             | Self::Queue(_)
             | Self::MssqlCdc(_)
+            | Self::MssqlBackupHistory(_)
             | Self::MssqlColumnstoreRowgroup(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::ConfiguredLogRateLimits(_)

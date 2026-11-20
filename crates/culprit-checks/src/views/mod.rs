@@ -3,6 +3,7 @@
 //! as the checks.
 
 pub(crate) mod advisor;
+pub mod backup_history;
 pub(crate) mod brief;
 pub mod cache_entry_memory;
 pub mod cdc;

@@ -34,12 +34,14 @@ mod captured_reference;
 pub use captured_reference::{
     CapturedPosition, CapturedReadBinding, CapturedReadRef, CapturedRecordReference, CapturedStreamRows,
 };
+mod backup_history;
 mod catalog;
 mod cdc;
 mod columnstore_rowgroups;
 pub use columnstore_rowgroups::*;
 mod check_constraints;
 mod cleanup;
+pub use backup_history::*;
 pub use cdc::*;
 mod columns;
 mod compilation;
@@ -728,6 +730,8 @@ impl TelemetryRecord {
                     (_, OperationalFact::MssqlColumnstoreRowgroup(point)) => accepted && point.fits_source(source),
                     (SourceObservation::ColumnstoreRowgroups { .. }, _) => false,
                     (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::MssqlBackupHistory(point)) => accepted && point.fits_source(source),
+                    (SourceObservation::BackupHistory { .. }, _) => false,
                     (SourceObservation::Snapshot(header), _) if header.dataset == SnapshotDataset::Cdc => false,
                     (_, OperationalFact::ConfiguredLogRateLimits(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::HyperscaleLogComponent(point)) => accepted && point.fits_source(source),

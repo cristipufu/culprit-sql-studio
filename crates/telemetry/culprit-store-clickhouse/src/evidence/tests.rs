@@ -3,6 +3,7 @@ mod columnstore_rowgroups;
 mod table_full_text;
 use super::*;
 mod activity;
+mod backup_history;
 mod blocking;
 mod cache_entry_memory;
 mod cleanup;

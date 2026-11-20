@@ -1,4 +1,5 @@
 mod cdc;
+mod rowgroups_backup;
 mod tempdb_metadata_memory;
 use super::*;
 use clap::Parser;

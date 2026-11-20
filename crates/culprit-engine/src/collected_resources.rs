@@ -17,6 +17,8 @@ mod cached_plans;
 pub use cached_plans::cached_plans;
 mod cache_entry_memory;
 pub use cache_entry_memory::cache_entry_memory;
+mod backup_history;
+pub use backup_history::backup_history;
 mod cdc;
 mod columnstore_rowgroups;
 pub use columnstore_rowgroups::columnstore_rowgroups;

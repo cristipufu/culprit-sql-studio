@@ -341,6 +341,22 @@ Nonclustered deleted counts omit the separate delete buffer; reported bytes are 
 footprint nor reclaimable space. Rowgroup numbers do not establish continuity across captures or a maintenance
 benefit. The same canonical observations can be replayed locally or through ADX and ClickHouse.
 
+`mssql.backup-history` captures retained backup metadata from the native Azure SQL database DMV or the connected
+SQL Server/Managed Instance's MSDB catalog. Request `SnapshotDataset::BackupHistory` through the SDK or a collection
+selection file. Native identifiers, nullable flags, historical initiator/software, offset-free timestamps,
+time-zone codes and exact byte/LSN values remain separate facts.
+
+The manual, cost-Unqualified profile retains at most 64 rows, with one overflow witness, at most 12 native
+dispatches, a one-second statement timeout and a five-second source deadline. Retention and missing history leave
+coverage partial, including an empty result. Hyperscale's snapshot backups have no history in
+[`sys.dm_database_backups`](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-database-backups-azure-sql-database),
+so that profile reports unavailable evidence. Backup media, restore chains and recovery readiness require
+separate evidence; collection performs no backup, restore or media access.
+
+CLI evidence analysis and MCP's existing `analyze_capture` operation expose the same captured rowgroup and backup
+reports. They retain original targets, source gaps and entry references, with bounded output and no database
+reconnection.
+
 The advisor combines those requests with workload and plan evidence, unindexed foreign keys, and duplicate, overlapping or unused indexes. Disabling an eligible index keeps its definition and stops its maintenance; `ALTER INDEX … REBUILD` restores it. Clustered, unique and constraint-backed indexes are not treated as disposable unused indexes.
 
 Schema drift and migration linting use the saved catalog, actual table sizes and captured workload. The proposed SQL remains a suggestion for review.

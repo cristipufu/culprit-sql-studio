@@ -24,6 +24,11 @@ enum PublicObservation<'a> {
         focus_key: &'a str,
         execution_key: String,
     },
+    BackupHistory {
+        snapshot: &'a StateSnapshotDescription,
+        scope: &'a MssqlBackupHistoryScope,
+        database_writable: bool,
+    },
     MssqlAgentJobs {
         snapshot: &'a StateSnapshotDescription,
         metadata: &'a MssqlAgentJobsMetadata,
@@ -149,6 +154,9 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
             }
         }
         SourceObservation::Jobs { snapshot, metadata } => PublicObservation::Jobs { snapshot, metadata },
+        SourceObservation::BackupHistory { snapshot, scope, database_writable } => {
+            PublicObservation::BackupHistory { snapshot, scope, database_writable: *database_writable }
+        }
         SourceObservation::MssqlAgentJobs { snapshot, metadata } => {
             PublicObservation::MssqlAgentJobs { snapshot, metadata }
         }
