@@ -261,3 +261,122 @@ fn localized_reports_reword_labels_without_changing_native_identity_value_unit_o
         assert_eq!(report.entries[0].observed_at, english.entries[0].observed_at);
     }
 }
+
+fn database_evidence() -> (CollectionDescription, OperationalObservation) {
+    let native = NativeIdentity::new("7")
+        .qualified("kind", "sql-server-local-database-recovery-epoch")
+        .qualified("database_created_without_offset", "2019-01-01T00:00:00.0000000")
+        .qualified("database_file_guid", "file")
+        .qualified("database_guid", "database")
+        .qualified("recovery_fork_guid", "fork")
+        .qualified("instance_epoch", "process");
+    let mut set = sample();
+    set.identity = native.clone();
+    set.scope = MeasurementScope::Database;
+    set.counters.truncate(1);
+    let counter = &mut set.counters[0];
+    counter.scope = MeasurementScope::Database;
+    counter.native_object = "SQLServer:Databases".into();
+    counter.native_name = "Log Bytes Flushed/sec".into();
+    counter.native_instance = Some("app".into());
+    counter.native_type = Some("272696576".into());
+    counter.nature = CounterNature::Cumulative;
+    counter.unit = CounterUnit::Bytes;
+    set.properties.insert(PERFORMANCE_COUNTER_PROFILE_PROPERTY.into(), DATABASE_PERFORMANCE_COUNTER_PROFILE.into());
+    set.properties.insert(DATABASE_PERFORMANCE_NAME_PROPERTY.into(), "app".into());
+    set.properties.insert(PERFORMANCE_COUNTER_ROWS_PROPERTY.into(), "1".into());
+    set.properties.insert("catalog_visibility".into(), "complete".into());
+    set.properties.insert("catalog_name_matches".into(), "1".into());
+    let source = CollectionDescription {
+        target: culprit_core::DatabaseIdentity::server(Engine::Mssql, "app", "fixture.invalid", 1433, None).into(),
+        partition: SourcePartition::InstanceLocal {
+            member: Some(SharedResourceIdentity {
+                engine: Engine::Mssql,
+                kind: SharedResourceKind::Instance,
+                namespace: NativeIdentity::new("host"),
+                native: NativeIdentity::new("instance"),
+            }),
+            epoch: Some(native.key().unwrap()),
+        },
+        source: "database-performance-counter-state".into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::DatabasePerformanceCounters {
+            snapshot: StateSnapshotDescription {
+                dataset: SnapshotDataset::DatabasePerformanceCounters,
+                observed_from: "2020-01-01T12:00:00Z".into(),
+                observed_until: "2020-01-01T12:00:01Z".into(),
+                records: 1,
+                sources: vec![StateSourceCoverage::observed(
+                    culprit_core::source_id::PERFORMANCE_COUNTERS.into(),
+                    1,
+                    false,
+                )],
+            },
+            native_database: Box::new(native),
+            database_writable: true,
+        },
+    };
+    let row = OperationalObservation::from_counters(culprit_core::source_id::PERFORMANCE_COUNTERS, set).unwrap();
+    (source, row)
+}
+#[test]
+fn selected_database_report_keeps_only_its_three_fields_and_never_infers_a_rate_or_shared_population() {
+    let (source, row) = database_evidence();
+    let coverage = &source.observation.snapshot().unwrap().sources[0];
+    let report = explain(PerformanceCounterEvidence::Database {
+        source: &source,
+        coverage,
+        observations: &[&row],
+        read_complete: true,
+    })
+    .unwrap();
+    assert_eq!(report.database.as_deref(), Some("app"));
+    assert_eq!(report.native_database_id.as_deref(), Some("7"));
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].field, "log_bytes_flushed");
+    assert_eq!(report.entries[0].raw_value, "9007199254740993");
+    assert_eq!(report.entries[0].metric.text.as_deref(), Some("9007199254740993 B"));
+    assert_eq!(report.missing_fields.len(), 2);
+    assert!(report.missing_fields.iter().all(|field| {
+        ["view.performance_counters.field.log_flushes", "view.performance_counters.field.log_flush_wait"]
+            .contains(&field.key.as_str())
+    }));
+    assert!(report.ratios.is_none());
+    assert!(report.limitations.contains(&t!("view.performance_counters.limit.database")));
+    assert!(report.limitations.contains(&t!("view.performance_counters.limit.lifetime")));
+    assert_eq!(report.source_state, Some(SourceState::Partial));
+}
+#[test]
+fn selected_report_refuses_foreign_source_counter_clock_or_native_database_before_wording() {
+    for cause in ["scope", "source", "epoch", "clock", "generic"] {
+        let (mut source, mut row) = database_evidence();
+        match cause {
+            "scope" => {
+                let OperationalFact::CounterSet(set) = &mut row.fact else { panic!() };
+                set.counters[0].native_instance = Some("_Total".into());
+            }
+            "source" => row.source = "unrelated".into(),
+            "epoch" => {
+                let SourcePartition::InstanceLocal { epoch, .. } = &mut source.partition else { panic!() };
+                *epoch = Some("foreign".into());
+            }
+            "clock" => {
+                let OperationalFact::CounterSet(set) = &mut row.fact else { panic!() };
+                set.properties
+                    .insert(PERFORMANCE_COUNTER_CLOCK_PROPERTY.into(), "2020-01-01T12:00:01.000000001Z".into());
+            }
+            _ => source.observation = SourceObservation::Snapshot(source.observation.snapshot().unwrap().clone()),
+        }
+        let coverage = &source.observation.snapshot().unwrap().sources[0];
+        assert!(
+            explain(PerformanceCounterEvidence::Database {
+                source: &source,
+                coverage,
+                observations: &[&row],
+                read_complete: true
+            })
+            .is_err(),
+            "{cause}"
+        );
+    }
+}

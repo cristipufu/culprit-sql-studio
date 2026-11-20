@@ -1,6 +1,9 @@
 use super::*;
 use culprit_checks::performance_counters::PerformanceCounterEvidence;
-use culprit_collector::analytical::test_support::{PerformanceCounterCase, performance_counter_evidence};
+use culprit_collector::analytical::test_support::{
+    DatabasePerformanceCounterCase, PerformanceCounterCase, database_performance_counter_evidence,
+    performance_counter_evidence,
+};
 use culprit_core::telemetry::*;
 
 fn report(case: PerformanceCounterCase, missing: bool) -> PerformanceCounterReport {
@@ -21,6 +24,19 @@ fn report(case: PerformanceCounterCase, missing: bool) -> PerformanceCounterRepo
         read_complete: !missing,
     })
     .unwrap()
+}
+
+fn database_report(case: DatabasePerformanceCounterCase) -> PerformanceCounterReport {
+    let (source, records) = database_performance_counter_evidence(case);
+    let coverage = &source.observation.snapshot().unwrap().sources[0];
+    let observations = records
+        .iter()
+        .map(|row| {
+            let TelemetryRecord::Operational(row) = row else { panic!() };
+            row
+        })
+        .collect::<Vec<_>>();
+    culprit_checks::performance_counters::explain_source(&source, coverage, &observations, true).unwrap()
 }
 
 #[test]
@@ -90,4 +106,58 @@ fn a_byte_counter_in_the_printed_prefix_keeps_exact_units_without_changing_sourc
     )));
     let first_omitted = &report.entries[super::super::super::BRIEF_FINDING_LIMIT];
     assert!(!text.contains(&first_omitted.native_name));
+}
+
+#[test]
+fn selected_database_counter_text_preserves_original_database_fields_exact_values_and_all_qualifications() {
+    use DatabasePerformanceCounterCase as Case;
+    for case in Case::ALL {
+        let report = database_report(case);
+        let text = performance_counters(&report);
+        assert!(text.contains(&t!("view.performance_counters.database", database = "shop", id = "7")));
+        for limitation in &report.limitations {
+            assert!(text.contains(limitation));
+        }
+        assert!(report.ratios.is_none());
+        assert_eq!(report.native_database_id.as_deref(), Some("7"));
+        if case == Case::Exact {
+            assert!(text.contains("9007199254740993 B"));
+            assert_eq!(report.entries.len(), 3);
+        } else if case == Case::Denied {
+            assert!(report.entries.is_empty());
+            assert_eq!(report.native_counter_rows, None);
+        }
+        for private in [
+            "private-database-guid-canary",
+            "private-fork-guid-canary",
+            "private-file-guid-canary",
+            "private-process-canary",
+        ] {
+            assert!(!text.contains(private));
+        }
+    }
+}
+#[test]
+fn database_and_native_entry_labels_use_bounded_escaped_previews_without_mutating_the_raw_report() {
+    let mut report = database_report(DatabasePerformanceCounterCase::Exact);
+    let name = format!("native\n\u{1b}数据库{}", "界".repeat(500));
+    report.database = Some(name.clone());
+    for entry in &mut report.entries {
+        entry.native_instance = Some(name.clone());
+    }
+    let object = "SQLServer\n\u{1b}:Databases";
+    let counter = "Log\n\u{1b}Bytes Flushed/sec";
+    report.entries[0].native_object = object.into();
+    report.entries[0].native_name = counter.into();
+    let original = serde_json::to_value(&report).unwrap();
+    let text = performance_counters(&report);
+    for label in [&name, object, counter] {
+        assert!(text.contains(&preview(label)));
+    }
+    assert!(!text.contains('\u{1b}'));
+    assert!(!text.contains("native\n"));
+    assert!(!text.contains("SQLServer\n"));
+    assert!(!text.contains("Log\n"));
+    assert!(!text.contains(&"界".repeat(101)));
+    assert_eq!(serde_json::to_value(&report).unwrap(), original);
 }

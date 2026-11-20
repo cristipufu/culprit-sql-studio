@@ -1,6 +1,6 @@
 //! Family adapters borrow the one canonical original read; native acquisition and local ownership are elsewhere.
 use super::*;
-use culprit_checks::{compilation::CompilationEvidence, performance_counters::PerformanceCounterEvidence};
+use culprit_checks::compilation::CompilationEvidence;
 use culprit_core::*;
 
 pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperationalRead) -> Result<LocalSnapshotReport> {
@@ -9,7 +9,7 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
     }
     let source = &read.description;
     let header = source.observation.snapshot().ok_or_else(invalid)?;
-    if kind.snapshot_dataset() != Some(header.dataset) {
+    if !kind.accepts_snapshot_dataset(header.dataset) {
         return Err(DeliveryProblem::UnsupportedSchema.error());
     }
     let context = read.context()?;
@@ -17,14 +17,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::PerformanceCounters => {
             let coverage = required_source(read, culprit_core::source_id::PERFORMANCE_COUNTERS)?;
             let rows = rows_for(read, coverage);
-            Ok(LocalSnapshotReport::PerformanceCounters(Box::new(culprit_checks::performance_counters::explain(
-                PerformanceCounterEvidence::Captured {
-                    context: &context,
-                    coverage,
-                    observations: &rows,
-                    read_complete: read.read_complete,
-                },
-            )?)))
+            Ok(LocalSnapshotReport::PerformanceCounters(Box::new(
+                culprit_checks::performance_counters::explain_source(source, coverage, &rows, read.read_complete)?,
+            )))
         }
         LocalCaptureAnalysisKind::TempdbMetadataMemory => Ok(LocalSnapshotReport::TempdbMetadataMemory(Box::new(
             culprit_checks::tempdb_metadata_memory::explain_captured(read)?,

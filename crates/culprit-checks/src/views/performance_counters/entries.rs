@@ -12,8 +12,9 @@ pub(super) fn append(
         if entries.len() >= MAX_PERFORMANCE_COUNTER_ENTRIES {
             break;
         }
-        let field =
-            profile.field(&row.native_object, &row.native_name, row.native_instance.as_deref()).ok_or_else(invalid)?;
+        let field = profile
+            .field_in_sample(sample, &row.native_object, &row.native_name, row.native_instance.as_deref())
+            .ok_or_else(invalid)?;
         let raw = match &row.value {
             MeasurementValue::Integer(value) => value,
             _ => return Err(invalid()),
@@ -94,23 +95,40 @@ fn value(raw: &str, unit: CounterUnit) -> String {
     }
 }
 
-pub(super) fn missing(profile: &PerformanceCounterProfile, samples: &[&NativeCounterSet]) -> Vec<Metric> {
+pub(super) fn missing(
+    profile: &PerformanceCounterProfile,
+    samples: &[&NativeCounterSet],
+    database: bool,
+) -> Vec<Metric> {
     if samples.is_empty() || samples.iter().any(|sample| !profile.declares_selection(sample)) {
         return Vec::new();
     }
     let mut missing = Vec::new();
     for field in profile.fields {
+        if database && !profile.database_field_ids.contains(&field.id) {
+            continue;
+        }
         let observed = |instance: Option<&str>| {
             samples.iter().any(|sample| {
                 sample.counters.iter().any(|row| {
-                    field.matches(&row.native_object, &row.native_name, row.native_instance.as_deref())
+                    profile
+                        .field_in_sample(sample, &row.native_object, &row.native_name, row.native_instance.as_deref())
+                        .is_some_and(|observed| observed.id == field.id)
                         && instance.is_none_or(|instance| row.native_instance.as_deref() == Some(instance))
                 }) || sample.ratio_gaps.iter().any(|row| {
-                    field.matches(&row.native_object, &row.native_name, row.native_instance.as_deref())
+                    profile
+                        .field_in_sample(sample, &row.native_object, &row.native_name, row.native_instance.as_deref())
+                        .is_some_and(|observed| observed.id == field.id)
                         && instance.is_none_or(|instance| row.native_instance.as_deref() == Some(instance))
                 })
             })
         };
+        if database {
+            if !observed(None) {
+                missing.push(Metric::said_text(field.label_key, t!("view.performance_counters.unknown")));
+            }
+            continue;
+        }
         match field.instances {
             PerformanceCounterInstances::Named(instances) => {
                 for instance in instances {

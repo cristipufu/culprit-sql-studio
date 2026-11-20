@@ -14,6 +14,7 @@ const TOTAL: &[&str] = &["_Total"];
 pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile {
     native_object: "sys.dm_os_performance_counters",
     selection: PERFORMANCE_COUNTER_PROFILE,
+    database_field_ids: &["log_bytes_flushed", "log_flushes", "log_flush_wait"],
     fields: &[
         PerformanceCounterSpec {
             id: "batches",

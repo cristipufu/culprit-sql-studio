@@ -216,3 +216,58 @@ async fn cancellation_after_verification_cannot_publish_a_finished_operational_p
     assert_eq!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::Cancelled)));
     assert!(read(&fixture).await.unwrap().into_operational_read().unwrap().is_valid());
 }
+
+#[tokio::test]
+async fn snapshot_lookup_accepts_only_explicit_unique_same_layout_datasets_and_authenticates_the_original_once() {
+    use crate::analytical::test_support::{DatabasePerformanceCounterCase, database_performance_counter_evidence};
+    let (source, rows) = database_performance_counter_evidence(DatabasePerformanceCounterCase::Exact);
+    let fixture = LocalCaptureFixture::snapshot(source, rows).await;
+    for datasets in [
+        vec![],
+        vec![SnapshotDataset::Operational, SnapshotDataset::Operational],
+        vec![SnapshotDataset::Operational, SnapshotDataset::Settings],
+        vec![SnapshotDataset::Operational],
+    ] {
+        let guard = OperationGuard::new(Duration::from_secs(5)).unwrap();
+        let result = fixture
+            .outbox
+            .as_ref()
+            .unwrap()
+            .delivery()
+            .with_completed_snapshots(
+                CompletedCaptureLookup {
+                    connection: "local-evidence",
+                    observation_id: &fixture.manifest.capture.observation_id,
+                },
+                &datasets,
+                CompletedCaptureBudget::default(),
+                guard.handle(),
+                (),
+                |_| Ok(()),
+            )
+            .await;
+        assert!(result.is_err(), "{datasets:?}");
+    }
+    let guard = OperationGuard::new(Duration::from_secs(5)).unwrap();
+    let read = fixture
+        .outbox
+        .as_ref()
+        .unwrap()
+        .delivery()
+        .with_completed_snapshots(
+            CompletedCaptureLookup {
+                connection: "local-evidence",
+                observation_id: &fixture.manifest.capture.observation_id,
+            },
+            &[SnapshotDataset::Operational, SnapshotDataset::DatabasePerformanceCounters],
+            CompletedCaptureBudget::default(),
+            guard.handle(),
+            (),
+            |original| original.into_operational_read(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(&read.description, fixture.manifest.description.as_ref().unwrap());
+    assert_eq!(read.observations.len(), 1);
+    assert!(read.is_valid());
+}

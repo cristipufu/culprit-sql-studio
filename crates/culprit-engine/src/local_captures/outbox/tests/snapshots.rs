@@ -211,3 +211,36 @@ async fn cold_snapshot_reads_preserve_original_proofs_and_reject_tampered_native
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn selected_database_counters_reuse_one_original_local_reader_and_keep_the_existing_analysis_kind() {
+    for case in DatabasePerformanceCounterCase::ALL {
+        let (source, rows) = database_performance_counter_evidence(case);
+        let fixture = LocalCaptureFixture::snapshot(source.clone(), rows.clone()).await;
+        let reader = reader(&fixture, CompletedCaptureBudget::default());
+        let result =
+            analyze(&reader, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::PerformanceCounters)
+                .await
+                .unwrap();
+        let LocalSnapshotReport::PerformanceCounters(report) = result.report() else { panic!() };
+        assert_eq!(&result.original().read().description, &source);
+        assert_eq!(result.original().read().observations.len(), rows.len());
+        assert_eq!(report.database.as_deref(), Some("shop"));
+        assert_eq!(report.native_database_id.as_deref(), Some("7"));
+        assert_eq!(report.source_state, Some(source.observation.snapshot().unwrap().sources[0].state));
+        assert_eq!(result.original().bytes_read(), fixture.original_bytes());
+        assert!(result.original().read().is_valid());
+        assert_eq!(fixture.manifest.source_queries, 0);
+        for other in [
+            LocalCaptureAnalysisKind::Storage,
+            LocalCaptureAnalysisKind::DatabaseProperties,
+            LocalCaptureAnalysisKind::Compilation,
+        ] {
+            assert_eq!(
+                analyze(&reader, &fixture.manifest.capture.observation_id, other).await.unwrap_err().detail,
+                Some(ErrorDetail::Delivery(DeliveryProblem::UnsupportedSchema)),
+                "{other:?}"
+            );
+        }
+    }
+}

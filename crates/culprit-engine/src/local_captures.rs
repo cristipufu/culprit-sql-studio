@@ -86,33 +86,30 @@ impl LocalCaptureAnalysisKind {
             Self::SessionCensus => Activity,
             Self::MemoryClerks
             | Self::TempdbMetadataMemory
-            | Self::PerformanceCounters
             | Self::InstanceResources
             | Self::DatabaseProperties
             | Self::ConfiguredLogRates
             | Self::ConnectionOutcomes
-            | Self::Storage => Snapshot(Dataset::Operational),
-            Self::HyperscaleLogComponents => Snapshot(Dataset::HyperscaleLogComponents),
-            Self::TableFullText => Snapshot(Dataset::Tables),
-            Self::Compilation => Snapshot(Dataset::QueryCompilation),
-            Self::Jobs => Snapshot(Dataset::Jobs),
-            Self::Cdc => Snapshot(Dataset::Cdc),
-            Self::ColumnstoreRowgroups => Snapshot(Dataset::ColumnstoreRowgroups),
-            Self::BackupHistory => Snapshot(Dataset::BackupHistory),
-            Self::RequestMemory => Snapshot(Dataset::CurrentRequestMemory),
-            Self::TaskSpace => Snapshot(Dataset::TaskSpace),
-            Self::CurrentRequestWork => Snapshot(Dataset::CurrentRequestWork),
-            Self::StatementWork => Snapshot(Dataset::StatementCounters),
-            Self::MaintenanceProgress => Snapshot(Dataset::MaintenanceProgress),
-            Self::CompletedSpills => Snapshot(Dataset::CachedRuntime),
+            | Self::Storage => Snapshot(&[Dataset::Operational]),
+            Self::PerformanceCounters => Snapshot(&[Dataset::Operational, Dataset::DatabasePerformanceCounters]),
+            Self::HyperscaleLogComponents => Snapshot(&[Dataset::HyperscaleLogComponents]),
+            Self::TableFullText => Snapshot(&[Dataset::Tables]),
+            Self::Compilation => Snapshot(&[Dataset::QueryCompilation]),
+            Self::Jobs => Snapshot(&[Dataset::Jobs]),
+            Self::Cdc => Snapshot(&[Dataset::Cdc]),
+            Self::ColumnstoreRowgroups => Snapshot(&[Dataset::ColumnstoreRowgroups]),
+            Self::BackupHistory => Snapshot(&[Dataset::BackupHistory]),
+            Self::RequestMemory => Snapshot(&[Dataset::CurrentRequestMemory]),
+            Self::TaskSpace => Snapshot(&[Dataset::TaskSpace]),
+            Self::CurrentRequestWork => Snapshot(&[Dataset::CurrentRequestWork]),
+            Self::StatementWork => Snapshot(&[Dataset::StatementCounters]),
+            Self::MaintenanceProgress => Snapshot(&[Dataset::MaintenanceProgress]),
+            Self::CompletedSpills => Snapshot(&[Dataset::CachedRuntime]),
         }
     }
     #[cfg(feature = "collector")]
-    pub(crate) fn snapshot_dataset(self) -> Option<culprit_core::telemetry::SnapshotDataset> {
-        match self.read_plan() {
-            LocalCaptureReadPlan::Snapshot(dataset) => Some(dataset),
-            _ => None,
-        }
+    pub(crate) fn accepts_snapshot_dataset(self, dataset: culprit_core::telemetry::SnapshotDataset) -> bool {
+        matches!(self.read_plan(),LocalCaptureReadPlan::Snapshot(datasets) if datasets.contains(&dataset))
     }
 }
 
@@ -120,7 +117,7 @@ impl LocalCaptureAnalysisKind {
 enum LocalCaptureReadPlan {
     Activity,
     QueryHistory,
-    Snapshot(culprit_core::telemetry::SnapshotDataset),
+    Snapshot(&'static [culprit_core::telemetry::SnapshotDataset]),
     Blocking,
 }
 

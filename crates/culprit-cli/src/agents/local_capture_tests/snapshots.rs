@@ -303,3 +303,49 @@ async fn mysql_event_originals_reach_mcp_with_native_source_gaps_and_no_executio
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
+
+#[tokio::test]
+async fn selected_database_counters_reach_the_existing_mcp_analysis_without_native_work_or_proof_disclosure() {
+    use culprit_collector::analytical::test_support::{
+        DatabasePerformanceCounterCase as Case, database_performance_counter_evidence,
+    };
+    for case in Case::ALL {
+        let (source, rows) = database_performance_counter_evidence(case);
+        let expected = source.observation.snapshot().unwrap().sources[0].state;
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::PerformanceCounters)
+                .await;
+        assert!(!error, "{value}");
+        let report = &value["performance_counters"];
+        assert_eq!(report["database"], "shop");
+        assert_eq!(report["native_database_id"], "7");
+        assert_eq!(report["source_state"], json!(expected));
+        assert_eq!(report["read_complete"], true);
+        if case != Case::Denied {
+            assert!(report["entries"].as_array().unwrap().iter().all(|row| row["scope"] == "database"));
+        }
+        let public = value.to_string();
+        for private in [
+            "private-database-guid-canary",
+            "private-fork-guid-canary",
+            "private-file-guid-canary",
+            "private-process-canary",
+            "private-machine-canary",
+            "private-member-canary",
+            "manifest_sha256",
+            "qualifiers",
+        ] {
+            assert!(!public.contains(private), "{private}");
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let (error, again) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::PerformanceCounters)
+                .await;
+        assert!(!error);
+        assert_eq!(again, value);
+    }
+}

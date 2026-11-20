@@ -167,3 +167,68 @@ async fn public_report_display_omits_an_absent_counter_report_and_keeps_present_
     let display = serde_json::to_value(culprit_engine::reports::display(&report)).unwrap();
     assert_eq!(display["performance_counters"]["entries"][0]["raw_value"], "9007199254740993");
 }
+
+#[tokio::test]
+async fn selected_database_counter_captures_preserve_original_identity_partial_scope_and_unavailable_without_hydration()
+{
+    use test_support::{DatabasePerformanceCounterCase as Case, database_performance_counter_evidence};
+    for case in Case::ALL {
+        let (source, records) = database_performance_counter_evidence(case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        test_support::assert_operational_capture(&capture, &source, &records);
+        let analysis = collected_resources::performance_counters(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.report.database.as_deref(), Some("shop"));
+        assert_eq!(analysis.report.native_database_id.as_deref(), Some("7"));
+        assert_eq!(analysis.report.read_complete, Some(true));
+        assert!(analysis.report.ratios.is_none());
+        assert!(analysis.report.entries.iter().all(|entry| entry.scope == MeasurementScope::Database
+            && entry.native_instance.as_deref() == Some("shop")
+            && entry.reset == culprit_core::ResetMarker::Unknown));
+        match case {
+            Case::Denied => {
+                assert_eq!(analysis.report.source_state, Some(SourceState::Unavailable));
+                assert_eq!(analysis.report.native_counter_rows, None);
+                assert!(analysis.report.entries.is_empty());
+            }
+            Case::Partial => {
+                assert_eq!(analysis.report.source_state, Some(SourceState::Partial));
+                assert_eq!(analysis.report.entries.len(), 2);
+                assert_eq!(analysis.report.missing_fields.len(), 1);
+            }
+            Case::Exact => {
+                assert_eq!(analysis.report.native_counter_rows, Some(3));
+                assert_eq!(analysis.report.entries.len(), 3);
+                assert!(analysis.report.missing_fields.is_empty());
+                assert_eq!(analysis.report.entries[0].raw_value, "9007199254740993");
+            }
+            Case::UnknownNativeType => {
+                assert_eq!(
+                    analysis.report.entries[0].availability,
+                    culprit_core::PerformanceCounterAvailability::UnknownNativeType
+                );
+                assert_eq!(analysis.report.entries[0].unit, CounterUnit::Unknown);
+            }
+        }
+        assert_eq!(fixture.recovery_object_reads(), opened);
+        assert_eq!(capture.metrics().recovery_objects, 0);
+    }
+}
+#[tokio::test]
+async fn a_missing_selected_database_counter_body_keeps_authenticated_database_without_zero_or_shared_total() {
+    let (source, records) =
+        test_support::database_performance_counter_evidence(test_support::DatabasePerformanceCounterCase::Exact);
+    let fixture = Fixture::new(source.clone(), records).await;
+    fixture.remove_first_row(TelemetryStream::OperationalSamples);
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(!capture.is_read_complete());
+    let analysis = collected_resources::performance_counters(&capture).unwrap();
+    assert_eq!(analysis.context.source, source);
+    assert_eq!(analysis.report.database.as_deref(), Some("shop"));
+    assert_eq!(analysis.report.native_observations, Some(1));
+    assert_eq!(analysis.report.native_counter_rows, None);
+    assert_eq!(analysis.report.source_state, Some(SourceState::Partial));
+    assert!(analysis.report.entries.is_empty());
+}

@@ -25,7 +25,10 @@ pub use tempdb_metadata_memory::{
 };
 mod counter_ratios;
 mod performance_counters;
-pub use performance_counters::{PerformanceCounterCase, performance_counter_evidence};
+pub use performance_counters::{
+    DatabasePerformanceCounterCase, PerformanceCounterCase, database_performance_counter_evidence,
+    performance_counter_evidence,
+};
 mod resource_io;
 mod wait_counters;
 pub use counter_ratios::{CounterRatioCase, counter_ratio_evidence};

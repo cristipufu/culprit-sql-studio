@@ -28,6 +28,10 @@ enum PublicObservation<'a> {
         snapshot: &'a StateSnapshotDescription,
         metadata: &'a MysqlEventsMetadata,
     },
+    DatabasePerformanceCountersContext {
+        snapshot: &'a StateSnapshotDescription,
+        database_writable: bool,
+    },
     BackupHistory {
         snapshot: &'a StateSnapshotDescription,
         scope: &'a MssqlBackupHistoryScope,
@@ -159,6 +163,9 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         }
         SourceObservation::Jobs { snapshot, metadata } => PublicObservation::Jobs { snapshot, metadata },
         SourceObservation::MysqlEvents { snapshot, metadata } => PublicObservation::MysqlEvents { snapshot, metadata },
+        SourceObservation::DatabasePerformanceCounters { snapshot, database_writable, .. } => {
+            PublicObservation::DatabasePerformanceCountersContext { snapshot, database_writable: *database_writable }
+        }
         SourceObservation::BackupHistory { snapshot, scope, database_writable } => {
             PublicObservation::BackupHistory { snapshot, scope, database_writable: *database_writable }
         }
@@ -246,3 +253,28 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod database_counter_tests {
+    use super::*;
+    #[test]
+    fn selected_database_public_observation_retains_scope_counts_and_role_without_recovery_owned_proof() {
+        let (source, _) = crate::analytical::test_support::database_performance_counter_evidence(
+            crate::analytical::test_support::DatabasePerformanceCounterCase::Exact,
+        );
+        let public = observation(&source.observation).unwrap();
+        assert_eq!(public["kind"], "database-performance-counters-context");
+        assert_eq!(public["data"]["database_writable"], true);
+        assert_eq!(public["data"]["snapshot"]["records"], 1);
+        let text = serde_json::to_string(&public).unwrap();
+        for private in [
+            "native_database",
+            "private-database-guid-canary",
+            "private-fork-guid-canary",
+            "private-file-guid-canary",
+            "private-process-canary",
+        ] {
+            assert!(!text.contains(private));
+        }
+    }
+}

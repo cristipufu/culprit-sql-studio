@@ -19,6 +19,10 @@ impl NativeIdentity {
         self.qualifiers.insert(name.into(), value.into());
         self
     }
+    /// A deterministic content key, independent of native authority or global namespace qualification.
+    pub fn key(&self) -> Result<String> {
+        serde_json::to_vec(self).map(|bytes| digest(&bytes)).map_err(|_| CollectionStop::InvalidPage.error())
+    }
     pub fn is_valid(&self) -> bool {
         valid_key(&self.id) && native_properties_valid(&self.qualifiers)
     }

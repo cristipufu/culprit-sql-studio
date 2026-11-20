@@ -480,3 +480,25 @@ fn settings_local_profile_advertises_only_the_existing_native_budget_without_cos
     assert_eq!(recipe.subjects, [RecipeSubject::Database]);
     assert_eq!(recipe.budget, super::super::state::settings_budget(&CollectionBudget::upper_limits()));
 }
+
+#[test]
+fn selected_database_performance_counters_are_manual_unqualified_and_bounded_independently_of_shared_total() {
+    let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.database-performance-counters").unwrap();
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, [RecipeSubject::Database]);
+    assert_eq!(
+        recipe.selector,
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters))
+    );
+    assert_eq!(recipe.budget, super::super::state::database_counter_budget(&CollectionBudget::upper_limits()));
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::DatabasePerformanceCounters },
+        budget: CollectionBudget::default(),
+    };
+    let source =
+        open(Arc::new(Pool::new(tiberius::Config::new(), None)), &request, "original.invalid".into(), 1433).unwrap();
+    assert_eq!(source.query_count(), 0);
+}

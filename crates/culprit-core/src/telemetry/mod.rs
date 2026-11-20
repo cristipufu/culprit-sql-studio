@@ -732,6 +732,10 @@ impl TelemetryRecord {
                     (_, OperationalFact::MssqlColumnstoreRowgroup(point)) => accepted && point.fits_source(source),
                     (SourceObservation::ColumnstoreRowgroups { .. }, _) => false,
                     (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::CounterSet(sample)) if database_performance_candidate(sample) => {
+                        accepted && database_performance_sample_fits_source(sample, source)
+                    }
+                    (SourceObservation::DatabasePerformanceCounters { .. }, _) => false,
                     (_, OperationalFact::MssqlBackupHistory(point)) => accepted && point.fits_source(source),
                     (SourceObservation::BackupHistory { .. }, _) => false,
                     (SourceObservation::Snapshot(header), _) if header.dataset == SnapshotDataset::Cdc => false,

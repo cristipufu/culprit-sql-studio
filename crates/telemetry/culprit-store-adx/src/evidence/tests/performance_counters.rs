@@ -120,3 +120,57 @@ async fn changed_value_native_type_instance_or_read_clock_cannot_borrow_original
         assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
     }
 }
+
+#[tokio::test]
+async fn selected_database_counters_restore_only_original_native_database_proof_without_publishing_or_hydrating_it() {
+    use test_support::{DatabasePerformanceCounterCase as Case, database_performance_counter_evidence};
+    for case in Case::ALL {
+        let (source, records) = database_performance_counter_evidence(case);
+        let catalog = Arc::new(SchemaCatalog::new().unwrap());
+        let recovery =
+            test_support::collected_resource_recovery("adx:test", catalog.digest(), source.clone(), records.clone())
+                .await;
+        let fixture = Fixture::from_recovery(catalog, Arc::new(recovery)).await;
+        let public = serde_json::to_string(&fixture.rows).unwrap();
+        for private in [
+            "private-database-guid-canary",
+            "private-fork-guid-canary",
+            "private-file-guid-canary",
+            "private-process-canary",
+            "private-machine-canary",
+            "private-member-canary",
+        ] {
+            assert!(!public.contains(private), "{private}");
+        }
+        fixture.replies(vec![fixture.rows.clone()]);
+        let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        let capture = fixture
+            .reader()
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..EvidenceReadBudget::default() },
+                None,
+            )
+            .await
+            .unwrap();
+        test_support::assert_operational_capture(&capture, &source, &records);
+        assert!(capture.is_read_complete());
+        assert_eq!(capture.source(), &source);
+        for (actual, original) in capture.records().iter().zip(&records) {
+            assert_eq!(actual.row(), &ExportedRecord::new(&source, capture.capture(), original.clone()).unwrap());
+        }
+        if case != Case::Denied {
+            let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::CounterSet(set), .. }) =
+                &capture.records()[0].row().record
+            else {
+                panic!()
+            };
+            assert_eq!(set.identity.qualifiers["database_guid"], "private-database-guid-canary");
+            assert_eq!(set.scope, culprit_core::MeasurementScope::Database);
+            assert_eq!(set.counters[0].value.integer(), Some(9_007_199_254_740_993));
+        }
+        assert_eq!(capture.metrics().recovery_objects, 0);
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+    }
+}

@@ -160,8 +160,10 @@ pub async fn collected_resource_recovery(
             CollectionSelection::ResourceHistory { from: history.from.clone(), until: history.until.clone() }
         }
         SourceObservation::Activity(_) => CollectionSelection::Activity,
-        SourceObservation::Snapshot(snapshot) => CollectionSelection::Snapshot { dataset: snapshot.dataset },
-        _ => panic!("retained resource, Activity or snapshot fixture"),
+        observation => {
+            let snapshot = observation.snapshot().expect("retained resource, Activity or snapshot fixture");
+            CollectionSelection::Snapshot { dataset: snapshot.dataset }
+        }
     };
     let subject = match &source.target {
         CollectionTarget::Database(_) => CollectionSubject::Database,

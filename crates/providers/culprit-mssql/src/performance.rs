@@ -8,9 +8,39 @@ use culprit_core::{
     },
 };
 use std::collections::{BTreeSet, HashMap};
+mod database;
+#[cfg(test)]
+pub(crate) use database::tests as test_support;
 mod ratios;
+pub(crate) use database::read_current;
 pub(crate) use ratios::PerformanceRead;
 pub(crate) const MAX_COUNTERS: usize = MAX_NATIVE_COUNTERS;
+const COUNTER_COLUMNS: &str = "RTRIM(object_name) AS native_object, RTRIM(counter_name) AS native_name,\nRTRIM(instance_name) AS native_instance, cntr_value AS value, cntr_type AS native_type";
+#[derive(Clone, Copy)]
+enum Population<'a> {
+    Shared,
+    Database(&'a crate::local_source::Context),
+}
+impl Population<'_> {
+    fn scope(self) -> MeasurementScope {
+        match self {
+            Self::Shared => MeasurementScope::Server,
+            Self::Database(_) => MeasurementScope::Database,
+        }
+    }
+    fn field(self, object: &str, name: &str, instance: Option<&str>) -> Option<&'static PerformanceCounterSpec> {
+        match self {
+            Self::Shared => specs().iter().find(|spec| spec.matches(object, name, instance)),
+            Self::Database(owner) => {
+                if instance != Some(owner.activity.database.database.as_str()) {
+                    return None;
+                }
+                culprit_core::Engine::Mssql.spec().performance_counters()?.database_field(object, name)
+            }
+        }
+    }
+}
+
 fn specs() -> &'static [PerformanceCounterSpec] {
     culprit_core::Engine::Mssql.spec().performance_counters().map(|profile| profile.fields).unwrap_or_default()
 }
@@ -35,8 +65,7 @@ fn sql() -> String {
         .join(" OR ");
     format!(
         "DECLARE @counter_observed_at datetime2(7)=SYSUTCDATETIME();
-/* culprit */ SELECT RTRIM(object_name) AS native_object, RTRIM(counter_name) AS native_name,
-RTRIM(instance_name) AS native_instance, cntr_value AS value, cntr_type AS native_type,
+/* culprit */ SELECT {COUNTER_COLUMNS},
 CONVERT(nvarchar(40),@counter_observed_at,127)+N'Z' AS counter_observed_at,
 CONVERT(int,SERVERPROPERTY(N'EngineEdition')) AS engine_edition,
 CONVERT(nvarchar(128),DATABASEPROPERTYEX(DB_NAME(),N'Edition')) AS database_edition,
@@ -50,9 +79,9 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R, limit: usize) -> Result<
     }
     let limit = limit.min(MAX_COUNTERS);
     let rows = reader.query(&sql(), vec![], limit + 1).await.map_err(ReadError::into_error)?;
-    decode(&rows, limit)
+    decode(&rows, limit, Population::Shared)
 }
-fn decode(rows: &[crate::value::Rec], limit: usize) -> Result<PerformanceRead> {
+fn decode(rows: &[crate::value::Rec], limit: usize, population: Population<'_>) -> Result<PerformanceRead> {
     if rows.len() > limit {
         return Err(CollectionStop::RowLimit.error());
     }
@@ -67,10 +96,8 @@ fn decode(rows: &[crate::value::Rec], limit: usize) -> Result<PerformanceRead> {
         let native_name = text(row, "native_name")?;
         let instance = optional_text(row, "native_instance")?.ok_or_else(invalid_data)?;
         let native_instance = (!instance.is_empty()).then_some(instance);
-        let spec = specs()
-            .iter()
-            .find(|spec| spec.matches(&native_object, &native_name, native_instance.as_deref()))
-            .ok_or_else(invalid_data)?;
+        let spec =
+            population.field(&native_object, &native_name, native_instance.as_deref()).ok_or_else(invalid_data)?;
         let identity =
             serde_json::to_vec(&(&native_object, &native_name, &native_instance)).map_err(|_| invalid_data())?;
         if !identities.insert(identity.clone()) {
@@ -102,7 +129,7 @@ fn decode(rows: &[crate::value::Rec], limit: usize) -> Result<PerformanceRead> {
             value: culprit_core::telemetry::MeasurementValue::Integer(value.to_string()),
             unit,
             nature,
-            scope: MeasurementScope::Server,
+            scope: population.scope(),
             reset: ResetMarker::Unknown,
             native_object,
             native_name,
@@ -114,7 +141,10 @@ fn decode(rows: &[crate::value::Rec], limit: usize) -> Result<PerformanceRead> {
         }
         counters.push(counter);
     }
-    ratios::captured(rows, counters, rejected)
+    match population {
+        Population::Shared => ratios::captured(rows, counters, rejected),
+        Population::Database(owner) => database::captured(rows, counters, owner),
+    }
 }
 pub(crate) fn application(rows: &[NativeCounterSample]) -> HashMap<String, f64> {
     let mut values = HashMap::new();

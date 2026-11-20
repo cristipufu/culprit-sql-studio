@@ -83,7 +83,7 @@ impl ReadControl {
 
 pub(super) enum ReadRequest {
     Snapshot { attempt: DiagnosticAttemptReceipt, dataset: SnapshotDataset },
-    SnapshotLookup { connection: String, observation_id: String, dataset: SnapshotDataset },
+    SnapshotLookup { connection: String, observation_id: String, datasets: Vec<SnapshotDataset> },
     QueryHistory { connection: String, observation_id: String },
     ActivityLookup { connection: String, observation_id: String },
     ActivityReference { connection: String, reference: DiagnosticCaptureRef },
@@ -101,7 +101,8 @@ impl ReadRequest {
 
     fn retains(&self, stream: TelemetryStream) -> bool {
         match self {
-            Self::Snapshot { dataset, .. } | Self::SnapshotLookup { dataset, .. } => stream == dataset.stream(),
+            Self::Snapshot { dataset, .. } => stream == dataset.stream(),
+            Self::SnapshotLookup { datasets, .. } => datasets.iter().any(|dataset| stream == dataset.stream()),
             Self::QueryHistory { .. } => {
                 matches!(stream, TelemetryStream::QueryRuntime | TelemetryStream::QueryDefinitions)
             }
@@ -184,15 +185,23 @@ impl CompletedCaptureRead {
 
     pub fn snapshot_lookup(
         lookup: CompletedCaptureLookup<'_>,
-        dataset: SnapshotDataset,
+        datasets: &[SnapshotDataset],
         budget: CompletedCaptureBudget,
         operation: OperationHandle,
     ) -> Result<Self> {
+        let Some(first) = datasets.first() else { return Err(DeliveryProblem::InvalidContract.error()) };
+        if datasets
+            .iter()
+            .enumerate()
+            .any(|(index, dataset)| dataset.streams() != first.streams() || datasets[..index].contains(dataset))
+        {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
         Self::lookup(
             ReadRequest::SnapshotLookup {
                 connection: lookup.connection.into(),
                 observation_id: lookup.observation_id.into(),
-                dataset,
+                datasets: datasets.to_vec(),
             },
             lookup,
             budget,
@@ -260,7 +269,15 @@ impl artifacts::VerificationObserver for CompletedCaptureRead {
         self.check()?;
         let source = manifest.description.as_ref().ok_or_else(unsupported)?;
         let rows = match &self.request {
-            ReadRequest::Snapshot { dataset, .. } | ReadRequest::SnapshotLookup { dataset, .. } => {
+            ReadRequest::SnapshotLookup { datasets, .. } => {
+                source
+                    .observation
+                    .snapshot()
+                    .filter(|header| datasets.contains(&header.dataset))
+                    .ok_or_else(unsupported)?
+                    .records
+            }
+            ReadRequest::Snapshot { dataset, .. } => {
                 source
                     .observation
                     .snapshot()

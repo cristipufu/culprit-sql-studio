@@ -209,15 +209,8 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
 #[ignore = "requires the existing nonce-owned boxed SQL Server fixture; source cost remains unqualified"]
 async fn owned_boxed_settings_use_the_actual_factory_and_same_native_decoder_through_sealed_outbox() {
     use crate::test_support::{owned_captures::OwnedCaptures, owned_case::finish_case};
-    use culprit_collector::capture::{CollectionCancellation, SourceFactory};
+    use culprit_collector::capture::CollectionCancellation;
     use std::time::Duration;
-    struct Factory(MssqlProvider);
-    #[async_trait::async_trait]
-    impl SourceFactory for Factory {
-        async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
-            self.0.telemetry_source(request)
-        }
-    }
     let cancellation = CollectionCancellation::default();
     let (expired, fixture) = finish_case(
         tokio::time::Instant::now() + Duration::from_secs(10),
@@ -255,5 +248,102 @@ async fn owned_boxed_settings_use_the_actual_factory_and_same_native_decoder_thr
         Ok::<(),culprit_core::Error>(())
     }).await;
     outcome.expect("the actual native local Settings profile must qualify every expected family");
+    assert!(!expired);
+}
+
+struct Factory(MssqlProvider);
+#[async_trait::async_trait]
+impl culprit_collector::capture::SourceFactory for Factory {
+    async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
+        self.0.telemetry_source(request)
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires the existing nonce-owned SQL Server16+ fixture; selected counter source cost remains unqualified"]
+async fn owned_selected_database_performance_counters_use_the_real_factory_and_sealed_original_outbox() {
+    use crate::test_support::{owned_captures::OwnedCaptures, owned_case::finish_case};
+    use culprit_collector::capture::CollectionCancellation;
+    use std::time::Duration;
+    let cancellation = CollectionCancellation::default();
+    let (expired, fixture) = finish_case(
+        tokio::time::Instant::now() + Duration::from_secs(10),
+        &cancellation,
+        OwnedSourceFixture::open("culprit-database-counters"),
+    )
+    .await;
+    let fixture = fixture.expect("existing positively nonce-owned SQL fixture admission");
+    assert!(!expired);
+    let factory = Factory(provider(fixture.port, &fixture.database, fixture.password()));
+    let mut originals = OwnedCaptures::from_pool(fixture.pool.clone(), fixture.port).unwrap();
+    let (expired, outcome) = finish_case(
+        tokio::time::Instant::now() + Duration::from_secs(20),
+        &cancellation,
+        async {
+            let captured = originals
+                .capture_with_factory(
+                    CollectionSelection::Snapshot { dataset: SnapshotDataset::DatabasePerformanceCounters },
+                    &cancellation,
+                    &factory,
+                )
+                .await?;
+            crate::test_support::save_cost_receipt(
+                &crate::test_support::receipt_directory(),
+                "database-performance-counters-original",
+                &serde_json::json!({
+                    "manifest": captured.manifest,
+                    "original_records": captured.records,
+                    "capture_export_ms": captured.capture_export_ms,
+                    "native_cost_approved": false,
+                }),
+            )?;
+            let source = captured.source()?;
+            let context = database_performance_context(source)?;
+            assert_eq!(context.target.database().unwrap().database, fixture.database);
+            assert!(context.target.database().unwrap().incarnation.is_none());
+            assert_eq!(context.database_writable, Some(true));
+            let SourceObservation::DatabasePerformanceCounters { native_database, snapshot, .. } =
+                &source.observation
+            else {
+                panic!("native selected population header")
+            };
+            assert!(validate_database_performance_identity(native_database));
+            assert_eq!(snapshot.records, 1);
+            assert_eq!(snapshot.sources.len(), 1);
+            assert_eq!(snapshot.sources[0].state, SourceState::Collected);
+            assert!(snapshot.sources[0].complete_scope);
+            assert_eq!(captured.records.len(), 1);
+            let record = &captured.records[0].record;
+            captured.reference(0)?.validate_canonical_record(source, record)?;
+            let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::CounterSet(set), .. }) =
+                record
+            else {
+                panic!("original native counters")
+            };
+            assert!(database_performance_sample_fits_source(set, source));
+            assert_eq!(&set.identity, native_database.as_ref());
+            assert_eq!(set.counters.len(), 3);
+            assert_eq!(set.scope, MeasurementScope::Database);
+            assert!(set.counters.iter().all(|counter| {
+                counter.native_instance.as_deref() == Some(fixture.database.as_str())
+                    && counter.reset == culprit_core::ResetMarker::Unknown
+                    && counter.value.integer().is_some()
+            }));
+            assert!(set.ratios.is_empty());
+            assert!(
+                captured.manifest.source_queries
+                    <= database_counter_budget(&CollectionBudget::upper_limits()).max_queries
+            );
+            originals.verify_retained(&captured).await?;
+            assert_eq!(factory.0.source_shutdown(), SourceShutdown::Quiescent);
+            eprintln!(
+                "owned database counters: original_source_queries={}, native_counter_rows=3, original_retained=true, cost_qualified=false",
+                captured.manifest.source_queries,
+            );
+            Ok::<(), culprit_core::Error>(())
+        },
+    )
+    .await;
+    outcome.expect("all three genuine selected database native counters must be captured");
     assert!(!expired);
 }

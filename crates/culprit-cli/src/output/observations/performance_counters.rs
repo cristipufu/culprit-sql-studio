@@ -1,4 +1,5 @@
 //! Bounded output uses shared exact display values and keeps every finite qualification.
+use super::statement::preview;
 use super::{SourceQualification, Summary, render_summary};
 use culprit_core::{PerformanceCounterReport, format, t};
 
@@ -12,6 +13,10 @@ pub(crate) fn performance_counters(report: &PerformanceCounterReport) -> String 
         },
         |_| {},
     );
+    if let (Some(database), Some(id)) = (&report.database, &report.native_database_id) {
+        text.push('\n');
+        text.push_str(&t!("view.performance_counters.database", database = preview(database), id = id));
+    }
     text.push('\n');
     text.push_str(&t!(
         "view.performance_counters.counts",
@@ -45,9 +50,10 @@ pub(crate) fn performance_counters(report: &PerformanceCounterReport) -> String 
         text.push('\n');
         text.push_str(&t!(
             "view.performance_counters.cli.native",
-            object = &entry.native_object,
-            name = &entry.native_name,
-            instance = entry.native_instance.clone().unwrap_or_else(|| t!("view.counter_ratios.uninstanced")),
+            object = preview(&entry.native_object),
+            name = preview(&entry.native_name),
+            instance =
+                entry.native_instance.as_deref().map(preview).unwrap_or_else(|| t!("view.counter_ratios.uninstanced")),
             native_type = entry.native_type.clone().unwrap_or_else(|| t!("view.performance_counters.unknown")),
             raw = &entry.raw_value,
             at = entry.observed_at.clone().unwrap_or_else(|| t!("view.performance_counters.unknown"))

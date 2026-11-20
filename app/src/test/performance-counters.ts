@@ -10,7 +10,8 @@ export const EXACT_PERFORMANCE_COUNTER = "9007199254740993 KiB";
 /** Derived presentation data only; native meaning and source proof are verified in Rust. */
 export function performanceCounterReport(count = 12): PerformanceCounterReport {
   return partial<PerformanceCounterReport>({
-    context: null, native_source: null, source_state: "partial", source_reason: null, read_complete: false,
+    context: null, native_source: null, database: null, native_database_id: null,
+    source_state: "partial", source_reason: null, read_complete: false,
     native_observations: 1, observed_observations: 1, native_counter_rows: count,
     observed_counter_rows: count, presented_counter_rows: count, entries_limited: false, fields_withheld: false,
     title: t("view.performance_counters.title"), summary: t("view.performance_counters.summary.partial"),

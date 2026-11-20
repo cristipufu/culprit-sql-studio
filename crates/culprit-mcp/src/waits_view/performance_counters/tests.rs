@@ -12,6 +12,8 @@ fn compact_output_keeps_counts_and_exact_display_text_without_native_labels_or_r
     )))
     .unwrap();
     report.performance_counters = Some(Box::new(PerformanceCounterReport {
+        native_database_id: None,
+        database: None,
         context: None,
         native_source: None,
         source_state: Some(SourceState::Partial),

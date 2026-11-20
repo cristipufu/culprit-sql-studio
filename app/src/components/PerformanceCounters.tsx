@@ -9,9 +9,12 @@ import { ObservationList } from "./ObservationList";
 export function PerformanceCounters({ report }: { report: PerformanceCounterReport }) {
   const bounds = report.context?.kind === "native" ? report.context.context : report.context;
   const count = (value: number | null) => value == null ? t("view.performance_counters.unknown") : digits(String(value));
+  const scope = report.database != null && report.native_database_id != null
+    ? t("view.performance_counters.database", { database: report.database, id: report.native_database_id })
+    : t("view.performance_counters.scope");
   return <>
     <ObservationList collapseEntries source={t("view.performance_counters.source")}
-      scope={t("view.performance_counters.scope")} report={report}
+      scope={scope} report={report}
       time={<>{t("view.performance_counters.counts", { native_sets: count(report.native_observations), sets: count(report.observed_observations), native: count(report.native_counter_rows), observed: count(report.observed_counter_rows), presented: count(report.presented_counter_rows) })}
         {bounds && <span> · {t("ui.memory_failures.read_between", { from: bounds.observed_from, until: bounds.observed_until })}</span>}</>}
       renderEntry={(entry) => <article className="operational-card" key={`${entry.observation_key}:${entry.counter_key}`}>

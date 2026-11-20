@@ -1,6 +1,8 @@
 //! Native-shaped fixed counters use the existing authentic Operational capture and shared Details codec.
 use super::*;
 use culprit_core::{Engine, MeasurementScope, ResetMarker};
+mod database;
+pub use database::{DatabasePerformanceCounterCase, database_performance_counter_evidence};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PerformanceCounterCase {

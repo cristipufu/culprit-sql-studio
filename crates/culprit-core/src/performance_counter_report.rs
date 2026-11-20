@@ -39,6 +39,9 @@ pub struct PerformanceCounterEntry {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct PerformanceCounterReport {
+    /// Exact original native population labels; never populated for shared _Total rows.
+    pub native_database_id: Option<String>,
+    pub database: Option<String>,
     pub context: Option<ObservationReadContext>,
     pub native_source: Option<StateSourceCoverage>,
     pub source_state: Option<SourceState>,

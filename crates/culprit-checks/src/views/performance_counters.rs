@@ -15,6 +15,12 @@ pub enum PerformanceCounterEvidence<'a> {
         observations: &'a [&'a OperationalObservation],
         read_complete: bool,
     },
+    Database {
+        source: &'a CollectionDescription,
+        coverage: &'a StateSourceCoverage,
+        observations: &'a [&'a OperationalObservation],
+        read_complete: bool,
+    },
     Snapshot {
         engine: Engine,
         samples: &'a [&'a NativeCounterSet],
@@ -36,62 +42,106 @@ pub fn explain_snapshot(snapshot: &Snapshot) -> Result<Option<PerformanceCounter
         .map(Some)
 }
 
+/// Both local originals and warehouse adapters supply the same original source and native rows.
+pub fn explain_source(
+    source: &CollectionDescription,
+    coverage: &StateSourceCoverage,
+    observations: &[&OperationalObservation],
+    read_complete: bool,
+) -> Result<PerformanceCounterReport> {
+    let context = NativeReadContext::from_snapshot(source).map_err(|_| invalid())?;
+    let evidence = match source.observation.snapshot().ok_or_else(invalid)?.dataset {
+        SnapshotDataset::DatabasePerformanceCounters => {
+            PerformanceCounterEvidence::Database { source, coverage, observations, read_complete }
+        }
+        SnapshotDataset::Operational => {
+            PerformanceCounterEvidence::Captured { context: &context, coverage, observations, read_complete }
+        }
+        _ => return Err(invalid()),
+    };
+    explain(evidence)
+}
+
 pub fn explain(evidence: PerformanceCounterEvidence<'_>) -> Result<PerformanceCounterReport> {
     match evidence {
-        PerformanceCounterEvidence::Snapshot { engine, samples, source } => render(engine, samples, source, None),
+        PerformanceCounterEvidence::Snapshot { engine, samples, source } => {
+            render(engine, samples, source, None, false)
+        }
+        PerformanceCounterEvidence::Database { source, coverage, observations, read_complete } => {
+            let context = database_performance_context(source).map_err(|_| invalid())?;
+            let snapshot = source.observation.snapshot().ok_or_else(invalid)?;
+            if snapshot.sources.as_slice() != [coverage.clone()]
+                || observations.iter().any(|row| !matches!(&row.fact, OperationalFact::CounterSet(sample) if database_performance_sample_fits_source(sample,source))) {
+                return Err(invalid());
+            }
+            let mut report = captured(&context, coverage, observations, read_complete, true)?;
+            let SourceObservation::DatabasePerformanceCounters { native_database, .. } = &source.observation else {
+                return Err(invalid());
+            };
+            report.native_database_id = Some(native_database.id.clone());
+            report.database = Some(source.target.database().ok_or_else(invalid)?.database.clone());
+            Ok(report)
+        }
         PerformanceCounterEvidence::Captured { context, coverage, observations, read_complete } => {
-            let profile = context.target.engine().spec().performance_counters().ok_or_else(invalid)?;
-            if !context.is_valid()
-                || !profile.source_is_valid(coverage)
-                || observations.len() > coverage.records as usize
-                || read_complete && observations.len() != coverage.records as usize
+            captured(context, coverage, observations, read_complete, false)
+        }
+    }
+}
+
+fn captured(
+    context: &NativeReadContext,
+    coverage: &StateSourceCoverage,
+    observations: &[&OperationalObservation],
+    read_complete: bool,
+    database: bool,
+) -> Result<PerformanceCounterReport> {
+    let profile = context.target.engine().spec().performance_counters().ok_or_else(invalid)?;
+    if !context.is_valid()
+        || !profile.source_is_valid(coverage)
+        || observations.len() > coverage.records as usize
+        || read_complete && observations.len() != coverage.records as usize
+    {
+        return Err(invalid());
+    }
+    let bounds = ObservationBounds::new(&context.observed_from, &context.observed_until).ok_or_else(invalid)?;
+    let samples = observations
+        .iter()
+        .map(|row| {
+            if !row.is_valid() || row.source != coverage.source {
+                return Err(invalid());
+            }
+            let OperationalFact::CounterSet(sample) = &row.fact else { return Err(invalid()) };
+            if profile.observed_at(sample)?.is_some_and(|at| !bounds.contains(at))
+                || sample.ratios.iter().any(|ratio| ratio.observed_at.as_deref().is_some_and(|at| !bounds.contains(at)))
             {
                 return Err(invalid());
             }
-            let bounds = ObservationBounds::new(&context.observed_from, &context.observed_until).ok_or_else(invalid)?;
-            let samples = observations
-                .iter()
-                .map(|row| {
-                    if !row.is_valid() || row.source != coverage.source {
-                        return Err(invalid());
-                    }
-                    let OperationalFact::CounterSet(sample) = &row.fact else { return Err(invalid()) };
-                    if profile.observed_at(sample)?.is_some_and(|at| !bounds.contains(at))
-                        || sample
-                            .ratios
-                            .iter()
-                            .any(|ratio| ratio.observed_at.as_deref().is_some_and(|at| !bounds.contains(at)))
-                    {
-                        return Err(invalid());
-                    }
-                    Ok(sample.as_ref())
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let missing = !read_complete
-                && matches!(coverage.state, SourceState::Collected | SourceState::Empty | SourceState::Partial);
-            let source = SourceOutcome {
-                source: coverage.source.clone(),
-                state: if missing { SourceState::Partial } else { coverage.state },
-                reason: if missing {
-                    Some(t!("view.performance_counters.limit.read"))
-                } else {
-                    coverage
-                        .stopped
-                        .map(|stop| stop.error().message)
-                        .or_else(|| coverage.error_code.map(|_| t!("view.performance_counters.summary.unavailable")))
-                },
-                reason_message: None,
-            };
-            let mut report = render(context.target.engine(), &samples, Some(&source), Some(read_complete))?;
-            report.context = Some(ObservationReadContext::Native { context: Box::new(context.clone()) });
-            report.native_source = Some(coverage.clone());
-            report.native_observations = Some(coverage.records);
-            if !context.has_qualified_local_owner() {
-                report.limitations.push(t!("view.performance_counters.limit.owner"));
-            }
-            Ok(report)
-        }
+            Ok(sample.as_ref())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let missing =
+        !read_complete && matches!(coverage.state, SourceState::Collected | SourceState::Empty | SourceState::Partial);
+    let source = SourceOutcome {
+        source: coverage.source.clone(),
+        state: if missing { SourceState::Partial } else { coverage.state },
+        reason: if missing {
+            Some(t!("view.performance_counters.limit.read"))
+        } else {
+            coverage
+                .stopped
+                .map(|stop| stop.error().message)
+                .or_else(|| coverage.error_code.map(|_| t!("view.performance_counters.summary.unavailable")))
+        },
+        reason_message: None,
+    };
+    let mut report = render(context.target.engine(), &samples, Some(&source), Some(read_complete), database)?;
+    report.context = Some(ObservationReadContext::Native { context: Box::new(context.clone()) });
+    report.native_source = Some(coverage.clone());
+    report.native_observations = Some(coverage.records);
+    if !context.has_qualified_local_owner() {
+        report.limitations.push(t!("view.performance_counters.limit.owner"));
     }
+    Ok(report)
 }
 
 fn render(
@@ -99,6 +149,7 @@ fn render(
     samples: &[&NativeCounterSet],
     source: Option<&SourceOutcome>,
     read_complete: Option<bool>,
+    database: bool,
 ) -> Result<PerformanceCounterReport> {
     let profile = engine.spec().performance_counters().ok_or_else(invalid)?;
     if samples.len() > CollectionBudget::upper_limits().max_snapshot_rows as usize
@@ -114,7 +165,15 @@ fn render(
     let mut withheld = false;
     let mut native_rows = Some(0_u32);
     for sample in samples {
-        if !sample.is_valid() || sample.scope != culprit_core::MeasurementScope::Server || !keys.insert(sample.key()?) {
+        if !sample.is_valid()
+            || sample.scope
+                != if database {
+                    culprit_core::MeasurementScope::Database
+                } else {
+                    culprit_core::MeasurementScope::Server
+                }
+            || !keys.insert(sample.key()?)
+        {
             return Err(invalid());
         }
         if sample.properties.get(PERFORMANCE_COUNTER_WITHHELD_PROPERTY).is_some_and(|value| value == "true") {
@@ -143,11 +202,17 @@ fn render(
     let unavailable =
         source.is_some_and(|source| matches!(source.state, SourceState::Unavailable | SourceState::NotApplicable));
     let mut limitations = vec![
-        t!("view.performance_counters.limit.scope"),
+        if database {
+            t!("view.performance_counters.limit.database")
+        } else {
+            t!("view.performance_counters.limit.scope")
+        },
         t!("view.performance_counters.limit.lifetime"),
         t!("view.performance_counters.limit.cause"),
-        t!("view.performance_counters.limit.overlap"),
     ];
+    if !database {
+        limitations.push(t!("view.performance_counters.limit.overlap"));
+    }
     if read_complete.is_none() {
         limitations.push(t!("view.performance_counters.limit.original"));
         limitations.push(t!("view.performance_counters.limit.owner"));
@@ -170,13 +235,15 @@ fn render(
     if samples.iter().any(|sample| !withheld && profile.observed_at(sample).ok().flatten().is_none()) {
         limitations.push(t!("view.performance_counters.limit.clock"));
     }
-    let missing_fields = if withheld { Vec::new() } else { entries::missing(profile, samples) };
+    let missing_fields = if withheld { Vec::new() } else { entries::missing(profile, samples, database) };
     let ratios = if samples.iter().any(|sample| !sample.ratios.is_empty()) {
         Some(Box::new(super::counter_ratios::explain_borrowed(samples, source, read_complete.unwrap_or(false))?))
     } else {
         None
     };
     Ok(PerformanceCounterReport {
+        native_database_id: None,
+        database: None,
         context: None,
         native_source: None,
         source_state: source.map(|source| source.state),

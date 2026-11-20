@@ -19,6 +19,7 @@ pub(super) fn attach(response: &mut Value, report: &Report) {
 pub(crate) fn value(counters: &PerformanceCounterReport) -> Value {
     json!({
         "title":counters.title,"summary":counters.summary,"source_state":counters.source_state,
+        "native_database_id":counters.native_database_id,"database":counters.database,
         "read_complete":counters.read_complete,"native_observations":counters.native_observations,"observed_observations":counters.observed_observations,
         "native_counter_rows":counters.native_counter_rows,"observed_counter_rows":counters.observed_counter_rows,
         "presented_counter_rows":counters.presented_counter_rows,"returned_counter_rows":counters.entries.len().min(ENTRY_LIMIT),"omitted_counter_rows":counters.entries.len().saturating_sub(ENTRY_LIMIT),"entries_limited":counters.entries_limited || counters.entries.len()>ENTRY_LIMIT,

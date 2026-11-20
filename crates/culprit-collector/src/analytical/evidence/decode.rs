@@ -58,6 +58,9 @@ pub(super) fn record(
             if stream == TelemetryStream::OperationalSamples && text(values, "FactKind")? == "page-wait" {
                 crate::analytical::page_target_contexts::restore(&mut details, &range.manifest().source)?;
             }
+            if stream == TelemetryStream::OperationalSamples && text(values, "FactKind")? == "counter-set" {
+                crate::analytical::database_counter_contexts::restore(&mut details, &range.manifest().source)?;
+            }
             fact_record(stream, values, *details)?
         }
         TelemetryStream::QueryDefinitions

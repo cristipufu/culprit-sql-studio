@@ -124,7 +124,7 @@ pub struct NativeCounterSet {
 }
 impl NativeCounterSet {
     pub fn key(&self) -> Result<String> {
-        serde_json::to_vec(&self.identity).map(|bytes| digest(&bytes)).map_err(|_| CollectionStop::InvalidPage.error())
+        self.identity.key()
     }
     pub fn is_valid(&self) -> bool {
         let mut keys = std::collections::BTreeSet::new();

@@ -69,6 +69,10 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
+        if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters)
+        {
+            return database_performance_context(self).is_ok();
+        }
         if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory)
             && !matches!(self.observation, SourceObservation::BackupHistory { .. })
         {

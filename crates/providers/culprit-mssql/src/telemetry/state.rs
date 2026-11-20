@@ -11,8 +11,10 @@ const CLOCK: &str = r#"SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME()
 const ENVELOPE_ALLOWANCE: usize = 4096;
 const MAX_BUFFERED_FAMILY_ROWS: usize = 10_000;
 const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
+mod database_counters;
 mod settings;
 mod tuning;
+pub(super) use database_counters::bounded_budget as database_counter_budget;
 pub(super) use settings::bounded_budget as settings_budget;
 pub(super) use tuning::bounded_budget as tuning_budget;
 
@@ -21,6 +23,10 @@ fn native_budget(request: &CollectionRequest) -> CollectionBudget {
         memory_failure_budget(&request.budget)
     } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::Tuning }) {
         tuning_budget(&request.budget)
+    } else if request.selection
+        == (CollectionSelection::Snapshot { dataset: SnapshotDataset::DatabasePerformanceCounters })
+    {
+        database_counter_budget(&request.budget)
     } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings }) {
         settings_budget(&request.budget)
     } else {
@@ -63,7 +69,10 @@ impl<R: NativeRead> StateSource<R> {
         subject::validate_dataset(&request.subject, dataset)?;
         let database_authority = subject::DatabaseAuthority::for_source(dataset, &request.subject)?;
         let mut request = request.clone();
-        if matches!(dataset, SnapshotDataset::Tuning | SnapshotDataset::Settings) {
+        if matches!(
+            dataset,
+            SnapshotDataset::Tuning | SnapshotDataset::Settings | SnapshotDataset::DatabasePerformanceCounters
+        ) {
             request.budget = native_budget(&request);
             request.budget.validate()?;
         }
@@ -203,6 +212,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         if dataset == SnapshotDataset::Settings {
             settings::require_profile(&read.identity)?;
         }
+        if dataset == SnapshotDataset::DatabasePerformanceCounters {
+            database_counters::require_profile(&read.identity)?;
+        }
         let target = read.identity.target();
         self.identity = Some(read.identity);
         let (mut observed_from, metadata_visible, properties) = if !shared && dataset == SnapshotDataset::Operational {
@@ -281,6 +293,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             } else {
                 match dataset {
                     SnapshotDataset::Operational => "operational-state",
+                    SnapshotDataset::DatabasePerformanceCounters => "database-performance-counter-state",
                     SnapshotDataset::WaitCounters => "wait-counter-state",
                     SnapshotDataset::Replication => "replication-state",
                     SnapshotDataset::Settings => "settings-state",
@@ -330,13 +343,16 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             }
             .into(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset,
-                observed_from,
-                observed_until,
-                records: self.rows.len() as u32,
-                sources,
-            }),
+            observation: database_counters::observation(
+                StateSnapshotDescription {
+                    dataset,
+                    observed_from,
+                    observed_until,
+                    records: self.rows.len() as u32,
+                    sources,
+                },
+                self.identity.as_ref().ok_or_else(invalid_data)?,
+            )?,
         };
         if !description.matches_request(&self.request) {
             return Err(invalid_data());

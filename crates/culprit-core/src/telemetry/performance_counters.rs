@@ -1,5 +1,7 @@
 //! Backend-native counter vocabulary and selection live once; a name never substitutes for its native type.
 use super::*;
+mod database;
+pub use database::*;
 
 pub const PERFORMANCE_COUNTER_PROFILE: &str = "sqlserver-performance-counters-v2";
 pub const PERFORMANCE_COUNTER_PROFILE_PROPERTY: &str = "performance_profile";
@@ -67,28 +69,64 @@ pub struct PerformanceCounterProfile {
     pub native_object: &'static str,
     pub selection: &'static str,
     pub fields: &'static [PerformanceCounterSpec],
+    /// Explicit native descriptors eligible for the separately bound selected-database population.
+    pub database_field_ids: &'static [&'static str],
 }
 impl PerformanceCounterProfile {
     pub fn source_is_valid(&self, source: &StateSourceCoverage) -> bool {
         source.source == crate::source_id::PERFORMANCE_COUNTERS && source.is_valid()
     }
     pub fn candidate(&self, sample: &NativeCounterSet) -> bool {
-        self.matches(sample)
+        database_performance_candidate(sample)
+            || self.matches(sample)
             || sample.properties.contains_key(PERFORMANCE_COUNTER_WITHHELD_PROPERTY)
             || sample.counters.iter().any(|counter| {
                 self.field(&counter.native_object, &counter.native_name, counter.native_instance.as_deref()).is_some()
             })
     }
     pub fn matches(&self, sample: &NativeCounterSet) -> bool {
+        if database_performance_candidate(sample) {
+            return true;
+        }
         sample.identity.id == self.native_object
             && sample.identity.qualifiers.get("native_object").is_some_and(|value| value == self.native_object)
     }
     pub fn field(&self, object: &str, name: &str, instance: Option<&str>) -> Option<&PerformanceCounterSpec> {
         self.fields.iter().find(|field| field.matches(object, name, instance))
     }
+    pub fn database_fields(&self) -> impl Iterator<Item = &PerformanceCounterSpec> {
+        self.fields.iter().filter(|field| self.database_field_ids.contains(&field.id))
+    }
+    pub fn database_field(&self, object: &str, name: &str) -> Option<&PerformanceCounterSpec> {
+        self.database_fields().find(|field| {
+            field.native_name == name
+                && field.object_family.is_some_and(|family| object.ends_with(&format!(":{family}")))
+        })
+    }
+    pub fn field_in_sample(
+        &self,
+        sample: &NativeCounterSet,
+        object: &str,
+        name: &str,
+        instance: Option<&str>,
+    ) -> Option<&PerformanceCounterSpec> {
+        if database_performance_candidate(sample) {
+            if instance == sample.properties.get(DATABASE_PERFORMANCE_NAME_PROPERTY).map(String::as_str) {
+                self.database_field(object, name)
+            } else {
+                None
+            }
+        } else {
+            self.field(object, name, instance)
+        }
+    }
+
     /// Known semantics require both this source's fixed descriptor and the recorded native counter type.
     /// Unknown native codes keep raw integers with Unknown nature/unit; contradictions never become repaired rows.
     pub fn validate(&self, sample: &NativeCounterSet) -> Result<()> {
+        if database_performance_candidate(sample) {
+            return validate_database_performance_sample(self, sample);
+        }
         if !sample.is_valid() || !self.matches(sample) || sample.scope != crate::MeasurementScope::Server {
             return Err(CollectionStop::InvalidPage.error());
         }
@@ -189,7 +227,10 @@ impl PerformanceCounterProfile {
         Ok(Some(at))
     }
     pub fn declares_selection(&self, sample: &NativeCounterSet) -> bool {
-        sample.properties.get(PERFORMANCE_COUNTER_PROFILE_PROPERTY).is_some_and(|value| value == self.selection)
+        sample
+            .properties
+            .get(PERFORMANCE_COUNTER_PROFILE_PROPERTY)
+            .is_some_and(|value| value == self.selection || value == DATABASE_PERFORMANCE_COUNTER_PROFILE)
     }
 }
 

@@ -109,7 +109,7 @@ impl Context {
             // database_guid can be duplicated by copying/attaching a database. Preserve it in the local
             // authority token; DatabaseIdentity::incarnation would instead promote it to a global namespace.
             let identity = self.native_identity()?;
-            context.epoch = Some(digest(&serde_json::to_vec(&identity).map_err(|_| invalid_data())?));
+            context.epoch = Some(identity.key()?);
         } else {
             context.epoch = None;
         }

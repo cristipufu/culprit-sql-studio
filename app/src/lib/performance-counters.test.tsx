@@ -35,6 +35,25 @@ test("withheld scalar descriptors remain an explanation with no invented zero en
   expect(html).toContain(report.summary); expect(html).not.toContain("<article"); expect(html).not.toContain(EXACT_PERFORMANCE_COUNTER);
 });
 
+test("selected counters show their original database context as escaped text without borrowing a row label", () => {
+  const report = performanceCounterReport(1);
+  const database = "<img src=x onerror=alert(1)>";
+  report.database = database;
+  report.native_database_id = "7";
+  const html = renderToStaticMarkup(<PerformanceCounters report={report} />);
+  expect(html).toContain("&lt;img");
+  expect(html).not.toContain("<img");
+  expect(html).toContain(t("view.performance_counters.database", { database, id: "7" }).replace("<", "&lt;").replace(">", "&gt;"));
+  expect(html).not.toContain(t("view.performance_counters.scope"));
+
+  report.native_database_id = null;
+  report.entries[0]!.native_instance = "some-other-database";
+  const unknown = renderToStaticMarkup(<PerformanceCounters report={report} />);
+  expect(unknown).toContain(t("view.performance_counters.scope"));
+  expect(unknown).not.toContain(t("view.performance_counters.database", { database: "some-other-database", id: "7" }));
+  expect(report.database).toBe(database);
+});
+
 test("language changes reword interface labels without recomputing retained Rust report text", () => {
   const previousLanguage = language();
   try {

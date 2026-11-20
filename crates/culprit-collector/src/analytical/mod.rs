@@ -1,5 +1,6 @@
 //! Shared analytical preparation and proofs; destination crates own physical layouts and query dialects.
 pub mod catalog;
+mod database_counter_contexts;
 pub mod encoding;
 pub mod envelope;
 pub mod evidence;

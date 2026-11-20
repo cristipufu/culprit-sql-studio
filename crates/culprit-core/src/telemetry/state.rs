@@ -15,6 +15,7 @@ pub enum SnapshotDataset {
     BackupHistory,
     ColumnstoreRowgroups,
     Operational,
+    DatabasePerformanceCounters,
     HyperscaleLogComponents,
     WaitCounters,
     Replication,
@@ -65,6 +66,7 @@ impl SnapshotDataset {
             | Self::BackupHistory
             | Self::ColumnstoreRowgroups
             | Self::Operational
+            | Self::DatabasePerformanceCounters
             | Self::HyperscaleLogComponents
             | Self::PlanCacheSummary
             | Self::CacheEntryMemory

@@ -6,7 +6,11 @@ import type { PerformanceCounterEntry } from "./PerformanceCounterEntry";
 import type { SourceState } from "./SourceState";
 import type { StateSourceCoverage } from "./StateSourceCoverage";
 
-export type PerformanceCounterReport = { context: ObservationReadContext | null, native_source: StateSourceCoverage | null, source_state: SourceState | null, source_reason: string | null, read_complete: boolean | null, 
+export type PerformanceCounterReport = { 
+/**
+ * Exact original native population labels; never populated for shared _Total rows.
+ */
+native_database_id: string | null, database: string | null, context: ObservationReadContext | null, native_source: StateSourceCoverage | null, source_state: SourceState | null, source_reason: string | null, read_complete: boolean | null, 
 /**
  * Source observations are aggregate sets, independently from the native DMV counter rows inside them.
  */

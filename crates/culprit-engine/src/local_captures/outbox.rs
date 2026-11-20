@@ -118,16 +118,23 @@ impl OutboxCaptureReader {
                     })
                     .await
             }
-            LocalCaptureReadPlan::Snapshot(dataset) => {
+            LocalCaptureReadPlan::Snapshot(datasets) => {
                 delivery
-                    .with_completed_snapshot(lookup, dataset, self.budget, request.operation, permit, move |capture| {
-                        let result = explain_operational(capture, request.analysis);
-                        #[cfg(test)]
-                        if let Some(boundary) = boundary {
-                            boundary()?;
-                        }
-                        result
-                    })
+                    .with_completed_snapshots(
+                        lookup,
+                        datasets,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        move |capture| {
+                            let result = explain_operational(capture, request.analysis);
+                            #[cfg(test)]
+                            if let Some(boundary) = boundary {
+                                boundary()?;
+                            }
+                            result
+                        },
+                    )
                     .await
             }
             LocalCaptureReadPlan::Activity => {

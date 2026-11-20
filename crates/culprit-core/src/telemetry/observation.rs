@@ -427,6 +427,11 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         metadata: Box<MysqlEventsMetadata>,
     },
+    DatabasePerformanceCounters {
+        snapshot: StateSnapshotDescription,
+        native_database: Box<NativeIdentity>,
+        database_writable: bool,
+    },
     BackupHistory {
         snapshot: StateSnapshotDescription,
         scope: Box<MssqlBackupHistoryScope>,
@@ -535,6 +540,9 @@ impl SourceObservation {
             Self::Activity(_) | Self::FocusedBlocking { .. } => TelemetryCollection::Activity,
             Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
             Self::BackupHistory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory),
+            Self::DatabasePerformanceCounters { .. } => {
+                TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters)
+            }
             Self::ColumnstoreRowgroups { .. } => TelemetryCollection::Snapshot(SnapshotDataset::ColumnstoreRowgroups),
             Self::PageWaitTargets { .. } | Self::FocusedPageWait { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)
@@ -598,6 +606,7 @@ impl SourceObservation {
             | Self::MysqlEvents { .. }
             | Self::MssqlAgentJobs { .. }
             | Self::BackupHistory { .. }
+            | Self::DatabasePerformanceCounters { .. }
             | Self::Snapshot(_)
             | Self::PagedSnapshot(_) => TelemetryRange::Current,
         })
@@ -624,6 +633,10 @@ impl SourceObservation {
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
             Self::BackupHistory { snapshot, .. } => backup_history_header_is_valid(snapshot),
+            Self::DatabasePerformanceCounters { snapshot, native_database, .. } => {
+                database_performance_header_is_valid(snapshot)
+                    && validate_database_performance_identity(native_database)
+            }
             Self::Jobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::MssqlAgentJobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::MysqlEvents { snapshot, metadata } => metadata.matches_snapshot(snapshot),
@@ -724,6 +737,7 @@ impl SourceObservation {
             | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
+            | Self::DatabasePerformanceCounters { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
             | Self::PageWaitWriters { snapshot, .. }
@@ -745,6 +759,7 @@ impl SourceObservation {
             | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
+            | Self::DatabasePerformanceCounters { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
             | Self::PageWaitWriters { snapshot, .. }
@@ -786,6 +801,7 @@ impl SourceObservation {
             | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
+            | Self::DatabasePerformanceCounters { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
@@ -1092,7 +1108,9 @@ impl CollectionDescription {
                 && snapshot.records <= request.budget.max_snapshot_rows;
         }
         if let (
-            SourceObservation::Snapshot(snapshot) | SourceObservation::BackupHistory { snapshot, .. },
+            SourceObservation::Snapshot(snapshot)
+            | SourceObservation::BackupHistory { snapshot, .. }
+            | SourceObservation::DatabasePerformanceCounters { snapshot, .. },
             CollectionSelection::Snapshot { dataset },
         ) = (&self.observation, &request.selection)
         {

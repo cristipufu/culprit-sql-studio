@@ -201,7 +201,21 @@ impl OutboxDelivery {
         worker_guard: impl Send + 'static,
         project: impl FnOnce(CompletedSnapshot) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        let read = CompletedCaptureRead::snapshot_lookup(lookup, dataset, budget, operation)?;
+        self.with_completed_snapshots(lookup, &[dataset], budget, operation, worker_guard, project).await
+    }
+
+    /// An explicit logical analysis may accept several native datasets, authenticated by the same original worker.
+    /// The nonempty selection must be unique and retain one stream layout; native scope and rows remain unchanged.
+    pub async fn with_completed_snapshots<T: Send + 'static>(
+        &self,
+        lookup: CompletedCaptureLookup<'_>,
+        datasets: &[SnapshotDataset],
+        budget: CompletedCaptureBudget,
+        operation: OperationHandle,
+        worker_guard: impl Send + 'static,
+        project: impl FnOnce(CompletedSnapshot) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let read = CompletedCaptureRead::snapshot_lookup(lookup, datasets, budget, operation)?;
         self.with_completed_capture(read, worker_guard, move |completed| {
             project(CompletedSnapshot::from_completed(completed)?)
         })

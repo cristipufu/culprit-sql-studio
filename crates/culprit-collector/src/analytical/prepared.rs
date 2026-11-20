@@ -2,7 +2,7 @@
 use culprit_core::{Result, telemetry::*};
 use serde_json::{Value, json};
 
-pub const PREPARATION_VERSION: u32 = 34;
+pub const PREPARATION_VERSION: u32 = 35;
 const MAX_PREVIEW_BYTES: usize = 1024;
 const MAX_INLINE_DETAIL_BYTES: usize = 128 * 1024;
 
@@ -63,6 +63,12 @@ fn fact(input: &mut Value, key: &str) -> Result<()> {
     detail(input, details)
 }
 fn operational(input: &mut Value, row: &OperationalObservation) -> Result<()> {
+    if let OperationalFact::CounterSet(sample) = &row.fact
+        && database_performance_candidate(sample)
+    {
+        *input.pointer_mut("/record/data/fact/data/identity").ok_or_else(invalid)? =
+            super::database_counter_contexts::project(&sample.identity)?;
+    }
     if let OperationalFact::PageWait(page) = &row.fact
         && let Some(target) = &page.target
         && let PageTargetScope::SharedResource { context } = &target.scope

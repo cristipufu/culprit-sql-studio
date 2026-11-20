@@ -69,7 +69,8 @@ impl NativeReadContext {
             observed_from: snapshot.observed_from.clone(),
             observed_until: snapshot.observed_until.clone(),
             database_writable: match &source.observation {
-                SourceObservation::BackupHistory { database_writable, .. }
+                SourceObservation::DatabasePerformanceCounters { database_writable, .. }
+                | SourceObservation::BackupHistory { database_writable, .. }
                 | SourceObservation::ColumnstoreRowgroups { database_writable, .. } => Some(*database_writable),
                 SourceObservation::Jobs { metadata, .. } => metadata.database_writable,
                 SourceObservation::MysqlEvents { metadata, .. } => Some(metadata.database_writable),

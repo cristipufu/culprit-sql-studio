@@ -10,6 +10,7 @@ pub(super) enum Family {
     Operation(native::Kind),
     FileIo,
     PerformanceCounters,
+    DatabasePerformanceCounters,
     Queue(QueueKind),
     VersionStore,
     CleanupHorizon,
@@ -56,6 +57,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
             .chain(crate::queues::KINDS.into_iter().map(Family::Queue))
             .chain([Family::VersionStore, Family::CleanupHorizon, Family::PersistentVersions])
             .collect(),
+        SnapshotDataset::DatabasePerformanceCounters => vec![Family::DatabasePerformanceCounters],
         SnapshotDataset::PlanCacheSummary => vec![Family::PlanCacheSummary],
         SnapshotDataset::MissingIndexes => vec![Family::MissingIndexes],
         SnapshotDataset::Tuning => crate::query_store::tuning::Kind::ALL.into_iter().map(Family::Tuning).collect(),
@@ -129,7 +131,7 @@ impl Family {
         match self {
             Self::Operation(kind) => kind.source(),
             Self::FileIo => &sources::FILE_LATENCY,
-            Self::PerformanceCounters => &sources::PERFORMANCE_COUNTERS,
+            Self::PerformanceCounters | Self::DatabasePerformanceCounters => &sources::PERFORMANCE_COUNTERS,
             Self::Queue(kind) => crate::queues::source(kind),
             Self::VersionStore => &sources::VERSION_STORE,
             Self::CleanupHorizon => &sources::OPEN_TRANSACTIONS,
@@ -313,6 +315,18 @@ impl Family {
             Self::FileIo => {
                 let facts = crate::storage_io::read(reader, crate::storage_io::Selection::Database, limit).await?;
                 crate::storage_io::observations(facts).into_iter().map(TelemetryRecord::Operational).collect()
+            }
+            Self::DatabasePerformanceCounters => {
+                let Some(super::subject::Identity::LocalDatabase(owner)) = owner else {
+                    return Err(crate::read::invalid_data());
+                };
+                let profile =
+                    culprit_core::Engine::Mssql.spec().performance_counters().ok_or_else(crate::read::invalid_data)?;
+                let facts = crate::performance::read_current(reader, profile.database_field_ids.len(), owner).await?;
+                let complete_scope = facts.native_rows == profile.database_field_ids.len();
+                let values =
+                    crate::performance::observations(facts)?.into_iter().map(TelemetryRecord::Operational).collect();
+                return Ok(ReadOutcome::Observed(Records { values, complete_scope, error_code: None }));
             }
             Self::PerformanceCounters => {
                 let facts = crate::performance::read(reader, limit).await?;
