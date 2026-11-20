@@ -16,22 +16,29 @@ pub(super) fn scenario(pair: &NativeRuntimeInputPair<'_>, name_a: &str, name_b: 
         Some(comparison) => (comparison, name_a, name_b, false),
         None => (lookup_read_comparison(pair.b, pair.a)?, name_b, name_a, true),
     };
-    let LookupReadComparison { reused_node, scan_node, executions, lookup_reads, scan_reads } = comparison;
+    let LookupReadComparison { reused_node, scan_node, executions, lookup_reads, scan_reads, compiled_runtime_equal } =
+        comparison;
     Some(Scenario {
         kind: ScenarioKind::Parameters,
         title: t!("core.plan_compare.scalar_reuse.title", reused = reused_name, scan = scan_name),
-        detail: Some(format!(
-            "{} {}",
-            t!(
+        detail: Some({
+            let mut detail = vec![t!(
                 "core.plan_compare.scalar_reuse.detail",
                 reused = reused_name,
                 scan = scan_name,
                 executions = format::count(executions),
                 lookup_reads = format::count(lookup_reads),
                 scan_reads = format::count(scan_reads)
-            ),
-            t!("core.plan_compare.scalar_reuse.limit")
-        )),
+            )];
+            if compiled_runtime_equal {
+                detail.push(t!("core.plan_compare.scalar_reuse.equal_compile_input"));
+            }
+            detail.push(t!("core.plan_compare.scalar_reuse.limit"));
+            if compiled_runtime_equal {
+                detail.push(t!("core.plan_compare.scalar_reuse.equal_investigation"));
+            }
+            detail.join(" ")
+        }),
         a: Some(if reversed { scan_node } else { reused_node }),
         b: Some(if reversed { reused_node } else { scan_node }),
     })

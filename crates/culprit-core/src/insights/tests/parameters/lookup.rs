@@ -43,6 +43,79 @@ fn assert_ordinary(plan: &Plan, case: &str) {
     );
 }
 
+fn counterpart_scan(lookup: &Plan) -> Plan {
+    let mut scan = lookup.root.children[0].clone();
+    scan.id = 3;
+    scan.kind = NodeKind::Scan;
+    scan.op = "Clustered Index Scan".into();
+    scan.seek_predicate = None;
+    scan.runtime = Some(crate::actual::NodeRuntime { logical_reads: Some(2_000.0), ..Default::default() });
+    actual(lookup.engine, scan, 400.0)
+}
+
+#[test]
+fn equal_bound_integers_qualify_only_measured_lookup_work_and_keep_ordinary_single_plan_advice() {
+    for comparison in [Comparison::SameRepresentation, Comparison::DifferentRepresentation] {
+        let mut plan = lookup_plan();
+        let parameter = &mut plan.facts_mut().parameter_context.as_mut().unwrap().parameters[0];
+        parameter.comparison = comparison;
+        parameter.integer_values_equal = Some(true);
+        assert_ordinary(&plan, "equal compiled/runtime integers");
+        let observed = crate::insights::lookup_read_comparison(&plan, &counterpart_scan(&plan))
+            .expect("equal values do not erase original measured operator work");
+        assert_eq!((observed.reused_node, observed.scan_node), (2, 3));
+        assert_eq!((observed.executions, observed.lookup_reads, observed.scan_reads), (10_000.0, 30_000.0, 2_000.0));
+        assert!(observed.compiled_runtime_equal);
+    }
+    let unequal = lookup_plan();
+    let observed = crate::insights::lookup_read_comparison(&unequal, &counterpart_scan(&unequal)).unwrap();
+    assert!(!observed.compiled_runtime_equal);
+    assert_eq!(lookup_insight(&unequal).verify, t!("insight.parameter_lookup.verify"));
+}
+
+#[test]
+fn equal_inputs_cannot_replace_unknown_binding_healthy_estimates_or_native_work_guards() {
+    for case in [
+        "integer-unknown",
+        "no-context",
+        "healthy-estimate",
+        "cache-unknown",
+        "missing-use",
+        "duplicate-node",
+        "parallel",
+        "lookup-output",
+        "scan-output",
+        "scan-reads-missing",
+        "immaterial-reads",
+    ] {
+        let mut plan = lookup_plan();
+        plan.facts_mut().parameter_context.as_mut().unwrap().parameters[0].integer_values_equal = Some(true);
+        let mut scan = counterpart_scan(&plan);
+        match case {
+            "integer-unknown" => {
+                plan.facts_mut().parameter_context.as_mut().unwrap().parameters[0].integer_values_equal = None
+            }
+            "no-context" => plan.facts_mut().parameter_context = None,
+            "healthy-estimate" => {
+                plan.root.children[0].est_rows = 10_000.0;
+                plan.root.children[0].facts_mut().access_rows.as_mut().unwrap().estimated_per_execution =
+                    Some(10_000.0);
+            }
+            "cache-unknown" => plan.facts_mut().parameter_context.as_mut().unwrap().retrieved_from_cache = None,
+            "missing-use" => plan.facts_mut().parameter_context.as_mut().unwrap().uses.clear(),
+            "duplicate-node" => plan.root.children[1].id = 1,
+            "parallel" => plan.root.children[0].facts_mut().parallel_operator = Some(true),
+            "lookup-output" => plan.root.children[1].act_rows = Some(9999.0),
+            "scan-output" => scan.root.act_rows = Some(9999.0),
+            "scan-reads-missing" => scan.root.runtime.as_mut().unwrap().logical_reads = None,
+            "immaterial-reads" => scan.root.runtime.as_mut().unwrap().logical_reads = Some(29_000.0),
+            _ => unreachable!(),
+        }
+        assert!(crate::insights::lookup_read_comparison(&plan, &scan).is_none(), "{case}");
+        assert_ordinary(&plan, case);
+    }
+}
+
 #[test]
 fn exact_cached_integer_seek_and_lookup_populations_enrich_the_existing_public_lookup_advice() {
     let plan = lookup_plan();

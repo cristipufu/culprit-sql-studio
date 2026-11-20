@@ -3503,6 +3503,8 @@
   "core.plan_compare.plan_kind.kinds": "{plan} is a {kind} plan and {other} a {other_kind} plan.",
   "core.plan_compare.rows": "{n, plural, one {{count} row} other {{count} rows}}",
   "core.plan_compare.scalar_reuse.detail": "The native statement in {reused} reports cache reuse. The plans' complete supported integer runtime inputs agree. The lookup executed {executions} times and recorded {lookup_reads} logical reads; the scan in {scan} recorded {scan_reads}.",
+  "core.plan_compare.scalar_reuse.equal_compile_input": "The parameter bound to the outer seek has equal recorded compiled and runtime integers. These facts do not establish a parameter-value change as the cause.",
+  "core.plan_compare.scalar_reuse.equal_investigation": "Compare data distribution, statistics and index coverage for this statement. Test covering access or a query change under comparable inputs and load; compare reads, latency, CPU and results.",
   "core.plan_compare.scalar_reuse.limit": "These are separate operator counters, not total plan reads or an elapsed-time comparison. Data, statistics, indexes, settings or capture completeness may differ; this pair does not establish fresh compilation or isolate parameters as the cause.",
   "core.plan_compare.scalar_reuse.title": "For the same runtime inputs, the scan in {scan} records fewer reads than the cached lookup in {reused}.",
   "core.plan_compare.spill.detail": "A missing warning does not establish a spill-free execution. These captures alone do not establish equivalent work, the spill’s elapsed cost or cause.",

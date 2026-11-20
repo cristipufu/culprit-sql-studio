@@ -97,6 +97,13 @@ pub(super) struct ParameterAccess<'a> {
 
 /// The use and both native counts belong to this node. This does not explain why its estimate differed.
 pub(super) fn access_mismatch<'a>(cx: &Cx<'a>, node: &PlanNode) -> Option<ParameterAccess<'a>> {
+    let access = bound_access_mismatch(cx, node)?;
+    (access.parameter.comparison == PlanParameterComparison::DifferentRepresentation
+        && access.parameter.integer_values_equal != Some(true))
+    .then_some(access)
+}
+
+fn bound_access_mismatch<'a>(cx: &Cx<'a>, node: &PlanNode) -> Option<ParameterAccess<'a>> {
     if cx.plan.kind != PlanKind::Actual {
         return None;
     }
@@ -106,16 +113,10 @@ pub(super) fn access_mismatch<'a>(cx: &Cx<'a>, node: &PlanNode) -> Option<Parame
         return None;
     }
     let parameter = context.parameter(usage)?;
-    if parameter.comparison != PlanParameterComparison::DifferentRepresentation
-        || parameter.integer_values_equal == Some(true)
-        || node.kind != NodeKind::Seek
-        || node.facts().relational_input.is_some()
-        || serial_executions(node).is_none()
-    {
+    if node.kind != NodeKind::Seek || node.facts().relational_input.is_some() || serial_executions(node).is_none() {
         return None;
     }
-    let mut identities = std::collections::BTreeSet::new();
-    if !cx.nodes.iter().all(|node| identities.insert(node.id)) {
+    if !cx.node_ids_unique {
         return None;
     }
     if !node.facts().access_rows?.actual_total.is_some_and(exact_count) {

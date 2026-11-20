@@ -11,6 +11,7 @@ pub(crate) struct LookupReadComparison {
     pub executions: f64,
     pub lookup_reads: f64,
     pub scan_reads: f64,
+    pub compiled_runtime_equal: bool,
 }
 
 /// Compare independent operator counters without adding inclusive plan reads or inferring equal elapsed cost.
@@ -53,6 +54,7 @@ pub(crate) fn lookup_read_comparison(reused: &Plan, counterpart: &Plan) -> Optio
         executions: lookup.executions,
         lookup_reads: lookup.logical_reads,
         scan_reads,
+        compiled_runtime_equal: lookup.parameter.integer_values_equal?,
     })
 }
 
@@ -77,8 +79,8 @@ impl<'a> LookupWork<'a> {
         if inner.id != lookup.id || !qualified_pair(cx, join, seek, lookup) {
             return None;
         }
-        let access = access_mismatch(cx, seek)?;
-        if access.parameter.integer_values_equal != Some(false) {
+        let access = bound_access_mismatch(cx, seek)?;
+        if access.parameter.integer_values_equal.is_none() {
             return None;
         }
         let (estimated, actual) = access.comparison.output_counts()?;
@@ -98,6 +100,10 @@ impl<'a> LookupWork<'a> {
     }
 
     pub(in crate::insights) fn enrich(self, draft: &mut Draft) {
+        // Equal values can qualify a measured work comparison, but cannot acquire parameter-change advice.
+        if self.parameter.integer_values_equal != Some(false) {
+            return;
+        }
         draft.nodes.push(self.join.id);
         draft.detail = format!(
             "{} {} {}",

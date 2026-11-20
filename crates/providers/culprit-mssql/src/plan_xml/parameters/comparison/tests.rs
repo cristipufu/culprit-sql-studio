@@ -92,6 +92,24 @@ fn same_native_runtime_tuple_links_material_cached_lookup_and_counterpart_scan_w
         lookup_reads = culprit_core::format::count(30_000.0),
         scan_reads = culprit_core::format::count(2_000.0)
     )));
+    assert_eq!(
+        scenario.detail.as_deref(),
+        Some(
+            format!(
+                "{} {}",
+                culprit_core::t!(
+                    "core.plan_compare.scalar_reuse.detail",
+                    reused = "Cached",
+                    scan = "Scan",
+                    executions = culprit_core::format::count(10_000.0),
+                    lookup_reads = culprit_core::format::count(30_000.0),
+                    scan_reads = culprit_core::format::count(2_000.0)
+                ),
+                culprit_core::t!("core.plan_compare.scalar_reuse.limit")
+            )
+            .as_str()
+        )
+    );
     let reversed = diff(&b, "Scan", &a, "Cached");
     let reversed = observed(&reversed).unwrap();
     assert_eq!((reversed.a, reversed.b), (Some(5), Some(3)));
@@ -99,6 +117,94 @@ fn same_native_runtime_tuple_links_material_cached_lookup_and_counterpart_scan_w
     for private in ["314159", "271828", "ParameterRuntimeValue", "ParameterCompiledValue", "ShowPlanXML"] {
         assert!(!serde_json::to_string(&result).unwrap().contains(private), "{private}");
     }
+}
+
+#[test]
+fn equal_compiled_runtime_integers_keep_material_native_work_comparison_without_parameter_change_advice() {
+    let (original, scan) = measured_pair();
+    for compiled in ["(314159)", "(+0314159)"] {
+        let lookup = changed(
+            &original,
+            "ParameterCompiledValue=\"(271828)\"",
+            &format!("ParameterCompiledValue=\"{compiled}\""),
+        );
+        assert_eq!(lookup.facts().parameter_context.as_ref().unwrap().parameters[0].integer_values_equal, Some(true));
+        assert_eq!(compare(&lookup, &scan).relation(), Relation::Same);
+        for reversed in [false, true] {
+            let result =
+                if reversed { diff(&scan, "Scan", &lookup, "Cached") } else { diff(&lookup, "Cached", &scan, "Scan") };
+            let scenario = observed(&result).expect("native equal inputs retain observed work without a cause verdict");
+            assert_eq!((scenario.a, scenario.b), if reversed { (Some(5), Some(3)) } else { (Some(3), Some(5)) });
+            assert_eq!(
+                scenario.detail.as_deref(),
+                Some(
+                    format!(
+                        "{} {} {} {}",
+                        culprit_core::t!(
+                            "core.plan_compare.scalar_reuse.detail",
+                            reused = "Cached",
+                            scan = "Scan",
+                            executions = culprit_core::format::count(10_000.0),
+                            lookup_reads = culprit_core::format::count(30_000.0),
+                            scan_reads = culprit_core::format::count(2_000.0)
+                        ),
+                        culprit_core::t!("core.plan_compare.scalar_reuse.equal_compile_input"),
+                        culprit_core::t!("core.plan_compare.scalar_reuse.limit"),
+                        culprit_core::t!("core.plan_compare.scalar_reuse.equal_investigation")
+                    )
+                    .as_str()
+                )
+            );
+            for private in
+                ["314159", "271828", "0314159", "ParameterRuntimeValue", "ParameterCompiledValue", "ShowPlanXML"]
+            {
+                assert!(!serde_json::to_string(&result).unwrap().contains(private), "{private}");
+            }
+        }
+    }
+}
+
+#[test]
+fn equal_compiled_inputs_do_not_override_unknown_healthy_variant_or_changed_runtime_evidence() {
+    let (original, scan) = measured_pair();
+    let equal = changed(&original, "ParameterCompiledValue=\"(271828)\"", "ParameterCompiledValue=\"(314159)\"");
+    for (before, after) in [
+        (" ParameterCompiledValue=\"(314159)\"", ""),
+        ("ParameterCompiledValue=\"(314159)\"", "ParameterCompiledValue=\"(?)\""),
+        ("EstimateRows=\"100\" EstimatedRowsRead=\"100\"", "EstimateRows=\"10000\" EstimatedRowsRead=\"10000\""),
+        ("RetrievedFromCache=\"true\"", "RetrievedFromCache=\"unknown\""),
+        (
+            "ActualRows=\"10000\" ActualRowsRead=\"10000\" ActualExecutions=\"10000\"",
+            "ActualRows=\"9999\" ActualRowsRead=\"10000\" ActualExecutions=\"10000\"",
+        ),
+        ("ActualLogicalReads=\"30000\"", "ActualLogicalReads=\"NaN\""),
+        ("Parallel=\"false\"", "Parallel=\"true\""),
+        ("<StmtSimple ", "<StmtSimple QueryVariantID=\"2\" "),
+        ("<QueryPlan>", "<QueryPlan><Dispatcher><OptionalParameterPredicate/></Dispatcher>"),
+    ] {
+        let altered = changed(&equal, before, after);
+        assert!(observed(&diff(&altered, "Lookup", &scan, "Scan")).is_none(), "{before} -> {after}");
+    }
+    let changed_input = changed(&scan, "ParameterRuntimeValue=\"(314159)\"", "ParameterRuntimeValue=\"(314160)\"");
+    assert_eq!(compare(&equal, &changed_input).relation(), Relation::Different);
+    assert!(observed(&diff(&equal, "Lookup", &changed_input, "Scan")).is_none());
+    let unknown = changed(&equal, " ParameterCompiledValue=\"(314159)\"", "");
+    assert_eq!(
+        compare(&unknown, &scan).relation(),
+        Relation::Same,
+        "known runtime equality cannot replace unknown compile context"
+    );
+    assert_eq!(unknown.facts().parameter_context.as_ref().unwrap().parameters[0].integer_values_equal, None);
+    let extra = r#"<ColumnReference Column="@other" ParameterDataType="int" ParameterCompiledValue="(2)" ParameterRuntimeValue="(2)"/>"#;
+    let complete_lookup = changed(&equal, "</ParameterList>", &format!("{extra}</ParameterList>"));
+    let complete_scan = changed(&scan, "</ParameterList>", &format!("{extra}</ParameterList>"));
+    assert_eq!(compare(&complete_lookup, &complete_scan).relation(), Relation::Same);
+    assert!(observed(&diff(&complete_lookup, "Lookup", &complete_scan, "Scan")).is_some());
+    let different_member = changed(&complete_scan, "ParameterRuntimeValue=\"(2)\"", "ParameterRuntimeValue=\"(3)\"");
+    assert_eq!(compare(&complete_lookup, &different_member).relation(), Relation::Different);
+    assert!(observed(&diff(&complete_lookup, "Lookup", &different_member, "Scan")).is_none());
+    assert_eq!(compare(&complete_lookup, &scan).relation(), Relation::Unavailable);
+    assert!(observed(&diff(&complete_lookup, "Lookup", &scan, "Scan")).is_none());
 }
 
 #[test]
@@ -239,11 +345,6 @@ fn native_equal_inputs_do_not_promote_healthy_incomplete_or_competing_work_popul
         let altered = changed(&b, before, after);
         assert!(observed(&diff(&a, "Cached", &altered, "Scan")).is_none(), "{before} -> {after}");
     }
-    let healthy = changed(&a, "ParameterCompiledValue=\"(271828)\"", "ParameterCompiledValue=\"(314159)\"");
-    assert!(
-        observed(&diff(&healthy, "Cached", &b, "Scan")).is_none(),
-        "same compiled/runtime values do not establish this cached mismatch"
-    );
     for cache in ["RetrievedFromCache=\"false\"", "UnknownCacheMetadata=\"true\""] {
         let unconfirmed_reuse = changed(&a, "RetrievedFromCache=\"true\"", cache);
         assert!(observed(&diff(&unconfirmed_reuse, "Lookup", &b, "Scan")).is_none(), "{cache}");
