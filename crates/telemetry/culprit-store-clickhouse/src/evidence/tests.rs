@@ -1,3 +1,4 @@
+mod table_full_text;
 use super::*;
 mod activity;
 mod blocking;

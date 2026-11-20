@@ -877,3 +877,11 @@ fn ensure_source_quiet(provider: &dyn culprit_core::Provider) -> culprit_core::R
     }
     Ok(())
 }
+
+/// One selected scan table's informational native full-text catalog details.
+pub fn explain_table_full_text(
+    snapshot: &culprit_core::Snapshot,
+    table: &culprit_core::TableStat,
+) -> culprit_core::Result<Option<culprit_core::TableFullTextReport>> {
+    culprit_checks::table_full_text::explain_table(snapshot, table)
+}

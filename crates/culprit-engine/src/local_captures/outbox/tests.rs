@@ -1,3 +1,4 @@
+mod table_full_text;
 mod tempdb_metadata_memory;
 use super::*;
 use culprit_collector::analytical::test_support::{LocalCaptureFixture, page_server_read_evidence_cases};

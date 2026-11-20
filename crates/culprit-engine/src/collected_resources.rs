@@ -30,6 +30,8 @@ pub use completed_spills::completed_spills;
 mod compiler_admission;
 mod instance_resources;
 pub use instance_resources::instance_resources;
+pub(crate) mod table_full_text;
+pub use table_full_text::table_full_text;
 mod database_properties;
 mod memory_clerks;
 mod tempdb_metadata_memory;

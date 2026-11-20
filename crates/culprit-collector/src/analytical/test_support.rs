@@ -5,6 +5,8 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod table_full_text;
+pub use table_full_text::{TableFullTextCase, assert_table_full_text_capture, table_full_text_evidence};
 mod database_properties;
 mod memory_clerks;
 mod tempdb_metadata_memory;

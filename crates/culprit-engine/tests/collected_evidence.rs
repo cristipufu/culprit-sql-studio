@@ -519,5 +519,6 @@ mod clock_boundaries;
 mod storage;
 
 mod instance_resources;
+mod table_full_text;
 
 mod boxed_query_history;

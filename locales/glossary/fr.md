@@ -208,3 +208,4 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | gap / insert-intention lock, intent lock | verrou d’intervalle / d’intention d’insertion, verrou intentionnel | |
 | the Queries, Live views | Requêtes, En direct | |
 | telemetry outbox, capture revision, journal, replay | tampon de sortie de télémétrie, révision de capture, journal transactionnel, relire | captures locales durables ; pas de messagerie |
+| full-text index, full-text population (native crawl) | index de texte intégral, remplissage de l’index de texte intégral | métadonnées du catalogue ; ne confirment ni progression ni résultats de recherche |

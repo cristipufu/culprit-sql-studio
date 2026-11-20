@@ -1,4 +1,12 @@
 //! Explanations over an authenticated resource capture retain the native rows once, without creating a database.
+
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct CollectedTableFullTextAnalysis {
+    pub context: crate::collected_analysis::CollectedEvidenceContext,
+    pub report: Box<crate::TableFullTextReport>,
+}
+
 use crate::{
     MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, RuntimeDistributionReport, StatementWorkReport,
     TaskSpaceReport, collected_analysis::CollectedEvidenceContext,

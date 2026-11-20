@@ -2,6 +2,7 @@ import { evidencePresentation } from "../../lib/engines";
 import { ChevronRight, Copy } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { TableSignalFacts } from "../../components/BeyondTime";
+import { FullText } from "./FullText";
 import type { Report } from "../../gen/Report";
 import type { TableStat } from "../../gen/TableStat";
 import { copyAndTell } from "../../lib/clipboard";
@@ -15,6 +16,9 @@ import { setState } from "../../lib/store";
 export function Header({ report, table, findings }: { report: Report; table: TableStat; findings: ReturnType<typeof tableFindings> }) {
   const [all, setAll] = useState(false);
   const { snapshot } = report;
+  const fullText = report.table_full_text;
+  const fullTextEntries = fullText?.entries.filter((entry) => entry.schema === table.schema && entry.table === table.name) ?? [];
+  const fullTextEntry = fullTextEntries.length === 1 ? fullTextEntries[0] : null;
   const data = table.data_bytes ?? 0;
   const index = table.index_bytes ?? 0;
   const total = Math.max(1, data + index);
@@ -120,6 +124,7 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
         <TableSignalFacts report={report} table={table} />
       </div>
       <HypertableChunks key={tableKey(table)} table={table} />
+      {fullText && fullTextEntry && <FullText key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_full_text])} report={fullText} entry={fullTextEntry} />}
       {findings.length > 0 && (
         <div className="td-findings">
           {shown.map((f, n) => (

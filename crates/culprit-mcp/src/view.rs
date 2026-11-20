@@ -658,6 +658,11 @@ pub fn table(report: &Report, wanted: &str) -> Result<Value> {
         "foreign_keys": foreign_keys,
         "note": format!("used_by_captured_plans covers the {planned} query plans captured in this scan; an index missing there may still serve other queries."),
     });
+    if let Some(full_text) = culprit_engine::explain_table_full_text(s, t)? {
+        let entry = &full_text.entries[0];
+        out["full_text"] = json!({"summary":entry.summary,"metrics":entry.metrics,"qualification":entry.qualification,"verify":entry.verify,
+            "source_state":full_text.source_state,"source_reason":full_text.source_reason,"limitations":full_text.limitations});
+    }
     if !referenced_by.is_empty() {
         out["referenced_by"] = json!(referenced_by);
     }
@@ -940,3 +945,6 @@ mod tests {
         assert!(summary["hottest"].is_null() && summary["hottest_cost_pct"].is_null(), "{summary}");
     }
 }
+
+#[cfg(test)]
+mod table_full_text_tests;

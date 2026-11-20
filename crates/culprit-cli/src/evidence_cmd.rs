@@ -239,6 +239,7 @@ enum Analysis {
     MemoryClerks,
     TempdbMetadataMemory,
     DatabaseProperties,
+    TableFullText,
     InstanceResources,
     Storage,
     WaitCounters,
@@ -278,6 +279,7 @@ impl Analysis {
             | Self::TempdbMetadataMemory
             | Self::InstanceResources
             | Self::DatabaseProperties
+            | Self::TableFullText
             | Self::Storage
             | Self::ConnectionOutcomes
             | Self::ConfiguredLogRates
@@ -459,6 +461,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::InstanceResources) => {
             let analysis = culprit_engine::collected_resources::instance_resources(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::instance_resources(&analysis.report))?;
+        }
+        Some(Analysis::TableFullText) => {
+            let analysis = culprit_engine::collected_resources::table_full_text(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::table_full_text(&analysis.report))?;
         }
         Some(Analysis::DatabaseProperties) => {
             let analysis = culprit_engine::collected_resources::database_properties(&capture)?;

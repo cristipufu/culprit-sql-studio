@@ -189,3 +189,4 @@ Aktualisieren (refresh), Vergleichen, Teilen, Exportieren, Importieren, Öffnen,
 Messen, Markieren, Ignorieren, Suchen, Weiter, Zurück, Fertig, Leeren (clear), Bearbeiten, Umbenennen, Einfügen.
 Progress: „Wird gespeichert…“, „Wird gelesen…“, „Wird ausgeführt…“.
 | telemetry outbox, capture revision, journal, replay | Telemetrie-Ausgangspuffer, Erfassungsrevision, Transaktionsjournal, erneut ausgeben | dauerhaft gespeicherte lokale Telemetrie; keine E-Mail |
+| full-text index, full-text population (native crawl) | Volltextindex, Volltextauffüllung | Katalogmetadaten; kein Nachweis über Fortschritt oder Suchergebnisse |
