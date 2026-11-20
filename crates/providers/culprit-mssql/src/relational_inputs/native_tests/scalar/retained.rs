@@ -112,22 +112,36 @@ pub(super) fn explain(capture: &Captured, position: usize, statement: &CachedSta
     assert!(!encoded.contains("ParameterCompiledValue") && !encoded.contains("ParameterRuntimeValue"));
     plan
 }
+pub(super) async fn verify_actor_present(fixture: &OwnedSourceFixture, database: &str, actor: &probe::Actor) {
+    verify_actor_count(fixture, database, actor, 1).await;
+}
 pub(super) async fn verify_actor_disappeared(fixture: &OwnedSourceFixture, database: &str, actor: &probe::Actor) {
+    verify_actor_count(fixture, database, actor, 0).await;
+}
+async fn verify_actor_count(fixture: &OwnedSourceFixture, database: &str, actor: &probe::Actor, expected: i64) {
     let mut control = crate::test_support::connect(
         &config(fixture.port, database, fixture.password(), "scalar-retained-proof"),
         SessionKind::User,
     )
     .await
     .unwrap();
-    verify_owned_source(&mut control).await.unwrap();
-    // Bind the exact original native generation rather than infer identity from a reused session number.
-    let mut query = tiberius::Query::new(
-        "SELECT /* culprit fixture */ COUNT_BIG(*) AS original_actor FROM sys.dm_exec_sessions WHERE session_id=@P1 AND CONVERT(varchar(40),login_time,126)=@P2",
-    );
-    query.bind(actor.id);
-    query.bind(actor.generation.as_str());
-    let rows = query.query(&mut control).await.unwrap().into_first_result().await.unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].get::<i64, _>("original_actor"), Some(0));
-    control.close().await.unwrap();
+    let observed = async {
+        verify_owned_source(&mut control).await?;
+        // Match the SAME full native datetime2 representation as Probe's original login point.
+        // A count0 without the corresponding live positive would not validate this generation predicate.
+        let mut query = tiberius::Query::new(
+            "SELECT /* culprit fixture */ COUNT_BIG(*) AS original_actor FROM sys.dm_exec_sessions WHERE session_id=@P1 AND CONVERT(varchar(40),CAST(login_time AS datetime2),126)=@P2",
+        );
+        query.bind(actor.id);
+        query.bind(actor.generation.as_str());
+        let rows = query.query(&mut control).await.map_err(crate::conn::map_error)?
+            .into_first_result().await.map_err(crate::conn::map_error)?;
+        let [row] = rows.as_slice() else { return Err(crate::read::invalid_data()) };
+        crate::read::integer(&crate::value::Rec::from_row(row), "original_actor")
+    }.await;
+    // Always retire this original verifier, preserving the first error before any close failure.
+    let closed = control.close().await;
+    let count = observed.unwrap();
+    closed.unwrap();
+    assert_eq!(count, expected, "the exact original native actor generation must match its expected lifetime");
 }

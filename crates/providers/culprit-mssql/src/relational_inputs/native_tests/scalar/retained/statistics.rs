@@ -75,6 +75,7 @@ async fn changed_statistics(fixture: &OwnedSourceFixture, database: &str) {
     let before = current_statistics(&mut probe).await;
     assert_eq!(before.table.database_id, original.context.database_id);
     let mut retained = Original::capture(&probe, &original).await;
+    verify_actor_present(fixture, database, &probe.actor()).await;
     // Refresh only this nonce-owned statistic, then explicitly prepare the controlled counterpart.
     // FULLSCAN alone need not replace a cache incarnation. The separately paid sp_recompile is not
     // inferred from a handle or native cache flag; neither intervention isolates the work difference.
@@ -177,7 +178,9 @@ async fn changed_statistics(fixture: &OwnedSourceFixture, database: &str) {
             "original_native_retrieved_from_cache":original.plan.facts().parameter_context.as_ref().and_then(|context|context.retrieved_from_cache),
             "counterpart_native_retrieved_from_cache":counterpart.plan.facts().parameter_context.as_ref().and_then(|context|context.retrieved_from_cache),
             "owned_application_executions":3,"owned_actual_plan_capture_dispatches":9,
-            "fixture_sql_dispatch_upper_bound_including_setup_and_original_source":56,
+            "live_actor_generation_verification_dispatches":2,
+            "live_actor_generation_verifier_session_setup_dispatches":1,
+            "fixture_sql_dispatch_upper_bound_including_setup_and_original_source":59,
             "histogram_change_or_exclusive_parameter_cause_established":false,
             "statistics_refresh_alone_isolated_as_cause":false,
             "fresh_compilation_inferred_from_cache_flag":false,

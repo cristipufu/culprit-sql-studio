@@ -171,6 +171,7 @@ async fn competing_blocking(fixture: &OwnedSourceFixture, database: &str) {
     eprintln!("owned scalar blocking phase=original-execution-and-blocking-capture-settled");
     assert_context(&original, ParameterValues::Different);
     let mut retained = Original::capture_owned(owner, &original).await;
+    verify_actor_present(fixture, database, &probe.actor()).await;
     eprintln!("owned scalar blocking phase=original-plan-retained");
     assert_eq!(blocked.source().unwrap().target, retained.capture.source().unwrap().target);
     assert_eq!(blocked.source().unwrap().partition, retained.capture.source().unwrap().partition);
@@ -242,7 +243,9 @@ async fn competing_blocking(fixture: &OwnedSourceFixture, database: &str) {
             "recovered_activity_records": &recovered.records,
             "source_queries": source_queries,
             "source_dispatch_cap": 26,
-            "separately_paid_fixture_dispatch_cap": 48,
+            "live_actor_generation_verification_dispatches": 2,
+            "live_actor_generation_verifier_session_setup_dispatches": 1,
+            "separately_paid_fixture_dispatch_cap": 51,
             "fixture_caps_are_not_observed_server_work": true,
             "lookup_operator_reads": lookup_reads,
             "scan_operator_reads": scan_reads,
