@@ -1904,7 +1904,7 @@
         "table": "orders"
       }
     ],
-    "format": 33,
+    "format": 34,
     "histograms": [
       {
         "buckets": 4.0,
@@ -3178,6 +3178,7 @@
         "lob_bytes": null,
         "modifications_since_analyze": null,
         "mssql_full_text": null,
+        "mssql_storage_configuration": null,
         "name": "customers",
         "overflow_bytes": null,
         "partition_of": null,
@@ -3208,6 +3209,7 @@
         "lob_bytes": null,
         "modifications_since_analyze": null,
         "mssql_full_text": null,
+        "mssql_storage_configuration": null,
         "name": "products",
         "overflow_bytes": null,
         "partition_of": null,
@@ -3238,6 +3240,7 @@
         "lob_bytes": null,
         "modifications_since_analyze": null,
         "mssql_full_text": null,
+        "mssql_storage_configuration": null,
         "name": "orders",
         "overflow_bytes": null,
         "partition_of": null,
@@ -3268,6 +3271,7 @@
         "lob_bytes": null,
         "modifications_since_analyze": null,
         "mssql_full_text": null,
+        "mssql_storage_configuration": null,
         "name": "order_items",
         "overflow_bytes": null,
         "partition_of": null,

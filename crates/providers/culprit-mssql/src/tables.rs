@@ -1,6 +1,9 @@
 //! Table metadata and partition accounting share one native relation for scans and streamed capture.
 use crate::{
-    read::{NativeRead, Parameter, ReadError, integer, invalid_data, optional_boolean, optional_text, text},
+    read::{
+        NativeRead, Parameter, ReadError, integer, invalid_data, optional_boolean, optional_integer, optional_text,
+        text,
+    },
     value::Rec,
 };
 use culprit_core::{Result, TableStat, telemetry::*};
@@ -45,6 +48,7 @@ WITH partitions AS ({relation}), totals AS (
 SELECT TOP (@P1) DB_ID() AS database_id,t.object_id,s.name AS schema_name,t.name AS table_name,
  CONVERT(varchar(40),t.create_date,126) AS created_without_offset,
  CONVERT(varchar(40),t.modify_date,126) AS modified_without_offset,
+ t.is_memory_optimized,t.durability,t.durability_desc,
  CASE WHEN t.is_memory_optimized=0 THEN CONVERT(varchar(40),p.row_count) END AS row_count,
  CASE WHEN {measurable} THEN CONVERT(varchar(40),p.reserved_bytes) END AS reserved_bytes,
  CASE WHEN {measurable} THEN CONVERT(varchar(40),p.data_bytes) END AS data_bytes,
@@ -85,6 +89,7 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlTableSnapshot> {
     let value = MssqlTableSnapshot {
         identity,
         full_text,
+        storage_configuration: storage_configuration(row)?,
         schema: text(row, "schema_name")?,
         name: text(row, "table_name")?,
         modified_without_offset: text(row, "modified_without_offset")?,
@@ -126,6 +131,17 @@ pub(crate) async fn application<R: NativeRead>(reader: &mut R, with_partition_st
     let tables = rows.iter().map(|row| decode(row, &layout).and_then(project)).collect::<Result<Vec<_>>>()?;
     Ok(TableRead { tables, complete_scope })
 }
+fn storage_configuration(row: &Rec) -> Result<MssqlTableStorageConfiguration> {
+    let value = MssqlTableStorageConfiguration {
+        memory_optimized: optional_boolean(row, "is_memory_optimized")?,
+        durability: optional_integer(row, "durability")?
+            .map(|code| u8::try_from(code).map_err(|_| invalid_data()))
+            .transpose()?,
+        durability_desc: optional_text(row, "durability_desc")?,
+    };
+    value.is_valid().then_some(value).ok_or_else(invalid_data)
+}
+
 fn display(value: Option<String>) -> Option<f64> {
     value.and_then(|value| value.parse::<u64>().ok()).map(|value| value as f64)
 }
@@ -160,6 +176,7 @@ fn project(value: MssqlTableSnapshot) -> Result<TableStat> {
         xid_age: None,
         storage: None,
         mssql_full_text: Some(value.full_text),
+        mssql_storage_configuration: Some(value.storage_configuration),
         partition_of: None,
         counters_since: None,
     })

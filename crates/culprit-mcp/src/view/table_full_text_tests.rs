@@ -49,3 +49,83 @@ fn single_table_schema_projects_original_native_catalog_values_and_never_a_stale
             .contains(&json!(culprit_core::t!("view.table_full_text.limit.partial")))
     );
 }
+
+#[test]
+fn selected_table_storage_configuration_preserves_native_nulls_scope_and_unavailable_refusal() {
+    let mut report: Report = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/mssql-demo.report.json"
+    )))
+    .unwrap();
+    for (memory_optimized, durability, description) in [
+        (Some(false), Some(0), Some("SCHEMA_AND_DATA")),
+        (Some(true), Some(1), Some("SCHEMA_ONLY")),
+        (None, None, None),
+    ] {
+        let selected = &mut report.snapshot.tables[0];
+        selected.mssql_storage_configuration = Some(MssqlTableStorageConfiguration {
+            memory_optimized,
+            durability,
+            durability_desc: description.map(str::to_owned),
+        });
+        let name = selected.qualified();
+        let value = super::table(&report, &name).unwrap();
+        assert_eq!(value["storage_configuration"]["memory_optimized"], json!(memory_optimized));
+        assert_eq!(value["storage_configuration"]["durability"], json!(durability));
+        assert_eq!(value["storage_configuration"]["durability_desc"], json!(description));
+        assert_eq!(
+            value["storage_configuration"]["qualification"],
+            culprit_core::t!("view.table_storage.qualification")
+        );
+    }
+    report.snapshot.tables[0].mssql_full_text = None;
+    let name = report.snapshot.tables[0].qualified();
+    let source =
+        report.snapshot.sources.iter_mut().find(|source| source.source == culprit_core::source_id::TABLES).unwrap();
+    source.state = culprit_core::SourceState::Partial;
+    let partial = super::table(&report, &name).unwrap();
+    assert_eq!(partial["storage_configuration"]["source_state"], "partial");
+    assert_eq!(
+        partial["storage_configuration"]["source_qualification"],
+        culprit_core::t!("view.table_storage.partial")
+    );
+    report.snapshot.sources.iter_mut().find(|source| source.source == culprit_core::source_id::TABLES).unwrap().state =
+        culprit_core::SourceState::Unavailable;
+    assert!(super::table(&report, &name).unwrap().get("storage_configuration").is_none());
+    report.snapshot.sources.retain(|source| source.source != culprit_core::source_id::TABLES);
+    let unknown = super::table(&report, &name).unwrap();
+    assert_eq!(unknown["storage_configuration"]["source_state"], Value::Null);
+    assert_eq!(
+        unknown["storage_configuration"]["source_qualification"],
+        culprit_core::t!("view.table_storage.unknown_source")
+    );
+    report.snapshot.server.engine = culprit_core::Engine::Postgres;
+    assert!(super::table(&report, &name).unwrap().get("storage_configuration").is_none());
+}
+
+#[test]
+fn storage_configuration_is_selected_by_its_original_table_and_invalid_native_pairs_are_withheld() {
+    let mut report: Report = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/mssql-demo.report.json"
+    )))
+    .unwrap();
+    let table = &mut report.snapshot.tables[0];
+    let name = table.qualified();
+    table.mssql_storage_configuration = Some(MssqlTableStorageConfiguration {
+        memory_optimized: Some(true),
+        durability: Some(1),
+        durability_desc: Some("SCHEMA_ONLY".into()),
+    });
+    let mut other = table.clone();
+    other.name = "IndependentTable".into();
+    other.mssql_full_text = None;
+    other.mssql_storage_configuration = None;
+    let other_name = other.qualified();
+    report.snapshot.tables.push(other);
+    assert!(super::table(&report, &name).unwrap().get("storage_configuration").is_some());
+    assert!(super::table(&report, &other_name).unwrap().get("storage_configuration").is_none());
+    report.snapshot.tables[0].mssql_storage_configuration.as_mut().unwrap().durability_desc =
+        Some("SCHEMA_AND_DATA".into());
+    assert!(super::table(&report, &name).unwrap().get("storage_configuration").is_none());
+}

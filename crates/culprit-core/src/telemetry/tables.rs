@@ -2,6 +2,8 @@
 use super::*;
 mod full_text;
 pub use full_text::*;
+mod storage_configuration;
+pub use storage_configuration::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -31,6 +33,7 @@ pub struct MssqlTableSnapshot {
     pub is_heap: Option<bool>,
     pub size_source: MssqlTableSizeSource,
     pub full_text: MssqlTableFullText,
+    pub storage_configuration: MssqlTableStorageConfiguration,
 }
 impl MssqlTableSnapshot {
     pub fn is_valid(&self) -> bool {
@@ -44,6 +47,9 @@ impl MssqlTableSnapshot {
         ];
         self.identity.is_valid()
             && self.full_text.is_valid()
+            && self.storage_configuration.is_valid()
+            && (self.storage_configuration.memory_optimized != Some(true)
+                || self.estimated_rows.is_none() && sizes.iter().all(|value| value.is_none()))
             && [&self.schema, &self.name].into_iter().all(|name| !name.is_empty() && name.len() <= 2048)
             && super::catalog::local_time(&self.modified_without_offset)
             && self.estimated_rows.as_deref().is_none_or(valid_counter)

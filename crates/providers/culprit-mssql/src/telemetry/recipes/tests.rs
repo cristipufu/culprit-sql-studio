@@ -34,7 +34,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.shared-operational", 7),
             ("mssql.settings", 4),
             ("mssql.tuning", 2),
-            ("mssql.tables", 2),
+            ("mssql.tables", 3),
             ("mssql.indexes", 2),
             ("mssql.query-compilation", 3),
             ("mssql.cached-runtime", 2),

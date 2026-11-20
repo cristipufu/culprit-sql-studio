@@ -221,6 +221,7 @@ pub(crate) fn project(r: &NativeCounterSet) -> TableStat {
         xid_age: number(r, "xid_age"),
         storage: None,
         mssql_full_text: None,
+        mssql_storage_configuration: None,
         in_row_bytes: number(r, "in_row_bytes"),
         lob_bytes: number(r, "lob_bytes"),
         overflow_bytes: None,

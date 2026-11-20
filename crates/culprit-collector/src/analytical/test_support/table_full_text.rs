@@ -74,6 +74,11 @@ pub fn table_full_text_evidence(case: TableFullTextCase) -> (CollectionDescripti
         is_heap: Some(false),
         size_source: MssqlTableSizeSource::Unavailable,
         full_text: MssqlTableFullText { availability, index },
+        storage_configuration: MssqlTableStorageConfiguration {
+            memory_optimized: Some(false),
+            durability: Some(0),
+            durability_desc: Some("SCHEMA_AND_DATA".into()),
+        },
     };
     assert!(table.is_valid());
     let records = if case == TableFullTextCase::SourceDenied {
@@ -113,7 +118,7 @@ pub fn table_full_text_evidence(case: TableFullTextCase) -> (CollectionDescripti
     (source, records)
 }
 
-pub fn assert_table_full_text_capture(
+pub fn assert_table_metadata_capture(
     capture: &crate::analytical::evidence::EvidenceCapture,
     source: &CollectionDescription,
     records: &[TelemetryRecord],

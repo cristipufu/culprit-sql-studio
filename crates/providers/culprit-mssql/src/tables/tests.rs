@@ -23,6 +23,9 @@ pub(crate) fn row() -> Rec {
         ("lob_bytes", Val::Text("16384".into())),
         ("overflow_bytes", Val::Text("16384".into())),
         ("sizes_available", Val::Int(1)),
+        ("is_memory_optimized", Val::Int(0)),
+        ("durability", Val::Int(0)),
+        ("durability_desc", Val::Text("SCHEMA_AND_DATA".into())),
         ("has_primary_key", Val::Int(1)),
         ("is_heap", Val::Int(0)),
         ("full_text_availability", Val::Int(0)),
@@ -131,4 +134,81 @@ async fn unavailable_full_text_catalogs_preserve_the_same_bounded_table_projecti
         assert_eq!(reader.calls.len(), 2);
         assert_eq!(reader.calls[1].limit, MAX_APPLICATION_TABLES + 1);
     }
+}
+
+fn memory_optimized_row(durability: i64, description: &str) -> Rec {
+    replace(
+        &without_full_text(0),
+        &[
+            ("is_memory_optimized", Val::Int(1)),
+            ("durability", Val::Int(durability)),
+            ("durability_desc", Val::Text(description.into())),
+            ("row_count", Val::Null),
+            ("sizes_available", Val::Int(0)),
+            ("reserved_bytes", Val::Null),
+            ("data_bytes", Val::Null),
+            ("index_bytes", Val::Null),
+            ("in_row_bytes", Val::Null),
+            ("lob_bytes", Val::Null),
+            ("overflow_bytes", Val::Null),
+        ],
+    )
+}
+
+#[tokio::test]
+async fn native_table_storage_configuration_survives_the_same_scan_and_stream_decoder() {
+    for (memory_optimized, durability, description, native) in [
+        (false, 0, "SCHEMA_AND_DATA", row()),
+        (true, 0, "SCHEMA_AND_DATA", memory_optimized_row(0, "SCHEMA_AND_DATA")),
+        (true, 1, "SCHEMA_ONLY", memory_optimized_row(1, "SCHEMA_ONLY")),
+    ] {
+        let layout = Layout::new(true);
+        let streamed = decode(&native, &layout).unwrap();
+        assert_eq!(streamed.storage_configuration.memory_optimized, Some(memory_optimized));
+        assert_eq!(streamed.storage_configuration.durability, Some(durability));
+        assert_eq!(streamed.storage_configuration.durability_desc.as_deref(), Some(description));
+        if memory_optimized {
+            assert_eq!(streamed.size_source, MssqlTableSizeSource::Unavailable);
+            assert!(streamed.estimated_rows.is_none());
+            assert!(streamed.reserved_bytes.is_none());
+        }
+        let mut reader = FakeRead::new(vec![Ok(vec![metadata(true)]), Ok(vec![native])]);
+        let mut scan = application(&mut reader, true).await.unwrap();
+        assert_eq!(scan.tables.remove(0).mssql_storage_configuration, Some(streamed.storage_configuration));
+        assert_eq!(reader.calls.len(), 2);
+        let sql = &reader.calls[1].sql;
+        assert!(sql.contains("t.is_memory_optimized,t.durability,t.durability_desc"));
+        assert!(sql.contains("TOP (@P1)"));
+        assert!(!sql.contains("dm_db_xtp"));
+    }
+}
+
+#[test]
+fn table_configuration_native_nulls_are_independent_and_malformed_or_contradictory_facts_are_refused() {
+    let layout = Layout::new(true);
+    let unknown = replace(
+        &row(),
+        &[("is_memory_optimized", Val::Null), ("durability", Val::Null), ("durability_desc", Val::Null)],
+    );
+    let value = decode(&unknown, &layout).unwrap();
+    assert_eq!(
+        value.storage_configuration,
+        MssqlTableStorageConfiguration { memory_optimized: None, durability: None, durability_desc: None }
+    );
+    assert_eq!(value.reserved_bytes.as_deref(), Some("81920"));
+    for changes in [
+        vec![("is_memory_optimized", Val::Int(2))],
+        vec![("durability", Val::Int(-1))],
+        vec![("durability", Val::Int(2))],
+        vec![("durability", Val::Int(256))],
+        vec![("durability", Val::Text("0".into()))],
+        vec![("durability_desc", Val::Text("SCHEMA_ONLY".into()))],
+        vec![("durability_desc", Val::Text("unexpected".into()))],
+        vec![("durability", Val::Int(1)), ("durability_desc", Val::Text("SCHEMA_ONLY".into()))],
+        vec![("is_memory_optimized", Val::Int(1))],
+    ] {
+        assert!(decode(&replace(&row(), &changes), &layout).is_err());
+    }
+    let missing = Rec::of(&[("durability", Val::Null), ("durability_desc", Val::Null)]);
+    assert!(storage_configuration(&missing).is_err(), "absent native fields are not SQL NULLs");
 }

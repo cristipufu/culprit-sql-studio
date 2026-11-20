@@ -93,7 +93,12 @@ async fn read_tables(fixture: &Fixture<'_>, mode: ReadMode, denied: bool) -> Tab
                     .tables
                     .into_iter()
                     .filter(|table| fixture.owns(&table.schema, &table.name))
-                    .map(|table| (table.name, table.mssql_full_text.expect("canonical MSSQL projection")))
+                    .map(|table| {
+                        assert_rowstore_configuration(
+                            table.mssql_storage_configuration.as_ref().expect("canonical native configuration"),
+                        );
+                        (table.name, table.mssql_full_text.expect("canonical MSSQL projection"))
+                    })
                     .collect::<Vec<_>>()
             }
             ReadMode::Stream => stream_tables(&mut reader, fixture, denied).await?,
@@ -164,6 +169,7 @@ async fn stream_tables(
                 continue;
             }
             fixture.assert_identity(&table);
+            assert_rowstore_configuration(&table.storage_configuration);
             if denied {
                 for name in [
                     "full_text_object_id",
@@ -196,4 +202,16 @@ async fn stream_tables(
         }
     }
     Ok(retained)
+}
+
+fn assert_rowstore_configuration(configuration: &MssqlTableStorageConfiguration) {
+    assert_eq!(
+        configuration,
+        &MssqlTableStorageConfiguration {
+            memory_optimized: Some(false),
+            durability: Some(0),
+            durability_desc: Some("SCHEMA_AND_DATA".into()),
+        },
+        "the owned ordinary tables retain their exact native catalog settings"
+    );
 }
