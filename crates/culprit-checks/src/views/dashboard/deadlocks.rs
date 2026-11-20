@@ -30,10 +30,14 @@ pub(super) fn deadlocks(report: &Report) -> Tile {
         });
         return tile;
     };
+    if !d.has_database_scope() {
+        let mut tile = Tile::new(TileKey::Deadlocks, TileStatus::Unavailable, t!("evidence.deadlocks.database_scope"));
+        tile.detail = d.note.clone();
+        return tile;
+    }
     let finding_id = report.findings.iter().find(|f| f.check == "deadlocks").map(|f| f.id.clone());
-    // This database's, as the check counts them: the server-wide reports carry other databases' too.
-    let here: Vec<&culprit_core::Deadlock> =
-        d.deadlocks.iter().filter(|dl| crate::deadlocks::in_this_database(dl, s)).collect();
+    // The original source, rather than graph labels, establishes database membership.
+    let here: Vec<&culprit_core::Deadlock> = d.deadlocks.iter().collect();
     // Only a dated deadlock is "in the last day": InnoDB keeps its latest one however old it is.
     let dated = here.iter().filter(|dl| dl.at.is_some()).count();
     if !here.is_empty() && dated == 0 {

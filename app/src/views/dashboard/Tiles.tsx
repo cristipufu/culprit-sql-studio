@@ -1,3 +1,4 @@
+import { databaseDeadlockGraphCount } from "../../lib/deadlock-scope";
 import { ChevronRight, Copy, FileText, RefreshCw, SquarePen } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { Report } from "../../gen/Report";
@@ -199,8 +200,11 @@ export function SignalsTile({
 
 export function DeadlocksTile({ tile, report }: { tile: Tile; report: Report }) {
   const d = report.snapshot.deadlocks;
-  if (tile.status === "unavailable" || !d) return <Frame tile={tile} />;
   const open = () => openLive("deadlocks");
+  if (databaseDeadlockGraphCount(d) === null) {
+    return <Frame tile={{ ...tile, status: "unavailable", takeaway: t("evidence.deadlocks.database_scope"), detail: d?.note ?? null, metrics: [], items: [], fix_sql: null }} action={t("ui.dashboard.action.deadlocks")} onOpen={open} />;
+  }
+  if (tile.status === "unavailable" || !d) return <Frame tile={tile} />;
   if (d.counted != null && d.deadlocks.length === 0) {
     return (
       <Frame tile={tile} action={t("ui.dashboard.action.deadlocks")} onOpen={open} foot={<p className="dash-detail">{t("ui.dashboard.deadlocks.paste")}</p>}>

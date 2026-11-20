@@ -73,12 +73,20 @@ pub fn blocking(live: &LiveState) -> Value {
 }
 
 pub fn deadlocks(report: &DeadlockReport) -> Value {
+    let database_scope = report.has_database_scope();
     json!({
         "source": report.source,
+        "scope": report.scope,
         "since_hours": report.since_hours,
-        "count": report.deadlocks.len(),
-        "counted": report.counted,
-        "counted_since": report.counted_since,
+        "count": database_scope.then_some(report.deadlocks.len()),
+        "counted": report.counted.filter(|_| database_scope),
+        "counted_since": report.counted_since.as_ref().filter(|_| database_scope),
+        "history": {
+            "graph_count": report.deadlocks.len(),
+            "counted": report.counted,
+            "counted_since": report.counted_since,
+        },
+        "database_scope_note": (!database_scope).then(|| culprit_core::t!("evidence.deadlocks.database_scope")),
         "note": report.note,
         "deadlocks": report.deadlocks.iter().take(20).map(|d| json!({
             "id": d.id,
@@ -110,6 +118,63 @@ pub fn deadlocks(report: &DeadlockReport) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_and_unresolved_deadlock_history_never_becomes_a_database_count() {
+        use culprit_core::{Deadlock, MeasurementScope};
+
+        for scope in [
+            None,
+            Some(MeasurementScope::Server),
+            Some(MeasurementScope::Pool),
+            Some(MeasurementScope::Node),
+            Some(MeasurementScope::Cluster),
+            Some(MeasurementScope::Session),
+            Some(MeasurementScope::File),
+            Some(MeasurementScope::Unknown),
+        ] {
+            for graphs in [vec![], vec![Deadlock::new("original event", None, vec![], vec![])]] {
+                let report = DeadlockReport {
+                    scope,
+                    source: "pg_stat_database".into(),
+                    deadlocks: graphs,
+                    counted: Some(72.0),
+                    counted_since: Some("2026-11-01T00:00:00Z".into()),
+                    note: Some("Original source limitation".into()),
+                    ..Default::default()
+                };
+                let response = deadlocks(&report);
+                assert_eq!(response["scope"], json!(scope));
+                for field in ["count", "counted", "counted_since"] {
+                    assert!(response[field].is_null(), "unqualified database {field}");
+                }
+                assert_eq!(response["history"]["graph_count"], report.deadlocks.len());
+                assert_eq!(response["history"]["counted"], 72.0);
+                assert_eq!(response["history"]["counted_since"], "2026-11-01T00:00:00Z");
+                assert_eq!(response["deadlocks"].as_array().unwrap().len(), report.deadlocks.len());
+                assert_eq!(response["note"], "Original source limitation");
+                assert!(response["database_scope_note"].as_str().is_some_and(|note| !note.is_empty()));
+            }
+        }
+    }
+
+    #[test]
+    fn database_deadlock_counter_keeps_its_native_total_without_inventing_graphs() {
+        let report = DeadlockReport {
+            scope: Some(culprit_core::MeasurementScope::Database),
+            counted: Some(72.0),
+            counted_since: Some("2026-11-01T00:00:00Z".into()),
+            ..Default::default()
+        };
+        let response = deadlocks(&report);
+        assert_eq!(response["scope"], "database");
+        assert_eq!(response["count"], 0);
+        assert_eq!(response["counted"], 72.0);
+        assert_eq!(response["counted_since"], "2026-11-01T00:00:00Z");
+        assert!(response["deadlocks"].as_array().unwrap().is_empty());
+        assert!(response["database_scope_note"].is_null());
+    }
+
     fn live() -> LiveState {
         LiveState {
             activity_census: None,

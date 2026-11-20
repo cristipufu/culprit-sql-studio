@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use culprit_core::deadlock::classify;
 use culprit_core::{
-    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, Result, t,
+    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, MeasurementScope,
+    Result, t,
 };
 use mysql_async::Value;
 
@@ -118,13 +119,17 @@ pub(crate) async fn last_statements(conn: &mut impl crate::read::QueryRead) -> H
 
 pub(crate) async fn recent(conn: &mut impl crate::read::QueryRead, since_hours: f64) -> Result<DeadlockReport> {
     let mut report = DeadlockReport { source: "InnoDB status".into(), since_hours, ..Default::default() };
-    let status = match query_one(conn, LATEST_SQL).await {
-        Ok(row) => row.and_then(|r| r.text("Status").or_else(|| r.text("status"))).unwrap_or_default(),
-        Err(_) => {
-            report.note = Some(needs_process_privilege());
-            return Ok(report);
-        }
+    let status = query_one(conn, LATEST_SQL)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.text("Status").or_else(|| row.text("status")))
+        .filter(|status| !status.trim().is_empty());
+    let Some(status) = status else {
+        report.note = Some(needs_process_privilege());
+        return Ok(report);
     };
+    report.scope = Some(MeasurementScope::Server);
     // InnoDB prints the time in the server's own (system) time zone; the server converts it to UTC, daylight saving
     // included. When it can't, the deadlock stays undated: never guessed, and never counted in a window.
     let at = match local_time(&status) {
@@ -452,6 +457,43 @@ fn mode_label(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rows::Rec;
+
+    #[tokio::test]
+    async fn failed_or_missing_native_status_has_no_measurement_scope_or_followup_read() {
+        use crate::read::test_support::Read;
+        for reply in [
+            Err(culprit_core::Error::invalid("native status is unavailable")),
+            Ok(vec![]),
+            Ok(vec![Rec::from_values(vec![("Status", Value::NULL)])]),
+            Ok(vec![Rec::from_values(vec![("Status", Value::from(" "))])]),
+        ] {
+            let mut io = Read::with(vec![reply]);
+            let report = recent(&mut io, 24.0).await.unwrap();
+            assert_eq!(report.scope, None);
+            assert!(report.deadlocks.is_empty());
+            assert!(report.note.is_some());
+            assert_eq!(io.queries.len(), 1);
+            assert_eq!(io.closed, 0, "the caller retains lifecycle ownership");
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_native_status_keeps_server_scope_even_without_a_retained_graph() {
+        use crate::read::test_support::Read;
+        let mut io = Read::with(vec![
+            Ok(vec![Rec::from_values(vec![("Status", Value::from("INNODB MONITOR OUTPUT"))])]),
+            Ok(vec![]),
+        ]);
+        let report = recent(&mut io, 24.0).await.unwrap();
+        assert_eq!(report.scope, Some(MeasurementScope::Server));
+        assert!(!report.has_database_scope());
+        assert!(report.deadlocks.is_empty());
+        assert!(report.recent_only);
+        assert_eq!(io.queries.len(), 2);
+        assert_eq!(io.closed, 0);
+    }
+
     #[test]
     fn native_graph_scope_preserves_quoted_dots_and_escapes_without_reading_statement_labels() {
         let section = "RECORD LOCKS index PRIMARY of table `db.with``quote`.`t.name` trx id 1\nTABLE LOCK table `second`.`tab` trx id 2";

@@ -1,5 +1,6 @@
 {
  "mssql": {
+   "scope": "server",
   "counted": null,
   "counted_since": null,
   "deadlocks": [
@@ -214,6 +215,7 @@
   "source": "system_health event files and ring buffer"
  },
  "postgres": {
+   "scope": "database",
   "counted": 1.0,
   "counted_since": "2026-10-11T07:01:50Z",
   "deadlocks": [],
@@ -222,6 +224,7 @@
   "source": "pg_stat_database"
  },
  "mysql": {
+   "scope": "server",
   "counted": null,
   "counted_since": null,
   "deadlocks": [
@@ -334,6 +337,7 @@
   "source": "InnoDB status"
  },
  "timescale-demo": {
+   "scope": "database",
   "deadlocks": [],
   "source": "pg_stat_database",
   "since_hours": 24.0,

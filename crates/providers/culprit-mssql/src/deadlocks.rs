@@ -4,8 +4,8 @@
 
 use culprit_core::deadlock::classify;
 use culprit_core::{
-    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, Error, LockHolder, LockWait, Result, t,
-    telemetry::canonical_time,
+    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, Error, LockHolder, LockWait, MeasurementScope,
+    Result, t, telemetry::canonical_time,
 };
 use roxmltree::{Document, Node};
 
@@ -104,6 +104,7 @@ pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Resul
         report.source = database_session();
         match native::read(io, native::Origin::DatabaseSession, &database, &from, &until, READ_LIMIT, true).await {
             Ok(events) => {
+                report.scope = Some(MeasurementScope::Database);
                 report.deadlocks.extend(events.into_iter().flat_map(|event| event.graphs));
                 report.note = Some(t!("provider.mssql.deadlocks.database_session_recent"));
             }
@@ -115,6 +116,7 @@ pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Resul
         report.recent_only = true;
         return Ok(report);
     }
+    report.scope = Some(MeasurementScope::Server);
     let (mut files, mut ring) = (false, false);
     if let Ok(events) = native::read(io, native::Origin::SystemHealth, &database, &from, &until, READ_LIMIT, true).await
     {
@@ -155,8 +157,8 @@ async fn ring_deadlocks(io: &mut impl NativeRead) -> Result<Vec<Deadlock>> {
     Ok(graphs)
 }
 
-/// Whether a deadlock from the instance-wide system_health session involves `database`: one of its processes ran in
-/// it. A graph that names no database for any process can't be placed and is kept.
+/// Retain graphs with this displayed database name or unresolved membership. This history filter does not establish
+/// that a graph belongs to the current database incarnation; the report remains server-scoped.
 fn involves(d: &Deadlock, database: &str) -> bool {
     let mut named = d.processes.iter().filter_map(|p| p.database.as_deref()).peekable();
     named.peek().is_none() || named.any(|db| db.eq_ignore_ascii_case(database))
@@ -397,11 +399,10 @@ mod tests {
         assert_eq!(d.resources[0].holders[0].mode.as_deref(), Some("X"));
     }
 
-    // system_health records every database's deadlocks; a scan of one database keeps only its own.
     #[test]
-    fn instance_wide_deadlocks_are_kept_only_for_this_database() {
+    fn the_history_name_filter_preserves_unresolved_membership_without_proving_database_scope() {
         let found = parse_deadlock_xml(KEY_LOOKUP_XDL, "system_health").unwrap();
-        assert!(involves(&found[0], "SHOP"), "both processes ran in shop");
+        assert!(involves(&found[0], "SHOP"), "both process labels name shop");
         assert!(!involves(&found[0], "billing"), "another database's deadlock");
         let unnamed = parse_deadlock_xml(&KEY_LOOKUP_XDL.replace(r#" currentdbname="shop""#, ""), "pasted").unwrap();
         assert!(involves(&unnamed[0], "billing"), "a graph without databases can't be placed, so it stays");
@@ -508,6 +509,7 @@ mod tests {
         );
         let mut io = recent_reader(Ok(vec![file_row("2026-10-11T12:05:01.1234567Z", &first)]), Some(&ring));
         let report = recent(&mut io, 1.0).await.unwrap();
+        assert_eq!(report.scope, Some(MeasurementScope::Server));
         assert_eq!(report.deadlocks.len(), 2);
         assert_eq!(report.deadlocks[0].at.as_deref(), Some("2026-10-11T12:05:01.123456800Z"));
         assert_eq!(report.deadlocks[1].at.as_deref(), Some("2026-10-11T12:05:01.123456700Z"));
@@ -516,6 +518,31 @@ mod tests {
         assert!(!report.recent_only);
         assert_eq!(io.calls.len(), 4, "the existing native query population is unchanged");
         assert_eq!(io.closed, 0, "the caller still owns the original reader's close");
+    }
+
+    #[tokio::test]
+    async fn database_scoped_session_owns_report_scope_even_when_graph_database_names_are_missing() {
+        use super::database::tests::{configuration, event, target};
+        let server = Rec::of(&[
+            ("edition", Val::Int(5)),
+            ("db", Val::Text("shop".into())),
+            ("observed_at", Val::Text("2020-01-01T07:00:00Z".into())),
+        ]);
+        let mut io =
+            FakeRead::new(vec![Ok(vec![server.clone()]), Ok(vec![configuration()]), Ok(vec![target(&[event(1)])])]);
+        let report = recent(&mut io, 1.0).await.unwrap();
+        assert_eq!(report.scope, Some(MeasurementScope::Database));
+        assert_eq!(report.deadlocks.len(), 1);
+        assert!(report.deadlocks[0].processes.iter().all(|process| process.database.is_none()));
+        assert_eq!(io.calls.len(), 3);
+        assert_eq!(io.closed, 0, "the caller still owns close");
+
+        let mut io = FakeRead::new(vec![Ok(vec![server]), Err(invalid_data().into())]);
+        let unavailable = recent(&mut io, 1.0).await.unwrap();
+        assert_eq!(unavailable.scope, None);
+        assert!(unavailable.deadlocks.is_empty());
+        assert!(unavailable.note.is_some());
+        assert_eq!(io.calls.len(), 2, "an unavailable database source has no server-wide fallback");
     }
 
     #[tokio::test]

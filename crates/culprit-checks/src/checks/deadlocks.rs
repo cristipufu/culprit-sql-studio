@@ -81,24 +81,6 @@ pub struct Counted<'s> {
     severity: Severity,
 }
 
-/// Whether a deadlock is this database's. SQL Server's system_health and InnoDB's report are the whole server's: a
-/// deadlock whose processes ran in other databases (SQL Server), or whose tables are all in other schemas (MySQL, where
-/// a schema is a database), belongs to them. One that names neither can't be placed, and is kept.
-pub(crate) fn in_this_database(d: &Deadlock, snapshot: &Snapshot) -> bool {
-    let database = &snapshot.server.database;
-    let mut named = d.processes.iter().filter_map(|p| p.database.as_deref()).peekable();
-    if named.peek().is_some() {
-        return named.any(|db| db.eq_ignore_ascii_case(database));
-    }
-    if snapshot.server.engine == Engine::Mysql {
-        let mut schemas = d.objects.iter().filter_map(|o| o.split_once('.').map(|(s, _)| s)).peekable();
-        if schemas.peek().is_some() {
-            return schemas.any(|s| s.eq_ignore_ascii_case(database));
-        }
-    }
-    true
-}
-
 /// How serious `n` dated deadlocks are over the `hours` the report covers: by how often, not how many. Ten in a day is
 /// High, as is one a day for ten days or more; a few in a month is Medium, one or two Low.
 pub(crate) fn deadlock_severity(n: usize, hours: f64) -> Severity {
@@ -113,14 +95,15 @@ pub(crate) fn deadlock_severity(n: usize, hours: f64) -> Severity {
 }
 
 fn deadlock_cases(snapshot: &Snapshot) -> Vec<DeadlockCase<'_>> {
-    let Some(report) = snapshot.deadlocks.as_ref() else { return Vec::new() };
+    let Some(report) = snapshot.deadlocks.as_ref().filter(|report| report.has_database_scope()) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
-    // The source keeps only its most recent deadlocks (InnoDB always), as its note says: a caveat on each pattern.
-    let only_latest_kept =
-        report.note.as_deref().filter(|_| report.recent_only || snapshot.server.engine == Engine::Mysql);
+    // Retention belongs to the original source, independently of the engine or the note's language.
+    let only_latest_kept = report.note.as_deref().filter(|_| report.recent_only);
 
     let mut groups: BTreeMap<(DeadlockPattern, Vec<String>), Vec<&Deadlock>> = BTreeMap::new();
-    for d in report.deadlocks.iter().filter(|d| in_this_database(d, snapshot)) {
+    for d in &report.deadlocks {
         groups.entry((d.pattern, d.objects.clone())).or_default().push(d);
     }
     for ((pattern, objects), list) in groups {
@@ -384,7 +367,9 @@ fn serde_key(pattern: DeadlockPattern) -> &'static str {
 mod tests {
     use super::*;
     use culprit_core::deadlock::classify;
-    use culprit_core::{DeadlockProcess, DeadlockReport, DeadlockResource, LockHolder};
+    use culprit_core::{
+        DeadlockProcess, DeadlockReport, DeadlockResource, LockHolder, MeasurementScope, TileKey, TileStatus,
+    };
 
     fn deadlock(at: &str) -> Deadlock {
         let process = |id: &str, victim| DeadlockProcess {
@@ -422,6 +407,7 @@ mod tests {
         let mut snapshot: Snapshot =
             serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
         snapshot.deadlocks = Some(DeadlockReport {
+            scope: Some(MeasurementScope::Database),
             deadlocks: (0..6).map(|i| deadlock(&format!("2026-10-11T1{i}:00:00Z"))).collect(),
             source: "system_health event files".into(),
             since_hours: 24.0,
@@ -452,6 +438,7 @@ mod tests {
             let mut snapshot: Snapshot =
                 serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
             snapshot.deadlocks = Some(DeadlockReport {
+                scope: Some(MeasurementScope::Database),
                 deadlocks: vec![deadlock("2026-10-11T10:00:00Z")],
                 source: "system_health event files".into(),
                 since_hours: 24.0,
@@ -463,44 +450,103 @@ mod tests {
         });
     }
 
-    // C1: system_health and InnoDB's report are the server's; another database's deadlocks aren't this one's.
     #[test]
-    fn other_databases_deadlocks_are_left_out() {
+    fn shared_or_unknown_deadlocks_keep_history_without_database_findings_or_counts() {
+        for engine in [Engine::Mssql, Engine::Mysql, Engine::Postgres] {
+            for scope in [None, Some(MeasurementScope::Server), Some(MeasurementScope::Unknown)] {
+                for database_label in [None, Some("culprit_demo"), Some("billing")] {
+                    let mut snapshot = crate::waits::snapshot_with(engine);
+                    let mut graph = deadlock(&snapshot.taken_at);
+                    for process in &mut graph.processes {
+                        process.database = database_label.map(str::to_owned);
+                    }
+                    snapshot.deadlocks = Some(DeadlockReport {
+                        scope,
+                        deadlocks: vec![graph],
+                        source: "pg_stat_database".into(),
+                        counted: Some(400.0),
+                        counted_since: Some("2026-10-01T00:00:00Z".into()),
+                        since_hours: 24.0,
+                        ..Default::default()
+                    });
+                    assert!(deadlocks(&snapshot).is_empty());
+                    let original = snapshot.deadlocks.as_ref().unwrap().deadlocks.clone();
+                    let report = crate::analyze(snapshot);
+                    let retained = report.snapshot.deadlocks.as_ref().unwrap();
+                    assert_eq!(retained.deadlocks, original, "scope refusal preserves the original incident");
+                    assert_eq!(retained.scope, scope);
+                    assert_eq!(retained.counted, Some(400.0));
+                    let assessment =
+                        report.assessments.iter().find(|assessment| assessment.check == "deadlocks").unwrap();
+                    assert_eq!(assessment.status, culprit_core::CheckStatus::InsufficientEvidence);
+                    let dashboard = crate::dashboard(&report);
+                    let tile = dashboard.tile(TileKey::Deadlocks).unwrap();
+                    assert_eq!(tile.status, TileStatus::Unavailable);
+                    assert!(tile.metrics.is_empty());
+                    assert!(tile.items.is_empty());
+                    let digest = crate::digest(&report, None, 5, 5).deadlocks.unwrap();
+                    assert_eq!((digest.count, digest.counted, digest.new_since), (None, None, None));
+                    assert!(digest.latest_at.is_none());
+                    assert!(digest.patterns.is_empty());
+                    assert!(digest.note.is_some());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn database_source_scope_qualifies_missing_and_cross_database_graph_labels() {
+        for database_label in [None, Some("billing")] {
+            let mut snapshot: Snapshot =
+                serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+            let mut graph = deadlock("2026-10-11T11:00:00Z");
+            for process in &mut graph.processes {
+                process.database = database_label.map(str::to_owned);
+            }
+            snapshot.deadlocks = Some(DeadlockReport {
+                scope: Some(MeasurementScope::Database),
+                deadlocks: vec![graph],
+                source: "an arbitrary translated source label".into(),
+                since_hours: 24.0,
+                ..Default::default()
+            });
+            assert_eq!(deadlocks(&snapshot).len(), 1);
+            let report = crate::analyze(snapshot);
+            assert_eq!(crate::digest(&report, None, 5, 5).deadlocks.unwrap().count, Some(1));
+            let dashboard = crate::dashboard(&report);
+            let tile = dashboard.tile(TileKey::Deadlocks).unwrap();
+            assert_ne!(tile.status, TileStatus::Unavailable);
+            assert_eq!(tile.metrics[0].value, Some(1.0));
+        }
+    }
+
+    #[test]
+    fn empty_shared_or_unknown_history_is_never_a_healthy_database_zero() {
+        for scope in [None, Some(MeasurementScope::Server), Some(MeasurementScope::Unknown)] {
+            for counted in [None, Some(0.0)] {
+                let mut snapshot: Snapshot =
+                    serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+                snapshot.deadlocks = Some(DeadlockReport { scope, counted, ..Default::default() });
+                let report = crate::analyze(snapshot);
+                let dashboard = crate::dashboard(&report);
+                let tile = dashboard.tile(TileKey::Deadlocks).unwrap();
+                assert_eq!(tile.status, TileStatus::Unavailable);
+                assert!(tile.metrics.is_empty());
+                let digest = crate::digest(&report, None, 5, 5).deadlocks.unwrap();
+                assert_eq!((digest.count, digest.counted), (None, None));
+            }
+        }
         let mut snapshot: Snapshot =
             serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
-        let mut elsewhere = deadlock("2026-10-11T11:00:00Z");
-        for p in &mut elsewhere.processes {
-            p.database = Some("billing".into());
-        }
-        snapshot.deadlocks = Some(DeadlockReport {
-            deadlocks: vec![elsewhere.clone(), elsewhere.clone(), elsewhere],
-            source: "system_health event files".into(),
-            since_hours: 24.0,
-            ..Default::default()
-        });
-        assert!(deadlocks(&snapshot).is_empty());
-
-        // MySQL names no database per process; the tables' schema is the database.
-        let mut mysql: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mysql-demo.json")).unwrap();
-        let mut other = deadlock("2026-10-11T11:00:00Z");
-        for p in &mut other.processes {
-            p.database = None;
-        }
-        other.objects = vec!["billing.invoices".into()];
-        let mut ours = other.clone();
-        ours.objects = vec![format!("{}.orders", mysql.server.database)];
-        mysql.deadlocks = Some(DeadlockReport {
-            deadlocks: vec![other, ours],
-            source: "InnoDB status".into(),
-            since_hours: 24.0,
-            ..Default::default()
-        });
-        let found = deadlocks(&mysql);
-        assert_eq!(found.len(), 1);
-        assert!(found[0].title.contains(".orders"), "{}", found[0].title);
-        // The digest counts the same deadlocks as the check.
-        let digest = crate::digest(&crate::analyze(mysql), None, 5, 5);
-        assert_eq!(digest.deadlocks.as_ref().and_then(|d| d.count), Some(1));
+        snapshot.deadlocks =
+            Some(DeadlockReport { scope: Some(MeasurementScope::Database), since_hours: 24.0, ..Default::default() });
+        let report = crate::analyze(snapshot);
+        assert!(report.findings.iter().all(|finding| finding.check != "deadlocks"));
+        let dashboard = crate::dashboard(&report);
+        let tile = dashboard.tile(TileKey::Deadlocks).unwrap();
+        assert_eq!(tile.status, TileStatus::Good);
+        assert_eq!(tile.metrics[0].value, Some(0.0));
+        assert_eq!(crate::digest(&report, None, 5, 5).deadlocks.unwrap().count, Some(0));
     }
 
     // C1: InnoDB keeps its latest deadlock however old; one whose time is unknown claims no window and is Low.
@@ -511,6 +557,7 @@ mod tests {
         let mut undated = deadlock("2026-10-11T11:00:00Z");
         undated.at = None;
         snapshot.deadlocks = Some(DeadlockReport {
+            scope: Some(MeasurementScope::Database),
             deadlocks: vec![undated],
             source: "InnoDB status".into(),
             since_hours: 24.0,
@@ -532,15 +579,20 @@ mod tests {
         let caveats = |snapshot: &Snapshot| deadlocks(snapshot)[0].caveats.clone();
         let note = "Lu depuis la mémoire tampon de system_health.";
         snapshot.deadlocks = Some(DeadlockReport {
+            scope: Some(MeasurementScope::Database),
             deadlocks: vec![deadlock("2026-10-11T11:00:00Z")],
             since_hours: 24.0,
             note: Some(note.into()),
             recent_only: true,
             ..Default::default()
         });
-        assert!(caveats(&snapshot).iter().any(|c| c == note));
-        snapshot.deadlocks.as_mut().unwrap().recent_only = false;
-        assert!(!caveats(&snapshot).iter().any(|c| c == note));
+        for engine in [Engine::Mssql, Engine::Mysql, Engine::Postgres, Engine::Yugabyte] {
+            snapshot.server.engine = engine;
+            snapshot.deadlocks.as_mut().unwrap().recent_only = true;
+            assert!(caveats(&snapshot).iter().any(|c| c == note));
+            snapshot.deadlocks.as_mut().unwrap().recent_only = false;
+            assert!(!caveats(&snapshot).iter().any(|c| c == note));
+        }
     }
 
     // C14: with no statistics reset on record, PostgreSQL's counter has no window: a total, Low.
@@ -548,7 +600,12 @@ mod tests {
     fn a_postgres_counter_without_a_reset_has_no_window() {
         let mut snapshot: Snapshot =
             serde_json::from_str(include_str!("../../../../fixtures/postgres-demo.json")).unwrap();
-        snapshot.deadlocks = Some(DeadlockReport { counted: Some(400.0), since_hours: 24.0, ..Default::default() });
+        snapshot.deadlocks = Some(DeadlockReport {
+            scope: Some(MeasurementScope::Database),
+            counted: Some(400.0),
+            since_hours: 24.0,
+            ..Default::default()
+        });
         let f = &deadlocks(&snapshot)[0];
         assert!(f.title.contains("since its statistics began"), "{}", f.title);
         assert_eq!(f.severity, Severity::Low);
@@ -559,6 +616,7 @@ mod tests {
         let mut snapshot: Snapshot =
             serde_json::from_str(include_str!("../../../../fixtures/postgres-demo.json")).unwrap();
         snapshot.deadlocks = Some(DeadlockReport {
+            scope: Some(MeasurementScope::Database),
             counted: Some(3.0),
             counted_since: Some("2026-10-01T00:00:00Z".into()),
             since_hours: 24.0,
@@ -566,7 +624,8 @@ mod tests {
         });
         let found = deadlocks(&snapshot);
         assert_eq!(found[0].title, "PostgreSQL resolved 3 deadlocks since Oct 1");
-        snapshot.deadlocks = Some(DeadlockReport { counted: Some(0.0), ..Default::default() });
+        snapshot.deadlocks =
+            Some(DeadlockReport { scope: Some(MeasurementScope::Database), counted: Some(0.0), ..Default::default() });
         assert!(deadlocks(&snapshot).is_empty());
     }
 }

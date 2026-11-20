@@ -73,6 +73,7 @@ fn cycle(engine: Engine, at: Option<&str>, tables: &[Option<&str>], processes: u
 
 fn with(mut s: Snapshot, deadlocks: Vec<Deadlock>, since_hours: f64, note: Option<&str>) -> Snapshot {
     s.deadlocks = Some(DeadlockReport {
+        scope: Some(culprit_core::MeasurementScope::Database),
         deadlocks,
         source: "system_health event files".into(),
         since_hours,
@@ -233,12 +234,13 @@ fn innodb_says_its_latest_deadlock_is_a_floor() {
     let mut undated = d.clone();
     undated.at = None;
     undated.objects = vec![format!("{}.customers", mysql.server.database)];
-    let s = with(
+    let mut s = with(
         mysql,
         vec![d, undated],
         24.0,
         Some("InnoDB only keeps the most recent deadlock: turn on innodb_print_all_deadlocks to log every one."),
     );
+    s.deadlocks.as_mut().unwrap().recent_only = true;
     pin(
         "deadlocks_innodb_latest",
         &run("deadlocks", &s),
@@ -274,6 +276,7 @@ fn postgres_counts_deadlocks_it_does_not_keep() {
     let mut s = fixture("postgres-demo.json");
     let note = "PostgreSQL counts deadlocks but keeps no graph of them: the server log has each one.";
     s.deadlocks = Some(DeadlockReport {
+        scope: Some(culprit_core::MeasurementScope::Database),
         counted: Some(400.0),
         counted_since: Some("2026-10-01T00:00:00Z".into()),
         since_hours: 24.0,
@@ -290,7 +293,12 @@ impact: 400 deadlocks
 fix: Find "deadlock detected" in the server log and paste those lines into Live › Deadlocks: Culprit names the pattern. Most are fixed by changing rows in the same order everywhere and keeping transactions short.
 verify: Re-scan later: the counter stops growing."#,
     );
-    s.deadlocks = Some(DeadlockReport { counted: Some(1.0), since_hours: 24.0, ..Default::default() });
+    s.deadlocks = Some(DeadlockReport {
+        scope: Some(culprit_core::MeasurementScope::Database),
+        counted: Some(1.0),
+        since_hours: 24.0,
+        ..Default::default()
+    });
     pin(
         "deadlocks_counter_one_no_reset",
         &run("deadlocks", &s),

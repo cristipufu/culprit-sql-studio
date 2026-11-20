@@ -137,7 +137,10 @@ pub async fn deadlocks(ws: &Workspace, args: DeadlocksArgs, out: &Out) -> Result
         out.value(&serde_json::to_value(&report).unwrap_or(Value::Null));
         return Ok(0);
     }
-    println!("{}", count_line(report.deadlocks.len(), report.since_hours, &report.source));
+    println!("{}", report_count_line(&report));
+    if !report.has_database_scope() {
+        println!("{}", out.dim(&t!("evidence.deadlocks.database_scope")));
+    }
     if let Some(note) = &report.note {
         println!("{}", out.dim(note));
     }
@@ -146,6 +149,23 @@ pub async fn deadlocks(ws: &Workspace, args: DeadlocksArgs, out: &Out) -> Result
         print_deadlock(d, out);
     }
     Ok(0)
+}
+
+/// The source's native database counter or returned history population, without assigning shared incidents to it.
+fn report_count_line(report: &DeadlockReport) -> String {
+    if !report.has_database_scope() {
+        return t!(
+            "cli.deadlocks.history_graphs",
+            n = report.deadlocks.len(),
+            count = report.deadlocks.len().to_string()
+        );
+    }
+    if report.deadlocks.is_empty()
+        && let Some(counted) = report.counted
+    {
+        return t!("cli.deadlocks.database_counted", n = counted, count = format::count(counted));
+    }
+    count_line(report.deadlocks.len(), report.since_hours, &report.source)
 }
 
 /// "2 deadlocks in the last 24 hours (Query Store).": how many deadlocks were found, over what and where.
@@ -212,6 +232,38 @@ fn print_deadlock(d: &Deadlock, out: &Out) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_and_unknown_summaries_count_returned_graphs_without_claiming_database_absence() {
+        for scope in [None, Some(culprit_core::MeasurementScope::Server)] {
+            let mut report = DeadlockReport {
+                scope,
+                source: "pg_stat_database".into(),
+                counted: Some(72.0),
+                since_hours: 24.0,
+                ..Default::default()
+            };
+            assert_eq!(report_count_line(&report), "The source returned 0 recorded deadlock graphs.");
+            report.deadlocks.push(Deadlock::new("copied database label", None, vec![], vec![]));
+            assert_eq!(report_count_line(&report), "The source returned 1 recorded deadlock graph.");
+            assert_eq!(report.deadlocks.len(), 1, "the history remains available for explanation");
+        }
+    }
+
+    #[test]
+    fn a_native_database_counter_without_graphs_is_not_reported_as_no_deadlocks() {
+        let mut report = DeadlockReport {
+            scope: Some(culprit_core::MeasurementScope::Database),
+            counted: Some(72.0),
+            since_hours: 24.0,
+            ..Default::default()
+        };
+        assert_eq!(report_count_line(&report), "The database source counted 72 deadlocks.");
+        report.counted = Some(0.0);
+        assert_eq!(report_count_line(&report), "The database source counted 0 deadlocks.");
+        report.counted = None;
+        assert_eq!(report_count_line(&report), "No deadlocks in the last 24 hours.");
+    }
 
     fn blocking_live(unqualified: &[String]) -> LiveState {
         let sessions: Vec<culprit_core::Session> = serde_json::from_value(json!([

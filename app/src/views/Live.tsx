@@ -1,3 +1,4 @@
+import { databaseDeadlockGraphCount } from "../lib/deadlock-scope";
 import { Lock, Pause, Play } from "lucide-react";
 import { lazy, Suspense, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { BlockingChains } from "../components/BlockingChains";
@@ -78,7 +79,7 @@ function LiveSessions({ connection }: { connection: string }) {
   const [located, setLocated] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const engine = owner?.engine ?? "postgres";
-  const recentDeadlocks = useStore((s) => currentReport(s)?.snapshot.deadlocks?.deadlocks.length ?? 0);
+  const recentDeadlocks = useStore((s) => databaseDeadlockGraphCount(currentReport(s)?.snapshot.deadlocks));
   const tableRef = useRef<HTMLDivElement>(null);
   const stopped = paused || hidden || tab !== "sessions";
   const stoppedRef = useRef(stopped);
@@ -187,7 +188,7 @@ function LiveSessions({ connection }: { connection: string }) {
           </button>
           <button type="button" role="tab" aria-selected={tab === "deadlocks"} tabIndex={tab === "deadlocks" ? 0 : -1} className={tab === "deadlocks" ? "on" : ""} onClick={() => chooseTab("deadlocks")}>
             {t("ui.live.tab.deadlocks")}
-            {recentDeadlocks > 0 && <span className="tab-count">{recentDeadlocks}</span>}
+            {recentDeadlocks !== null && recentDeadlocks > 0 && <span className="tab-count">{recentDeadlocks}</span>}
           </button>
         </span>
         <span className="spacer" />

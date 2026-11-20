@@ -359,7 +359,9 @@ impl Requirement<'_> {
                 let Some(d) = s.deadlocks.as_ref() else {
                     return insufficient(t!("evidence.no_deadlocks"));
                 };
-                if d.counted.is_some() || d.note.is_some() {
+                if !d.has_database_scope() {
+                    insufficient(t!("evidence.deadlocks.database_scope"))
+                } else if d.counted.is_some() || d.note.is_some() {
                     insufficient(t!("evidence.deadlock_sample"))
                 } else {
                     Available

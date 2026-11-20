@@ -1,7 +1,7 @@
 reading: MariaDB 11.8.9 · database shop · scanned 2026-10-11T16:05:40Z
-headline: 8 opportunities. The top ones touch 53.7 s of database time over the 1 minute since statistics were reset (95%).
+headline: 7 opportunities. The top ones touch 53.7 s of database time over the 1 minute since statistics were reset (95%).
 top share: 95%
-findings: 9
+findings: 8
 
 === finding heavy-query:375c64398248650e
 Optional improvement · low severity · high confidence · queries
@@ -221,53 +221,6 @@ brief:
     ## What to do in the codebase
 
     Gather the runtime evidence the fix asks for first, from a retained actual plan or a representative run in a test environment. Check the actual row counts and IO for that run before choosing a change to the application's statements, indexes or statistics. After any change is live, run `culprit scan mariadb-demo` and check `scan-heavy:shop.orders` the way *How to verify* says.
-
-=== finding deadlocks:opposite-order:shop.customers+shop.orders
-Optional improvement · low severity · high confidence · queries
-title: Two queries deadlocked at least once, most recently on Oct 11 at 16:05 UTC (opposite access order on shop.customers and shop.orders)
-summary: Two transactions locked shop.customers and shop.orders in opposite order and waited on each other; session 202's transaction was rolled back. Each transaction had already changed rows the other one wanted next: session 202 was running “UPDATE shop.customers SET name = name WHERE id = 1” and session 201 “UPDATE shop.orders SET status = status WHERE id = 1”. With the same order in both, the second would simply wait instead of deadlocking.
-impact: at least 1 deadlock
-metrics:
-  - Deadlocks (at least): 1
-  - Pattern: opposite access order
-  - Rolled back: session 202 (login root)
-fix: Touch tables and rows in the same order everywhere: Make every code path that changes shop.customers and shop.orders do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking.
-verify:
-  1. Re-scan tomorrow: no new opposite access order deadlocks on shop.customers and shop.orders.
-  2. Live › Deadlocks shows the graph of each one, with both statements.
-caveats:
-  - InnoDB keeps only its most recent deadlock. Turn on innodb_print_all_deadlocks to write every one to the error log.
-brief:
-    # Two queries deadlocked at least once, most recently on Oct 11 at 16:05 UTC (opposite access order on shop.customers and shop.orders)
-
-    Database: **mariadb-demo** (MariaDB 11.8.9, database `shop`, development environment). Finding `deadlocks:opposite-order:shop.customers+shop.orders`: Optional improvement, low impact, high confidence. Scanned 2026-10-11T16:05:40Z.
-
-    ## What's happening
-
-    Two transactions locked shop.customers and shop.orders in opposite order and waited on each other; session 202's transaction was rolled back. Each transaction had already changed rows the other one wanted next: session 202 was running “UPDATE shop.customers SET name = name WHERE id = 1” and session 201 “UPDATE shop.orders SET status = status WHERE id = 1”. With the same order in both, the second would simply wait instead of deadlocking.
-
-    ## Evidence
-
-    - Deadlocks (at least): 1
-    - Pattern: opposite access order
-    - Rolled back: session 202 (login root)
-
-    ## Suggested fix
-
-    Touch tables and rows in the same order everywhere: Make every code path that changes shop.customers and shop.orders do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking.
-
-    ## How to verify
-
-    - Re-scan tomorrow: no new opposite access order deadlocks on shop.customers and shop.orders.
-    - Live › Deadlocks shows the graph of each one, with both statements.
-
-    ## Caveats
-
-    - InnoDB keeps only its most recent deadlock. Turn on innodb_print_all_deadlocks to write every one to the error log.
-
-    ## What to do in the codebase
-
-    The statements to look for are quoted under *What's happening*: find the code that sends them (search for `shop.customers` and `shop.orders`) and make the change the fix describes there. After any change is live, run `culprit scan mariadb-demo` and check `deadlocks:opposite-order:shop.customers+shop.orders` the way *How to verify* says.
 
 === finding duplicate-index:shop.orders.ix_orders_status
 Optional improvement · low severity · medium confidence · indexes

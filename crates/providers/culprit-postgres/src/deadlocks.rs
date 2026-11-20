@@ -7,7 +7,8 @@ use culprit_core::telemetry::{
     MAX_POSTGRES_DEADLOCK_EDGES, postgres_deadlock_cycle_is_valid, postgres_log_lock_mode_is_valid,
 };
 use culprit_core::{
-    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, Result, t,
+    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, MeasurementScope,
+    Result, t,
 };
 use tokio_postgres::Client;
 
@@ -63,6 +64,7 @@ pub(crate) async fn recent(client: &Client, since_hours: f64) -> Result<Deadlock
     let log_waits = row.as_ref().and_then(|r| r.text("log_lock_waits")).is_some_and(|v| v == "on");
     let note = counted_note(counted, since.as_deref(), log_waits);
     Ok(DeadlockReport {
+        scope: counted.map(|_| MeasurementScope::Database),
         deadlocks: Vec::new(),
         source: "pg_stat_database".into(),
         since_hours,

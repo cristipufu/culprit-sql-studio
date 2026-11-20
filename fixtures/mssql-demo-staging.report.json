@@ -134,8 +134,8 @@
     },
     {
       "check": "deadlocks",
-      "reason": null,
-      "status": "findings",
+      "reason": "The source does not establish deadlock counts for this database. Recorded incidents remain available in deadlock history.",
+      "status": "insufficient-evidence",
       "title": "Deadlocks"
     },
     {
@@ -413,81 +413,6 @@
       "verification_basis": "rescan",
       "verify": [
         "Re-scan once the index exists: this finding should be gone, and a delete from shop.support_tickets then finds the rows of shop.ticket_events it checks through the index, not by scanning the table."
-      ]
-    },
-    {
-      "actionability": "optional-improvement",
-      "category": "queries",
-      "caveats": [],
-      "check": "deadlocks",
-      "confidence": "high",
-      "facts": {
-        "advice": {
-          "application": "unspecified",
-          "diagnostic_cleanup": false,
-          "disappears_after_rescan": false,
-          "disposition": "change",
-          "running_totals_explained": false,
-          "statement_quote": "summary",
-          "upkeep_on_connection_close": false
-        },
-        "bloat": null,
-        "histogram_columns": [],
-        "index_keys": [],
-        "large_rows": null,
-        "lock_wait": null,
-        "log_write": null,
-        "plan_change": null,
-        "recommended_plan": null
-      },
-      "fix": {
-        "cost": null,
-        "sql": "ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;",
-        "summary": "Make the read skip the lookup: Add the columns the read needs to ix_customers_email (as INCLUDE columns) so it never touches the main index the write locks. The query's plan in Queries shows the Key Lookup and its output columns. Or let reads stop taking shared locks: With READ_COMMITTED_SNAPSHOT on, reads use row versions instead of shared locks, so a read can't be part of this cycle. It costs some tempdb space for the versions."
-      },
-      "id": "deadlocks:key-lookup:shop.customers",
-      "impact": {
-        "db_time_share": null,
-        "label": "1 deadlock",
-        "score": 9.0,
-        "time_ms_per_day": null
-      },
-      "inactive": false,
-      "last_seen": "2026-10-11T11:42:17Z",
-      "metrics": [
-        {
-          "label": "Deadlocks",
-          "text": null,
-          "unit": "count",
-          "value": 1.0
-        },
-        {
-          "key": "check.deadlocks.metric.pattern",
-          "label": "Pattern",
-          "text": "key-lookup deadlock",
-          "unit": "text",
-          "value": 0.0
-        },
-        {
-          "key": "check.deadlocks.metric.rolled_back",
-          "label": "Rolled back",
-          "text": "session 61 (orders-api)",
-          "unit": "text",
-          "value": 0.0
-        }
-      ],
-      "queries": [],
-      "severity": "low",
-      "subject": {
-        "kind": "table",
-        "name": "shop.customers"
-      },
-      "summary": "Key-lookup deadlock on shop.customers: a read through ix_customers_email and a write to the same rows took their locks in opposite order; session 61's transaction was rolled back. The read finds rows through ix_customers_email and then looks each one up in the table's main index; the write changes the main index first and then ix_customers_email. Each ends up holding the lock the other needs next. It recurs whenever the two statements touch the same rows at the same time.",
-      "title": "Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers)",
-      "verification_basis": "rescan",
-      "verify": [
-        "Re-scan tomorrow: no new key-lookup deadlocks on shop.customers.",
-        "Live › Deadlocks shows the graph of each one, with both statements."
       ]
     },
     {
@@ -1411,6 +1336,7 @@
         }
       ],
       "note": null,
+      "scope": "server",
       "since_hours": 6.0,
       "source": "system_health event files and ring buffer"
     },
@@ -1485,7 +1411,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 24,
+    "format": 25,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {
@@ -5414,10 +5340,6 @@
         "count": 3
       },
       {
-        "category": "queries",
-        "count": 1
-      },
-      {
         "category": "configuration",
         "count": 3
       }
@@ -5428,7 +5350,7 @@
         "severity": "high"
       },
       {
-        "count": 6,
+        "count": 5,
         "severity": "low"
       }
     ],
@@ -5464,7 +5386,7 @@
         "table": "ticket_events"
       }
     ],
-    "headline": "7 opportunities.",
+    "headline": "6 opportunities.",
     "headline_message": {
       "kind": "sequence",
       "messages": [
@@ -5472,11 +5394,11 @@
           "arguments": {
             "count": {
               "kind": "digits",
-              "value": "7"
+              "value": "6"
             },
             "n": {
               "kind": "number",
-              "value": 7.0
+              "value": 6.0
             }
           },
           "key": "summary.headline.opportunities",
@@ -5542,7 +5464,7 @@
       "kind": "text",
       "text": "Query Store is OFF on this database."
     },
-    "opportunities": 7,
+    "opportunities": 6,
     "over_scans": [],
     "runs_said": [],
     "takeaway": null,

@@ -1,3 +1,4 @@
+import { databaseDeadlockGraphCount, DeadlockScopeNotice, DeadlockUnavailableHistory } from "../lib/deadlock-scope";
 import { evidencePresentation } from "../lib/engines";
 import { ArrowUpRight, CircleCheck, ClipboardPaste, Copy, FileWarning } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -149,7 +150,8 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
   };
 
   const findingTitle = (id: string | null) => (id ? report?.findings.find((f) => f.id === id)?.title ?? null : null);
-  const counted = load.status === "ready" ? load.report.counted : null;
+  const databaseScope = load.status === "ready" && databaseDeadlockGraphCount(load.report) !== null;
+  const counted = load.status === "ready" && databaseScope ? load.report.counted : null;
 
   return (
     <div
@@ -179,6 +181,8 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
         </span>
       </div>
 
+      {load.status === "ready" && all.length > 0 && <DeadlockScopeNotice report={load.report} />}
+
       {pasteError && (
         <div className="dl-inline-note" role="alert">
           <span className="sev medium" aria-hidden /> {pasteError.message}
@@ -200,7 +204,9 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
         </div>
       ) : all.length === 0 ? (
         <div className="dl-empty">
-          {counted != null && counted > 0 ? (
+          {load.status === "ready" && !databaseScope ? (
+            <DeadlockUnavailableHistory report={load.report} />
+          ) : counted != null && counted > 0 ? (
             <>
               <div className="dl-counter">
                 <span className="dl-counter-value">{digits(counted.toLocaleString("en-US"))}</span>

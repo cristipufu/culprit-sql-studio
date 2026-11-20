@@ -133,7 +133,7 @@
     },
     {
       "check": "deadlocks",
-      "reason": "A cumulative counter or a limited deadlock sample cannot verify the absence of this deadlock pattern.",
+      "reason": "The source does not establish deadlock counts for this database. Recorded incidents remain available in deadlock history.",
       "status": "insufficient-evidence",
       "title": "Deadlocks"
     },
@@ -1854,6 +1854,7 @@
       "counted_since": null,
       "deadlocks": [],
       "note": "InnoDB keeps only its most recent deadlock. Turn on innodb_print_all_deadlocks to write every one to the error log.",
+      "scope": "server",
       "since_hours": 6.0,
       "source": "InnoDB status"
     },
@@ -1902,7 +1903,7 @@
         "table": "orders"
       }
     ],
-    "format": 24,
+    "format": 25,
     "histograms": [
       {
         "buckets": 4.0,

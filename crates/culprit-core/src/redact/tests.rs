@@ -198,7 +198,7 @@ fn a_redacted_snapshot_keeps_no_planted_value() {
     .expect("deadlock");
     snapshot.deadlocks = Some(
         serde_json::from_value(serde_json::json!({
-            "deadlocks": [deadlock], "source": "test", "since_hours": 24.0, "counted": 1.0
+            "scope": null, "deadlocks": [deadlock], "source": "test", "since_hours": 24.0, "counted": 1.0
         }))
         .expect("deadlocks"),
     );

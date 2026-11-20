@@ -119,8 +119,8 @@
     },
     {
       "check": "deadlocks",
-      "reason": "A cumulative counter or a limited deadlock sample cannot verify the absence of this deadlock pattern.",
-      "status": "findings",
+      "reason": "The source does not establish deadlock counts for this database. Recorded incidents remain available in deadlock history.",
+      "status": "insufficient-evidence",
       "title": "Deadlocks"
     },
     {
@@ -549,83 +549,6 @@
       "verify": [
         "After adding an index for a selective filter, the full reads of orders should grow far slower. Compare how much its scan counters grow between a scan taken once the change is live and one a day or more later (80 full reads in this scan).",
         "Whether the fix adds an index or reads fewer rows or columns: performance_schema keeps running totals, so a later scan's runs, share and averages for the query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop."
-      ]
-    },
-    {
-      "actionability": "optional-improvement",
-      "category": "queries",
-      "caveats": [
-        "InnoDB keeps only its most recent deadlock. Turn on innodb_print_all_deadlocks to write every one to the error log."
-      ],
-      "check": "deadlocks",
-      "confidence": "high",
-      "facts": {
-        "advice": {
-          "application": "unspecified",
-          "diagnostic_cleanup": false,
-          "disappears_after_rescan": false,
-          "disposition": "change",
-          "running_totals_explained": false,
-          "statement_quote": "summary",
-          "upkeep_on_connection_close": false
-        },
-        "bloat": null,
-        "histogram_columns": [],
-        "index_keys": [],
-        "large_rows": null,
-        "lock_wait": null,
-        "log_write": null,
-        "plan_change": null,
-        "recommended_plan": null
-      },
-      "fix": {
-        "cost": null,
-        "sql": null,
-        "summary": "Touch tables and rows in the same order everywhere: Make every code path that changes shop.customers and shop.orders do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking."
-      },
-      "id": "deadlocks:opposite-order:shop.customers+shop.orders",
-      "impact": {
-        "db_time_share": null,
-        "label": "at least 1 deadlock",
-        "score": 9.0,
-        "time_ms_per_day": null
-      },
-      "inactive": false,
-      "last_seen": "2026-10-11T16:05:39Z",
-      "metrics": [
-        {
-          "label": "Deadlocks (at least)",
-          "text": null,
-          "unit": "count",
-          "value": 1.0
-        },
-        {
-          "key": "check.deadlocks.metric.pattern",
-          "label": "Pattern",
-          "text": "opposite access order",
-          "unit": "text",
-          "value": 0.0
-        },
-        {
-          "key": "check.deadlocks.metric.rolled_back",
-          "label": "Rolled back",
-          "text": "session 202 (login root)",
-          "unit": "text",
-          "value": 0.0
-        }
-      ],
-      "queries": [],
-      "severity": "low",
-      "subject": {
-        "kind": "table",
-        "name": "shop.customers"
-      },
-      "summary": "Two transactions locked shop.customers and shop.orders in opposite order and waited on each other; session 202's transaction was rolled back. Each transaction had already changed rows the other one wanted next: session 202 was running “UPDATE shop.customers SET name = name WHERE id = 1” and session 201 “UPDATE shop.orders SET status = status WHERE id = 1”. With the same order in both, the second would simply wait instead of deadlocking.",
-      "title": "Two queries deadlocked at least once, most recently on Oct 11 at 16:05 UTC (opposite access order on shop.customers and shop.orders)",
-      "verification_basis": "rescan",
-      "verify": [
-        "Re-scan tomorrow: no new opposite access order deadlocks on shop.customers and shop.orders.",
-        "Live › Deadlocks shows the graph of each one, with both statements."
       ]
     },
     {
@@ -1501,6 +1424,7 @@
         }
       ],
       "note": "InnoDB keeps only its most recent deadlock. Turn on innodb_print_all_deadlocks to write every one to the error log.",
+      "scope": "server",
       "since_hours": 24.0,
       "source": "InnoDB status"
     },
@@ -1549,7 +1473,7 @@
         "table": "order_items"
       }
     ],
-    "format": 24,
+    "format": 25,
     "histograms": null,
     "id": "20261011T160540.394Z",
     "identity": {
@@ -4707,12 +4631,12 @@
       },
       {
         "category": "queries",
-        "count": 5
+        "count": 4
       }
     ],
     "by_severity": [
       {
-        "count": 8,
+        "count": 7,
         "severity": "low"
       }
     ],
@@ -4736,7 +4660,7 @@
         "table": "order_items"
       }
     ],
-    "headline": "8 opportunities. The top ones touch 53.7 s of database time over the 1 minute since statistics were reset (95%).",
+    "headline": "7 opportunities. The top ones touch 53.7 s of database time over the 1 minute since statistics were reset (95%).",
     "headline_message": {
       "kind": "sequence",
       "messages": [
@@ -4744,11 +4668,11 @@
           "arguments": {
             "count": {
               "kind": "digits",
-              "value": "8"
+              "value": "7"
             },
             "n": {
               "kind": "number",
-              "value": 8.0
+              "value": 7.0
             }
           },
           "key": "summary.headline.opportunities",
@@ -4845,7 +4769,7 @@
       }
     ],
     "no_workload": null,
-    "opportunities": 8,
+    "opportunities": 7,
     "over_scans": [
       {
         "activity": {

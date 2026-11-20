@@ -640,7 +640,7 @@ export async function demoApi(): Promise<Api> {
       if (c && !can(c.engine, "deadlocks")) return Promise.reject(refusal(c.engine, "deadlocks"));
       const samples = await deadlockSample();
       const sample = samples?.[reportName(name)] ?? samples?.[c?.engine ?? "postgres"];
-      return sample ? { ...sample, since_hours: sinceHours } : { deadlocks: [], source: "demo", since_hours: sinceHours, counted: null, counted_since: null, note: null };
+      return sample ? { ...sample, since_hours: sinceHours } : { scope: null, deadlocks: [], source: "demo", since_hours: sinceHours, counted: null, counted_since: null, note: null };
     },
     parseDeadlock: () =>
       Promise.reject({

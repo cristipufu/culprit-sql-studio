@@ -232,7 +232,9 @@ fn a_trend_compares_the_last_stretch_with_what_came_before() {
 #[test]
 fn deadlocks_are_grouped_and_postgres_only_counts_them() {
     let mut r = report("mssql-demo");
-    r.snapshot.deadlocks = Some(deadlocks("mssql"));
+    // Reuse the graph corpus under a synthetic database-scoped report to test grouping.
+    let sample = deadlocks("mssql");
+    r.snapshot.deadlocks = Some(DeadlockReport { scope: Some(culprit_core::MeasurementScope::Database), ..sample });
     r.snapshot.taken_at = "2026-10-11T14:00:00Z".into();
     r = culprit_checks::analyze(r.snapshot);
     let d = dashboard(&r);
@@ -244,6 +246,7 @@ fn deadlocks_are_grouped_and_postgres_only_counts_them() {
 
     let mut r = report("pg-demo");
     r.snapshot.deadlocks = Some(DeadlockReport {
+        scope: Some(culprit_core::MeasurementScope::Database),
         source: "pg_stat_database".into(),
         since_hours: 24.0,
         counted: Some(12.0),

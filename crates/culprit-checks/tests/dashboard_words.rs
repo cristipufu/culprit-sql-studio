@@ -123,7 +123,12 @@ fn database_time_and_its_spans_say_what_they_said() {
     // Spans: no deadlocks over a day, days, hours and minutes.
     for hours in [24.0, 72.0, 30.0, 5.0, 1.0, 0.5, 0.01] {
         let mut s = base.clone();
-        s.deadlocks = Some(DeadlockReport { source: "system_health".into(), since_hours: hours, ..Default::default() });
+        s.deadlocks = Some(DeadlockReport {
+            scope: Some(culprit_core::MeasurementScope::Database),
+            source: "system_health".into(),
+            since_hours: hours,
+            ..Default::default()
+        });
         out.push(said(s, TileKey::Deadlocks));
     }
     same(&out.join("\n"), DB_TIME);
@@ -187,7 +192,8 @@ fn deadlock_sample() -> DeadlockReport {
 #[test]
 fn deadlocks_say_what_they_said() {
     let mut out = Vec::new();
-    let sample = deadlock_sample();
+    // These word pins exercise a synthetic database-scoped report, not system_health attribution.
+    let sample = DeadlockReport { scope: Some(culprit_core::MeasurementScope::Database), ..deadlock_sample() };
     let (opposite, lookup) = (sample.deadlocks[0].clone(), sample.deadlocks[1].clone());
     let at = |d: &culprit_core::Deadlock, n: usize| {
         let mut d = d.clone();
@@ -218,6 +224,7 @@ fn deadlocks_say_what_they_said() {
     for (counted, since) in [(0.0, true), (0.0, false), (1.0, false), (3.0, false)] {
         let mut s = snapshot("pg-demo.report.json");
         s.deadlocks = Some(DeadlockReport {
+            scope: Some(culprit_core::MeasurementScope::Database),
             source: "pg_stat_database".into(),
             since_hours: 24.0,
             counted: Some(counted),

@@ -3,7 +3,7 @@
 use culprit_core::{
     CleanupKind, DeadlockPattern, Digest, DigestChanges, DigestCounts, DigestDay, DigestDeadlockPattern,
     DigestDeadlocks, DigestFinding, DigestIndexAdvice, DigestIndexCreate, DigestIndexDrop, DigestTopQuery, Environment,
-    Finding, Report, Severity, SubjectKind, Workload, format,
+    Finding, Report, Severity, SubjectKind, Workload, format, t,
 };
 
 /// What a report says, and what changed since `previous` (an earlier report of the same database). `top` caps every
@@ -294,13 +294,24 @@ fn deadlocks(report: &Report, previous_at: Option<&str>, top: usize) -> DigestDe
             ..DigestDeadlocks::default()
         };
     };
+    if !d.has_database_scope() {
+        return DigestDeadlocks {
+            source: Some(d.source.clone()).filter(|source| !source.is_empty()),
+            note: Some(
+                std::iter::once(t!("evidence.deadlocks.database_scope"))
+                    .chain(d.note.clone())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            ..DigestDeadlocks::default()
+        };
+    }
     let unknown = d.deadlocks.is_empty() && (d.counted.is_some() || d.note.is_some());
     let at = |t: &Option<String>| t.as_deref().and_then(format::epoch_seconds);
     let after = previous_at.and_then(format::epoch_seconds);
     let mut groups: Vec<DigestDeadlockPattern> = Vec::new();
-    // Another database's deadlocks (the server keeps them for every database) are theirs, as in the deadlocks check.
-    let ours: Vec<&culprit_core::Deadlock> =
-        d.deadlocks.iter().filter(|dl| crate::deadlocks::in_this_database(dl, s)).collect();
+    // Database membership belongs to the original source scope, never to participant labels.
+    let ours: Vec<&culprit_core::Deadlock> = d.deadlocks.iter().collect();
     // Most recent first, so each group's first deadlock is its latest.
     for dl in &ours {
         let mut tables = dl.objects.clone();
@@ -833,6 +844,7 @@ mod tests {
     fn with_deadlocks(deadlocks: Vec<culprit_core::Deadlock>) -> Report {
         let mut r = report();
         r.snapshot.deadlocks = Some(culprit_core::DeadlockReport {
+            scope: Some(culprit_core::MeasurementScope::Database),
             deadlocks,
             source: "system_health".into(),
             since_hours: 48.0,

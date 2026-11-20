@@ -13,6 +13,7 @@ fn deadlock_groups_keep_their_identity_and_order_when_labels_change_language() {
     use culprit_core::{Deadlock, DeadlockPattern, DeadlockReport, i18n};
     let mut report = crate::analyze(crate::waits::snapshot_with(Engine::Mssql));
     report.snapshot.deadlocks = Some(DeadlockReport {
+        scope: Some(culprit_core::MeasurementScope::Database),
         source: "system_health".into(),
         since_hours: 24.0,
         deadlocks: [

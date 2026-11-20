@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::MeasurementScope;
 use crate::model::Engine;
 use crate::{format, key, t};
 
@@ -163,6 +164,10 @@ pub struct Deadlock {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
 #[ts(export)]
 pub struct DeadlockReport {
+    /// The actual native source's measurement scope. Display names and graph database labels do not establish it.
+    /// Shared or unknown history cannot establish deadlock counts for the snapshot's current database.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub scope: Option<MeasurementScope>,
     /// Most recent first.
     pub deadlocks: Vec<Deadlock>,
     /// Where they were read from, in words.
@@ -182,6 +187,13 @@ pub struct DeadlockReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lock_waits_logged: Option<bool>,
+}
+
+impl DeadlockReport {
+    /// Only a database-scoped source can establish counts and findings for the snapshot's current database.
+    pub fn has_database_scope(&self) -> bool {
+        self.scope == Some(MeasurementScope::Database)
+    }
 }
 
 impl Deadlock {
@@ -511,6 +523,39 @@ fn rcsi(d: &Deadlock) -> DeadlockFix {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deadlock_report_scope_is_required_nullable_and_preserves_unresolved_history() {
+        let graph = Deadlock::new("copied database source label", None, vec![], vec![]);
+        let report = DeadlockReport { deadlocks: vec![graph], ..Default::default() };
+        let mut encoded = serde_json::to_value(&report).unwrap();
+        assert!(encoded["scope"].is_null());
+        let decoded: DeadlockReport = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(decoded, report);
+        assert!(!decoded.has_database_scope());
+        encoded.as_object_mut().unwrap().remove("scope");
+        assert!(serde_json::from_value::<DeadlockReport>(encoded).is_err());
+    }
+
+    #[test]
+    fn only_native_database_scope_qualifies_database_deadlock_counts() {
+        for scope in [
+            None,
+            Some(MeasurementScope::Pool),
+            Some(MeasurementScope::Node),
+            Some(MeasurementScope::Cluster),
+            Some(MeasurementScope::Server),
+            Some(MeasurementScope::Session),
+            Some(MeasurementScope::File),
+            Some(MeasurementScope::Unknown),
+            Some(MeasurementScope::Database),
+        ] {
+            let report = DeadlockReport { scope, source: "pg_stat_database".into(), ..Default::default() };
+            let decoded: DeadlockReport = serde_json::from_value(serde_json::to_value(&report).unwrap()).unwrap();
+            assert_eq!(decoded.has_database_scope(), scope == Some(MeasurementScope::Database));
+            assert_eq!(decoded.scope, scope);
+        }
+    }
 
     fn process(id: &str, session: &str, victim: bool) -> DeadlockProcess {
         DeadlockProcess {
