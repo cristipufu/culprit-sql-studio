@@ -37,6 +37,41 @@ async fn genuine_collected_sealed_published_property_points_retain_all_original_
             assert_eq!(point.native_database_id, "5");
             assert_eq!(point.database, "sample");
             assert_eq!(point.catalog_read_only, Some(false));
+            assert_eq!(
+                point.broker_enabled,
+                match case {
+                    DatabasePropertiesCase::BrokerEnabled => Some(true),
+                    DatabasePropertiesCase::UnknownValues => None,
+                    _ => Some(false),
+                }
+            );
+            assert_eq!(
+                point.in_standby,
+                match case {
+                    DatabasePropertiesCase::Standby => Some(true),
+                    DatabasePropertiesCase::UnknownValues => None,
+                    _ => Some(false),
+                }
+            );
+            assert_eq!(
+                point.delayed_durability.code,
+                match case {
+                    DatabasePropertiesCase::DelayedDurabilityAllowed => Some(1),
+                    DatabasePropertiesCase::DelayedDurabilityForced => Some(2),
+                    DatabasePropertiesCase::UnknownValues => None,
+                    DatabasePropertiesCase::UnknownCodes => Some(255),
+                    _ => Some(0),
+                }
+            );
+
+            assert_eq!(
+                point.auto_shrink,
+                match case {
+                    DatabasePropertiesCase::AutoShrinkEnabled => Some(true),
+                    DatabasePropertiesCase::UnknownValues => None,
+                    _ => Some(false),
+                }
+            );
             let expected = match case {
                 DatabasePropertiesCase::UnknownValues => None,
                 DatabasePropertiesCase::NoRecordedCheckDb => Some("1900-01-01T00:00:00.000"),
@@ -78,6 +113,32 @@ async fn native_code_clock_database_flag_and_null_projection_tampering_never_bor
         ("/observed_at", json!("2020-01-01T12:00:00.0000002Z")),
         ("/database", json!("foreign")),
         ("/catalog_read_only", json!(true)),
+        ("/auto_shrink", json!(true)),
+        ("/auto_shrink", Value::Null),
+        ("/broker_enabled", json!(true)),
+        ("/broker_enabled", Value::Null),
+        ("/in_standby", json!(true)),
+        ("/in_standby", Value::Null),
+        ("/delayed_durability/code", json!(2)),
+        ("/delayed_durability/description", Value::Null),
+        ("/encrypted", json!(true)),
+        ("/encrypted", Value::Null),
+        ("/ledger_enabled", json!(true)),
+        ("/ledger_enabled", Value::Null),
+        ("/change_feed_enabled", json!(true)),
+        ("/change_feed_enabled", Value::Null),
+        ("/published", json!(true)),
+        ("/published", Value::Null),
+        ("/subscribed", json!(true)),
+        ("/subscribed", Value::Null),
+        ("/merge_published", json!(true)),
+        ("/merge_published", Value::Null),
+        ("/distributor", json!(true)),
+        ("/distributor", Value::Null),
+        ("/accelerated_recovery_enabled", json!(true)),
+        ("/accelerated_recovery_enabled", Value::Null),
+        ("/containment/code", json!(1)),
+        ("/containment/description", json!("PARTIAL")),
         ("/query_store_enabled", Value::Null),
         ("/native_database_id", json!("6")),
         ("/last_good_checkdb_without_offset", Value::Null),

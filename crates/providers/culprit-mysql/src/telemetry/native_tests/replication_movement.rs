@@ -1,5 +1,8 @@
 //! Advancing native coordinates in one owned MySQL8.4 topology. This is not a lag, pressure or cost verdict.
-use super::replication::{capture, counter, required, valid_owner};
+use super::{
+    capture,
+    replication::{counter, required, valid_owner},
+};
 use crate::connect::Flavor;
 use culprit_collector::capture::{CollectionCancellation, collect_once};
 use culprit_core::{Provider, telemetry::*};
@@ -74,7 +77,7 @@ async fn observe(
     let result = collect_once(
         &SourceGate::default(),
         factory,
-        capture::request(budget.clone()),
+        super::replication::capture::request(budget.clone()),
         output,
         &CollectionCancellation::default(),
     )
@@ -90,7 +93,7 @@ async fn observe(
     let source = captured.manifest.description.as_ref().expect("original native source");
     assert_eq!(source.partition, SourcePartition::Target);
     assert_eq!(source.continuity, SourceContinuity::Unverified);
-    let samples = capture::samples(&captured.records);
+    let samples = super::replication::capture::samples(&captured.records);
     assert_eq!(samples.len(), 1, "one exact owned channel; never select a first channel");
     let point = samples[0];
     let properties = &point.measurements.properties;
@@ -102,7 +105,11 @@ async fn observe(
     assert_eq!(counter(point, "io-error-code"), Some("0"));
     assert_eq!(counter(point, "sql-error-code"), Some("0"));
     assert_eq!(counter(point, "source-server-id"), Some("101"));
-    let show = capture::show_work(captured.manifest.read_metrics.as_ref().unwrap(), Flavor::Mysql, version);
+    let show = super::replication::capture::show_work(
+        captured.manifest.read_metrics.as_ref().unwrap(),
+        Flavor::Mysql,
+        version,
+    );
     assert_eq!(show.failures, 0);
     assert_eq!(show.rows_decoded, "1");
     Coordinates {

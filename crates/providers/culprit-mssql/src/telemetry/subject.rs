@@ -81,15 +81,15 @@ impl Identity {
 #[derive(Clone, Copy)]
 pub(super) enum DatabaseAuthority {
     AzureOnly,
-    Tuning,
+    LocalDatabase,
 }
 impl DatabaseAuthority {
     pub fn for_source(dataset: SnapshotDataset, subject: &CollectionSubject) -> Result<Self> {
-        if dataset != SnapshotDataset::Tuning {
+        if !matches!(dataset, SnapshotDataset::Tuning | SnapshotDataset::Settings) {
             return Ok(Self::AzureOnly);
         }
         subject.require_database()?;
-        Ok(Self::Tuning)
+        Ok(Self::LocalDatabase)
     }
     async fn read<R: NativeRead>(
         self,
@@ -100,7 +100,7 @@ impl DatabaseAuthority {
     ) -> Result<SubjectRead> {
         let profile = match self {
             Self::AzureOnly => description::supported_profile(reader, detail).await?,
-            Self::Tuning => description::observed_profile(reader, detail).await?,
+            Self::LocalDatabase => description::observed_profile(reader, detail).await?,
         };
         if profile.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
             let generation = reader.connection_generation();

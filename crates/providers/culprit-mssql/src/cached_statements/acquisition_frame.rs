@@ -30,7 +30,11 @@ impl Projection {
 }
 
 pub(crate) fn require_role(row: &Rec, expected: Option<bool>) -> Result<()> {
-    let (Some(expected), Some(actual)) = (expected, database_writable(row)?) else {
+    require_writable(database_writable(row)?, expected)
+}
+
+pub(crate) fn require_writable(actual: Option<bool>, expected: Option<bool>) -> Result<()> {
+    let (Some(expected), Some(actual)) = (expected, actual) else {
         return Err(CollectionStop::SourceUnavailable.error());
     };
     if actual != expected {

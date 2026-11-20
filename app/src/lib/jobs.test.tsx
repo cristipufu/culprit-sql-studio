@@ -5,7 +5,7 @@ import { HealthTab } from "../components/Health";
 import type { Report } from "../gen/Report";
 import type { OperationalObservation } from "../gen/OperationalObservation";
 import { partial } from "../test/fixtures";
-import { JOBS_SOURCE, jobPoint, jobsEvidence, jobsReport, agentJobEvidence, agentJobsReport } from "../test/jobs";
+import { JOBS_SOURCE, jobPoint, jobsEvidence, jobsReport, agentJobEvidence, agentJobsReport, mysqlEventEvidence, mysqlEventsReport } from "../test/jobs";
 import { t } from "./i18n";
 
 test("continuous-aggregate settings render as exact folded text without becoming a job or refresh verdict", () => {
@@ -117,4 +117,24 @@ test("Agent not-applicable and acquired-without-view markers retain explicit Hea
     expect(html).toContain(t("view.mssql_agent_jobs.title"));expect(html).not.toContain(t("ui.health.empty"));
     if (state==="collected") expect(html).toContain(t("view.jobs.invalid"));
   }
+});
+
+
+
+test("scheduled-event context stays folded plain text and requires its original source, row and read", () => {
+  const evidence = mysqlEventEvidence(); const report = mysqlEventsReport(evidence);
+  const html = renderToStaticMarkup(<Jobs evidence={evidence} report={report} />);
+  expect(html).toContain("nightly &lt;script&gt;event-canary&lt;/script&gt;"); expect(html).not.toContain("<script>");
+  expect(html).toContain(report.limitations[0]!); expect(html).not.toContain("private-native-event-host");
+  expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
+  evidence.snapshot.context = structuredClone(evidence.snapshot.context); evidence.snapshot.context.observed_until = "2026-11-15T12:00:02.123456Z";
+  const changed = renderToStaticMarkup(<Jobs evidence={evidence} report={report} />);
+  expect(changed).toContain(t("ui.memory_failures.missing_row")); expect(changed).not.toContain("event-canary");
+});
+
+test("unavailable scheduled-event catalog keeps its own source title without Agent or empty-health labels", () => {
+  const report = partial<Report>({ snapshot: { server: { engine: "mysql" }, sources: [{ source: "mysql-scheduled-events", state: "unavailable", reason: "Native event catalog permission denied." }], operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
+  const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="MySQL" />);
+  expect(html).toContain(t("view.mysql_events.title")); expect(html).toContain("Native event catalog permission denied.");
+  expect(html).not.toContain(t("view.mssql_agent_jobs.title")); expect(html).not.toContain(t("ui.health.empty"));
 });

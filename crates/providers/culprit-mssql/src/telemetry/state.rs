@@ -11,7 +11,9 @@ const CLOCK: &str = r#"SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME()
 const ENVELOPE_ALLOWANCE: usize = 4096;
 const MAX_BUFFERED_FAMILY_ROWS: usize = 10_000;
 const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
+mod settings;
 mod tuning;
+pub(super) use settings::bounded_budget as settings_budget;
 pub(super) use tuning::bounded_budget as tuning_budget;
 
 fn native_budget(request: &CollectionRequest) -> CollectionBudget {
@@ -19,6 +21,8 @@ fn native_budget(request: &CollectionRequest) -> CollectionBudget {
         memory_failure_budget(&request.budget)
     } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::Tuning }) {
         tuning_budget(&request.budget)
+    } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings }) {
+        settings_budget(&request.budget)
     } else {
         request.budget.clone()
     }
@@ -59,8 +63,8 @@ impl<R: NativeRead> StateSource<R> {
         subject::validate_dataset(&request.subject, dataset)?;
         let database_authority = subject::DatabaseAuthority::for_source(dataset, &request.subject)?;
         let mut request = request.clone();
-        if dataset == SnapshotDataset::Tuning {
-            request.budget = tuning_budget(&request.budget);
+        if matches!(dataset, SnapshotDataset::Tuning | SnapshotDataset::Settings) {
+            request.budget = native_budget(&request);
             request.budget.validate()?;
         }
         Ok(Self {
@@ -99,7 +103,7 @@ impl<R: NativeRead> StateSource<R> {
         };
         for family in families {
             let source = family.source().name.to_string();
-            match family.availability(metadata_visible, tuning_layout.as_ref()) {
+            match family.availability(metadata_visible, tuning_layout.as_ref(), self.identity.as_ref()) {
                 Ok(point::Availability::NotApplicable) => {
                     outcomes.push(StateSourceCoverage::not_applicable(source));
                     continue;
@@ -196,6 +200,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             self.database_authority,
         )
         .await?;
+        if dataset == SnapshotDataset::Settings {
+            settings::require_profile(&read.identity)?;
+        }
         let target = read.identity.target();
         self.identity = Some(read.identity);
         let (mut observed_from, metadata_visible, properties) = if !shared && dataset == SnapshotDataset::Operational {

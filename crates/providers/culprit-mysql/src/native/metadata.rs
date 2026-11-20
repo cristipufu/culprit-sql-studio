@@ -69,8 +69,7 @@ async fn read_identity<R: QueryRead>(reader: &mut R, connector: &Connector, proc
     } else {
         None
     };
-    let (user, host) = connection.login.rsplit_once('@').ok_or_else(invalid)?;
-    let grantee = format!("'{}'@'{}'", user.replace('\'', "''"), host.replace('\'', "''"));
+    let grantee = grantee(&connection.login)?;
     // Direct global/schema privileges are sufficient proof. Role-only grants remain unverified rather than
     // interpreting server-specific role expansion or silently claiming an inventory is database-wide.
     let member = member_projection(&connection, process_epoch);
@@ -95,6 +94,11 @@ async fn read_identity<R: QueryRead>(reader: &mut R, connector: &Connector, proc
         started_second,
         member,
     })
+}
+
+pub(crate) fn grantee(login: &str) -> Result<String> {
+    let (user, host) = login.rsplit_once('@').ok_or_else(invalid)?;
+    Ok(format!("'{}'@'{}'", user.replace('\'', "''"), host.replace('\'', "''")))
 }
 
 fn member_projection(connection: &ConnectionContext, process_epoch: bool) -> &'static str {

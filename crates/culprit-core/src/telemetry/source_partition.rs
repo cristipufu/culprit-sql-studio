@@ -107,6 +107,9 @@ impl CollectionDescription {
         if let SourceObservation::Jobs { snapshot, metadata } = &self.observation {
             return metadata.matches_source(self, snapshot);
         }
+        if let SourceObservation::MysqlEvents { snapshot, metadata } = &self.observation {
+            return metadata.matches_source(self, snapshot);
+        }
         if let SourceObservation::MssqlAgentJobs { snapshot, metadata } = &self.observation {
             return metadata.matches_source(self, snapshot);
         }

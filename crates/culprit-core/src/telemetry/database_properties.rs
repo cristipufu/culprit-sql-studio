@@ -34,6 +34,8 @@ pub enum DatabasePropertyCodeKind {
     SnapshotIsolation,
     PageVerify,
     RecoveryModel,
+    DelayedDurability,
+    Containment,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +64,10 @@ pub enum DatabasePropertyState {
     FullRecovery,
     BulkLoggedRecovery,
     SimpleRecovery,
+    Allowed,
+    Forced,
+    NoContainment,
+    PartialContainment,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -78,18 +84,50 @@ pub struct DatabasePropertiesObservation {
     /// Native DATABASEPROPERTYEX Updateability, from this same selected-database read.
     pub updateability: Option<String>,
     pub catalog_read_only: Option<bool>,
+    /// Native catalog flag: read-only for log restore; it does not establish a current replica role.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub in_standby: Option<bool>,
     pub collation: Option<String>,
     pub compatibility_level: Option<u8>,
     pub snapshot_isolation: DatabasePropertyCode,
     pub read_committed_snapshot: Option<bool>,
+    /// Native AUTO_SHRINK configuration, not evidence of a shrink operation or its resource contribution.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub auto_shrink: Option<bool>,
     pub auto_create_statistics: Option<bool>,
     pub auto_update_statistics: Option<bool>,
     pub auto_update_statistics_async: Option<bool>,
     pub forced_parameterization: Option<bool>,
     /// The native catalog enablement flag, not Query Store's actual/desired capture mode or retention.
     pub query_store_enabled: Option<bool>,
+    /// Native Service Broker enablement only; not evidence of message delivery, queue progress or health.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub broker_enabled: Option<bool>,
     pub page_verify: DatabasePropertyCode,
     pub recovery_model: DatabasePropertyCode,
+    /// Native configured delayed durability, not proof of an individual transaction's durability.
+    pub delayed_durability: DatabasePropertyCode,
+    /// Native containment code/description; current catalog configuration is not an authentication verdict.
+    pub containment: DatabasePropertyCode,
+    /// Native feature/replication catalog flags only. They do not prove encryption completion, active
+    /// replication/change processing, availability-group role or persistent-version-store usage.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub encrypted: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub ledger_enabled: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub change_feed_enabled: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub published: Option<bool>,
+    /// Native is_subscribed is documented as unused and always zero; it does not identify subscribers.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub subscribed: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub merge_published: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub distributor: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub accelerated_recovery_enabled: Option<bool>,
     pub target_recovery_time_seconds: Option<u32>,
     /// Native DATABASEPROPERTYEX LastGoodCheckDbTime datetime, without an established offset.
     /// The 1900 sentinel remains original data. Availability groups report the primary's successful check.
@@ -108,6 +146,8 @@ impl DatabasePropertiesObservation {
                 &self.snapshot_isolation,
                 &self.page_verify,
                 &self.recovery_model,
+                &self.delayed_durability,
+                &self.containment,
             ]
             .into_iter()
             .all(|value| value.is_valid())
@@ -204,6 +244,17 @@ impl DatabasePropertiesObservation {
                     0 => Some(S::NoVerification),
                     1 => Some(S::TornPageDetection),
                     2 => Some(S::Checksum),
+                    _ => None,
+                },
+                K::DelayedDurability => match self.delayed_durability.code? {
+                    0 => Some(S::Off),
+                    1 => Some(S::Allowed),
+                    2 => Some(S::Forced),
+                    _ => None,
+                },
+                K::Containment => match self.containment.code? {
+                    0 => Some(S::NoContainment),
+                    1 => Some(S::PartialContainment),
                     _ => None,
                 },
                 K::RecoveryModel => match self.recovery_model.code? {

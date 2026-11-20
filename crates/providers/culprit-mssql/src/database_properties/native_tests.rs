@@ -57,6 +57,8 @@ async fn run(fixture: &OwnedSourceFixture, directory: &Path, cancellation: &Coll
     // Close the original owner on native error, case cancellation and panic before inspecting any result.
     let shutdown = io.close().await;
     let quiet = io.is_quiet().await;
+    let native =
+        outcome.as_ref().ok().and_then(|result| result.as_ref().ok()).and_then(|frame| frame.properties.as_ref().ok());
     save_cost_receipt(
         directory,
         "database-properties-native",
@@ -67,6 +69,18 @@ async fn run(fixture: &OwnedSourceFixture, directory: &Path, cancellation: &Coll
             "client_elapsed_ms":started.elapsed().as_secs_f64()*1000.0,
             "fixture_admission_client_elapsed_ms":fixture.admission_elapsed_ms,
             "error":outcome.as_ref().ok().and_then(|result|result.as_ref().err()).map(|error|error.code),
+            "native_in_standby":outcome.as_ref().ok().and_then(|result|result.as_ref().ok()).and_then(|frame|frame.properties.as_ref().ok()).and_then(|point|point.in_standby),
+            "native_delayed_durability":outcome.as_ref().ok().and_then(|result|result.as_ref().ok()).and_then(|frame|frame.properties.as_ref().ok()).map(|point|&point.delayed_durability),
+            "native_broker_enabled":outcome.as_ref().ok().and_then(|result|result.as_ref().ok()).and_then(|frame|frame.properties.as_ref().ok()).and_then(|point|point.broker_enabled),
+            "native_auto_shrink":outcome.as_ref().ok().and_then(|result|result.as_ref().ok())
+                .and_then(|frame|frame.properties.as_ref().ok()).and_then(|point|point.auto_shrink),
+            "native_configuration":native.map(|point|json!({
+                "containment":point.containment, "encrypted":point.encrypted,
+                "ledger_enabled":point.ledger_enabled, "change_feed_enabled":point.change_feed_enabled,
+                "published":point.published, "subscribed":point.subscribed,
+                "merge_published":point.merge_published, "distributor":point.distributor,
+                "accelerated_recovery_enabled":point.accelerated_recovery_enabled,
+            })),
             "observed_rows":outcome.as_ref().ok().and_then(|result|result.as_ref().ok()).map(|_|1),
             "exact_template_active_observed":watch.was_active(),
             "active_template_cancellation":"unexercised; this metadata statement may complete before a native active sample",
@@ -92,6 +106,22 @@ async fn run(fixture: &OwnedSourceFixture, directory: &Path, cancellation: &Coll
     assert_eq!(point.database, fixture.database);
     assert_eq!(io.scope().target.database().unwrap().database, point.database);
     assert!(point.catalog_state.code.is_some());
+    assert!(matches!(
+        point.state(DatabasePropertyCodeKind::Containment),
+        Some(DatabasePropertyState::NoContainment | DatabasePropertyState::PartialContainment)
+    ));
+    assert!(point.encrypted.is_some());
+    assert!(point.published.is_some());
+    assert_eq!(point.subscribed, Some(false), "the native unused flag does not establish actual subscriber status");
+    assert!(point.merge_published.is_some());
+    assert!(point.distributor.is_some());
+    assert!(point.in_standby.is_some());
+    assert!(point.broker_enabled.is_some(), "the owned online catalog point exposes native Service Broker enablement");
+    assert!(matches!(
+        point.state(DatabasePropertyCodeKind::DelayedDurability),
+        Some(DatabasePropertyState::Off | DatabasePropertyState::Allowed | DatabasePropertyState::Forced)
+    ));
+    assert!(point.auto_shrink.is_some(), "this owned online catalog point reports native AUTO_SHRINK configuration");
     assert!(point.compatibility_level.is_some());
     assert!(
         point.query_store_enabled.is_some(),

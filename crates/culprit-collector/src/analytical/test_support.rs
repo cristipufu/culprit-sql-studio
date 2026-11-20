@@ -164,6 +164,8 @@ pub use projection::JsonProjection;
 mod native_failures;
 pub use native_failures::native_failure_evidence_cases;
 mod jobs;
+mod mysql_events;
+pub use mysql_events::{MysqlEventsCase, mysql_events_evidence, mysql_events_evidence_cases};
 mod mssql_agent_jobs;
 pub use jobs::{JobsCase, assert_jobs_capture, jobs_evidence, jobs_evidence_cases};
 pub use mssql_agent_jobs::{MssqlAgentJobsCase, mssql_agent_jobs_evidence, mssql_agent_jobs_evidence_cases};

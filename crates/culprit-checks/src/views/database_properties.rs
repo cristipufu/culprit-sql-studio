@@ -65,6 +65,7 @@ fn unavailable() -> DatabasePropertiesReport {
             t!("view.database_properties.limit.state"),
             t!("view.database_properties.limit.query_store"),
             t!("view.database_properties.limit.advice"),
+            t!("view.database_properties.limit.features"),
         ],
         fields: vec![],
     }
@@ -187,6 +188,59 @@ fn fields(point: &DatabasePropertiesObservation) -> Vec<DatabasePropertyField> {
             None,
             None,
         ),
+        field("auto_shrink", t!("view.database_properties.field.auto_shrink"), enabled(point.auto_shrink), None, None),
+        field("in_standby", t!("view.database_properties.field.in_standby"), yes_no(point.in_standby), None, None),
+        coded(
+            "delayed_durability",
+            t!("view.database_properties.field.delayed_durability"),
+            &point.delayed_durability,
+            point.state(C::DelayedDurability),
+        ),
+        field(
+            "broker_enabled",
+            t!("view.database_properties.field.broker_enabled"),
+            enabled(point.broker_enabled),
+            None,
+            None,
+        ),
+        coded(
+            "containment",
+            t!("view.database_properties.field.containment"),
+            &point.containment,
+            point.state(C::Containment),
+        ),
+        field("encrypted", t!("view.database_properties.field.encrypted"), enabled(point.encrypted), None, None),
+        field(
+            "ledger_enabled",
+            t!("view.database_properties.field.ledger_enabled"),
+            yes_no(point.ledger_enabled),
+            None,
+            None,
+        ),
+        field(
+            "change_feed_enabled",
+            t!("view.database_properties.field.change_feed_enabled"),
+            enabled(point.change_feed_enabled),
+            None,
+            None,
+        ),
+        field("published", t!("view.database_properties.field.published"), yes_no(point.published), None, None),
+        field("subscribed", t!("view.database_properties.field.subscribed"), yes_no(point.subscribed), None, None),
+        field(
+            "merge_published",
+            t!("view.database_properties.field.merge_published"),
+            yes_no(point.merge_published),
+            None,
+            None,
+        ),
+        field("distributor", t!("view.database_properties.field.distributor"), yes_no(point.distributor), None, None),
+        field(
+            "accelerated_recovery_enabled",
+            t!("view.database_properties.field.accelerated_recovery_enabled"),
+            enabled(point.accelerated_recovery_enabled),
+            None,
+            None,
+        ),
     ]
 }
 fn field(
@@ -245,6 +299,10 @@ fn state(state: DatabasePropertyState) -> String {
         FullRecovery => t!("view.database_properties.state.full_recovery"),
         BulkLoggedRecovery => t!("view.database_properties.state.bulk_logged_recovery"),
         SimpleRecovery => t!("view.database_properties.state.simple_recovery"),
+        Allowed => t!("view.database_properties.state.allowed"),
+        Forced => t!("view.database_properties.state.forced"),
+        NoContainment => t!("view.database_properties.state.not_contained"),
+        PartialContainment => t!("view.database_properties.state.partially_contained"),
     }
 }
 

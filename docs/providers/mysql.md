@@ -126,6 +126,32 @@ failures outside every capped read until earlier entries expire. Partial reads e
 diagnostic sample does not provide continuous or guaranteed recent-error coverage. A recent feed requires its own
 qualified acquisition policy.
 
+### Recorded scheduled events
+
+The existing native-diagnostics scan option also requests a bounded Event Scheduler catalog read. Default scans
+skip it. The explicit `mysql.jobs` investigation profile uses the same acquisition, native context and decoder.
+The canonical jobs report is shared by scans, authenticated local/store captures, CLI, MCP and the folded UI.
+
+Only the selected database's visible `information_schema.EVENTS` metadata is read. Definitions, definers and
+comments are not selected, and collection never creates, enables or executes an event. Native status, schedule,
+time zones and last-start fields remain separate from outcomes. `LAST_EXECUTED` does not establish success or a
+failure result; the global `event_scheduler` setting is configuration and can remain `ON` after the scheduler stops.
+Native local catalog clocks are never converted to the UTC acquisition clock.
+
+Direct global/schema `EVENT` privileges prove catalog visibility. Role-only or unknown visibility and capped
+rows remain partial; a missing row or empty catalog cannot prove an absence of execution failures. The source
+requires its existing native member/process markers (MySQL 5.7+ or a MariaDB release exposing `server_uid`),
+rechecks the original connection, member, process, role and configuration and retains unknown reset/continuity.
+The process marker has one-second resolution; event names and catalog times are not persistent incarnations.
+
+The profile retains at most 128 rows plus one lookahead and intersects caller limits: 25 native dispatches including
+owned session setup, two-second statements, ten-second total, 64 KiB pages and 512 KiB total. The scan route needs at
+most 20 dispatches; retained collection pays the final verification. LIMIT bounds returned rows, not the catalog's
+internal metadata work. The source remains Unqualified and requires owned native/cost acceptance before automatic
+production admission. See [native columns](https://dev.mysql.com/doc/refman/8.4/en/information-schema-events-table.html),
+[clock semantics](https://dev.mysql.com/doc/refman/8.4/en/events-metadata.html) and
+[scheduler configuration](https://dev.mysql.com/doc/refman/8.4/en/events-configuration.html).
+
 ## Schema and indexes
 
 `information_schema`, `performance_schema` and `sys` provide the catalog, table activity, index usage and available column histograms. Missing-index candidates are derived from workload, plans and foreign keys rather than a native missing-index DMV.

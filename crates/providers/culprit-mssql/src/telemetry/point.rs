@@ -155,6 +155,7 @@ impl Family {
         self,
         metadata_visible: bool,
         tuning_layout: Option<&Result<crate::query_store::tuning::Layout>>,
+        owner: Option<&super::subject::Identity>,
     ) -> Result<Availability> {
         if self.requires_metadata() && !metadata_visible {
             return Ok(Availability::MissingMetadata);
@@ -165,7 +166,10 @@ impl Family {
         }
         Ok(match self {
             // This capture profile is Azure SQL primary-only; it has no msdb suspect-page source.
-            Self::Operation(native::Kind::SuspectPages) | Self::Settings(crate::settings::Kind::Server) => {
+            Self::Operation(native::Kind::SuspectPages) => Availability::NotApplicable,
+            Self::Settings(crate::settings::Kind::Server)
+                if !matches!(owner, Some(super::subject::Identity::LocalDatabase(_))) =>
+            {
                 Availability::NotApplicable
             }
             _ => Availability::Available,
@@ -292,7 +296,13 @@ impl Family {
                 vec![TelemetryRecord::Operational(crate::version_store::persistent::observation(sample))]
             }
             Self::Settings(kind) => {
-                crate::settings::read(reader, kind, limit).await?.into_iter().map(TelemetryRecord::Setting).collect()
+                let values = match owner {
+                    Some(super::subject::Identity::LocalDatabase(context)) => {
+                        crate::settings::read_current(reader, kind, limit, context).await?
+                    }
+                    _ => crate::settings::read(reader, kind, limit).await?,
+                };
+                values.into_iter().map(TelemetryRecord::Setting).collect()
             }
             Self::Operation(kind) => native::read(reader, kind, limit)
                 .await?

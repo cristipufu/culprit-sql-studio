@@ -5,26 +5,67 @@ use crate::{
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 
-const PREFIX: &str = "SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,CAST(0 AS int) AS property_error_number,DB_ID() AS selected_database_id,DB_NAME() AS selected_database,d.database_id,d.name AS database_name,d.state,d.state_desc,d.user_access,d.user_access_desc,CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(128)) AS updateability,d.is_read_only,d.collation_name,d.compatibility_level,d.snapshot_isolation_state,d.snapshot_isolation_state_desc,d.is_read_committed_snapshot_on,d.is_auto_create_stats_on,d.is_auto_update_stats_on,d.is_auto_update_stats_async_on,d.is_parameterization_forced,";
+const PREFIX: &str = "CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,CAST(0 AS int) AS property_error_number,DB_ID() AS selected_database_id,DB_NAME() AS selected_database,d.database_id,d.name AS database_name,d.state,d.state_desc,d.user_access,d.user_access_desc,CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(128)) AS updateability,d.is_read_only,d.is_in_standby,d.is_broker_enabled,d.collation_name,d.compatibility_level,d.snapshot_isolation_state,d.snapshot_isolation_state_desc,d.is_read_committed_snapshot_on,d.is_auto_shrink_on,d.is_auto_create_stats_on,d.is_auto_update_stats_on,d.is_auto_update_stats_async_on,d.is_parameterization_forced";
 const SUFFIX: &str = ",d.page_verify_option,d.page_verify_option_desc,d.recovery_model,d.recovery_model_desc,d.target_recovery_time_in_seconds,CONVERT(varchar(23),CONVERT(datetime,DATABASEPROPERTYEX(DB_NAME(),'LastGoodCheckDbTime')),126) AS last_good_checkdb_without_offset FROM (VALUES(1)) AS selected_database(only_row) LEFT JOIN sys.databases AS d ON d.database_id=DB_ID() OPTION(MAXDOP 1)";
-const FALLBACK: &str = "SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,DB_NAME() AS selected_database,ERROR_NUMBER() AS property_error_number";
+const FALLBACK: &str = "CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,DB_NAME() AS selected_database,ERROR_NUMBER() AS property_error_number";
 
 /// Fixed SQL only. Dynamic compilation keeps pre-2016 servers and hidden columns out of an invalid binding;
 /// permitted property-detail failures return the original clock shape in the SAME dispatch, never a retry.
 pub(crate) fn query() -> String {
-    let prefix = PREFIX.replace('\'', "''");
+    query_with_context("", "")
+}
+
+/// Only fixed provider-owned projection columns may be supplied; the native catalog decoder is unchanged.
+pub(crate) fn query_with_context(context_columns: &str, execution_parameters: &str) -> String {
+    let prefix = format!("SELECT /* culprit */ {context_columns}{PREFIX}").replace('\'', "''");
     let suffix = SUFFIX.replace('\'', "''");
+    let fallback = format!("SELECT /* culprit */ {context_columns}{FALLBACK}");
+    let query_store = optional_columns(&[("is_query_store_on", "bit")]);
+    // Delayed durability was introduced in SQL Server 2014. Both native columns must be visible before
+    // the fixed batch binds either; a missing/hidden pair remains NULL without replacing other properties.
+    let delayed_durability =
+        optional_columns(&[("delayed_durability", "int"), ("delayed_durability_desc", "nvarchar(60)")]);
+    // Each capability stays independent: one unavailable native feature must not erase other values.
+    let containment = optional_columns(&[("containment", "tinyint"), ("containment_desc", "nvarchar(60)")]);
+    let feature_flags = [
+        "is_encrypted",
+        "is_ledger_on",
+        "is_change_feed_enabled",
+        "is_published",
+        "is_subscribed",
+        "is_merge_published",
+        "is_distributor",
+        "is_accelerated_database_recovery_on",
+    ]
+    .into_iter()
+    .map(|column| optional_columns(&[(column, "bit")]))
+    .collect::<Vec<_>>()
+    .join("\n");
     format!(
         "DECLARE /* culprit */ @culprit_database_properties nvarchar(max)=N'{prefix}';\n\
-         IF COL_LENGTH(N'sys.databases',N'is_query_store_on') IS NULL\n\
-          SET /* culprit */ @culprit_database_properties+=N'CAST(NULL AS bit) AS is_query_store_on';\n\
-         ELSE SET /* culprit */ @culprit_database_properties+=N'd.is_query_store_on';\n\
+         {query_store}\n\
+         {delayed_durability}\n\
+         {containment}\n\
+         {feature_flags}\n\
          SET /* culprit */ @culprit_database_properties+=N'{suffix}';\n\
-         BEGIN TRY EXEC /* culprit */ sys.sp_executesql @culprit_database_properties; END TRY\n\
+         BEGIN TRY EXEC /* culprit */ sys.sp_executesql @culprit_database_properties{execution_parameters}; END TRY\n\
          BEGIN CATCH\n\
           IF ERROR_NUMBER() NOT IN(207,208,229,297,300) THROW;\n\
-          {FALLBACK};\n\
+          {fallback};\n\
          END CATCH;"
+    )
+}
+/// Compile only fixed source-owned catalog columns, without binding optional names on older native layouts.
+fn optional_columns(columns: &[(&str, &str)]) -> String {
+    let missing = columns
+        .iter()
+        .map(|(name, _)| format!("COL_LENGTH(N'sys.databases',N'{name}') IS NULL"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let unavailable = columns.iter().map(|(name, kind)| format!(",CAST(NULL AS {kind}) AS {name}")).collect::<String>();
+    let available = columns.iter().map(|(name, _)| format!(",d.{name}")).collect::<String>();
+    format!(
+        "IF {missing}\n SET /* culprit */ @culprit_database_properties+=N'{unavailable}';\nELSE SET /* culprit */ @culprit_database_properties+=N'{available}';"
     )
 }
 
@@ -36,7 +77,12 @@ pub(crate) struct Read {
 }
 pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<Read> {
     let rows = reader.query(&query(), vec![], 2).await.map_err(ReadError::into_error)?;
-    let [row] = rows.as_slice() else { return Err(invalid_data()) };
+    decode_read(&rows)
+}
+
+/// The same decoder also accepts rows from a same-dispatch, native-authority-bound Settings batch.
+pub(crate) fn decode_read(rows: &[Rec]) -> Result<Read> {
+    let [row] = rows else { return Err(invalid_data()) };
     let observed_at = text(row, "observed_at")?;
     canonical_time(&observed_at)?;
     let metadata_visible = integer(row, "metadata_visibility")? == 1;
@@ -65,17 +111,30 @@ fn decode(row: &Rec, at: &str) -> Result<DatabasePropertiesObservation> {
         user_access: code(row, "user_access", "user_access_desc")?,
         updateability: optional_text(row, "updateability")?,
         catalog_read_only: optional_boolean(row, "is_read_only")?,
+        in_standby: optional_boolean(row, "is_in_standby")?,
         collation: optional_text(row, "collation_name")?,
         compatibility_level: byte(row, "compatibility_level")?,
         snapshot_isolation: code(row, "snapshot_isolation_state", "snapshot_isolation_state_desc")?,
         read_committed_snapshot: optional_boolean(row, "is_read_committed_snapshot_on")?,
+        auto_shrink: optional_boolean(row, "is_auto_shrink_on")?,
         auto_create_statistics: optional_boolean(row, "is_auto_create_stats_on")?,
         auto_update_statistics: optional_boolean(row, "is_auto_update_stats_on")?,
         auto_update_statistics_async: optional_boolean(row, "is_auto_update_stats_async_on")?,
         forced_parameterization: optional_boolean(row, "is_parameterization_forced")?,
         query_store_enabled: optional_boolean(row, "is_query_store_on")?,
+        broker_enabled: optional_boolean(row, "is_broker_enabled")?,
         page_verify: code(row, "page_verify_option", "page_verify_option_desc")?,
         recovery_model: code(row, "recovery_model", "recovery_model_desc")?,
+        delayed_durability: code(row, "delayed_durability", "delayed_durability_desc")?,
+        containment: code(row, "containment", "containment_desc")?,
+        encrypted: optional_boolean(row, "is_encrypted")?,
+        ledger_enabled: optional_boolean(row, "is_ledger_on")?,
+        change_feed_enabled: optional_boolean(row, "is_change_feed_enabled")?,
+        published: optional_boolean(row, "is_published")?,
+        subscribed: optional_boolean(row, "is_subscribed")?,
+        merge_published: optional_boolean(row, "is_merge_published")?,
+        distributor: optional_boolean(row, "is_distributor")?,
+        accelerated_recovery_enabled: optional_boolean(row, "is_accelerated_database_recovery_on")?,
         last_good_checkdb_without_offset: optional_text(row, "last_good_checkdb_without_offset")?,
         target_recovery_time_seconds: optional_integer(row, "target_recovery_time_in_seconds")?
             .map(|value| u32::try_from(value).map_err(|_| invalid_data()))

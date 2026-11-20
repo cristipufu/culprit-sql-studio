@@ -4,7 +4,11 @@ use test_support::{JobsCase, assert_jobs_capture, jobs_evidence, jobs_evidence_c
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
 #[tokio::test]
 async fn job_views_run_nulls_lifetime_counters_and_original_receipts_round_trip_without_sql_recovery() {
-    for (source, records) in jobs_evidence_cases().into_iter().chain(test_support::mssql_agent_jobs_evidence_cases()) {
+    for (source, records) in jobs_evidence_cases()
+        .into_iter()
+        .chain(test_support::mssql_agent_jobs_evidence_cases())
+        .chain(test_support::mysql_events_evidence_cases())
+    {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
         fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());

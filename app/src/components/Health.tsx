@@ -37,7 +37,7 @@ import { ConfiguredLogRates } from "./ConfiguredLogRates";
 import { WaitCounters } from "./WaitCounters";
 import { ConnectionOutcomes } from "./ConnectionOutcomes";
 import { PageServerReads, pageServerReadIssue } from "./PageServerReads";
-import { Jobs, JOBS_SOURCES } from "./Jobs";
+import { Jobs, JOBS_SOURCES, AGENT_JOB_SOURCES, MYSQL_EVENTS_SOURCE } from "./Jobs";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
@@ -109,8 +109,9 @@ export function HealthTab({
   const nativeReport = report.native_failures;
   const jobs = report.snapshot.operations.jobs;
   const jobsReport = report.jobs;
-  const agentJobs = jobs?.kind === "mssql-agent" || (report.snapshot.sources ?? []).some((outcome) => JOBS_SOURCES.slice(2).some((source) => source === outcome.source));
-  const jobsTitle = t(agentJobs ? "view.mssql_agent_jobs.title" : "view.jobs.title");
+  const agentJobs = jobs?.kind === "mssql-agent" || (report.snapshot.sources ?? []).some((outcome) => AGENT_JOB_SOURCES.some((source) => source === outcome.source));
+  const mysqlEvents = jobs?.kind === "mysql-events" || (report.snapshot.sources ?? []).some((outcome) => outcome.source === MYSQL_EVENTS_SOURCE);
+  const jobsTitle = t(mysqlEvents ? "view.mysql_events.title" : agentJobs ? "view.mssql_agent_jobs.title" : "view.jobs.title");
   const jobsAssessed = Boolean(jobs) || (report.snapshot.sources ?? []).some((outcome) => JOBS_SOURCES.some((source) => source === outcome.source));
   const explicitNativeFailureSource = (report.snapshot.sources ?? []).some((outcome) => outcome.source === (nativeFailures?.source ?? "native failures"));
   const nativeIssue = nativeFailureReadIssue(nativeFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_native_failures === true && (!jobsAssessed || explicitNativeFailureSource));

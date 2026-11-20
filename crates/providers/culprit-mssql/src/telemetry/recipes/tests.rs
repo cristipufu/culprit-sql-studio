@@ -30,9 +30,9 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.current-request-memory", 4),
             ("mssql.focused-request-memory", 4),
             ("mssql.task-space", 3),
-            ("mssql.operational", 6),
+            ("mssql.operational", 7),
             ("mssql.shared-operational", 7),
-            ("mssql.settings", 3),
+            ("mssql.settings", 4),
             ("mssql.tuning", 2),
             ("mssql.tables", 2),
             ("mssql.indexes", 2),
@@ -471,4 +471,12 @@ fn selected_columnstore_rowgroups_recipe_requires_native_target_and_stays_manual
         ..request
     };
     assert!(open(Arc::new(Pool::new(tiberius::Config::new(), None)), &broad, "original.invalid".into(), 1433).is_err());
+}
+
+#[test]
+fn settings_local_profile_advertises_only_the_existing_native_budget_without_cost_approval() {
+    let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.settings").unwrap();
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, [RecipeSubject::Database]);
+    assert_eq!(recipe.budget, super::super::state::settings_budget(&CollectionBudget::upper_limits()));
 }

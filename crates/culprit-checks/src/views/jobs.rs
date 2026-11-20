@@ -5,6 +5,7 @@ use culprit_core::{
 use std::collections::BTreeMap;
 mod agent;
 mod continuous_aggregates;
+mod mysql_events;
 mod points;
 const MAX_JOB_ENTRIES: usize = 256;
 
@@ -34,6 +35,9 @@ pub fn explain_bounded(snapshot: &JobsSnapshot, max_entries: usize) -> Result<Jo
         return Err(Error::invalid(t!("view.jobs.invalid")));
     }
     match snapshot {
+        JobsSnapshot::MysqlEvents { snapshot, read_complete } => {
+            mysql_events::explain(snapshot, *read_complete, max_entries)
+        }
         JobsSnapshot::Timescale { snapshot, read_complete } => {
             explain_timescale_bounded(snapshot, *read_complete, max_entries)
         }

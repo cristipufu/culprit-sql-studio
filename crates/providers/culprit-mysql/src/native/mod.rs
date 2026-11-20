@@ -9,6 +9,7 @@ pub(crate) mod metadata;
 pub(crate) mod operational;
 pub(crate) mod replication;
 pub(crate) mod runtime_distributions;
+pub(crate) mod scheduled_events;
 pub(crate) mod session_memory;
 pub(crate) mod statements;
 use crate::{read::QueryRead, rows::Rec};

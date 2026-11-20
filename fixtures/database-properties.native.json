@@ -3,21 +3,55 @@
   "database": "sample",
   "native_database_id": "5",
   "observed_at": "2020-01-01T12:00:00.0000001Z",
-  "catalog_state": {"code": 0, "description": "ONLINE"},
-  "user_access": {"code": 0, "description": "MULTI_USER"},
+  "catalog_state": {
+    "code": 0,
+    "description": "ONLINE"
+  },
+  "user_access": {
+    "code": 0,
+    "description": "MULTI_USER"
+  },
   "updateability": "READ_WRITE",
   "catalog_read_only": false,
+  "in_standby": false,
   "collation": "Latin1_General_100_CI_AS",
   "compatibility_level": 160,
-  "snapshot_isolation": {"code": 1, "description": "ON"},
+  "snapshot_isolation": {
+    "code": 1,
+    "description": "ON"
+  },
   "read_committed_snapshot": true,
+  "auto_shrink": false,
   "auto_create_statistics": true,
   "auto_update_statistics": true,
   "auto_update_statistics_async": false,
   "forced_parameterization": false,
   "query_store_enabled": true,
-  "page_verify": {"code": 2, "description": "CHECKSUM"},
-  "recovery_model": {"code": 1, "description": "FULL"},
+  "page_verify": {
+    "code": 2,
+    "description": "CHECKSUM"
+  },
+  "recovery_model": {
+    "code": 1,
+    "description": "FULL"
+  },
+  "delayed_durability": {
+    "code": 0,
+    "description": "DISABLED"
+  },
   "target_recovery_time_seconds": 0,
-  "last_good_checkdb_without_offset": "2019-12-28T23:10:00.003"
+  "last_good_checkdb_without_offset": "2019-12-28T23:10:00.003",
+  "broker_enabled": false,
+  "containment": {
+    "code": 0,
+    "description": "NONE"
+  },
+  "encrypted": false,
+  "ledger_enabled": false,
+  "change_feed_enabled": false,
+  "published": false,
+  "subscribed": false,
+  "merge_published": false,
+  "distributor": false,
+  "accelerated_recovery_enabled": false
 }

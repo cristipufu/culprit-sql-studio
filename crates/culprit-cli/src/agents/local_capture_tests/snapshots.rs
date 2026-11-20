@@ -216,3 +216,90 @@ async fn failed_or_unconfirmed_completed_snapshots_never_fall_back_to_a_saved_de
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
+
+#[tokio::test]
+async fn mysql_event_originals_reach_mcp_with_native_source_gaps_and_no_execution_inference() {
+    use culprit_collector::analytical::test_support::mysql_events_evidence_cases;
+    for (source, rows) in mysql_events_evidence_cases() {
+        let native = source.observation.snapshot().unwrap().clone();
+        let coverage = native.sources[0].clone();
+        let last_started = rows.first().map(|row| {
+            let TelemetryRecord::Operational(row) = row else { panic!() };
+            let OperationalFact::MysqlScheduledEvent(event) = &row.fact else { panic!() };
+            assert_eq!(row.source, MYSQL_SCHEDULED_EVENTS_SOURCE);
+            event.last_started_without_offset.clone()
+        });
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        assert_eq!(fixture.manifest.status, CollectionStatus::Complete);
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) = culprit_core::i18n::scope_async(
+            "fr",
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::Jobs),
+        )
+        .await;
+        assert!(!error, "{value}");
+        assert_eq!(value["analysis"], "jobs");
+        assert_eq!(value["historical_context"], true);
+        assert_eq!(value["native_rows"], native.records);
+        assert_eq!(value["observed_rows"], native.records);
+        assert_eq!(value["read_complete"], true);
+        assert_eq!(value["native_sources"][0]["state"], json!(coverage.state));
+        assert_eq!(value["native_sources"][0]["complete_scope"], coverage.complete_scope);
+        assert_eq!(value["native_sources"][0]["error_code"], json!(coverage.error_code));
+        assert_eq!(value["original_read_bounds"], json!({"from":native.observed_from,"until":native.observed_until}));
+        assert_eq!(value["local_verification_bytes"], fixture.original_bytes());
+        let report = &value["jobs"];
+        assert_eq!(report["title"], culprit_core::i18n::scope("en", || culprit_core::t!("view.mysql_events.title")));
+        assert_eq!(report["entries_available"], native.records);
+        assert_eq!(report["entries_presented"], native.records);
+        assert_eq!(report["entries_omitted"], 0);
+        assert_eq!(report["entries_limited"], false);
+        if let Some(last_started) = last_started {
+            let entries = report["entries"].as_array().unwrap();
+            assert_eq!(entries.len(), 1);
+            let entry = &entries[0];
+            assert_eq!(entry["kind"], "state");
+            assert!(entry["job_id"].is_null());
+            let reference = entry["reference"].as_str().unwrap();
+            assert_eq!(reference.len(), 64);
+            assert!(reference.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            let last = entry["metrics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|metric| metric["key"] == "view.mysql_events.field.last_started")
+                .unwrap();
+            let expected = last_started
+                .unwrap_or_else(|| culprit_core::i18n::scope("en", || culprit_core::t!("view.mysql_events.unknown")));
+            assert_eq!(last["text"], expected);
+            for unavailable in ["succeeded", "duration_ms", "current_worker"] {
+                assert!(entry.get(unavailable).is_none());
+            }
+        } else {
+            assert!(report["entries"].as_array().unwrap().is_empty());
+        }
+        let text = value.to_string();
+        for private in [
+            "EVENT_DEFINITION",
+            "DEFINER",
+            "native_payload_sha256",
+            "manifest_sha256",
+            "source_sha256",
+            "payload_sha256",
+            "qualifiers",
+            "fixture.invalid",
+            "query_id",
+        ] {
+            assert!(!text.contains(private), "{private}");
+        }
+        assert!(text.len() <= 64 * 1024);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let (error, again) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::Jobs).await;
+        assert!(!error);
+        assert_eq!(again, value, "stable exact original capture reference");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}

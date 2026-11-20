@@ -1,12 +1,20 @@
 // Stable templates and bound parameters keep page values out of SQL text and the plan-cache key.
 pub(crate) const EDITION: &str = "SELECT /* culprit */ CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition";
-pub(crate) const OPTIONS: &str = concat!(
-    "SELECT /* culprit */ ",
-    super::layout::columns!(),
-    ",o.actual_state_desc,o.query_capture_mode_desc,o.wait_stats_capture_mode_desc,",
-    "HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility ",
-    "FROM sys.database_query_store_options o"
-);
+macro_rules! options_columns {
+    () => {
+        concat!(
+            super::layout::columns!(),
+            ",o.actual_state_desc,o.query_capture_mode_desc,o.wait_stats_capture_mode_desc,",
+            "HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility "
+        )
+    };
+}
+pub(crate) const OPTIONS: &str =
+    concat!("SELECT /* culprit */ ", options_columns!(), "FROM sys.database_query_store_options o");
+
+pub(crate) fn options_with_context(context_columns: &str) -> String {
+    format!("SELECT /* culprit */ {context_columns}{}FROM sys.database_query_store_options o", options_columns!())
+}
 pub(crate) const REPLICAS: &str = "SELECT TOP (101) /* culprit */ replica_group_id,role_type,replica_name FROM sys.query_store_replicas ORDER BY replica_group_id,role_type,replica_name OPTION (MAXDOP 1)";
 pub(crate) const MAX_PLAN: &str =
     "SELECT TOP (1) /* culprit */ plan_id FROM sys.query_store_plan ORDER BY plan_id DESC OPTION (MAXDOP 1)";

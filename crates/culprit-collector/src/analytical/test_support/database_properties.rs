@@ -3,6 +3,20 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabasePropertiesCase {
     Exact,
+    Encrypted,
+    LedgerEnabled,
+    ChangeFeedEnabled,
+    Published,
+    Subscribed,
+    MergePublished,
+    Distributor,
+    AcceleratedRecoveryEnabled,
+    PartiallyContained,
+    AutoShrinkEnabled,
+    BrokerEnabled,
+    Standby,
+    DelayedDurabilityAllowed,
+    DelayedDurabilityForced,
     ReadOnlyConnection,
     UnknownValues,
     NoRecordedCheckDb,
@@ -12,8 +26,22 @@ pub enum DatabasePropertiesCase {
     NotApplicable,
 }
 impl DatabasePropertiesCase {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 22] = [
         Self::Exact,
+        Self::Encrypted,
+        Self::LedgerEnabled,
+        Self::ChangeFeedEnabled,
+        Self::Published,
+        Self::Subscribed,
+        Self::MergePublished,
+        Self::Distributor,
+        Self::AcceleratedRecoveryEnabled,
+        Self::PartiallyContained,
+        Self::AutoShrinkEnabled,
+        Self::BrokerEnabled,
+        Self::Standby,
+        Self::DelayedDurabilityAllowed,
+        Self::DelayedDurabilityForced,
         Self::ReadOnlyConnection,
         Self::UnknownValues,
         Self::NoRecordedCheckDb,
@@ -32,12 +60,45 @@ pub fn database_properties_evidence(case: DatabasePropertiesCase) -> (Collection
     )))
     .unwrap();
     match case {
+        DatabasePropertiesCase::Encrypted => point.encrypted = Some(true),
+        DatabasePropertiesCase::LedgerEnabled => point.ledger_enabled = Some(true),
+        DatabasePropertiesCase::ChangeFeedEnabled => point.change_feed_enabled = Some(true),
+        DatabasePropertiesCase::Published => point.published = Some(true),
+        DatabasePropertiesCase::Subscribed => point.subscribed = Some(true),
+        DatabasePropertiesCase::MergePublished => point.merge_published = Some(true),
+        DatabasePropertiesCase::Distributor => point.distributor = Some(true),
+        DatabasePropertiesCase::AcceleratedRecoveryEnabled => point.accelerated_recovery_enabled = Some(true),
+        DatabasePropertiesCase::PartiallyContained => {
+            point.containment = DatabasePropertyCode { code: Some(1), description: Some("PARTIAL".into()) };
+        }
+        DatabasePropertiesCase::AutoShrinkEnabled => point.auto_shrink = Some(true),
+        DatabasePropertiesCase::BrokerEnabled => point.broker_enabled = Some(true),
+        DatabasePropertiesCase::Standby => point.in_standby = Some(true),
+        DatabasePropertiesCase::DelayedDurabilityAllowed => {
+            point.delayed_durability = DatabasePropertyCode { code: Some(1), description: Some("ALLOWED".into()) };
+        }
+        DatabasePropertiesCase::DelayedDurabilityForced => {
+            point.delayed_durability = DatabasePropertyCode { code: Some(2), description: Some("FORCED".into()) };
+        }
         DatabasePropertiesCase::ReadOnlyConnection => point.updateability = Some("READ_ONLY".into()),
         DatabasePropertiesCase::UnknownValues => {
             point.last_good_checkdb_without_offset = None;
             point.collation = None;
             point.compatibility_level = None;
             point.query_store_enabled = None;
+            point.auto_shrink = None;
+            point.broker_enabled = None;
+            point.containment = DatabasePropertyCode { code: None, description: None };
+            point.encrypted = None;
+            point.ledger_enabled = None;
+            point.change_feed_enabled = None;
+            point.published = None;
+            point.subscribed = None;
+            point.merge_published = None;
+            point.distributor = None;
+            point.accelerated_recovery_enabled = None;
+            point.in_standby = None;
+            point.delayed_durability = DatabasePropertyCode { code: None, description: None };
             point.auto_create_statistics = None;
             point.auto_update_statistics = None;
             point.auto_update_statistics_async = None;
@@ -48,6 +109,8 @@ pub fn database_properties_evidence(case: DatabasePropertiesCase) -> (Collection
         }
         DatabasePropertiesCase::UnknownCodes => {
             point.catalog_state.code = Some(255);
+            point.delayed_durability.code = Some(255);
+            point.containment.code = Some(255);
             point.snapshot_isolation.code = None;
             point.updateability = Some("FUTURE_NATIVE_VALUE".into());
         }

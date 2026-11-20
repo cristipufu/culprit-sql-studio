@@ -168,3 +168,91 @@ async fn a_foreign_selected_database_cannot_supply_property_values_for_the_confi
     assert!(values.database_properties.unwrap().observation.is_none());
     assert!(values.settings.is_empty());
 }
+
+#[tokio::test]
+async fn auto_shrink_setting_reuses_the_original_property_point_without_guessing_a_missing_configuration() {
+    for (native, expected) in [(Val::Bool(true), Some("1")), (Val::Bool(false), Some("0")), (Val::Null, None)] {
+        let mut reader = FakeRead::new(vec![Ok(vec![replace(&database(), &[("is_auto_shrink_on", native)])])]);
+        let values = read(&mut reader, Kind::Database, 100).await.unwrap();
+        let property = values.iter().find(|point| point.name == "is_auto_shrink_on").unwrap();
+        assert_eq!(property.value.as_deref(), expected);
+        assert_eq!(property.nature, SettingNature::Configuration);
+        assert_eq!(reader.calls.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn standby_state_and_delayed_durability_configuration_reuse_the_same_original_nullable_catalog_point() {
+    for (standby, description, expected_standby, expected_description) in [
+        (Val::Bool(true), Val::Text("ALLOWED".into()), Some("1"), Some("ALLOWED")),
+        (Val::Bool(false), Val::Text("FORCED".into()), Some("0"), Some("FORCED")),
+        (Val::Null, Val::Null, None, None),
+    ] {
+        let native = replace(&database(), &[("is_in_standby", standby), ("delayed_durability_desc", description)]);
+        let mut reader = FakeRead::new(vec![Ok(vec![native])]);
+        let values = read(&mut reader, Kind::Database, 100).await.unwrap();
+        let standby = values.iter().find(|value| value.name == "is_in_standby").unwrap();
+        assert_eq!(standby.value.as_deref(), expected_standby);
+        assert_eq!(standby.nature, SettingNature::State);
+        let delayed = values.iter().find(|value| value.name == "delayed_durability_desc").unwrap();
+        assert_eq!(delayed.value.as_deref(), expected_description);
+        assert_eq!(delayed.nature, SettingNature::Configuration);
+        assert_eq!(reader.calls.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn service_broker_setting_is_nullable_configuration_from_the_existing_catalog_point() {
+    for (native, expected) in [(Val::Bool(true), Some("1")), (Val::Bool(false), Some("0")), (Val::Null, None)] {
+        let mut reader = FakeRead::new(vec![Ok(vec![replace(&database(), &[("is_broker_enabled", native)])])]);
+        let values = read(&mut reader, Kind::Database, 100).await.unwrap();
+        let broker = values.iter().find(|point| point.name == "is_broker_enabled").unwrap();
+        assert_eq!(broker.value.as_deref(), expected);
+        assert_eq!(broker.nature, SettingNature::Configuration);
+        assert_eq!(broker.default_value, None);
+        assert_eq!(broker.default_source, SettingDefaultSource::Unknown);
+        assert_eq!(reader.calls.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn catalog_features_and_replication_states_reuse_the_same_property_read_without_a_second_source() {
+    for native in [Val::Bool(true), Val::Bool(false), Val::Null] {
+        let changes = [
+            "is_encrypted",
+            "is_ledger_on",
+            "is_change_feed_enabled",
+            "is_published",
+            "is_subscribed",
+            "is_merge_published",
+            "is_distributor",
+            "is_accelerated_database_recovery_on",
+        ]
+        .map(|column| (column, native.clone()));
+        let mut io = FakeRead::new(vec![Ok(vec![replace(&database(), &changes)])]);
+        let values = read(&mut io, Kind::Database, 100).await.unwrap();
+        let expected = match native {
+            Val::Bool(value) => Some(u8::from(value).to_string()),
+            Val::Null => None,
+            _ => unreachable!(),
+        };
+        for (name, nature) in [
+            ("is_encrypted", SettingNature::Configuration),
+            ("is_ledger_on", SettingNature::Configuration),
+            ("is_change_feed_enabled", SettingNature::Configuration),
+            ("is_accelerated_database_recovery_on", SettingNature::Configuration),
+            ("is_published", SettingNature::State),
+            ("is_subscribed", SettingNature::State),
+            ("is_merge_published", SettingNature::State),
+            ("is_distributor", SettingNature::State),
+        ] {
+            let value = values.iter().find(|value| value.name == name).unwrap();
+            assert_eq!(value.value, expected);
+            assert_eq!(value.nature, nature);
+        }
+        let containment = values.iter().find(|value| value.name == "containment_desc").unwrap();
+        assert_eq!(containment.value.as_deref(), Some("NONE"));
+        assert_eq!(containment.nature, SettingNature::Configuration);
+        assert_eq!(io.calls.len(), 1);
+    }
+}

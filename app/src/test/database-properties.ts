@@ -15,7 +15,20 @@ export function databasePropertiesReport(): DatabasePropertiesReport {
       { key: "catalog_read_only", label: t("view.database_properties.field.catalog_read_only"), value: t("view.database_properties.no"), native_code: null, native_description: null },
       { key: "last_good_checkdb_without_offset", label: t("view.database_properties.field.last_good_checkdb"), value: "2019-12-28T23:10:00.003", native_code: null, native_description: null },
       { key: "target_recovery_time_seconds", label: t("view.database_properties.field.target_recovery_time_seconds"), value: "0", native_code: null, native_description: null },
-    ], limitations: [t("view.database_properties.limit.scope"), t("view.database_properties.limit.state"), t("view.database_properties.limit.read"), t("core.engines.mssql.integrity_history")],
+      { key: "auto_shrink", label: t("view.database_properties.field.auto_shrink"), value: t("view.database_properties.disabled"), native_code: null, native_description: null },
+      { key: "in_standby", label: t("view.database_properties.field.in_standby"), value: t("view.database_properties.no"), native_code: null, native_description: null },
+      { key: "delayed_durability", label: t("view.database_properties.field.delayed_durability"), value: t("view.database_properties.disabled"), native_code: "0", native_description: "DISABLED" },
+      { key: "broker_enabled", label: t("view.database_properties.field.broker_enabled"), value: t("view.database_properties.disabled"), native_code: null, native_description: null },
+      { key: "containment", label: t("view.database_properties.field.containment"), value: t("view.database_properties.state.not_contained"), native_code: "0", native_description: "NONE" },
+      { key: "encrypted", label: t("view.database_properties.field.encrypted"), value: t("view.database_properties.disabled"), native_code: null, native_description: null },
+      { key: "ledger_enabled", label: t("view.database_properties.field.ledger_enabled"), value: t("view.database_properties.no"), native_code: null, native_description: null },
+      { key: "change_feed_enabled", label: t("view.database_properties.field.change_feed_enabled"), value: t("view.database_properties.disabled"), native_code: null, native_description: null },
+      { key: "published", label: t("view.database_properties.field.published"), value: t("view.database_properties.no"), native_code: null, native_description: null },
+      { key: "subscribed", label: t("view.database_properties.field.subscribed"), value: t("view.database_properties.no"), native_code: null, native_description: null },
+      { key: "merge_published", label: t("view.database_properties.field.merge_published"), value: t("view.database_properties.no"), native_code: null, native_description: null },
+      { key: "distributor", label: t("view.database_properties.field.distributor"), value: t("view.database_properties.no"), native_code: null, native_description: null },
+      { key: "accelerated_recovery_enabled", label: t("view.database_properties.field.accelerated_recovery_enabled"), value: t("view.database_properties.disabled"), native_code: null, native_description: null },
+    ], limitations: [t("view.database_properties.limit.scope"), t("view.database_properties.limit.state"), t("view.database_properties.limit.read"), t("view.database_properties.limit.features"), t("core.engines.mssql.integrity_history")],
   });
 }
 export function databasePropertiesHealthReport(view: DatabasePropertiesReport | null = databasePropertiesReport()): Report {

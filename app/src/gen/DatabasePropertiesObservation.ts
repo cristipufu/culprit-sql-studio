@@ -10,11 +10,40 @@ native_database_id: string, observed_at: string, catalog_state: DatabaseProperty
 /**
  * Native DATABASEPROPERTYEX Updateability, from this same selected-database read.
  */
-updateability: string | null, catalog_read_only: boolean | null, collation: string | null, compatibility_level: number | null, snapshot_isolation: DatabasePropertyCode, read_committed_snapshot: boolean | null, auto_create_statistics: boolean | null, auto_update_statistics: boolean | null, auto_update_statistics_async: boolean | null, forced_parameterization: boolean | null, 
+updateability: string | null, catalog_read_only: boolean | null, 
+/**
+ * Native catalog flag: read-only for log restore; it does not establish a current replica role.
+ */
+in_standby: boolean | null, collation: string | null, compatibility_level: number | null, snapshot_isolation: DatabasePropertyCode, read_committed_snapshot: boolean | null, 
+/**
+ * Native AUTO_SHRINK configuration, not evidence of a shrink operation or its resource contribution.
+ */
+auto_shrink: boolean | null, auto_create_statistics: boolean | null, auto_update_statistics: boolean | null, auto_update_statistics_async: boolean | null, forced_parameterization: boolean | null, 
 /**
  * The native catalog enablement flag, not Query Store's actual/desired capture mode or retention.
  */
-query_store_enabled: boolean | null, page_verify: DatabasePropertyCode, recovery_model: DatabasePropertyCode, target_recovery_time_seconds: number | null, 
+query_store_enabled: boolean | null, 
+/**
+ * Native Service Broker enablement only; not evidence of message delivery, queue progress or health.
+ */
+broker_enabled: boolean | null, page_verify: DatabasePropertyCode, recovery_model: DatabasePropertyCode, 
+/**
+ * Native configured delayed durability, not proof of an individual transaction's durability.
+ */
+delayed_durability: DatabasePropertyCode, 
+/**
+ * Native containment code/description; current catalog configuration is not an authentication verdict.
+ */
+containment: DatabasePropertyCode, 
+/**
+ * Native feature/replication catalog flags only. They do not prove encryption completion, active
+ * replication/change processing, availability-group role or persistent-version-store usage.
+ */
+encrypted: boolean | null, ledger_enabled: boolean | null, change_feed_enabled: boolean | null, published: boolean | null, 
+/**
+ * Native is_subscribed is documented as unused and always zero; it does not identify subscribers.
+ */
+subscribed: boolean | null, merge_published: boolean | null, distributor: boolean | null, accelerated_recovery_enabled: boolean | null, target_recovery_time_seconds: number | null, 
 /**
  * Native DATABASEPROPERTYEX LastGoodCheckDbTime datetime, without an established offset.
  * The 1900 sentinel remains original data. Availability groups report the primary's successful check.

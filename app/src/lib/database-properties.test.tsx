@@ -48,3 +48,80 @@ test("recorded check metadata, no recorded success and unknown remain informatio
     expect(html).not.toContain("1900-01-01");
   }
 });
+
+test("automatic shrinking stays a folded configuration value with explicit unknown and no inferred diagnosis", () => {
+  for (const value of [t("view.database_properties.enabled"), t("view.database_properties.disabled"), null]) {
+    const report = databasePropertiesReport();
+    const field = report.fields.find((field) => field.key === "auto_shrink")!;
+    field.value = value;
+    const html = renderToStaticMarkup(<DatabasePropertyFields report={report} />);
+    expect(html).toContain(t("view.database_properties.field.auto_shrink"));
+    expect(html).toContain(value ?? t("ui.memory_failures.not_reported"));
+    expect(html).not.toContain("sig-dot");
+    expect(html).not.toContain("ALTER DATABASE");
+    expect(html).not.toContain("DBCC SHRINK");
+    const folded = renderToStaticMarkup(<DatabaseProperties report={report} />);
+    expect(folded).not.toContain(t("view.database_properties.field.auto_shrink"));
+  }
+});
+
+
+test("standby and delayed durability display recorded fields inside the existing disclosure", () => {
+  const report = databasePropertiesReport();
+  report.fields.find((field) => field.key === "in_standby")!.value = t("view.database_properties.yes");
+  const delayed = report.fields.find((field) => field.key === "delayed_durability")!;
+  delayed.value = t("view.database_properties.state.allowed");
+  delayed.native_description = "<script>native catalog text</script>";
+  const html = renderToStaticMarkup(<DatabasePropertyFields report={report} />);
+  expect(html).toContain(t("view.database_properties.field.in_standby"));
+  expect(html).toContain(t("view.database_properties.field.delayed_durability"));
+  expect(html).toContain(t("view.database_properties.state.allowed"));
+  expect(html).not.toContain("<script>");
+  expect(html).toContain("&lt;script&gt;");
+  expect(html).not.toContain("sig-dot");
+  expect(html).not.toContain("RESTORE LOG");
+  expect(html).not.toContain("ALTER DATABASE");
+  expect(renderToStaticMarkup(<DatabaseProperties report={report} />)).not.toContain(t("view.database_properties.field.delayed_durability"));
+});
+
+test("Service Broker enablement is a folded native configuration value with explicit unknown", () => {
+  for (const value of [t("view.database_properties.enabled"), t("view.database_properties.disabled"), null]) {
+    const report = databasePropertiesReport();
+    report.fields.find((field) => field.key === "broker_enabled")!.value = value;
+    const html = renderToStaticMarkup(<DatabasePropertyFields report={report} />);
+    expect(html).toContain(t("view.database_properties.field.broker_enabled"));
+    expect(html).toContain(value ?? t("ui.memory_failures.not_reported"));
+    expect(html).not.toContain("sig-dot");
+    expect(html).not.toContain("ENABLE_BROKER");
+    expect(html).not.toContain("NEW_BROKER");
+    expect(renderToStaticMarkup(<DatabaseProperties report={report} />)).not.toContain(t("view.database_properties.field.broker_enabled"));
+  }
+});
+
+
+test("feature and replication catalog facts stay folded, nullable and informational", () => {
+  const keys = ["containment", "encrypted", "ledger_enabled", "change_feed_enabled", "published", "subscribed", "merge_published", "distributor", "accelerated_recovery_enabled"];
+  for (const value of [t("view.database_properties.yes"), t("view.database_properties.no"), null]) {
+    const report = databasePropertiesReport();
+    for (const key of keys) {
+      const field = report.fields.find((field) => field.key === key)!;
+      field.value = value;
+    }
+    const containment = report.fields.find((field) => field.key === "containment")!;
+    containment.native_description = "<script>private catalog text</script>";
+    const html = renderToStaticMarkup(<DatabasePropertyFields report={report} />);
+    for (const key of keys) {
+      expect(html).toContain(report.fields.find((field) => field.key === key)!.label);
+    }
+    expect(html).toContain(value ?? t("ui.memory_failures.not_reported"));
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("sig-dot");
+    expect(html).not.toContain("ALTER DATABASE");
+    expect(html).not.toContain("sp_replicationdboption");
+    const folded = renderToStaticMarkup(<DatabaseProperties report={report} />);
+    for (const key of keys) {
+      expect(folded).not.toContain(report.fields.find((field) => field.key === key)!.label);
+    }
+  }
+});

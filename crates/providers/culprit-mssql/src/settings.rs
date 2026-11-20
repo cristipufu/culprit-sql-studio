@@ -8,10 +8,12 @@ use culprit_core::{
     telemetry::{CollectionStop, SettingDefaultSource, SettingNature, SettingObservation},
 };
 
-const SCOPED: &str = r#"SELECT c.*, CONVERT(nvarchar(128),c.value) AS value_text,
+mod frame;
+
+const SCOPED: &str = r#"c.*, CONVERT(nvarchar(128),c.value) AS value_text,
  CONVERT(nvarchar(128),c.value_for_secondary) AS secondary_value_text FROM sys.database_scoped_configurations c
  OPTION(MAXDOP 1)"#;
-const SERVER: &str = r#"SELECT name, CONVERT(nvarchar(128),value) AS value,
+const SERVER: &str = r#"name, CONVERT(nvarchar(128),value) AS value,
  CONVERT(nvarchar(128),value_in_use) AS value_in_use FROM sys.configurations
  WHERE name IN ('cost threshold for parallelism','max degree of parallelism','optimize for ad hoc workloads','max server memory (MB)')
  OPTION(MAXDOP 1)"#;
@@ -47,6 +49,18 @@ impl Kind {
         if self == Self::Server { MeasurementScope::Server } else { MeasurementScope::Database }
     }
 }
+fn query(kind: Kind, context_columns: &str) -> String {
+    match kind {
+        Kind::Database => crate::database_properties::query_with_context(
+            context_columns,
+            if context_columns.is_empty() { "" } else { frame::EXECUTION_PARAMETERS },
+        ),
+        Kind::Scoped => format!("SELECT {context_columns}{SCOPED}"),
+        Kind::Server => format!("SELECT {context_columns}{SERVER}"),
+        Kind::QueryStore => crate::query_store::catalog_sql::options_with_context(context_columns),
+    }
+}
+
 fn base(kind: Kind, name: String, value: Option<String>, nature: SettingNature) -> SettingObservation {
     SettingObservation {
         source: kind.source().name.into(),
@@ -105,28 +119,53 @@ fn query_store_nature(name: &str) -> SettingNature {
     }
 }
 pub(crate) async fn read<R: NativeRead>(reader: &mut R, kind: Kind, limit: usize) -> Result<Vec<SettingObservation>> {
-    Ok(read_family(reader, kind, limit).await?.values)
+    Ok(read_family(reader, kind, limit, None).await?.values)
 }
+pub(crate) async fn read_current<R: NativeRead>(
+    reader: &mut R,
+    kind: Kind,
+    limit: usize,
+    owner: &crate::local_source::Context,
+) -> Result<Vec<SettingObservation>> {
+    Ok(read_family(reader, kind, limit, Some(owner)).await?.values)
+}
+
 struct FamilyRead {
     values: Vec<SettingObservation>,
     properties: Option<culprit_core::telemetry::DatabasePropertiesObservation>,
 }
-async fn read_family<R: NativeRead>(reader: &mut R, kind: Kind, limit: usize) -> Result<FamilyRead> {
+async fn read_family<R: NativeRead>(
+    reader: &mut R,
+    kind: Kind,
+    limit: usize,
+    owner: Option<&crate::local_source::Context>,
+) -> Result<FamilyRead> {
     if kind == Kind::Database {
-        let point = crate::database_properties::read(reader).await?.properties?;
+        let read = match owner {
+            None => crate::database_properties::read(reader).await?,
+            Some(owner) => {
+                let rows = frame::read(reader, &query(kind, frame::COLUMNS), 2, owner).await?;
+                crate::database_properties::decode_read(&rows)?
+            }
+        };
+        let point = read.properties?;
+        if owner.is_some_and(|owner| {
+            point.native_database_id != owner.database_id.to_string()
+                || point.database != owner.activity.database.database
+                || point.writable().is_some_and(|writable| Some(writable) != owner.activity.writable)
+        }) {
+            return Err(CollectionStop::SourceChanged.error());
+        }
         let values = database_settings(&point)?;
         if values.len() > limit {
             return Err(CollectionStop::RowLimit.error());
         }
         return Ok(FamilyRead { values, properties: Some(point) });
     }
-    let sql = match kind {
-        Kind::Database => return Err(invalid_data()),
-        Kind::Scoped => SCOPED,
-        Kind::Server => SERVER,
-        Kind::QueryStore => crate::query_store::catalog_sql::OPTIONS,
+    let rows = match owner {
+        Some(owner) => frame::read(reader, &query(kind, frame::COLUMNS), limit.saturating_add(1), owner).await?,
+        None => reader.query(&query(kind, ""), vec![], limit.saturating_add(1)).await.map_err(ReadError::into_error)?,
     };
-    let rows = reader.query(sql, vec![], limit.saturating_add(1)).await.map_err(ReadError::into_error)?;
     let values = match kind {
         Kind::Database => return Err(invalid_data()),
         Kind::QueryStore => {
@@ -152,6 +191,19 @@ fn database_settings(
             ("compatibility_level", point.compatibility_level.map(|value| value.to_string()), configuration),
             ("is_read_committed_snapshot_on", bit(point.read_committed_snapshot), configuration),
             ("snapshot_isolation_state_desc", point.snapshot_isolation.description.clone(), state),
+            ("is_auto_shrink_on", bit(point.auto_shrink), configuration),
+            ("is_broker_enabled", bit(point.broker_enabled), configuration),
+            ("is_in_standby", bit(point.in_standby), state),
+            ("delayed_durability_desc", point.delayed_durability.description.clone(), configuration),
+            ("containment_desc", point.containment.description.clone(), configuration),
+            ("is_encrypted", bit(point.encrypted), configuration),
+            ("is_ledger_on", bit(point.ledger_enabled), configuration),
+            ("is_change_feed_enabled", bit(point.change_feed_enabled), configuration),
+            ("is_published", bit(point.published), state),
+            ("is_subscribed", bit(point.subscribed), state),
+            ("is_merge_published", bit(point.merge_published), state),
+            ("is_distributor", bit(point.distributor), state),
+            ("is_accelerated_database_recovery_on", bit(point.accelerated_recovery_enabled), configuration),
             ("is_auto_create_stats_on", bit(point.auto_create_statistics), configuration),
             ("is_auto_update_stats_on", bit(point.auto_update_statistics), configuration),
             ("is_auto_update_stats_async_on", bit(point.auto_update_statistics_async), configuration),
@@ -274,7 +326,7 @@ async fn collect_with<R: NativeRead>(
         } else if let Some(error) = &stopped {
             Err(error.clone())
         } else {
-            read_family(reader, kind, MAX_SETTINGS_PER_SOURCE).await
+            read_family(reader, kind, MAX_SETTINGS_PER_SOURCE, None).await
         };
         let result = result.and_then(|read| {
             if read

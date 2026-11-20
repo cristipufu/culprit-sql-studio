@@ -423,6 +423,10 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         metadata: Box<TimescaleJobsMetadata>,
     },
+    MysqlEvents {
+        snapshot: StateSnapshotDescription,
+        metadata: Box<MysqlEventsMetadata>,
+    },
     BackupHistory {
         snapshot: StateSnapshotDescription,
         scope: Box<MssqlBackupHistoryScope>,
@@ -541,7 +545,9 @@ impl SourceObservation {
             Self::MaintenanceProgress { .. } => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
             Self::CurrentRequestWork { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::Diagnostics(_) => TelemetryCollection::Diagnostics,
-            Self::Jobs { .. } | Self::MssqlAgentJobs { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
+            Self::MysqlEvents { .. } | Self::Jobs { .. } | Self::MssqlAgentJobs { .. } => {
+                TelemetryCollection::Snapshot(SnapshotDataset::Jobs)
+            }
             Self::Snapshot(snapshot) | Self::SourceRead { snapshot, .. } => {
                 TelemetryCollection::Snapshot(snapshot.dataset)
             }
@@ -589,6 +595,7 @@ impl SourceObservation {
             },
             Self::PageWaitTargets { .. }
             | Self::Jobs { .. }
+            | Self::MysqlEvents { .. }
             | Self::MssqlAgentJobs { .. }
             | Self::BackupHistory { .. }
             | Self::Snapshot(_)
@@ -619,6 +626,7 @@ impl SourceObservation {
             Self::BackupHistory { snapshot, .. } => backup_history_header_is_valid(snapshot),
             Self::Jobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::MssqlAgentJobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
+            Self::MysqlEvents { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::Activity(snapshot) => snapshot.is_valid(),
             Self::FocusedBlocking { snapshot, result } => result.is_valid_header(snapshot),
             Self::ColumnstoreRowgroups { snapshot, target, index_type, .. } => {
@@ -713,6 +721,7 @@ impl SourceObservation {
             Self::Snapshot(snapshot)
             | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
+            | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
@@ -733,6 +742,7 @@ impl SourceObservation {
             Self::Snapshot(snapshot)
             | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
+            | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
@@ -773,6 +783,7 @@ impl SourceObservation {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
             Self::Jobs { snapshot, .. }
+            | Self::MysqlEvents { snapshot, .. }
             | Self::MssqlAgentJobs { snapshot, .. }
             | Self::BackupHistory { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
@@ -1051,6 +1062,13 @@ impl CollectionDescription {
         }
         if let (
             SourceObservation::MssqlAgentJobs { snapshot, metadata },
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs },
+        ) = (&self.observation, &request.selection)
+        {
+            return metadata.matches_source(self, snapshot) && snapshot.records <= request.budget.max_snapshot_rows;
+        }
+        if let (
+            SourceObservation::MysqlEvents { snapshot, metadata },
             CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs },
         ) = (&self.observation, &request.selection)
         {

@@ -1,8 +1,10 @@
 use super::*;
 use culprit_core::{ConnectionSpec, Engine, Provider};
 
+mod capture;
 mod replication;
 mod replication_movement;
+mod scheduled_events;
 
 fn fixture() -> crate::MysqlProvider {
     crate::MysqlProvider::new(&ConnectionSpec {

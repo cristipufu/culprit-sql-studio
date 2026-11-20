@@ -471,6 +471,7 @@ pub enum OperationalFact {
     MysqlErrorLog(Box<MysqlErrorLogObservation>),
     PostgresLog(Box<PostgresLogFailureObservation>),
     MssqlAgentJob(Box<MssqlAgentJob>),
+    MysqlScheduledEvent(Box<MysqlScheduledEvent>),
     MssqlAgentStep(Box<MssqlAgentStep>),
     MssqlAgentHistory(Box<MssqlAgentHistory>),
     MssqlAgentContext(Box<MssqlAgentContext>),
@@ -528,6 +529,7 @@ impl OperationalFact {
             Self::MysqlErrorLog(observation) => observation.key(),
             Self::PostgresLog(observation) => observation.key(),
             Self::MssqlAgentJob(point) => point.key(),
+            Self::MysqlScheduledEvent(point) => point.key(),
             Self::MssqlAgentStep(point) => point.key(),
             Self::MssqlAgentHistory(point) => point.key(),
             Self::MssqlAgentContext(point) => point.key(),
@@ -605,6 +607,7 @@ impl OperationalFact {
             | Self::StatementCounters(_)
             | Self::RuntimeDistribution(_)
             | Self::MaintenanceProgress(_)
+            | Self::MysqlScheduledEvent(_)
             | Self::MssqlAgentJob(_)
             | Self::MssqlAgentStep(_)
             | Self::MssqlAgentHistory(_)
@@ -683,6 +686,7 @@ impl OperationalFact {
             Self::MysqlErrorLog(observation) => observation.is_valid(),
             Self::PostgresLog(observation) => observation.is_valid(),
             Self::MssqlAgentJob(point) => point.is_valid(),
+            Self::MysqlScheduledEvent(point) => point.is_valid(),
             Self::MssqlAgentStep(point) => point.is_valid(),
             Self::MssqlAgentHistory(point) => point.is_valid(),
             Self::MssqlAgentContext(point) => point.is_valid(),
@@ -739,6 +743,7 @@ impl OperationalObservation {
                 OperationalFact::MssqlBackupHistory(_) => self.source == MSSQL_BACKUP_HISTORY_SOURCE,
                 OperationalFact::MssqlColumnstoreRowgroup(_) => self.source == MSSQL_COLUMNSTORE_ROWGROUPS_SOURCE,
                 OperationalFact::MssqlAgentJob(_) => self.source == MSSQL_AGENT_JOBS_SOURCE,
+                OperationalFact::MysqlScheduledEvent(_) => self.source == MYSQL_SCHEDULED_EVENTS_SOURCE,
                 OperationalFact::MssqlAgentStep(_) => self.source == MSSQL_AGENT_STEPS_SOURCE,
                 OperationalFact::MssqlAgentHistory(_) => self.source == MSSQL_AGENT_HISTORY_SOURCE,
                 OperationalFact::MssqlAgentContext(_) => self.source == MSSQL_AGENT_CONTEXT_SOURCE,

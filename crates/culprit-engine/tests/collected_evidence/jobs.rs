@@ -11,6 +11,7 @@ async fn original_job_capabilities_outcomes_counts_and_receipts_reuse_the_same_p
     for (source, records) in jobs_evidence_cases()
         .into_iter()
         .chain(culprit_collector::analytical::test_support::mssql_agent_jobs_evidence_cases())
+        .chain(culprit_collector::analytical::test_support::mysql_events_evidence_cases())
     {
         let rows = records
             .iter()
@@ -148,4 +149,46 @@ async fn current_validation_function_survives_authenticated_readback_without_att
             assert!(analysis.report.sources.iter().all(|source| source.state == SourceState::Partial));
         }
     }
+}
+
+#[tokio::test]
+async fn scheduled_events_preserve_original_unknown_results_body_gaps_and_withhold_private_catalog_binding_for_share() {
+    use culprit_collector::analytical::test_support::{MysqlEventsCase, mysql_events_evidence};
+    let (source, records) = mysql_events_evidence(MysqlEventsCase::Disabled);
+    let fixture = Fixture::new(source.clone(), records.clone()).await;
+    let opened = fixture.recovery_object_reads();
+    fixture.remove_first_row(TelemetryStream::OperationalSamples);
+    let capture = fixture.read_families(FAMILY).await;
+    let analysis = collected_resources::jobs(&capture).unwrap();
+    assert_eq!(analysis.report.native_rows, 1);
+    assert_eq!(analysis.report.observed_rows, 0);
+    assert!(!analysis.report.read_complete);
+    assert_eq!(analysis.report.sources[0].state, SourceState::Partial);
+    assert_eq!(fixture.recovery_object_reads(), opened);
+    assert_eq!(capture.metrics().recovery_objects, 0);
+    let mut report: Box<culprit_core::Report> = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/mysql-demo.report.json"
+    )))
+    .unwrap();
+    let mut rows = records
+        .into_iter()
+        .map(|row| {
+            let TelemetryRecord::Operational(row) = row else { unreachable!() };
+            row
+        })
+        .collect::<Vec<_>>();
+    let OperationalFact::MysqlScheduledEvent(point) = &mut rows[0].fact else { unreachable!() };
+    point.name = "private-event-catalog-canary".into();
+    rows[0].key = point.key().unwrap();
+    report.snapshot.operations.jobs = Some(Box::new(JobsSnapshot::from_source(&source, rows, true).unwrap()));
+    let shared = culprit_core::redact::redact_snapshot(&report.snapshot);
+    assert!(shared.operations.jobs.is_none());
+    assert!(
+        shared
+            .sources
+            .iter()
+            .any(|source| source.source == MYSQL_SCHEDULED_EVENTS_SOURCE && source.state == SourceState::Unavailable)
+    );
+    assert!(!serde_json::to_string(&shared).unwrap().contains("private-event-catalog-canary"));
 }

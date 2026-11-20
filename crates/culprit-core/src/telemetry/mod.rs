@@ -695,6 +695,8 @@ impl TelemetryRecord {
                 let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
                 match (&source.observation, &row.fact) {
                     (SourceObservation::Jobs { snapshot, metadata }, _) => accepted && metadata.accepts(snapshot, row),
+                    (_, OperationalFact::MysqlScheduledEvent(event)) => accepted && event.fits_source(source),
+                    (SourceObservation::MysqlEvents { .. }, _) => false,
                     (SourceObservation::MssqlAgentJobs { snapshot, metadata }, _) => {
                         accepted && metadata.accepts(snapshot, row)
                     }

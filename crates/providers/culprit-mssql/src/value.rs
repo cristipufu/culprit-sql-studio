@@ -29,6 +29,10 @@ impl Rec {
         Rec { cols: cols.iter().map(|(name, value)| (name.to_ascii_lowercase(), value.clone())).collect() }
     }
 
+    pub(crate) fn retain_columns(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.cols.retain(|(name, _)| keep(name));
+    }
+
     fn get(&self, name: &str) -> Option<&Val> {
         let name = name.to_ascii_lowercase();
         self.cols.iter().find(|(n, _)| *n == name).map(|(_, v)| v)

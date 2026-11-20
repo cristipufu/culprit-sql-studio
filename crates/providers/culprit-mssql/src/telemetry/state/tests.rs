@@ -458,24 +458,35 @@ async fn settings_use_one_point_profile_with_source_coverage_and_stable_capture_
     let mut source = StateSource::with_io(FakeRead::new(replies), &request, "fixture.invalid".into(), 1433).unwrap();
     let description = source.describe().await.unwrap();
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.records, 17);
+    assert_eq!(snapshot.records, 30);
     assert_eq!(snapshot.sources.len(), 4);
     assert_eq!(
         snapshot.sources.iter().find(|row| row.source == Kind::Server.source().name).unwrap().state,
         SourceState::NotApplicable
     );
-    let CollectionRead::Page { records, next_cursor } =
-        source.read_page(TelemetryStream::SettingObservations, None).await.unwrap()
-    else {
-        panic!("page")
-    };
-    assert!(next_cursor.is_none());
+    let mut records = Vec::new();
+    let mut cursor = None;
+    let mut pages = 0;
+    loop {
+        let CollectionRead::Page { records: page, next_cursor } =
+            source.read_page(TelemetryStream::SettingObservations, cursor.as_deref()).await.unwrap()
+        else {
+            panic!("settings page")
+        };
+        pages += 1;
+        records.extend(page);
+        cursor = next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert!(pages > 1, "settings retain every record across the bounded native page size");
     let capture = CaptureIdentity { observation_id: "settings-fixture".into(), revision: None };
     let ids = records
         .iter()
         .map(|record| ExportedRecord::new(&description, &capture, record.clone()).unwrap().record_id.unwrap())
         .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(ids.len(), 17);
+    assert_eq!(ids.len(), 30);
     assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }

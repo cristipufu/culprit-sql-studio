@@ -186,6 +186,7 @@ impl OperationalFact {
             | Self::MssqlDatabaseFile(_)
             | Self::Space(_)
             | Self::MaintenanceProgress(_)
+            | Self::MysqlScheduledEvent(_)
             | Self::MssqlAgentJob(_)
             | Self::MssqlAgentStep(_)
             | Self::MssqlAgentHistory(_)

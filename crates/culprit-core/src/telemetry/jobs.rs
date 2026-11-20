@@ -7,8 +7,10 @@ pub use points::*;
 mod continuous_aggregates;
 pub use continuous_aggregates::*;
 mod agent;
+mod mysql_events;
 mod profile;
 pub use agent::*;
+pub use mysql_events::*;
 pub use profile::JobsSnapshot;
 
 pub const TIMESCALE_JOBS_SOURCE: &str = "timescale-jobs";

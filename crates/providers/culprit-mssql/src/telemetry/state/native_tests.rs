@@ -204,3 +204,56 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     }
     assert_eq!(member.source_shutdown(), SourceShutdown::Quiescent);
 }
+
+#[tokio::test]
+#[ignore = "requires the existing nonce-owned boxed SQL Server fixture; source cost remains unqualified"]
+async fn owned_boxed_settings_use_the_actual_factory_and_same_native_decoder_through_sealed_outbox() {
+    use crate::test_support::{owned_captures::OwnedCaptures, owned_case::finish_case};
+    use culprit_collector::capture::{CollectionCancellation, SourceFactory};
+    use std::time::Duration;
+    struct Factory(MssqlProvider);
+    #[async_trait::async_trait]
+    impl SourceFactory for Factory {
+        async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
+            self.0.telemetry_source(request)
+        }
+    }
+    let cancellation = CollectionCancellation::default();
+    let (expired, fixture) = finish_case(
+        tokio::time::Instant::now() + Duration::from_secs(10),
+        &cancellation,
+        OwnedSourceFixture::open("culprit-local-settings"),
+    )
+    .await;
+    let fixture = fixture.expect("existing nonce-owned SQL endpoint admission");
+    assert!(!expired);
+    let factory = Factory(provider(fixture.port, &fixture.database, fixture.password()));
+    let mut originals = OwnedCaptures::from_pool(fixture.pool.clone(), fixture.port).unwrap();
+    let (expired,outcome)=finish_case(tokio::time::Instant::now()+Duration::from_secs(20),&cancellation,async {
+        let captured=originals.capture_with_factory(CollectionSelection::Snapshot{dataset:SnapshotDataset::Settings},&cancellation,&factory).await?;
+        let source=captured.source()?;let context=NativeReadContext::from_snapshot(source)?;
+        assert!(context.has_qualified_local_owner());assert!(source.target.database().unwrap().incarnation.is_none());
+        assert_eq!(source.target.database().unwrap().database,fixture.database);
+        let sources=&source.observation.snapshot().unwrap().sources;
+        assert_eq!(sources.len(),4);
+        for kind in crate::settings::Kind::ALL {
+            let coverage=sources.iter().find(|source|source.source==kind.source().name).unwrap();
+            assert_eq!(coverage.state,SourceState::Collected,"{coverage:?}");assert!(coverage.complete_scope&&coverage.records>0);
+        }
+        let mut server=0;let mut database=0;
+        for (index,row) in captured.records.iter().enumerate(){
+            captured.reference(index)?.validate_canonical_record(source,&row.record)?;
+            let TelemetryRecord::Setting(value)=&row.record else{panic!("native Setting observations only")};
+            assert!(value.is_valid());assert!(!value.name.contains("culprit_settings_frame"));
+            if value.namespace=="sys.configurations" {assert_eq!(value.scope,MeasurementScope::Server);assert!(value.value_in_use.is_some());server+=1;}
+            else {assert_eq!(value.scope,MeasurementScope::Database);database+=1;}
+        }
+        assert_eq!(server,4);assert!(database>0);assert!(captured.manifest.source_queries<=settings_budget(&CollectionBudget::upper_limits()).max_queries);
+        originals.verify_retained(&captured).await?;
+        assert_eq!(factory.0.source_shutdown(),SourceShutdown::Quiescent);
+        eprintln!("owned boxed Settings: original_source_queries={}, server_settings={}, database_settings={}; cost_qualified=false",captured.manifest.source_queries,server,database);
+        Ok::<(),culprit_core::Error>(())
+    }).await;
+    outcome.expect("the actual native local Settings profile must qualify every expected family");
+    assert!(!expired);
+}

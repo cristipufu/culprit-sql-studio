@@ -634,7 +634,11 @@ pub(crate) fn require_primary(writable: Option<bool>) -> Result<()> {
 }
 
 pub(crate) fn database_writable(row: &Rec) -> Result<Option<bool>> {
-    match row.str("updateability").as_deref() {
+    database_writable_field(row, "updateability")
+}
+
+pub(crate) fn database_writable_field(row: &Rec, name: &str) -> Result<Option<bool>> {
+    match row.str(name).as_deref() {
         Some("READ_WRITE") => Ok(Some(true)),
         Some("READ_ONLY") => Ok(Some(false)),
         None => Ok(None),

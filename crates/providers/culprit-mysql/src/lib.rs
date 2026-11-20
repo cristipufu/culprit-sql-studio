@@ -7,6 +7,7 @@ mod collect;
 mod connect;
 pub mod deadlocks;
 pub mod fingerprint;
+mod jobs;
 mod json_members;
 mod native;
 mod native_failures;

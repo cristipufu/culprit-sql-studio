@@ -49,6 +49,20 @@ pub(crate) async fn platform<R: QueryRead>(reader: &mut R) -> Result<Platform> {
 }
 
 impl Platform {
+    /// Reuse a native connection point already observed by the selected source; no new probe or inferred owner.
+    pub(crate) fn from_connection(connection: &super::metadata::ConnectionContext) -> Self {
+        Self {
+            version: connection.version.clone(),
+            flavor: connection.flavor,
+            performance_schema: connection.performance_schema,
+            observed_at: connection.at.clone(),
+            connection_id: connection.connection_id,
+            login: connection.login.clone(),
+            server_id: connection.server_id,
+            server_name: connection.server_name.clone(),
+        }
+    }
+
     /// Only call after the owning source has qualified the native product and UUID availability.
     pub(crate) async fn identify<R: QueryRead>(&self, reader: &mut R, configuration: &Rec) -> Result<Identity> {
         let field = match self.flavor {

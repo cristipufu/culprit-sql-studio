@@ -24,6 +24,10 @@ enum PublicObservation<'a> {
         focus_key: &'a str,
         execution_key: String,
     },
+    MysqlEvents {
+        snapshot: &'a StateSnapshotDescription,
+        metadata: &'a MysqlEventsMetadata,
+    },
     BackupHistory {
         snapshot: &'a StateSnapshotDescription,
         scope: &'a MssqlBackupHistoryScope,
@@ -154,6 +158,7 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
             }
         }
         SourceObservation::Jobs { snapshot, metadata } => PublicObservation::Jobs { snapshot, metadata },
+        SourceObservation::MysqlEvents { snapshot, metadata } => PublicObservation::MysqlEvents { snapshot, metadata },
         SourceObservation::BackupHistory { snapshot, scope, database_writable } => {
             PublicObservation::BackupHistory { snapshot, scope, database_writable: *database_writable }
         }

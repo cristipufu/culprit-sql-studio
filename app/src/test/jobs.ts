@@ -45,3 +45,21 @@ export function agentJobEvidence(): JobsSnapshot {
 export function agentJobsReport(evidence=agentJobEvidence()): JobsReport {
   return {context:evidence.snapshot.context,sources:[{source:"mssql-agent-job-history",state:"partial",reason:"Retained history is partial."}],read_complete:true,native_rows:1,observed_rows:1,entries_limited:false,title:"Recorded SQL Server Agent jobs",summary:"Retained failure is independent from the current definition.",limitations:["Job local times have no recorded offset.","An old failure does not establish a current failing job."],entries:[{source:"mssql-agent-job-history",observation_key:"original-agent-history",job_id:"aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb",kind:"retained-run",title:"Retained execution record",explanation:"This retained history row records failure, not a current failure.",metrics:[{key:"view.mssql_agent_jobs.field.history_id",label:"Native history row ID",value:0,unit:"text",text:"2147483647"},{key:"view.mssql_agent_jobs.field.duration",label:"Native duration (HHmmss)",value:0,unit:"text",text:"250101"},{key:"view.mssql_agent_jobs.field.stored_step",label:"Stored historical label",value:0,unit:"text",text:"stored <script>agent-canary</script>"}],investigation:"Inspect current definition and retained outcomes separately.",verify:"Take another bounded native read without executing jobs."}]};
 }
+
+
+export function mysqlEventEvidence(): JobsSnapshot {
+  const context = jobsEvidence([]).snapshot.context;
+  context.target = { scope: "database", identity: { engine: "mysql", database: "shop", location: { kind: "server", host: "private-native-event-host", port: 3306, instance: null }, incarnation: null } };
+  context.partition = { kind: "instance-local", member: { engine: "mysql", kind: "instance", namespace: { id: "mysql-server", qualifiers: {} }, native: { id: "original-member", qualifiers: {} } }, epoch: "original-process" };
+  const row = partial<OperationalObservation>({ source: "mysql-scheduled-events", key: "original-event", fact: { kind: "mysql-scheduled-event", data: {
+    observed_at: context.observed_from, schema: "shop", name: "nightly <script>event-canary</script>", status: "disabled", event_type: "recurring", time_zone: "SYSTEM", last_started_without_offset: null,
+  } } });
+  return { kind: "mysql-events", read_complete: true, snapshot: { context, metadata: { scheduler_setting: "off", scheduler_observed_at: context.observed_from, database_event_visibility: true, layout: "available", session_time_zone: "+00:00", database_writable: true }, sources: [{ source: "mysql-scheduled-events", records: 1, state: "collected", complete_scope: true, error_code: null, stopped: null }], observations: [row] } };
+}
+export function mysqlEventsReport(evidence = mysqlEventEvidence()): JobsReport {
+  const row = evidence.snapshot.observations[0]!;
+  if (row.fact.kind !== "mysql-scheduled-event") throw new Error("original event point required");
+  return { context: evidence.snapshot.context, sources: [{ source: row.source, state: "collected", reason: null }], read_complete: true, native_rows: 1, observed_rows: 1, entries_limited: false,
+    title: "Scheduled events", summary: "Event Scheduler setting: OFF. This is configuration, not a runtime result.", limitations: ["Last start is not a success or failure outcome."],
+    entries: [{ source: row.source, observation_key: row.key, job_id: null, kind: "state", title: "Recorded event", explanation: "The event is recorded as disabled.", metrics: [{ label: "Event", key: "view.mysql_events.field.name", value: 0, unit: "text", text: row.fact.data.name }], investigation: "Review the original event schedule.", verify: "Verify a specific run independently." }] };
+}

@@ -459,7 +459,12 @@ pub(crate) fn current_request_work(report: &culprit_core::CurrentRequestWorkRepo
 }
 
 fn native_metrics(metrics: &[culprit_core::Metric]) -> impl Iterator<Item = String> + '_ {
-    metrics.iter().filter_map(|metric| metric.text.as_ref().map(|value| format!("{}: {value}", metric.label)))
+    metrics.iter().filter_map(|metric| {
+        metric
+            .text
+            .as_ref()
+            .map(|value| format!("{}: {}", metric.label, statement::preview_bounded(value, OBSERVATION_DETAIL_CHARS)))
+    })
 }
 
 fn native_work_summary<'a>(summary: Summary<'a>, entries: impl Iterator<Item = (&'a str, Vec<String>)>) -> String {

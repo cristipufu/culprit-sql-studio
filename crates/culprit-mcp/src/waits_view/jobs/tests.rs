@@ -415,3 +415,53 @@ fn agent_service_states_keep_their_native_labels_and_exclude_unselected_text() {
     assert!(metrics[2].to_string().contains("SQL Server (instance A)"));
     assert!(!output.to_string().contains("PRIVATE-COMMAND-CANARY"));
 }
+
+#[test]
+fn mysql_event_compact_output_uses_exact_original_reference_without_runtime_or_private_body_inference() {
+    let unknown = culprit_core::t!("view.mysql_events.unknown");
+    for last_started in ["2026-11-19T13:00:00", unknown.as_str()] {
+        let entry = JobEntry {
+            source: MYSQL_SCHEDULED_EVENTS_SOURCE.into(),
+            observation_key: "original-event-catalog-key".into(),
+            job_id: None,
+            kind: culprit_core::JobEntryKind::State,
+            title: culprit_core::t!("view.mysql_events.event.title"),
+            explanation: culprit_core::t!("view.mysql_events.event.unknown"),
+            metrics: vec![
+                Metric::said_text("view.mysql_events.field.name", "nightly_event"),
+                Metric::said_text("view.mysql_events.field.schema", "shop"),
+                Metric::said_text("view.mysql_events.field.last_started", last_started),
+                Metric::said_text("view.mysql_events.field.time_zone", "SYSTEM"),
+                Metric::said_text("unselected-event-definition", "PRIVATE-EVENT-BODY-CANARY"),
+                Metric::said_text("unselected-event-definer", "PRIVATE-DEFINER-CANARY"),
+            ],
+            investigation: culprit_core::t!("view.mysql_events.investigate"),
+            verify: culprit_core::t!("view.mysql_events.verify"),
+        };
+        let output = point(&entry);
+        assert_eq!(output["kind"], "state");
+        assert!(output["job_id"].is_null());
+        assert_eq!(output["reference"]["source"], MYSQL_SCHEDULED_EVENTS_SOURCE);
+        assert_eq!(output["reference"]["observation_key"], entry.observation_key);
+        let metrics = output["metrics"].as_array().unwrap();
+        assert_eq!(metrics.len(), 4);
+        assert_eq!(metrics[2]["key"], "view.mysql_events.field.last_started");
+        assert_eq!(metrics[2]["text"], last_started);
+        assert_eq!(metrics[3]["text"], "SYSTEM");
+        let text = output.to_string();
+        for forbidden in [
+            "PRIVATE-EVENT-BODY-CANARY",
+            "PRIVATE-DEFINER-CANARY",
+            "EVENT_DEFINITION",
+            "DEFINER",
+            "query_id",
+            "native_payload_sha256",
+        ] {
+            assert!(!text.contains(forbidden));
+        }
+        for unavailable in ["succeeded", "duration_ms", "current_worker"] {
+            assert!(output.get(unavailable).is_none());
+        }
+        assert!(text.len() <= 4096);
+    }
+}

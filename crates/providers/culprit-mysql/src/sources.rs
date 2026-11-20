@@ -33,6 +33,11 @@ pub const REDO_PRESSURE: Source = Source {
     reads: culprit_core::key!("provider.mysql.source.redo_pressure"),
     delivers: &[],
 };
+pub const SCHEDULED_EVENTS: Source = Source {
+    name: culprit_core::telemetry::MYSQL_SCHEDULED_EVENTS_SOURCE,
+    reads: culprit_core::key!("provider.mysql.source.scheduled_events"),
+    delivers: &[],
+};
 pub const CLUSTER_HEALTH: Source = Source {
     name: source_id::CLUSTER_HEALTH,
     reads: culprit_core::key!("provider.mysql.source.cluster_health"),
@@ -143,6 +148,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    SCHEDULED_EVENTS,
     CURRENT_REQUEST_WORK,
     SESSION_MEMORY,
     NATIVE_FAILURES,

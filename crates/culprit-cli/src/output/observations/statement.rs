@@ -25,8 +25,11 @@ pub(super) fn sql(payload: Option<&DefinitionPayload>) -> String {
 }
 
 pub(super) fn preview(text: &str) -> String {
+    preview_bounded(text, SQL_PREVIEW_CHARS)
+}
+pub(super) fn preview_bounded(text: &str, limit: usize) -> String {
     let mut characters = text.chars().flat_map(char::escape_debug);
-    let mut preview = characters.by_ref().take(SQL_PREVIEW_CHARS).collect::<String>();
+    let mut preview = characters.by_ref().take(limit).collect::<String>();
     if characters.next().is_some() {
         preview.push('…');
     }

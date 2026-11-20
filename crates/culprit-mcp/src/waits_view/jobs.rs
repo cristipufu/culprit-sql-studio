@@ -1,7 +1,7 @@
 //! MCP projects the shared job explanation; it does not reacquire or reclassify native scheduler records.
 use culprit_core::{
     JobEntry, Metric, Report,
-    telemetry::{MSSQL_AGENT_SOURCES, TIMESCALE_JOB_RUNS_SOURCE, TIMESCALE_JOBS_SOURCE},
+    telemetry::{MSSQL_AGENT_SOURCES, MYSQL_SCHEDULED_EVENTS_SOURCE, TIMESCALE_JOB_RUNS_SOURCE, TIMESCALE_JOBS_SOURCE},
 };
 use serde_json::{Value, json};
 const ENTRY_LIMIT: usize = 5;
@@ -12,8 +12,10 @@ pub(super) fn attach(response: &mut Value, report: &Report) {
             .sources
             .iter()
             .filter(|source| {
-                matches!(source.source.as_str(), TIMESCALE_JOBS_SOURCE | TIMESCALE_JOB_RUNS_SOURCE)
-                    || MSSQL_AGENT_SOURCES.contains(&source.source.as_str())
+                matches!(
+                    source.source.as_str(),
+                    TIMESCALE_JOBS_SOURCE | TIMESCALE_JOB_RUNS_SOURCE | MYSQL_SCHEDULED_EVENTS_SOURCE
+                ) || MSSQL_AGENT_SOURCES.contains(&source.source.as_str())
             })
             .collect::<Vec<_>>();
         if report.snapshot.operations.jobs.is_some() || !sources.is_empty() {
@@ -59,6 +61,21 @@ fn safe_metric(metric: &Metric) -> bool {
         "view.jobs.metric.fixed_schedule",
         "view.jobs.metric.succeeded",
     ];
+    const MYSQL_KEYS: &[&str] = &[
+        "view.mysql_events.field.name",
+        "view.mysql_events.field.schema",
+        "view.mysql_events.field.observed_at",
+        "view.mysql_events.field.type",
+        "view.mysql_events.field.time_zone",
+        "view.mysql_events.field.interval_value",
+        "view.mysql_events.field.interval_field",
+        "view.mysql_events.field.execute_at",
+        "view.mysql_events.field.starts",
+        "view.mysql_events.field.ends",
+        "view.mysql_events.field.last_started",
+        "view.mysql_events.field.created",
+        "view.mysql_events.field.altered",
+    ];
     const AGENT_KEYS: &[&str] = &[
         "view.mssql_agent_jobs.field.name",
         "view.mssql_agent_jobs.field.stored_step",
@@ -92,7 +109,9 @@ fn safe_metric(metric: &Metric) -> bool {
         "view.mssql_agent_jobs.field.service_start",
         "view.mssql_agent_jobs.field.service_limit",
     ];
-    KEYS.contains(&metric.key.as_str()) || AGENT_KEYS.contains(&metric.key.as_str())
+    KEYS.contains(&metric.key.as_str())
+        || AGENT_KEYS.contains(&metric.key.as_str())
+        || MYSQL_KEYS.contains(&metric.key.as_str())
 }
 #[cfg(test)]
 mod tests;

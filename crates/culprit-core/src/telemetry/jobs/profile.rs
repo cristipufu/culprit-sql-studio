@@ -6,6 +6,7 @@ use super::*;
 #[ts(export)]
 pub enum JobsSnapshot {
     Timescale { snapshot: Box<TimescaleJobsSnapshot>, read_complete: bool },
+    MysqlEvents { snapshot: Box<MysqlEventsSnapshot>, read_complete: bool },
     MssqlAgent { snapshot: Box<MssqlAgentJobsSnapshot>, read_complete: bool },
 }
 impl JobsSnapshot {
@@ -15,6 +16,9 @@ impl JobsSnapshot {
         read_complete: bool,
     ) -> Result<Self> {
         let read = match &source.observation {
+            SourceObservation::MysqlEvents { .. } => {
+                Self::MysqlEvents { snapshot: Box::new(MysqlEventsSnapshot::from_source(source, rows)?), read_complete }
+            }
             SourceObservation::Jobs { .. } => {
                 Self::Timescale { snapshot: Box::new(TimescaleJobsSnapshot::from_source(source, rows)?), read_complete }
             }
@@ -28,35 +32,42 @@ impl JobsSnapshot {
     }
     pub fn context(&self) -> &NativeReadContext {
         match self {
+            Self::MysqlEvents { snapshot, .. } => &snapshot.context,
             Self::Timescale { snapshot, .. } => &snapshot.context,
             Self::MssqlAgent { snapshot, .. } => &snapshot.context,
         }
     }
     pub fn observations(&self) -> &[OperationalObservation] {
         match self {
+            Self::MysqlEvents { snapshot, .. } => &snapshot.observations,
             Self::Timescale { snapshot, .. } => &snapshot.observations,
             Self::MssqlAgent { snapshot, .. } => &snapshot.observations,
         }
     }
     pub fn sources(&self) -> &[StateSourceCoverage] {
         match self {
+            Self::MysqlEvents { snapshot, .. } => &snapshot.sources,
             Self::Timescale { snapshot, .. } => &snapshot.sources,
             Self::MssqlAgent { snapshot, .. } => &snapshot.sources,
         }
     }
     pub fn read_complete(&self) -> bool {
         match self {
-            Self::Timescale { read_complete, .. } | Self::MssqlAgent { read_complete, .. } => *read_complete,
+            Self::MysqlEvents { read_complete, .. }
+            | Self::Timescale { read_complete, .. }
+            | Self::MssqlAgent { read_complete, .. } => *read_complete,
         }
     }
     pub fn primary_source(&self) -> &'static str {
         match self {
+            Self::MysqlEvents { .. } => MYSQL_SCHEDULED_EVENTS_SOURCE,
             Self::Timescale { .. } => TIMESCALE_JOBS_SOURCE,
             Self::MssqlAgent { .. } => MSSQL_AGENT_JOBS_SOURCE,
         }
     }
     pub fn is_valid(&self) -> bool {
         match self {
+            Self::MysqlEvents { snapshot, read_complete } => snapshot.is_valid_read(*read_complete),
             Self::Timescale { snapshot, read_complete } => snapshot.is_valid_read(*read_complete),
             Self::MssqlAgent { snapshot, read_complete } => snapshot.is_valid_read(*read_complete),
         }

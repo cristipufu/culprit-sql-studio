@@ -203,6 +203,9 @@ pub async fn snapshot(
             crate::native_failures::collect(connector.clone(), options.collect_native_failures, &probe).await;
         snapshot.operations.native_failures = native_failures;
         coverage.append_to(&mut snapshot);
+        if options.collect_native_failures {
+            crate::jobs::collect(connector.clone(), &mut snapshot).await;
+        }
         let (session_memory, coverage) =
             crate::session_memory::collect(connector.clone(), options.collect_session_memory, &probe).await;
         snapshot.operations.session_memory = session_memory;
@@ -211,6 +214,7 @@ pub async fn snapshot(
         let mut coverage = Coverage::default();
         for (requested, source) in [
             (options.collect_native_failures, &sources::NATIVE_FAILURES),
+            (options.collect_native_failures, &sources::SCHEDULED_EVENTS),
             (options.collect_session_memory, &sources::SESSION_MEMORY),
         ] {
             if requested {

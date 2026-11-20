@@ -152,3 +152,127 @@ fn an_integrity_history_fact_cannot_be_borrowed_by_another_engine_or_a_missing_n
     assert!(missing.is_valid());
     assert_eq!(missing.source.records, 1);
 }
+
+#[test]
+fn auto_shrink_configuration_keeps_native_true_false_and_null_without_accepting_an_omitted_contract_field() {
+    for native in [Some(true), Some(false), None] {
+        let mut original = point();
+        original.auto_shrink = native;
+        assert!(original.is_valid());
+        let bytes = serde_json::to_vec(&original).unwrap();
+        let restored: DatabasePropertiesObservation = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(restored.auto_shrink, native);
+        assert!(restored.fits_source(&source()));
+    }
+    let mut missing = serde_json::to_value(point()).unwrap();
+    missing.as_object_mut().unwrap().remove("auto_shrink");
+    assert!(serde_json::from_value::<DatabasePropertiesObservation>(missing).is_err());
+    for malformed in [serde_json::json!(2), serde_json::json!("false")] {
+        let mut value = serde_json::to_value(point()).unwrap();
+        value["auto_shrink"] = malformed;
+        assert!(serde_json::from_value::<DatabasePropertiesObservation>(value).is_err());
+    }
+}
+
+#[test]
+fn standby_and_delayed_durability_keep_nullable_native_configuration_and_codes_independent_of_descriptions() {
+    for standby in [Some(true), Some(false), None] {
+        let mut original = point();
+        original.in_standby = standby;
+        for (native, expected) in [
+            (Some(0), Some(DatabasePropertyState::Off)),
+            (Some(1), Some(DatabasePropertyState::Allowed)),
+            (Some(2), Some(DatabasePropertyState::Forced)),
+            (Some(255), None),
+            (None, None),
+        ] {
+            original.delayed_durability = DatabasePropertyCode { code: native, description: Some("DISABLED".into()) };
+            assert!(original.is_valid());
+            assert_eq!(original.state(DatabasePropertyCodeKind::DelayedDurability), expected);
+            let restored: DatabasePropertiesObservation =
+                serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
+            assert_eq!(restored.in_standby, standby);
+            assert_eq!(restored.delayed_durability, original.delayed_durability);
+            assert!(restored.fits_source(&source()));
+        }
+    }
+    for field in ["in_standby", "delayed_durability"] {
+        let mut value = serde_json::to_value(point()).unwrap();
+        value.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DatabasePropertiesObservation>(value).is_err(), "{field}");
+    }
+}
+
+#[test]
+fn service_broker_configuration_preserves_native_true_false_null_and_requires_its_serialized_field() {
+    for broker_enabled in [Some(true), Some(false), None] {
+        let mut original = point();
+        original.broker_enabled = broker_enabled;
+        assert!(original.is_valid());
+        let restored: DatabasePropertiesObservation =
+            serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
+        assert_eq!(restored.broker_enabled, broker_enabled);
+        assert!(restored.fits_source(&source()));
+    }
+    let mut missing = serde_json::to_value(point()).unwrap();
+    missing.as_object_mut().unwrap().remove("broker_enabled");
+    assert!(serde_json::from_value::<DatabasePropertiesObservation>(missing).is_err());
+    for malformed in [serde_json::json!(2), serde_json::json!("false")] {
+        let mut value = serde_json::to_value(point()).unwrap();
+        value["broker_enabled"] = malformed;
+        assert!(serde_json::from_value::<DatabasePropertiesObservation>(value).is_err());
+    }
+}
+
+#[test]
+fn feature_and_replication_flags_require_their_nullable_native_contract_without_coercion() {
+    for field in [
+        "encrypted",
+        "ledger_enabled",
+        "change_feed_enabled",
+        "published",
+        "subscribed",
+        "merge_published",
+        "distributor",
+        "accelerated_recovery_enabled",
+    ] {
+        for native in [serde_json::json!(true), serde_json::json!(false), serde_json::Value::Null] {
+            let mut encoded = serde_json::to_value(point()).unwrap();
+            encoded[field] = native.clone();
+            let decoded: DatabasePropertiesObservation = serde_json::from_value(encoded).unwrap();
+            assert!(decoded.is_valid() && decoded.fits_source(&source()));
+            assert_eq!(serde_json::to_value(decoded).unwrap()[field], native, "{field}");
+        }
+        let mut omitted = serde_json::to_value(point()).unwrap();
+        omitted.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DatabasePropertiesObservation>(omitted).is_err(), "{field}");
+        for native in [serde_json::json!(2), serde_json::json!("false"), serde_json::json!([])] {
+            let mut encoded = serde_json::to_value(point()).unwrap();
+            encoded[field] = native;
+            assert!(serde_json::from_value::<DatabasePropertiesObservation>(encoded).is_err(), "{field}");
+        }
+    }
+}
+
+#[test]
+fn containment_keeps_the_native_code_separate_from_description_and_availability() {
+    let mut point = point();
+    for (native, expected) in [
+        (Some(0), Some(DatabasePropertyState::NoContainment)),
+        (Some(1), Some(DatabasePropertyState::PartialContainment)),
+        (Some(255), None),
+        (None, None),
+    ] {
+        point.containment = DatabasePropertyCode { code: native, description: Some("PARTIAL".into()) };
+        assert!(point.is_valid());
+        assert_eq!(point.state(DatabasePropertyCodeKind::Containment), expected);
+        let restored: DatabasePropertiesObservation =
+            serde_json::from_slice(&serde_json::to_vec(&point).unwrap()).unwrap();
+        assert_eq!(restored.containment, point.containment);
+    }
+    point.containment = DatabasePropertyCode { code: None, description: None };
+    assert!(point.is_valid());
+    let mut missing = serde_json::to_value(&point).unwrap();
+    missing.as_object_mut().unwrap().remove("containment");
+    assert!(serde_json::from_value::<DatabasePropertiesObservation>(missing).is_err());
+}

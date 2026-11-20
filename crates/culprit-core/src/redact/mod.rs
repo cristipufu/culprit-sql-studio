@@ -432,12 +432,16 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     }
     if let Some(evidence) = s.operations.jobs.take() {
         let source = evidence.primary_source();
-        let message =
-            if matches!(evidence.as_ref(), crate::telemetry::JobsSnapshot::MssqlAgent { .. }) && evidence.is_valid() {
-                crate::message!("view.mssql_agent_jobs.sharing_withheld")
-            } else {
-                crate::message!("view.jobs.invalid")
-            };
+        let message = if matches!(evidence.as_ref(), crate::telemetry::JobsSnapshot::MssqlAgent { .. })
+            && evidence.is_valid()
+        {
+            crate::message!("view.mssql_agent_jobs.sharing_withheld")
+        } else if matches!(evidence.as_ref(), crate::telemetry::JobsSnapshot::MysqlEvents { .. }) && evidence.is_valid()
+        {
+            crate::message!("view.mysql_events.sharing_withheld")
+        } else {
+            crate::message!("view.jobs.invalid")
+        };
         s.operations.jobs = admit_shared_evidence(&mut s, source, message, jobs::redact(*evidence));
     }
     let configured = s.pressure.as_mut().and_then(|pressure| pressure.configured_log_rates.take());

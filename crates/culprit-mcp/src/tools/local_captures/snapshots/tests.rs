@@ -197,9 +197,9 @@ fn bounded_database_property_disclosure_retains_recorded_check_metadata_without_
         // File reanalysis invokes the production pure interpretation without a provider or new dependency.
         let report = workspace.analyze_file(&path).unwrap().database_properties.unwrap();
         let value = database_properties(&report);
-        assert_eq!(value["fields_available"], 17);
+        assert_eq!(value["fields_available"], 30);
         assert_eq!(value["fields_presented"], ENTRY_LIMIT);
-        assert_eq!(value["fields_omitted"], 12);
+        assert_eq!(value["fields_omitted"], 25);
         assert_eq!(value["fields"][4]["key"], "last_good_checkdb_without_offset");
         assert_eq!(value["fields"][4]["value"], json!(expected));
         assert_eq!(value["observed_at"], "2020-01-01T12:00:00.0000001Z");

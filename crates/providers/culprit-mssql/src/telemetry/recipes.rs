@@ -275,7 +275,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(backup_history::bounded_budget)
     .on_editions(&[2, 3, 4, 5, 8]),
-    state!("mssql.operational", Operational).baseline().version(6),
+    state!("mssql.operational", Operational).baseline().version(7),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
@@ -296,7 +296,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(replication::bounded_budget)
     .baseline(),
-    state!("mssql.settings", Settings).baseline().version(3),
+    state!("mssql.settings", Settings).bounded(state::settings_budget).baseline().version(4),
     streamed!("mssql.statement-grants", StatementGrants, grants::Grants),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations),
     streamed!("mssql.tables", Tables, tables::Tables).version(2),

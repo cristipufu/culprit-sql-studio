@@ -11,7 +11,7 @@ pub(super) fn redact(read: JobsSnapshot) -> crate::Result<Box<JobsSnapshot>> {
             Ok(Box::new(JobsSnapshot::Timescale { snapshot, read_complete }))
         }
         // Job labels and immutable native grouping identities cannot be masked and reissued as original evidence.
-        JobsSnapshot::MssqlAgent { .. } => Err(CollectionStop::InvalidPage.error()),
+        JobsSnapshot::MssqlAgent { .. } | JobsSnapshot::MysqlEvents { .. } => Err(CollectionStop::InvalidPage.error()),
     }
 }
 fn redact_timescale(
