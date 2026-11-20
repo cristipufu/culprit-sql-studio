@@ -99,7 +99,8 @@ fn native_lock_references_distinguish_maintenance_blocking_waiting_and_both_dire
     assert_eq!(victim.entries[0].waiting_on, maintenance.wait.as_ref().unwrap().owners);
     let both = report(&frame(3), &[maintenance, owner, waiter], true).unwrap();
     assert_eq!(both.entries[0].direction, MaintenanceDirection::Both);
-    assert_eq!(both.entries[0].investigation, t!("view.maintenance.investigate.blocking"));
+    assert_eq!(both.entries[0].investigation, t!("view.maintenance.investigate.both"));
+    assert_eq!(both.entries[0].verify, t!("view.maintenance.verify.both"));
 }
 
 #[test]
@@ -453,6 +454,97 @@ fn original_source_capture_and_payload_receipts_cannot_be_reassigned_to_differen
     assert!(
         explain(&source, &[ActivityFrameRow { observation: &changed_row, reference: Some(&original) }], true).is_err()
     );
+}
+
+#[test]
+fn mixed_maintenance_roles_preserve_exact_original_incoming_and_outgoing_references() {
+    let upstream = current("59", "UPDATE dbo.orders SET value = 9264");
+    let maintenance = waiting(current("57", "ALTER INDEX ix ON dbo.orders REBUILD"), &upstream);
+    let affected = waiting(current("58", "SELECT id FROM dbo.orders"), &maintenance);
+    let observations = [maintenance, upstream, affected];
+    let original = serde_json::to_value(&observations).unwrap();
+    let source = frame(observations.len());
+    let receipts =
+        observations.iter().enumerate().map(|(index, row)| receipt(&source, row, index as u32)).collect::<Vec<_>>();
+    let rows = observations.iter().zip(&receipts).map(|(row, receipt)| with_receipt(row, receipt)).collect::<Vec<_>>();
+    let result = explain(&source, &rows, true).unwrap();
+    let entry = &result.entries[0];
+    assert_eq!(entry.direction, MaintenanceDirection::Both);
+    assert_eq!(entry.reference.activity, observations[0].key);
+    assert_eq!(entry.reference.evidence.as_ref(), Some(&receipts[0]));
+    assert_eq!(entry.waiting_on, observations[0].wait.as_ref().unwrap().owners);
+    assert_eq!(entry.affected_count, 1);
+    assert_eq!(entry.affected[0].activity, observations[2].key);
+    assert_eq!(entry.affected[0].evidence.as_ref(), Some(&receipts[2]));
+    assert!(entry.issues.contains(&MaintenanceRelationIssue::SessionOwnershipOnly));
+    assert_eq!(entry.investigation, t!("view.maintenance.investigate.both"));
+    assert_eq!(entry.verify, t!("view.maintenance.verify.both"));
+    assert!(result.limitations.contains(&t!("view.maintenance.limit.history")));
+    assert_eq!(serde_json::to_value(&observations).unwrap(), original);
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(!json.contains("ALTER INDEX") && !json.contains("UPDATE dbo"));
+}
+
+#[test]
+fn a_missing_upstream_owner_keeps_both_observed_directions_without_manufacturing_owner_context() {
+    let maintenance = waiting(
+        current("57", "ALTER INDEX ix ON dbo.orders REBUILD"),
+        &current("59", "UPDATE dbo.orders SET value = 9264"),
+    );
+    let affected = waiting(current("58", "SELECT id FROM dbo.orders"), &maintenance);
+    let result = report(&frame(2), &[maintenance, affected], true).unwrap();
+    let entry = &result.entries[0];
+    assert_eq!(entry.direction, MaintenanceDirection::Both);
+    assert!(entry.waiting_on.is_empty());
+    assert!(entry.issues.contains(&MaintenanceRelationIssue::WaitOwnerUnavailable));
+    assert_eq!(entry.affected_count, 1);
+    assert_eq!(entry.investigation, t!("view.maintenance.investigate.both"));
+    assert!(entry.explanation.contains(&t!("view.maintenance.entry.owner_unknown")));
+    assert!(entry.competing_requests.is_empty());
+}
+
+#[test]
+fn an_unqualified_scope_does_not_turn_a_waiting_rebuild_into_a_two_direction_cause() {
+    let maintenance = waiting(
+        current("57", "ALTER INDEX ix ON dbo.orders REBUILD"),
+        &current("59", "UPDATE dbo.orders SET value = 9264"),
+    );
+    let affected = waiting(current("58", "SELECT id FROM dbo.orders"), &maintenance);
+    let mut source = frame(2);
+    source.partition = SourcePartition::InstanceLocal { member: None, epoch: None };
+    let SourceObservation::Activity(native) = &mut source.observation else { unreachable!() };
+    native.epoch = None;
+    native.coverage = StateSourceCoverage::observed(source.source.clone(), 2, false);
+    let result = report(&source, &[maintenance, affected], true).unwrap();
+    let entry = &result.entries[0];
+    assert_eq!(entry.direction, MaintenanceDirection::Waiting);
+    assert!(entry.affected.is_empty());
+    assert_eq!(entry.investigation, t!("view.maintenance.investigate.waiting"));
+    assert_eq!(entry.verify, t!("view.maintenance.verify"));
+}
+
+#[test]
+fn independent_incoming_or_outgoing_controls_keep_their_original_single_role_advice() {
+    for (incoming, outgoing, expected) in [
+        (false, true, MaintenanceDirection::BlockingSession),
+        (true, false, MaintenanceDirection::Waiting),
+        (false, false, MaintenanceDirection::Unlinked),
+    ] {
+        let owner = current("59", "UPDATE dbo.orders SET value = 9264");
+        let mut maintenance = current("57", "ALTER INDEX ix ON dbo.orders REBUILD");
+        if incoming {
+            maintenance = waiting(maintenance, &owner);
+        }
+        let mut observations = vec![maintenance.clone(), owner];
+        if outgoing {
+            observations.push(waiting(current("58", "SELECT id FROM dbo.orders"), &maintenance));
+        }
+        let result = report(&frame(observations.len()), &observations, true).unwrap();
+        let entry = &result.entries[0];
+        assert_eq!(entry.direction, expected);
+        assert_ne!(entry.investigation, t!("view.maintenance.investigate.both"));
+        assert_eq!(entry.verify, t!("view.maintenance.verify"));
+    }
 }
 
 #[test]

@@ -1,5 +1,6 @@
 //! Controlled, independently sealed maintenance and blocking points share one exact original Activity focus.
 use super::*;
+use culprit_core::MaintenanceDirection;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MaintenanceBlockingCase {
@@ -130,4 +131,56 @@ pub fn maintenance_blocking_evidence(case: MaintenanceBlockingCase) -> Maintenan
         }
     }
     MaintenanceBlockingFixture { maintenance_source, maintenance_rows, blocking_source, blocking_rows }
+}
+
+/// One original Activity frame carries each independent maintenance blocking direction.
+/// Current statement context never establishes which statement acquired a session's locks.
+pub fn maintenance_activity_evidence(direction: MaintenanceDirection) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (mut source, _) = activity_evidence_cases().remove(0);
+    let current = |session: &str, sql: &str| {
+        let mut row = activity_observation(DefinitionPayload::sql(sql, culprit_core::Engine::Mssql));
+        row.key.session.id = session.into();
+        row.key.session.generation = format!("native-login-{session}");
+        row.key.request.as_mut().unwrap().generation = format!("native-request-{session}");
+        row.statement_identity = Some(NativeIdentity::new(format!("native-statement-{session}")));
+        row.waiting_on_lock = Some(false);
+        row.wait = None;
+        row
+    };
+    let mut maintenance = current("81", "ALTER INDEX ix ON dbo.orders REBUILD");
+    let mut affected = current("82", "SELECT payload FROM dbo.orders WHERE tenant_id=9264");
+    let owner = current("83", "UPDATE dbo.orders SET payload=9264 WHERE id=42");
+    let lock_wait = |owner: &ActivityObservation| ActivityWait {
+        class: None,
+        native_type: Some("LCK_M_X".into()),
+        elapsed_ms: Some("40000".into()),
+        owners: vec![ActivityWaitOwner::Session {
+            id: owner.key.session.id.clone(),
+            generation: Some(owner.key.session.generation.clone()),
+        }],
+        identified_resources: vec![],
+        resources: None,
+    };
+    let blocking = matches!(direction, MaintenanceDirection::BlockingSession | MaintenanceDirection::Both);
+    let waiting = matches!(direction, MaintenanceDirection::Waiting | MaintenanceDirection::Both);
+    if blocking {
+        affected.waiting_on_lock = Some(true);
+        affected.wait = Some(lock_wait(&maintenance));
+    }
+    if waiting {
+        maintenance.waiting_on_lock = Some(true);
+        maintenance.wait = Some(lock_wait(&owner));
+    }
+    let mut records = vec![TelemetryRecord::from(maintenance)];
+    if blocking {
+        records.push(affected.into());
+    }
+    if waiting {
+        records.push(owner.into());
+    }
+    let SourceObservation::Activity(native) = &mut source.observation else { unreachable!() };
+    native.native_rows = records.len() as u32;
+    native.observations = native.native_rows;
+    native.coverage = StateSourceCoverage::collected(source.source.clone(), native.native_rows);
+    (source, records)
 }

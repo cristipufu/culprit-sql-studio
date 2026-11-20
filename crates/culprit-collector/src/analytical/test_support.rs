@@ -150,7 +150,9 @@ pub use mssql_agent_jobs::{MssqlAgentJobsCase, mssql_agent_jobs_evidence, mssql_
 mod maintenance_progress;
 pub use maintenance_progress::maintenance_progress_evidence_cases;
 mod maintenance_blocking;
-pub use maintenance_blocking::{MaintenanceBlockingCase, MaintenanceBlockingFixture, maintenance_blocking_evidence};
+pub use maintenance_blocking::{
+    MaintenanceBlockingCase, MaintenanceBlockingFixture, maintenance_activity_evidence, maintenance_blocking_evidence,
+};
 mod replication;
 pub use replication::{ReplicationCase, assert_replication_capture, replication_evidence, replication_evidence_cases};
 

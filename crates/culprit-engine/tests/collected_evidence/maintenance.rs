@@ -1,7 +1,7 @@
 use super::fixture::Fixture;
 use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason, RecoveryPayloadBudget},
-    test_support::activity_evidence_cases,
+    test_support::{activity_evidence_cases, maintenance_activity_evidence},
 };
 use culprit_core::{Engine, MaintenanceDirection, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
@@ -148,4 +148,64 @@ async fn a_truncated_sql_projection_stays_a_gap_until_explicit_authenticated_pay
     assert_eq!(report.entries[0].direction, MaintenanceDirection::BlockingSession);
     assert_eq!(report.entries[0].reference.evidence.as_ref().unwrap().row_ordinal, 0);
     assert_eq!(hydrated.metrics().recovery_objects, 1);
+}
+
+#[tokio::test]
+async fn original_maintenance_roles_keep_upstream_and_downstream_references_and_distinct_verification() {
+    for direction in [
+        MaintenanceDirection::BlockingSession,
+        MaintenanceDirection::Waiting,
+        MaintenanceDirection::Both,
+        MaintenanceDirection::Unlinked,
+    ] {
+        let (source, rows) = maintenance_activity_evidence(direction);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let recovery_before = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+        let report = collected_resources::maintenance(&capture).unwrap().report;
+        let entry = &report.entries[0];
+        assert_eq!(entry.direction, direction);
+        assert_eq!(entry.reference.evidence.as_ref().unwrap().row_ordinal, 0);
+        assert_eq!(entry.reference.evidence.as_ref().unwrap().capture, *capture.capture());
+        let (investigation, verify) = match direction {
+            MaintenanceDirection::Both => (
+                culprit_core::t!("view.maintenance.investigate.both"),
+                culprit_core::t!("view.maintenance.verify.both"),
+            ),
+            MaintenanceDirection::BlockingSession => {
+                (culprit_core::t!("view.maintenance.investigate.blocking"), culprit_core::t!("view.maintenance.verify"))
+            }
+            MaintenanceDirection::Waiting => {
+                (culprit_core::t!("view.maintenance.investigate.waiting"), culprit_core::t!("view.maintenance.verify"))
+            }
+            MaintenanceDirection::Unlinked => {
+                (culprit_core::t!("view.maintenance.investigate.unlinked"), culprit_core::t!("view.maintenance.verify"))
+            }
+        };
+        assert_eq!(entry.investigation, investigation);
+        assert_eq!(entry.verify, verify);
+        if matches!(direction, MaintenanceDirection::BlockingSession | MaintenanceDirection::Both) {
+            assert_eq!(entry.affected_count, 1);
+            assert_eq!(entry.affected[0].activity.session.id, "82");
+            assert_eq!(entry.affected[0].evidence.as_ref().unwrap().row_ordinal, 1);
+        } else {
+            assert!(entry.affected.is_empty());
+        }
+        if matches!(direction, MaintenanceDirection::Waiting | MaintenanceDirection::Both) {
+            assert_eq!(
+                entry.waiting_on,
+                vec![ActivityWaitOwner::Session { id: "83".into(), generation: Some("native-login-83".into()) }]
+            );
+        } else {
+            assert!(entry.waiting_on.is_empty());
+        }
+        for row in &rows {
+            let original = ExportedRecord::new(&source, capture.capture(), row.clone()).unwrap();
+            assert!(capture.records().iter().any(|row| row.row() == &original));
+        }
+        assert_eq!(fixture.recovery_object_reads(), recovery_before);
+        assert!(!serde_json::to_string(&report).unwrap().contains("ALTER INDEX"));
+        let replay = collected_resources::maintenance(&capture).unwrap().report;
+        assert_eq!(serde_json::to_value(replay).unwrap(), serde_json::to_value(report).unwrap());
+    }
 }

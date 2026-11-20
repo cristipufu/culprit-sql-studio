@@ -236,13 +236,16 @@ fn render(
         explanation: details.join(" "),
         metrics: metrics(observation),
         investigation: match direction {
-            MaintenanceDirection::BlockingSession | MaintenanceDirection::Both => {
-                t!("view.maintenance.investigate.blocking")
-            }
+            MaintenanceDirection::BlockingSession => t!("view.maintenance.investigate.blocking"),
+            MaintenanceDirection::Both => t!("view.maintenance.investigate.both"),
             MaintenanceDirection::Waiting => t!("view.maintenance.investigate.waiting"),
             MaintenanceDirection::Unlinked => t!("view.maintenance.investigate.unlinked"),
         },
-        verify: t!("view.maintenance.verify"),
+        verify: if direction == MaintenanceDirection::Both {
+            t!("view.maintenance.verify.both")
+        } else {
+            t!("view.maintenance.verify")
+        },
     }
 }
 

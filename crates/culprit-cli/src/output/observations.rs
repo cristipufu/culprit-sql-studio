@@ -10,6 +10,8 @@ const OBSERVATION_DETAIL_CHARS: usize = 1024;
 mod compilation_tests;
 mod completed_spills;
 #[cfg(test)]
+mod maintenance_tests;
+#[cfg(test)]
 mod participants_tests;
 #[cfg(test)]
 mod task_space_tests;
@@ -351,7 +353,7 @@ pub(crate) fn compiler_admission(report: &culprit_core::CompilerAdmissionReport)
 }
 
 pub(crate) fn maintenance(report: &culprit_core::MaintenanceReport) -> String {
-    render_explanations(
+    native_work_summary(
         Summary {
             title: &report.title,
             summary: &report.summary,
@@ -361,7 +363,9 @@ pub(crate) fn maintenance(report: &culprit_core::MaintenanceReport) -> String {
             },
             limitations: &report.limitations,
         },
-        report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
+        report.entries.iter().map(|entry| {
+            (entry.title.as_str(), vec![entry.explanation.clone(), entry.investigation.clone(), entry.verify.clone()])
+        }),
     )
 }
 
