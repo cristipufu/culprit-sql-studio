@@ -255,6 +255,14 @@ const REGISTRATIONS: &[Registration] = &[
     .bounded(cleanup::bounded_budget)
     .on_editions(crate::instance::SUPPORTED_EDITIONS),
     Registration::database(
+        "mssql.columnstore-rowgroups",
+        RecipeSelector::ColumnstoreRowgroups,
+        |pool, request, host, port| {
+            Ok(Box::new(columnstore_rowgroups::RowgroupSource::new(pool, request, host, port)?))
+        },
+    )
+    .bounded(columnstore_rowgroups::bounded_budget),
+    Registration::database(
         "mssql.cdc",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cdc)),
         |pool, request, host, port| Ok(Box::new(cdc::CdcSource::new(pool, request, host, port)?)),

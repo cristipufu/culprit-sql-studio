@@ -1,4 +1,5 @@
 mod columnstore;
+mod columnstore_rowgroups;
 mod table_full_text;
 use super::*;
 mod activity;

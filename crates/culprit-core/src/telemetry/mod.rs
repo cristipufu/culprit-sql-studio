@@ -36,6 +36,8 @@ pub use captured_reference::{
 };
 mod catalog;
 mod cdc;
+mod columnstore_rowgroups;
+pub use columnstore_rowgroups::*;
 mod check_constraints;
 mod cleanup;
 pub use cdc::*;
@@ -356,12 +358,19 @@ impl CollectionRequest {
             CollectionSelection::Snapshot {
                 dataset:
                     SnapshotDataset::CacheEntryMemory
+                    | SnapshotDataset::ColumnstoreRowgroups
                     | SnapshotDataset::MaintenanceProgress
                     | SnapshotDataset::CurrentRequestWork
                     | SnapshotDataset::PageWaitWriters
                     | SnapshotDataset::PageTaskHolders,
             } => {
                 return Err(CollectionStop::InvalidPage.error());
+            }
+            CollectionSelection::ColumnstoreRowgroups { target } => {
+                self.subject.require_database()?;
+                if !target.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
             }
             CollectionSelection::CacheEntryMemory { focus } => {
                 self.subject.require_database()?;
@@ -716,6 +725,8 @@ impl TelemetryRecord {
                     }
                     (SourceObservation::MaintenanceProgress { .. }, _)
                     | (_, OperationalFact::MaintenanceProgress(_)) => false,
+                    (_, OperationalFact::MssqlColumnstoreRowgroup(point)) => accepted && point.fits_source(source),
+                    (SourceObservation::ColumnstoreRowgroups { .. }, _) => false,
                     (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),
                     (SourceObservation::Snapshot(header), _) if header.dataset == SnapshotDataset::Cdc => false,
                     (_, OperationalFact::ConfiguredLogRateLimits(point)) => accepted && point.fits_source(source),

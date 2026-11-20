@@ -142,6 +142,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
         | SourceObservation::FocusedCompilationAdmission { snapshot, .. }
         | SourceObservation::MaintenanceProgress { snapshot, .. }
         | SourceObservation::CurrentRequestWork { snapshot, .. }
+        | SourceObservation::ColumnstoreRowgroups { snapshot, .. }
         | SourceObservation::CacheEntryMemory { snapshot, .. } => {
             context["dataset"] = json!(snapshot.dataset);
             context["observed_from"] = json!(snapshot.observed_from);

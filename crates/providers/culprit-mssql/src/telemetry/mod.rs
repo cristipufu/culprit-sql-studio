@@ -6,6 +6,7 @@ mod cdc;
 mod check_constraints;
 mod cleanup;
 mod columns;
+mod columnstore_rowgroups;
 mod compilation;
 mod compiler_admission;
 mod grants;

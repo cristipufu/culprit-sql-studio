@@ -326,8 +326,20 @@ catalog dates, appear in scan JSON and bounded per-index schema JSON, and are no
 The same one-dispatch catalog query and decoder serve scans and index snapshots; optional layout, type, version
 and permission checks occur before optional identifiers compile. No rowgroup DMV or application rows are read,
 and configured ordering/delay does not establish physical ordering, refresh progress or columnstore health.
-Selected rowgroup population and native work qualification remain separate unfinished scope. The changed
-`mssql.indexes` recipe remains cost-Unqualified; output limits do not establish a native CPU/I/O quota.
+The changed `mssql.indexes` recipe remains cost-Unqualified; output limits do not establish a native CPU/I/O quota.
+
+`mssql.columnstore-rowgroups` reads the public rowgroup catalog for one explicitly selected native table/index
+and optional partition. Supply `CollectionSelection::ColumnstoreRowgroups` through a collection selection file
+or the SDK. The source rechecks the table's original catalog identity, modification date, index kind, permissions,
+connected member and role before and after acquisition. It retains up to 128 rowgroups, with at most 11 native
+dispatches, a one-second statement timeout and a five-second source deadline. The recipe remains manual and
+cost-Unqualified.
+
+The captured report preserves native state, physical/deleted rows, delta-store HoBT and byte counts, including
+NULLs and incomplete coverage. It does not read the physical-stats DMV, shared dictionaries or application rows.
+Nonclustered deleted counts omit the separate delete buffer; reported bytes are neither a complete index
+footprint nor reclaimable space. Rowgroup numbers do not establish continuity across captures or a maintenance
+benefit. The same canonical observations can be replayed locally or through ADX and ClickHouse.
 
 The advisor combines those requests with workload and plan evidence, unindexed foreign keys, and duplicate, overlapping or unused indexes. Disabling an eligible index keeps its definition and stops its maintenance; `ALTER INDEX … REBUILD` restores it. Clustered, unique and constraint-backed indexes are not treated as disposable unused indexes.
 

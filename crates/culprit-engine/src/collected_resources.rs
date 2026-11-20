@@ -18,6 +18,8 @@ pub use cached_plans::cached_plans;
 mod cache_entry_memory;
 pub use cache_entry_memory::cache_entry_memory;
 mod cdc;
+mod columnstore_rowgroups;
+pub use columnstore_rowgroups::columnstore_rowgroups;
 mod cleanup;
 pub use cdc::cdc;
 pub use cleanup::cleanup;

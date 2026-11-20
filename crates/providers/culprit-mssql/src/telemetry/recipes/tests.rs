@@ -115,6 +115,9 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
         RecipeSelector::FocusedBlocking => {
             panic!("the SQL Server catalog does not declare focused blocking")
         }
+        RecipeSelector::ColumnstoreRowgroups => CollectionSelection::ColumnstoreRowgroups {
+            target: Box::new(crate::columnstore_rowgroups::tests::selection()),
+        },
         RecipeSelector::CacheEntryMemory => {
             CollectionSelection::CacheEntryMemory { focus: Box::new(crate::cache_entry_memory::tests::focus().await) }
         }
@@ -419,4 +422,32 @@ fn cdc_recipe_is_manual_unqualified_and_keeps_its_own_paid_native_roster() {
     assert_eq!(cdc.budget.total_bytes, 256 * 1024);
     assert_eq!(cdc.budget.statement_timeout_ms, 1000);
     assert_eq!(cdc.budget.total_timeout_ms, 5000);
+}
+
+#[test]
+fn selected_columnstore_rowgroups_recipe_requires_native_target_and_stays_manual_unqualified() {
+    let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.columnstore-rowgroups").unwrap();
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.selector, RecipeSelector::ColumnstoreRowgroups);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.budget.max_snapshot_rows, 128);
+    assert_eq!(recipe.budget.max_queries, 11);
+    assert_eq!(recipe.budget.statement_timeout_ms, 1000);
+    assert_eq!(recipe.budget.total_timeout_ms, 5000);
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::ColumnstoreRowgroups {
+            target: Box::new(crate::columnstore_rowgroups::tests::selection()),
+        },
+        budget: CollectionBudget::default(),
+    };
+    let source =
+        open(Arc::new(Pool::new(tiberius::Config::new(), None)), &request, "original.invalid".into(), 1433).unwrap();
+    assert_eq!(source.query_count(), 0);
+    let broad = CollectionRequest {
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::ColumnstoreRowgroups },
+        ..request
+    };
+    assert!(open(Arc::new(Pool::new(tiberius::Config::new(), None)), &broad, "original.invalid".into(), 1433).is_err());
 }

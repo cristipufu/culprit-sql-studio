@@ -275,3 +275,10 @@ pub struct CollectedCdcAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: Box<crate::CdcReport>,
 }
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedColumnstoreRowgroupAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::ColumnstoreRowgroupReport>,
+}

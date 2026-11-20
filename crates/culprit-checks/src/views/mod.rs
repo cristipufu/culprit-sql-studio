@@ -7,6 +7,7 @@ pub(crate) mod brief;
 pub mod cache_entry_memory;
 pub mod cdc;
 pub mod cleanup;
+pub mod columnstore_rowgroups;
 pub mod compilation;
 pub mod compiler_admission;
 pub mod completed_spills;

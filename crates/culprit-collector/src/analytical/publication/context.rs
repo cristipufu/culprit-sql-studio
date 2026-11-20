@@ -54,6 +54,12 @@ enum PublicObservation<'a> {
         #[serde(flatten)]
         context: FocusedRequestContext<'a>,
     },
+    ColumnstoreRowgroupsContext {
+        snapshot: &'a StateSnapshotDescription,
+        target_key: String,
+        index_type: u8,
+        database_writable: bool,
+    },
     CacheEntryMemoryContext {
         snapshot: &'a StateSnapshotDescription,
         focus_key: String,
@@ -145,6 +151,14 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::Jobs { snapshot, metadata } => PublicObservation::Jobs { snapshot, metadata },
         SourceObservation::MssqlAgentJobs { snapshot, metadata } => {
             PublicObservation::MssqlAgentJobs { snapshot, metadata }
+        }
+        SourceObservation::ColumnstoreRowgroups { snapshot, target, index_type, database_writable } => {
+            PublicObservation::ColumnstoreRowgroupsContext {
+                snapshot,
+                target_key: target.key()?,
+                index_type: *index_type,
+                database_writable: *database_writable,
+            }
         }
         SourceObservation::CacheEntryMemory { snapshot, focus } => {
             PublicObservation::CacheEntryMemoryContext { snapshot, focus_key: focus.key()? }

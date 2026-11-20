@@ -69,6 +69,7 @@ impl NativeReadContext {
             observed_from: snapshot.observed_from.clone(),
             observed_until: snapshot.observed_until.clone(),
             database_writable: match &source.observation {
+                SourceObservation::ColumnstoreRowgroups { database_writable, .. } => Some(*database_writable),
                 SourceObservation::Jobs { metadata, .. } => metadata.database_writable,
                 SourceObservation::MaintenanceProgress { result, .. }
                 | SourceObservation::CurrentRequestWork { result, .. } => result.database_writable,

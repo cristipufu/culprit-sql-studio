@@ -5,6 +5,8 @@ pub mod blocking_report;
 pub mod cache_entry_memory_report;
 pub mod cached_plan_report;
 mod cdc_report;
+mod columnstore_rowgroup_report;
+pub use columnstore_rowgroup_report::{ColumnstoreRowgroupEntry, ColumnstoreRowgroupReport};
 pub mod changes;
 pub mod check;
 pub mod cleanup_report;

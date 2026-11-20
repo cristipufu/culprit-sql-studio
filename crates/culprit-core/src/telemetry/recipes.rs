@@ -44,6 +44,7 @@ pub enum RecipeSelector {
     Collection(TelemetryCollection),
     FocusedBlocking,
     CacheEntryMemory,
+    ColumnstoreRowgroups,
     FocusedPageWait,
     FocusedPageWaitWriters,
     FocusedPageTaskHolders,
@@ -84,6 +85,8 @@ impl RecipeSelector {
             ) => false,
             (Self::FocusedRequestMemory, CollectionSelection::FocusedRequestMemory { .. }) => true,
             (Self::Collection(_), CollectionSelection::FocusedRequestMemory { .. }) => false,
+            (Self::ColumnstoreRowgroups, CollectionSelection::ColumnstoreRowgroups { .. }) => true,
+            (Self::Collection(_), CollectionSelection::ColumnstoreRowgroups { .. }) => false,
             (Self::CacheEntryMemory, CollectionSelection::CacheEntryMemory { .. }) => true,
             (Self::Collection(_), CollectionSelection::CacheEntryMemory { .. }) => false,
             (

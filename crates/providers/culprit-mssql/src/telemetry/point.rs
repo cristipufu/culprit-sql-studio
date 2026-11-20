@@ -93,6 +93,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         | SnapshotDataset::MemoryFailures
         | SnapshotDataset::NativeFailures
         | SnapshotDataset::Jobs
+        | SnapshotDataset::ColumnstoreRowgroups
         | SnapshotDataset::Cdc
         | SnapshotDataset::SessionMemory
         | SnapshotDataset::PageWaitTargets

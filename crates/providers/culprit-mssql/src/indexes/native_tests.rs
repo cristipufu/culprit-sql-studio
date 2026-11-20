@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 
+mod rowgroups;
+
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 struct Fixture<'a> {
     owned: &'a OwnedSourceFixture,

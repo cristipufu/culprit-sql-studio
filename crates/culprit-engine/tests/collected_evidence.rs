@@ -10,6 +10,7 @@ mod cdc;
 mod cleanup;
 mod cohorts;
 mod columnstore;
+mod columnstore_rowgroups;
 mod compilation;
 mod compilation_definitions;
 mod compiler_admission;

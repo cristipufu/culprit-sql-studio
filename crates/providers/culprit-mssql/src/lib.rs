@@ -17,6 +17,7 @@ mod cdc;
 mod check_constraints;
 mod collect;
 mod columns;
+mod columnstore_rowgroups;
 mod compiler_gateways;
 mod conn;
 mod constraints;

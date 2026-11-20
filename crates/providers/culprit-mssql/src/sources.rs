@@ -4,6 +4,12 @@
 //! detail some checks use; without it those checks say less, never something wrong.
 
 use culprit_core::{Capability, Coverage, ErrorCode, Source, source_id};
+pub const COLUMNSTORE_ROWGROUPS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_COLUMNSTORE_ROWGROUPS_SOURCE,
+    reads: culprit_core::key!("provider.mssql.source.columnstore_rowgroups"),
+    delivers: &[],
+};
+
 pub const CDC_STATUS: Source = Source {
     name: culprit_core::telemetry::MSSQL_CDC_STATUS_SOURCE,
     reads: culprit_core::key!("view.cdc.source.status"),
@@ -431,6 +437,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    COLUMNSTORE_ROWGROUPS,
     CDC_STATUS,
     CDC_SCANS,
     CDC_ERRORS,
