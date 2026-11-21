@@ -6,6 +6,7 @@ mod actual_plans;
 mod cost_receipts;
 pub(crate) mod idle_sessions;
 pub(crate) mod owned_case;
+pub(crate) mod owned_control;
 mod owned_source;
 pub(crate) mod parameter_variants;
 pub(crate) mod query_store_probes;

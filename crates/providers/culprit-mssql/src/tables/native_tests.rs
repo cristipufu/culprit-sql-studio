@@ -36,6 +36,12 @@ async fn owned_full_text_enabled_and_disabled_rows_match_scan_and_stream_without
     run(true).await;
 }
 
+#[tokio::test]
+#[ignore = "requires the exact nonce-owned FTS image, fresh receipt directory and supervisor; one finite synthetic full-population runtime capture, no status7/aborted/cost guarantee"]
+async fn owned_full_text_runtime_population_retains_original_after_stop_with_supervisor_owned_background() {
+    populations::run_runtime().boxed_local().await;
+}
+
 async fn run(indexed: bool) {
     let owned = OwnedSourceFixture::open("culprit-full-text-fixture").await.unwrap();
     let mut fixture = Fixture::new(&owned);

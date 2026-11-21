@@ -2,9 +2,24 @@
 use super::*;
 use crate::{
     conn::{MsClient, SessionKind},
-    test_support::{batch, config, connect, verify_owned_source},
+    test_support::{config, connect, verify_owned_source},
 };
 use tiberius::Config;
+
+mod control;
+mod runtime;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PopulationWork {
+    NotStarted,
+    MayBeRunning,
+    StopCommandCompleted,
+}
+impl PopulationWork {
+    fn requires_supervisor(self) -> bool {
+        self != Self::NotStarted
+    }
+}
 
 struct NativeIds {
     database: u32,
@@ -22,6 +37,12 @@ pub(super) struct Fixture<'a> {
     prefix: String,
     owns_objects: bool,
     population_capture_unsettled: bool,
+    population_capture_attempts: u32,
+    population_captures_completed: u32,
+    control_available: bool,
+    control_connections: u32,
+    control_sql_attempts: u32,
+    population_work: PopulationWork,
     ids: Option<NativeIds>,
 }
 impl<'a> Fixture<'a> {
@@ -29,7 +50,19 @@ impl<'a> Fixture<'a> {
         let owner = std::env::var("CULPRIT_SMOKE_OWNER").unwrap();
         let prefix =
             format!("culprit_fts_{owner}_{}_{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap());
-        Self { owned, prefix, owns_objects: false, population_capture_unsettled: false, ids: None }
+        Self {
+            owned,
+            prefix,
+            owns_objects: false,
+            population_capture_unsettled: false,
+            population_capture_attempts: 0,
+            population_captures_completed: 0,
+            control_available: true,
+            control_connections: 0,
+            control_sql_attempts: 0,
+            population_work: PopulationWork::NotStarted,
+            ids: None,
+        }
     }
     fn name(&self, suffix: &str) -> String {
         format!("{}_{suffix}", self.prefix)
@@ -43,105 +76,90 @@ impl<'a> Fixture<'a> {
     pub(super) fn config(&self) -> Config {
         config(self.owned.port, &self.owned.database, self.owned.password(), "culprit-full-text-source")
     }
-    async fn actor(&self, label: &str) -> MsClient {
-        let mut client =
-            connect(&config(self.owned.port, &self.owned.database, self.owned.password(), label), SessionKind::User)
-                .await
-                .unwrap();
-        verify_owned_source(&mut client).await.unwrap();
-        client
-    }
     pub(super) async fn initialize(&mut self, indexed: bool) -> Result<()> {
-        let mut client = self.actor("culprit-full-text-setup").await;
         let plain = self.name("plain");
         let table = self.indexed_table();
         let catalog = self.name("catalog");
         let user = self.name("viewer");
         let key = self.name("indexed_key");
-        let before = crate::conn::query_one(&mut client, &format!(
-            "SELECT /* culprit fixture precondition */ CONVERT(int,FULLTEXTSERVICEPROPERTY('IsFullTextInstalled')) AS installed, OBJECT_ID(N'dbo.{plain}',N'U') AS plain_id, OBJECT_ID(N'dbo.{table}',N'U') AS indexed_id, USER_ID(N'{user}') AS user_id, (SELECT fulltext_catalog_id FROM sys.fulltext_catalogs WHERE name=N'{catalog}') AS catalog_id"
-        )).await.unwrap();
-        for name in ["plain_id", "indexed_id", "user_id", "catalog_id"] {
-            assert_eq!(
-                crate::read::optional_integer(&before, name)?,
-                None,
-                "fixture collision: no existing object may be claimed"
-            );
-        }
-        if indexed && crate::read::optional_boolean(&before, "installed")? != Some(true) {
-            client.close().await.unwrap();
-            return Err(culprit_core::Error::new(
-                culprit_core::ErrorCode::Unsupported,
-                "The owned SQL image has no available native full-text installation; enabled/disabled acceptance did not run.",
-            ));
-        }
-        self.owns_objects = true;
-        batch(&mut client, &format!(
-            "CREATE TABLE dbo.[{plain}](id int NOT NULL CONSTRAINT [{plain}_key] PRIMARY KEY CLUSTERED,content nvarchar(1000) NULL); CREATE TABLE dbo.[{table}](id int NOT NULL CONSTRAINT [{key}] PRIMARY KEY CLUSTERED,content nvarchar(1000) NULL);"
-        )).await;
-        if indexed {
-            batch(&mut client, &format!("CREATE FULLTEXT CATALOG [{catalog}]")).await;
-            batch(&mut client, &format!("CREATE FULLTEXT INDEX ON dbo.[{table}](content LANGUAGE 1033) KEY INDEX [{key}] ON [{catalog}] WITH(CHANGE_TRACKING=OFF,NO POPULATION)")).await;
-        }
-        batch(&mut client, &format!(
-            "CREATE USER [{user}] WITHOUT LOGIN; GRANT VIEW DEFINITION TO [{user}]; GRANT SELECT ON OBJECT::dbo.[{plain}] TO [{user}]; GRANT SELECT ON OBJECT::dbo.[{table}] TO [{user}]; DENY SELECT ON OBJECT::sys.fulltext_indexes TO [{user}];"
-        )).await;
-        // Independent fixture oracle, outside source-query accounting. Only these exact owned catalog keys are read.
-        let ids = crate::conn::query_one(&mut client, &format!(
-            "SELECT /* culprit fixture identity */ DB_ID() AS database_id, OBJECT_ID(N'dbo.{plain}',N'U') AS plain_id, OBJECT_ID(N'dbo.{table}',N'U') AS indexed_id, (SELECT index_id FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U') AND name=N'{key}') AS unique_index_id, (SELECT fulltext_catalog_id FROM sys.fulltext_catalogs WHERE name=N'{catalog}') AS catalog_id, (SELECT has_crawl_completed FROM sys.fulltext_indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS last_crawl_completed, (SELECT CONVERT(varchar(40),create_date,126) FROM sys.tables WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS created_without_offset, (SELECT CONVERT(varchar(40),modify_date,126) FROM sys.tables WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS modified_without_offset"
-        )).await.unwrap();
-        self.ids = Some(NativeIds {
-            database: crate::read::integer(&ids, "database_id")?.try_into().unwrap(),
-            plain: crate::read::integer(&ids, "plain_id")?.try_into().unwrap(),
-            indexed: crate::read::integer(&ids, "indexed_id")?.try_into().unwrap(),
-            unique_index: crate::read::integer(&ids, "unique_index_id")?.try_into().unwrap(),
-            catalog: crate::read::optional_integer(&ids, "catalog_id")?.map(|value| value.try_into().unwrap()),
-            last_crawl_completed: crate::read::optional_boolean(&ids, "last_crawl_completed")?,
-            created_without_offset: crate::read::text(&ids, "created_without_offset")?,
-            modified_without_offset: crate::read::text(&ids, "modified_without_offset")?,
-        });
-        client.close().await.unwrap();
+        let oracle = self.identity_sql();
+        let ids = self.control("culprit-full-text-setup", async |commands, owns_objects| {
+            let before = commands.row(&format!(
+                "SELECT /* culprit fixture precondition */ CONVERT(int,FULLTEXTSERVICEPROPERTY('IsFullTextInstalled')) AS installed, OBJECT_ID(N'dbo.{plain}',N'U') AS plain_id, OBJECT_ID(N'dbo.{table}',N'U') AS indexed_id, USER_ID(N'{user}') AS user_id, (SELECT fulltext_catalog_id FROM sys.fulltext_catalogs WHERE name=N'{catalog}') AS catalog_id"
+            )).await;
+            for name in ["plain_id", "indexed_id", "user_id", "catalog_id"] {
+                assert_eq!(crate::read::optional_integer(&before, name)?, None,
+                    "fixture collision: no existing object may be claimed");
+            }
+            if indexed && crate::read::optional_boolean(&before, "installed")? != Some(true) {
+                return Err(culprit_core::Error::new(culprit_core::ErrorCode::Unsupported,
+                    "The owned SQL image has no available native full-text installation; enabled/disabled acceptance did not run."));
+            }
+            *owns_objects = true;
+            commands.batch(&format!("CREATE TABLE dbo.[{plain}](id int NOT NULL CONSTRAINT [{plain}_key] PRIMARY KEY CLUSTERED,content nvarchar(1000) NULL); CREATE TABLE dbo.[{table}](id int NOT NULL CONSTRAINT [{key}] PRIMARY KEY CLUSTERED,content nvarchar(1000) NULL);")).await;
+            if indexed {
+                commands.batch(&format!("CREATE FULLTEXT CATALOG [{catalog}]")).await;
+                commands.batch(&format!("CREATE FULLTEXT INDEX ON dbo.[{table}](content LANGUAGE 1033) KEY INDEX [{key}] ON [{catalog}] WITH(CHANGE_TRACKING=OFF,NO POPULATION)")).await;
+            }
+            commands.batch(&format!("CREATE USER [{user}] WITHOUT LOGIN; GRANT VIEW DEFINITION TO [{user}]; GRANT SELECT ON OBJECT::dbo.[{plain}] TO [{user}]; GRANT SELECT ON OBJECT::dbo.[{table}] TO [{user}]; DENY SELECT ON OBJECT::sys.fulltext_indexes TO [{user}];")).await;
+            NativeIds::decode(&commands.row(&oracle).await)
+        }).await?;
+        self.ids = Some(ids);
         Ok(())
+    }
+    fn identity_sql(&self) -> String {
+        let plain = self.name("plain");
+        let table = self.indexed_table();
+        let key = self.name("indexed_key");
+        let catalog = self.name("catalog");
+        format!(
+            "SELECT /* culprit fixture identity */ DB_ID() AS database_id, OBJECT_ID(N'dbo.{plain}',N'U') AS plain_id, OBJECT_ID(N'dbo.{table}',N'U') AS indexed_id, (SELECT index_id FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U') AND name=N'{key}') AS unique_index_id, (SELECT fulltext_catalog_id FROM sys.fulltext_catalogs WHERE name=N'{catalog}') AS catalog_id, (SELECT has_crawl_completed FROM sys.fulltext_indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS last_crawl_completed, (SELECT CONVERT(varchar(40),create_date,126) FROM sys.tables WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS created_without_offset, (SELECT CONVERT(varchar(40),modify_date,126) FROM sys.tables WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')) AS modified_without_offset"
+        )
     }
     pub(super) fn impersonate(&self) -> String {
         format!("EXECUTE AS USER=N'{}'", self.name("viewer"))
     }
     pub(super) async fn disable(&mut self) -> Result<()> {
-        let mut client = self.actor("culprit-full-text-disable").await;
-        batch(&mut client, &format!("ALTER FULLTEXT INDEX ON dbo.[{}] DISABLE", self.indexed_table())).await;
-        let native = crate::conn::query_one(&mut client, &format!(
-            "SELECT /* culprit fixture independent flag */ has_crawl_completed AS last_crawl_completed FROM sys.fulltext_indexes WHERE object_id=OBJECT_ID(N'dbo.{}',N'U')", self.indexed_table()
-        )).await.unwrap();
+        let table = self.indexed_table();
+        let native = self.control("culprit-full-text-disable", async |commands, _| {
+            commands.batch(&format!("ALTER FULLTEXT INDEX ON dbo.[{table}] DISABLE")).await;
+            commands.row(&format!("SELECT /* culprit fixture independent flag */ has_crawl_completed AS last_crawl_completed FROM sys.fulltext_indexes WHERE object_id=OBJECT_ID(N'dbo.{table}',N'U')")).await
+        }).await;
         self.ids.as_mut().unwrap().last_crawl_completed =
             crate::read::optional_boolean(&native, "last_crawl_completed")?;
-        client.close().await.unwrap();
         Ok(())
     }
     pub(super) async fn cleanup(&mut self) -> Result<()> {
-        if self.population_capture_unsettled {
-            // No further fixture SQL after an interrupted or failed capture. The nonce supervisor destroys it.
+        if self.population_capture_unsettled || !self.control_available {
             return Err(crate::read::invalid_data());
         }
         if !self.owns_objects {
             return Ok(());
         }
-        let mut client = self.actor("culprit-full-text-cleanup").await;
+        if self.population_work.requires_supervisor() {
+            // STOP acknowledgement is not a native background-idle proof. Only the positively nonce-owned
+            // supervisor may destroy this disposable process; no further fixture DDL is issued here.
+            eprintln!("owned full-text population requires supervisor destruction: {:?}", self.population_work);
+            return Ok(());
+        }
         let plain = self.name("plain");
         let table = self.indexed_table();
         let catalog = self.name("catalog");
         let user = self.name("viewer");
-        // DROP TABLE also removes its own full-text index; no population or global resource is stopped/flushed.
-        batch(&mut client, &format!(
-            "IF OBJECT_ID(N'dbo.{table}',N'U') IS NOT NULL DROP TABLE dbo.[{table}]; IF OBJECT_ID(N'dbo.{plain}',N'U') IS NOT NULL DROP TABLE dbo.[{plain}]; IF EXISTS(SELECT 1 FROM sys.fulltext_catalogs WHERE name=N'{catalog}') DROP FULLTEXT CATALOG [{catalog}]; IF USER_ID(N'{user}') IS NOT NULL DROP USER [{user}];"
-        )).await;
-        client.close().await.unwrap();
-        self.owns_objects = false;
+        self.control("culprit-full-text-cleanup", async |commands, owns_objects| {
+            commands.batch(&format!("IF OBJECT_ID(N'dbo.{table}',N'U') IS NOT NULL DROP TABLE dbo.[{table}]; IF OBJECT_ID(N'dbo.{plain}',N'U') IS NOT NULL DROP TABLE dbo.[{plain}]; IF EXISTS(SELECT 1 FROM sys.fulltext_catalogs WHERE name=N'{catalog}') DROP FULLTEXT CATALOG [{catalog}]; IF USER_ID(N'{user}') IS NOT NULL DROP USER [{user}];")).await;
+            *owns_objects = false;
+        }).await;
         Ok(())
     }
     pub(super) fn begin_population_capture(&mut self) {
+        assert_eq!(self.population_capture_attempts, 0, "one original source capture, never a retry");
+        self.population_capture_attempts += 1;
         self.population_capture_unsettled = true;
     }
     pub(super) fn population_capture_settled(&mut self) {
+        assert!(self.population_capture_unsettled);
+        self.population_captures_completed += 1;
         self.population_capture_unsettled = false;
     }
     pub(super) fn population_target(&self) -> MssqlFullTextPopulationTarget {
@@ -201,5 +219,20 @@ impl<'a> Fixture<'a> {
                 "NULL optional fields cannot become index absence under unavailable visibility"
             );
         }
+    }
+}
+
+impl NativeIds {
+    fn decode(ids: &crate::value::Rec) -> Result<Self> {
+        Ok(Self {
+            database: crate::read::integer(ids, "database_id")?.try_into().unwrap(),
+            plain: crate::read::integer(ids, "plain_id")?.try_into().unwrap(),
+            indexed: crate::read::integer(ids, "indexed_id")?.try_into().unwrap(),
+            unique_index: crate::read::integer(ids, "unique_index_id")?.try_into().unwrap(),
+            catalog: crate::read::optional_integer(ids, "catalog_id")?.map(|value| value.try_into().unwrap()),
+            last_crawl_completed: crate::read::optional_boolean(ids, "last_crawl_completed")?,
+            created_without_offset: crate::read::text(ids, "created_without_offset")?,
+            modified_without_offset: crate::read::text(ids, "modified_without_offset")?,
+        })
     }
 }
