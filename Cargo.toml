@@ -62,6 +62,7 @@ rustls = { version = "0.23.46", default-features = false, features = ["ring", "s
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.152", features = ["alloc", "float_roundtrip"] }
 sha2 = "0.11.0"
+tempfile = "3.27.0"
 thiserror = "2.0.21"
 tiberius = { version = "0.13.0", default-features = false, features = ["tds73", "rustls"] }
 process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "kill-on-drop", "process-group", "job-object", "creation-flags"] }

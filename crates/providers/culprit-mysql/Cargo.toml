@@ -22,5 +22,5 @@ tokio.workspace = true
 
 [dev-dependencies]
 culprit-collector.workspace = true
-tempfile = "3.27.0"
+tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

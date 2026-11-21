@@ -25,5 +25,5 @@ zeroize.workspace = true
 [dev-dependencies]
 culprit-collector = { workspace = true, features = ["test-support"] }
 base64.workspace = true
-tempfile = "3.27"
+tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
