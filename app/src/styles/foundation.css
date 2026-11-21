@@ -1,0 +1,202 @@
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Inter", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --sidebar: #f3f3f1;
+  --raised: #ffffff;
+  --sunken: #f4f4f2;
+  --hover: rgba(20, 20, 18, 0.045);
+  --active: rgba(20, 20, 18, 0.075);
+  --border: #e8e7e3;
+  --border-strong: #d8d6d0;
+  --text: #1b1a18;
+  --text-2: #5c5a55;
+  --text-3: #8d8a84;
+  --text-inverse: #ffffff;
+
+  --brand: #ffcf33;
+  --brand-ink: #1b1a18;
+  --focus: #3b6fe8;
+  --select: #fff6d1;
+  --select-border: #f2c94c;
+
+  --high: #e0484e;
+  --high-bg: #fdeceb;
+  --medium: #e8930c;
+  --medium-bg: #fdf3e1;
+  --low: #6f8bb8;
+  --low-bg: #edf1f8;
+  --good: #2f9e66;
+  --good-bg: #e7f5ee;
+
+  --env-production: #e0484e;
+  --env-staging: #e8930c;
+  --env-development: #3b6fe8;
+  --env-local: #2f9e66;
+
+  --heat-0: transparent;
+  --heat-1: #fde9a6;
+  --heat-2: #fbc96b;
+  --heat-3: #f59a4c;
+  --heat-4: #ea5f45;
+
+  --code-bg: #f6f6f4;
+  --code-keyword: #8f3fbf;
+  --code-string: #2f7d4f;
+  --code-number: #b4541b;
+  --code-comment: #9a978f;
+  --code-param: #2463c9;
+
+  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.06), 0 12px 40px rgba(0, 0, 0, 0.14);
+  --radius: 8px;
+  --radius-sm: 5px;
+  --sidebar-w: 212px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: var(--theme-dark-bg);
+    --surface: var(--theme-dark-surface);
+    --sidebar: var(--theme-dark-sidebar);
+    --raised: var(--theme-dark-raised);
+    --sunken: var(--theme-dark-sunken);
+    --hover: var(--theme-dark-hover);
+    --active: var(--theme-dark-active);
+    --border: var(--theme-dark-border);
+    --border-strong: var(--theme-dark-border-strong);
+    --text: var(--theme-dark-text);
+    --text-2: var(--theme-dark-text-2);
+    --text-3: var(--theme-dark-text-3);
+    --text-inverse: var(--theme-dark-text-inverse);
+    --select: var(--theme-dark-select);
+    --select-border: var(--theme-dark-select-border);
+    --high: var(--theme-dark-high);
+    --high-bg: var(--theme-dark-high-bg);
+    --medium: var(--theme-dark-medium);
+    --medium-bg: var(--theme-dark-medium-bg);
+    --low: var(--theme-dark-low);
+    --low-bg: var(--theme-dark-low-bg);
+    --good: var(--theme-dark-good);
+    --good-bg: var(--theme-dark-good-bg);
+    --heat-1: var(--theme-dark-heat-1);
+    --heat-2: var(--theme-dark-heat-2);
+    --heat-3: var(--theme-dark-heat-3);
+    --heat-4: var(--theme-dark-heat-4);
+    --code-bg: var(--theme-dark-code-bg);
+    --code-keyword: var(--theme-dark-code-keyword);
+    --code-string: var(--theme-dark-code-string);
+    --code-number: var(--theme-dark-code-number);
+    --code-comment: var(--theme-dark-code-comment);
+    --code-param: var(--theme-dark-code-param);
+    --shadow-pop: var(--theme-dark-shadow-pop);
+    color-scheme: var(--theme-dark-color-scheme);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: var(--theme-dark-bg);
+  --surface: var(--theme-dark-surface);
+  --sidebar: var(--theme-dark-sidebar);
+  --raised: var(--theme-dark-raised);
+  --sunken: var(--theme-dark-sunken);
+  --hover: var(--theme-dark-hover);
+  --active: var(--theme-dark-active);
+  --border: var(--theme-dark-border);
+  --border-strong: var(--theme-dark-border-strong);
+  --text: var(--theme-dark-text);
+  --text-2: var(--theme-dark-text-2);
+  --text-3: var(--theme-dark-text-3);
+  --text-inverse: var(--theme-dark-text-inverse);
+  --select: var(--theme-dark-select);
+  --select-border: var(--theme-dark-select-border);
+  --high: var(--theme-dark-high);
+  --high-bg: var(--theme-dark-high-bg);
+  --medium: var(--theme-dark-medium);
+  --medium-bg: var(--theme-dark-medium-bg);
+  --low: var(--theme-dark-low);
+  --low-bg: var(--theme-dark-low-bg);
+  --good: var(--theme-dark-good);
+  --good-bg: var(--theme-dark-good-bg);
+  --heat-1: var(--theme-dark-heat-1);
+  --heat-2: var(--theme-dark-heat-2);
+  --heat-3: var(--theme-dark-heat-3);
+  --heat-4: var(--theme-dark-heat-4);
+  --code-bg: var(--theme-dark-code-bg);
+  --code-keyword: var(--theme-dark-code-keyword);
+  --code-string: var(--theme-dark-code-string);
+  --code-number: var(--theme-dark-code-number);
+  --code-comment: var(--theme-dark-code-comment);
+  --code-param: var(--theme-dark-code-param);
+  --shadow-pop: var(--theme-dark-shadow-pop);
+  color-scheme: var(--theme-dark-color-scheme);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-body)/1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.selectable,
+code,
+pre,
+.sql {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: default;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 10px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

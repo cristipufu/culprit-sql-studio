@@ -1,0 +1,231 @@
+/* ───────── beyond run time: query costs, storage, replication ───────── */
+
+.beyond-lead {
+  margin: 0 0 10px;
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.beyond-lead.bad,
+.beyond-lead.watch {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.beyond-lead.bad::before,
+.beyond-lead.watch::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--medium);
+}
+
+.beyond-lead.bad::before {
+  background: var(--high);
+}
+
+.beyond-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.beyond-row {
+  display: grid;
+  grid-template-columns: 7px 108px minmax(120px, 168px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px 8px 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-ui);
+  line-height: 1.45;
+}
+
+.beyond-row:first-child {
+  border-top: none;
+}
+
+.beyond-label {
+  color: var(--text-2);
+}
+
+.beyond-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.beyond-note {
+  color: var(--text-3);
+  min-width: 0;
+}
+
+.beyond-foot {
+  margin: 8px 0 0;
+  font-size: var(--fs-ui-sm);
+  color: var(--text-3);
+}
+
+.io-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.io-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.io-head h4 {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.io-head .muted {
+  font-size: var(--fs-meta);
+}
+
+.io-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.io-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.io-row:first-child {
+  border-top: none;
+}
+
+.io-row:has(.io-facts[open]) { align-items: start; }
+
+.io-row.io-th {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  background: color-mix(in srgb, var(--hover) 60%, transparent);
+}
+
+.io-row.four {
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+}
+
+.io-row.quiet {
+  color: var(--text-3);
+}
+
+.io-row.repl {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.4fr);
+}
+
+.io-source {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.io-context {
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.io-facts {
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
+.io-facts > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.io-facts > ul {
+  margin: 8px 0 0;
+  padding-inline-start: 16px;
+  overflow-wrap: anywhere;
+}
+
+.io-facts li + li { margin-top: 6px; }
+
+.io-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.io-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+}
+
+.io-kind {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: var(--fs-micro);
+  line-height: 17px;
+  color: var(--text-3);
+  background: var(--hover);
+}
+
+.io-kind.log {
+  color: var(--wait-log, var(--text-2));
+}
+
+.io-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.io-cell b {
+  font-weight: 600;
+}
+
+@container (max-width: 560px) {
+  .beyond-row {
+    grid-template-columns: 7px 108px minmax(0, 1fr);
+    row-gap: 2px;
+  }
+  .beyond-note {
+    grid-column: 3;
+  }
+}

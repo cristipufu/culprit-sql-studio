@@ -1,0 +1,177 @@
+/* ───────── runtime spread ───────── */
+
+.rs h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rs-sub {
+  font-weight: 400;
+  font-size: var(--fs-micro);
+}
+
+.rs-sentence {
+  margin: 0 0 10px;
+  font-size: var(--fs-ui);
+  color: var(--text-2);
+}
+
+.rs-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rs-lane,
+.rs-axis {
+  display: grid;
+  grid-template-columns: minmax(110px, 26%) minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 12px;
+}
+
+.rs-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-ui-sm);
+  min-width: 0;
+}
+
+.rs-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.rs-name i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.rs-compiled {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rs-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+}
+
+.rs-population {
+  overflow-wrap: anywhere;
+}
+
+.rs-track {
+  position: relative;
+  height: 34px;
+  margin-top: 6px;
+  border-radius: 6px;
+  background: var(--sunken);
+}
+
+.rs-hist {
+  position: absolute;
+  bottom: 0;
+  background: color-mix(in srgb, var(--lane) 22%, transparent);
+  border-top: 1.5px solid color-mix(in srgb, var(--lane) 60%, transparent);
+}
+
+.rs-whisker {
+  position: absolute;
+  top: 16.5px;
+  height: 1.5px;
+  background: color-mix(in srgb, var(--lane) 70%, var(--text-3));
+}
+
+.rs-band {
+  position: absolute;
+  top: 12px;
+  height: 10px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--lane) 30%, transparent);
+}
+
+.rs-cap {
+  position: absolute;
+  top: 11px;
+  height: 12px;
+  width: 1.5px;
+  margin-inline-start: -0.75px;
+  background: color-mix(in srgb, var(--lane) 70%, var(--text-3));
+}
+
+.rs-dot {
+  position: absolute;
+  top: 12px;
+  width: 10px;
+  height: 10px;
+  margin-inline-start: -5px;
+  border-radius: 50%;
+  background: var(--lane);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--lane);
+}
+
+.rs-q {
+  position: absolute;
+  top: -11px;
+  transform: translateX(-50%);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-3);
+  border-bottom: 6px solid color-mix(in srgb, var(--lane) 60%, transparent);
+  line-height: 10px;
+  white-space: nowrap;
+}
+
+.rs-q-tick {
+  width: 2px;
+}
+
+.rs-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rs-values b {
+  color: var(--text);
+}
+
+.rs-ticks {
+  position: relative;
+  height: 14px;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.rs-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.rs-legend {
+  font-size: var(--fs-2xs);
+}
+
+.rs-note {
+  margin: 10px 0 0;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}

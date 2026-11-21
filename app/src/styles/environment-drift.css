@@ -1,0 +1,188 @@
+/* ───────── environment drift ───────── */
+
+.drift {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.drift .toolbar {
+  flex-wrap: wrap;
+}
+
+.drift-with {
+  color: var(--text-2);
+  margin: 0 4px 0 6px;
+}
+
+.drift-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.drift-report {
+  max-width: 920px;
+  padding: 18px 22px 40px;
+}
+
+.drift-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.drift-side {
+  background: var(--surface);
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.drift-side .name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-strong);
+}
+
+.drift-side .muted {
+  font-size: var(--fs-ui-sm);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drift-letter {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.drift-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  font-size: var(--fs-strong);
+  color: var(--text-2);
+}
+
+.drift-summary.same {
+  color: var(--good-text);
+}
+
+.drift-report section {
+  margin-top: 22px;
+}
+
+.drift-report h3 {
+  display: flex;
+  gap: 6px;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.drift-item {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.drift-badge {
+  align-self: start;
+  justify-self: start;
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--medium-text);
+  background: var(--medium-bg);
+}
+
+.drift-badge.different {
+  color: var(--high-text);
+  background: var(--high-bg);
+}
+
+.drift-badge.renamed {
+  color: var(--text-3);
+  background: var(--sunken);
+}
+
+.drift-main {
+  min-width: 0;
+}
+
+.drift-text {
+  font-size: var(--fs-body);
+  line-height: 1.45;
+}
+
+.drift-item.renamed .drift-text {
+  color: var(--text-2);
+}
+
+.drift-def {
+  display: block;
+  margin-top: 4px;
+  font: var(--fs-ui-sm)/1.5 var(--mono);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.drift-values {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 6px;
+}
+
+.drift-values code {
+  font: var(--fs-ui-sm)/1.5 var(--mono);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.drift-sql {
+  margin-top: 8px;
+}
+
+.drift-sql-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-ui-sm);
+  margin-bottom: 4px;
+}
+
+.drift-sql-head .actions {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.drift-sql .codeblock {
+  padding: 8px 12px;
+}

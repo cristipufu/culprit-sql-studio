@@ -1,0 +1,157 @@
+/* ───────── tables ───────── */
+
+.table-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+table.grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--fs-ui);
+}
+
+table.grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  text-align: start;
+  font-weight: 600;
+  font-size: var(--fs-ui-sm);
+  color: var(--text-3);
+  padding: 0 10px;
+  height: 30px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+table.grid th.r,
+table.grid td.r {
+  text-align: end;
+}
+
+table.grid th.sortable:hover {
+  color: var(--text);
+}
+
+table.grid th.sorted {
+  color: var(--text);
+}
+
+table.grid td {
+  padding: 0 10px;
+  height: 34px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+table.grid tr.row:hover td {
+  background: var(--hover);
+}
+
+table.grid tr.row.selected td {
+  background: var(--select);
+}
+
+table.grid td.sqlcell {
+  max-width: 1px;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: var(--fs-ui-sm);
+  color: var(--text-2);
+}
+
+.sharecell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sharecell .bar {
+  width: 56px;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(480px, 54%);
+  flex: 1;
+  min-height: 0;
+}
+
+.split > .pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.split > .pane + .pane {
+  border-inline-start: 1px solid var(--border);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+.query-pages {
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  flex-shrink: 0;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--sunken);
+  color: var(--text-3);
+  min-width: 180px;
+}
+
+.search input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  width: 100%;
+  font-size: var(--fs-ui);
+  color: var(--text);
+}
+
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--sunken);
+}
+
+.seg button {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.seg button.on {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}

@@ -1,0 +1,36 @@
+/* ───────── live ───────── */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 18px 0;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--high-bg);
+  color: var(--high-text);
+  font-weight: 600;
+}
+
+.banner.calm {
+  background: var(--good-bg);
+  color: var(--good-text);
+}
+
+.pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--good);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}

@@ -1,0 +1,488 @@
+/* ───────── overview ───────── */
+
+.overview {
+  display: grid;
+  grid-template-columns: minmax(380px, 44%) 1fr;
+  flex: 1;
+  min-height: 0;
+}
+
+.ov-list {
+  border-inline-end: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ov-head {
+  padding: 18px 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ov-head h2 {
+  margin: 0 0 4px;
+  font-size: var(--fs-metric);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.ov-head p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.vitals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-top: 14px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.vital {
+  background: var(--surface);
+  padding: 9px 11px 10px;
+  min-width: 0;
+}
+
+.vital .label {
+  font-size: var(--fs-ui-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vital .value {
+  font-size: var(--fs-heading);
+  font-weight: 600;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vital .hint {
+  font-size: var(--fs-ui-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.waitbar {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 6px 0 3px;
+  gap: 1px;
+}
+
+/* Categories keep their full names; when the list is narrow the filter box moves to its own row instead of scrolling
+ * out of sight. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.filters .chip {
+  flex: none;
+}
+
+.filters .search {
+  margin-inline-start: auto;
+}
+
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.frow {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 4px 8px;
+  align-items: start;
+  width: 100%;
+  text-align: start;
+  padding: 9px 10px 10px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+}
+
+.frow + .frow {
+  margin-top: 1px;
+}
+
+.frow:hover {
+  background: var(--hover);
+}
+
+.frow.selected {
+  background: var(--select);
+  border-color: var(--select-border);
+}
+
+.frow .sev {
+  margin-top: 5px;
+}
+
+.frow .title {
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.frow .meta {
+  grid-column: 2 / 4;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frow .impact {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 62px;
+  padding-top: 2px;
+}
+
+.frow .impact .v {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.frow .impact .bar {
+  width: 54px;
+}
+
+.frow.dismissed {
+  opacity: 0.45;
+}
+
+.group-label {
+  padding: 14px 10px 6px;
+}
+
+/* ───────── detail ───────── */
+
+.detail {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 22px 28px 40px;
+}
+
+.detail-inner {
+  max-width: 760px;
+}
+
+.detail .crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.detail h2 {
+  font-size: var(--fs-metric);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  margin: 10px 0 8px;
+}
+
+.detail .summary {
+  color: var(--text-2);
+  font-size: var(--fs-strong);
+  line-height: 1.55;
+  margin: 0;
+  max-width: 70ch;
+}
+
+.detail section {
+  margin-top: 26px;
+}
+
+.detail h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+.detail h3 .muted {
+  font-weight: 500;
+}
+
+.detail h3 .actions {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Dividers drawn by each cell, so a short last row leaves blank space instead of a grey block. */
+.metric {
+  min-width: 0;
+  background: var(--surface);
+  padding: 10px 12px 11px;
+  box-shadow: 1px 0 0 var(--border), 0 1px 0 var(--border);
+  overflow-wrap: anywhere;
+}
+
+.metric .value {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.metric .label {
+  color: var(--text-3);
+  font-size: var(--fs-ui-sm);
+  margin-top: 1px;
+}
+
+.metrics.finding-metrics {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.finding-metrics > .metric {
+  flex: 1 1 136px;
+}
+
+.finding-metrics > .metric-text {
+  flex-basis: 100%;
+}
+
+.metric-text .label {
+  margin: 0 0 4px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.metric-text .value {
+  font-size: var(--fs-body);
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: normal;
+  white-space: pre-wrap;
+}
+
+.qcard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.qcard + .qcard {
+  margin-top: 8px;
+}
+
+/* Five whole lines of SQL (18.6px each) plus padding; only a statement that is longer fades, over its last line. */
+.qcard .sql {
+  position: relative;
+  max-height: calc(5 * 18.6px + 20px);
+  overflow: hidden;
+  padding: 10px 12px;
+  background: var(--code-bg);
+}
+
+.qcard .sql.clipped {
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 28px), transparent);
+}
+
+.qcard .sql.open {
+  max-height: none;
+}
+
+.qcard .sql-more {
+  display: block;
+  width: 100%;
+  padding: 3px 12px 5px;
+  border: 0;
+  background: var(--code-bg);
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  text-align: start;
+  cursor: pointer;
+}
+
+.qcard .sql-more:hover {
+  color: var(--text);
+}
+
+.qcard .qmeta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-meta);
+  color: var(--text-2);
+}
+
+.qcard .qmeta b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.qcard .qmeta .open {
+  margin-inline-start: auto;
+}
+
+.qcard:hover {
+  border-color: var(--border-strong);
+}
+
+.hotnode {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--select);
+  border: 1px solid var(--select-border);
+  margin-top: 8px;
+}
+
+.hotnode .op {
+  font-weight: 600;
+}
+
+.codeblock {
+  position: relative;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+
+/* A fix can be a script of many statements: keep Verify and Caveats in reach. */
+.fix-sql {
+  max-height: 22rem;
+  overflow: auto;
+}
+
+.codeblock pre {
+  margin: 0;
+  font: var(--fs-ui)/1.55 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fix-summary {
+  margin: 0 0 10px;
+  color: var(--text-2);
+  line-height: 1.55;
+  max-width: 70ch;
+}
+
+.fix-cost {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 10px;
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+}
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.steps li {
+  counter-increment: step;
+  position: relative;
+  padding-inline-start: 28px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.steps li + li {
+  margin-top: 6px;
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  inset-inline-start: 0;
+  top: 1px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.caveats {
+  margin: 0;
+  padding: 0 0 0 16px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.actionbar {
+  position: sticky;
+  bottom: -40px;
+  margin: 30px -28px -40px;
+  padding: 12px 28px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.actionbar .spacer {
+  flex: 1;
+}
+
+.inline-code {
+  font: 0.92em/1 var(--mono);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  word-break: break-word;
+  color: var(--text);
+}

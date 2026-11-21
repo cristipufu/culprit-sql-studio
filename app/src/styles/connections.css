@@ -1,0 +1,229 @@
+/* ───────── connections ───────── */
+
+.connections {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 56px 24px;
+}
+
+.connections-inner {
+  width: min(880px, 100%);
+  container-type: inline-size;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 26px;
+}
+
+.brand h1 {
+  font-size: var(--fs-display);
+  margin: 0;
+  letter-spacing: -0.015em;
+}
+
+.brand p {
+  margin: 2px 0 0;
+  color: var(--text-2);
+}
+
+.smart-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 0 6px 0 12px;
+  background: var(--raised);
+  height: 44px;
+}
+
+.smart-input:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
+}
+
+.smart-input .btn {
+  flex: none;
+}
+
+.smart-input input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: var(--fs-strong);
+  font-family: var(--mono);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px 14px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.form-grid label,
+.form-grid .form-grid-label {
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+}
+
+.form-grid input {
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: var(--raised);
+  outline: 0;
+}
+
+.form-grid input:focus {
+  border-color: var(--focus);
+}
+
+.notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--sunken);
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+}
+
+.notice.error {
+  background: var(--high-bg);
+  color: var(--high-text);
+}
+
+.side-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  min-height: 0;
+  margin-bottom: 8px;
+}
+
+.conn-item .env-dot {
+  width: 7px;
+  height: 7px;
+  box-shadow: none;
+}
+
+.conn-item .conn-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.alias-input {
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: var(--raised);
+  outline: 0;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.alias-input:focus {
+  border-color: var(--focus);
+}
+
+.discover-list {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+}
+
+.discover-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(160px, 240px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 7px;
+}
+
+.discover-row:hover {
+  background: var(--hover);
+}
+
+.discover-row.saved {
+  opacity: 0.6;
+}
+
+.discover-row .alias {
+  font-weight: 600;
+}
+
+.discover-row .where {
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.discovery-search input {
+  min-width: 0;
+}
+.discovery-search .discovery-regions {
+  flex: 0 0 190px;
+  border-inline-start: 1px solid var(--border);
+  padding-inline-start: 10px;
+}
+.cloud-discovery .discover-row {
+  grid-template-columns: auto auto minmax(100px, 240px) minmax(0, 1fr) auto;
+}
+.cloud-discovery .alias-input {
+  min-width: 0;
+  width: 100%;
+}
+.discover-more {
+  padding: 10px 4px 4px;
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+}
+@container (max-width: 560px) {
+  .discovery-search {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px 12px;
+  }
+  .discovery-search > input:first-of-type {
+    flex-basis: calc(100% - 32px);
+  }
+  .discovery-search .discovery-regions {
+    flex: 1;
+    border-inline-start: 0;
+    padding-inline-start: 0;
+  }
+  .cloud-discovery .discover-row {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+  .cloud-discovery .discover-row .where {
+    grid-column: 3 / -1;
+    grid-row: 2;
+  }
+  .cloud-discovery .discover-row > span:last-child {
+    grid-column: 4;
+    grid-row: 1;
+  }
+}

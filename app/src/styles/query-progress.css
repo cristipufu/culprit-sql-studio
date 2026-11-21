@@ -1,0 +1,711 @@
+/* ───────── actual runs & live progress ───────── */
+
+.actual-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--focus) 5%, var(--surface)), var(--surface));
+}
+
+.as-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.as-kicker {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.as-elapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-metric);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.as-elapsed svg {
+  color: var(--text-3);
+  align-self: center;
+}
+
+.as-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.as-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-ui);
+  color: var(--text-2);
+}
+
+.as-stat b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.as-stat svg {
+  color: var(--text-3);
+}
+
+.as-when {
+  margin-inline-start: auto;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+
+.as-memory {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-ui);
+  color: var(--text-2);
+}
+
+.as-label {
+  width: 56px;
+  flex: none;
+  font-size: var(--fs-ui-sm);
+  color: var(--text-3);
+}
+
+.as-bar {
+  position: relative;
+  width: 140px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.as-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--focus);
+}
+
+.as-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+
+.as-callouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.as-callout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-meta);
+  color: var(--text-2);
+  text-align: start;
+}
+
+button.as-callout:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.as-callout b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.as-callout.hot svg {
+  color: var(--heat-4);
+}
+
+.as-callout.warn svg {
+  color: var(--medium-text);
+}
+
+.actual-origin {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+
+.actual-missing {
+  padding: 18px 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.am-title {
+  font-weight: 600;
+  font-size: var(--fs-strong);
+}
+
+.am-body {
+  margin: 6px 0 0;
+  max-width: 70ch;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+.am-code {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 10px 8px 12px;
+  border-radius: 6px;
+  background: var(--code-bg);
+}
+
+.am-code code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.am-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.plan-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  font-size: var(--fs-ui);
+}
+
+.sk-line,
+.sk-cards > span {
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--sunken) 0%, var(--hover) 50%, var(--sunken) 100%);
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.4s ease-in-out infinite;
+}
+
+.sk-line {
+  height: 12px;
+}
+
+.sk-cards {
+  display: flex;
+  gap: 18px;
+  padding: 6px 0;
+}
+
+.sk-cards > span {
+  width: 180px;
+  height: 64px;
+  border-radius: 9px;
+}
+
+@keyframes sk-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* Live: a running session opens its progress below the list. */
+
+.grid tr.openable {
+  cursor: pointer;
+}
+
+.grid tr.openable:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.qprog {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-strong);
+  background: var(--surface);
+  overflow: hidden;
+  animation: qp-in 0.18s ease-out;
+}
+
+/* Status on the left, the plan filling the rest; stacked when the window is narrow. */
+.qp-body {
+  flex: 1 !important;
+  flex-shrink: 1 !important;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+}
+
+.qp-side {
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 14px;
+  border-inline-end: 1px solid var(--border);
+}
+
+.qp-plan {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.qp-plan .plan {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.qp-plan .diagram-scroll {
+  flex: 1;
+  min-height: 140px;
+  max-height: none;
+}
+
+.qp-noplan {
+  margin: 16px;
+  font-size: var(--fs-ui);
+  color: var(--text-3);
+}
+
+@media (max-width: 980px) {
+  .qp-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .qp-side {
+    border-inline-end: 0;
+    overflow: visible;
+  }
+  .qp-plan .diagram-scroll {
+    max-height: 480px;
+  }
+}
+
+/* Sections keep their height; the panel scrolls instead of squeezing the plan. */
+.qprog > * {
+  flex-shrink: 0;
+}
+
+@keyframes qp-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.qp-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.qp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-body);
+}
+
+.qp-state {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-ui-sm);
+  font-weight: 500;
+  background: var(--sunken);
+  color: var(--text-2);
+}
+
+.qp-state.running {
+  background: color-mix(in srgb, var(--good) 14%, transparent);
+  color: var(--good-text);
+}
+
+.freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.freshness .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.freshness.live .dot {
+  background: var(--good);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 55%, transparent);
+  animation: fresh-pulse 1s ease-out infinite;
+}
+
+@keyframes fresh-pulse {
+  to {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.qp-sql {
+  margin: 12px 14px 0;
+  font-size: var(--fs-ui-sm);
+  line-height: 1.5;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.qp-stats {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 8px 14px 0;
+  font-size: var(--fs-ui);
+  color: var(--text-2);
+}
+
+.qp-stats b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.qp-big {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-display);
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.qp-big small {
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.qp-wait {
+  margin: 6px 14px 0;
+  font-size: var(--fs-ui);
+  color: var(--medium-text);
+}
+
+.qp-basis {
+  margin-top: 6px;
+  font-size: var(--fs-ui-sm);
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+.qp-progress {
+  padding: 10px 14px 0;
+}
+
+.qp-meter + .qp-meter {
+  margin-top: 12px;
+}
+
+.qp-session-context {
+  overflow-wrap: anywhere;
+}
+
+.qp-current-work {
+  margin: 12px 14px 0;
+  font-size: var(--fs-ui-sm);
+}
+
+.qp-current-work > summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.qp-current-work .observation-list {
+  margin: 0;
+  padding: 10px 0 0;
+  border: 0;
+}
+
+.qp-current-work .observation-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.qp-current-work .operational-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.qp-phase {
+  margin-bottom: 6px;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+}
+
+.qp-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-ui);
+}
+
+.qp-bar {
+  position: relative;
+  flex: 1;
+  max-width: 420px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.qp-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--focus) 75%, white), var(--focus));
+  transition: width 0.9s ease-out;
+}
+
+.qp-hot {
+  display: flex;
+  align-items: flex-start;
+  line-height: 1.45;
+  gap: 6px;
+  margin: 10px 14px 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--heat-4) 9%, var(--surface));
+  font-size: var(--fs-ui);
+}
+
+.qp-hot svg {
+  color: var(--heat-4);
+}
+
+.qp-note {
+  margin: 12px 14px;
+  font-size: var(--fs-ui);
+}
+
+.qp-note.calm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+}
+
+.qp-note.subtle {
+  margin: 10px 14px 0;
+  max-width: 90ch;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+
+
+/* Progress drawn over a plan card. */
+
+.po {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 9px;
+}
+
+.po-pending {
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
+}
+
+.po-hot {
+  box-shadow:
+    0 0 0 2px var(--heat-4),
+    0 0 0 6px color-mix(in srgb, var(--heat-4) 18%, transparent);
+  animation: po-hot 1.6s ease-in-out infinite;
+}
+
+@keyframes po-hot {
+  50% {
+    box-shadow:
+      0 0 0 2px var(--heat-4),
+      0 0 0 9px color-mix(in srgb, var(--heat-4) 6%, transparent);
+  }
+}
+
+.po-badge {
+  position: absolute;
+  top: -9px;
+  inset-inline-end: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--raised);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.po-done .po-badge {
+  color: var(--good-text);
+}
+
+.po-over .po-badge {
+  color: var(--medium-text);
+  border-color: color-mix(in srgb, var(--medium) 45%, var(--border));
+}
+
+.po-running .po-badge {
+  color: var(--link);
+}
+
+.po-track {
+  position: absolute;
+  inset-inline-start: 1px;
+  inset-inline-end: 1px;
+  bottom: 1px;
+  height: 4px;
+  border-radius: 0 0 8px 8px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.po-fill {
+  display: block;
+  height: 100%;
+  background: var(--focus);
+  transition: width 0.9s ease-out;
+}
+
+.po-running .po-fill {
+  background-image: linear-gradient(110deg, var(--focus) 30%, color-mix(in srgb, var(--focus) 55%, white) 50%, var(--focus) 70%);
+  background-size: 200% 100%;
+  animation: po-flow 1.2s linear infinite;
+}
+
+.po-done .po-fill {
+  background: var(--good);
+}
+
+.po-over .po-fill {
+  background: var(--medium);
+}
+
+/* Consuming its input but no rows out yet (a sort, a hash): an indeterminate sweep instead of a stuck 0%. */
+.po-running .po-fill.po-busy {
+  width: 30% !important;
+  animation: po-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes po-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@keyframes po-flow {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qprog,
+  .freshness.live .dot,
+  .po-hot,
+  .po-running .po-fill,
+  .po-running .po-fill.po-busy,
+  .sk-line,
+  .sk-cards > span {
+    animation: none;
+  }
+  .qp-bar > span,
+  .po-fill {
+    transition: none;
+  }
+}
+
+/* In a live view the per-step progress says more than the cost estimate; give the space to the diagram. */
+.qp-plan .cost-strip {
+  display: none;
+}
+
+.qp-plan .node-props {
+  display: none;
+}
+
+/* Plan section toolbar: toggles never break their labels; the row wraps instead at narrow widths. */
+.plan-bar {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.plan-bar .actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 6px;
+}
+
+.seg button {
+  white-space: nowrap;
+}

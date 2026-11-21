@@ -1,0 +1,466 @@
+/* ───────── shell ───────── */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+}
+
+/* Technical text and coordinate systems retain their own direction inside a localized layout. */
+code, .mono, .sql, .cm-editor, .diagram-scroll, .tc-plot, .tc-axis, .tc-lane,
+.resource-plot, .resource-xaxis, .dash-ticks, .pstrip {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+:root[dir="rtl"][data-platform="mac"] .topbar {
+  padding-inline-end: 80px;
+}
+
+:root[dir="rtl"] .share-redact input[role="switch"]:checked::after {
+  transform: translateX(-12px);
+}
+
+.sidebar {
+  background: var(--sidebar);
+  border-inline-end: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sidebar-drag {
+  height: 40px;
+  flex-shrink: 0;
+}
+
+/* Only macOS draws window buttons over the sidebar; elsewhere the title bar sits above the window. */
+:root:not([data-platform="mac"]) .sidebar-drag {
+  height: 10px;
+}
+
+.conn-switch {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: var(--radius);
+  text-align: start;
+  margin-bottom: 10px;
+}
+
+.conn-switch:hover {
+  background: var(--hover);
+}
+
+.conn-switch .name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-switch .sub {
+  color: var(--text-3);
+  font-size: var(--fs-ui-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-switch .chev {
+  margin-inline-start: auto;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.env-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.env-production {
+  color: var(--env-production);
+  background: var(--env-production);
+}
+
+.env-staging {
+  color: var(--env-staging);
+  background: var(--env-staging);
+}
+
+.env-development {
+  color: var(--env-development);
+  background: var(--env-development);
+}
+
+.env-local {
+  color: var(--env-local);
+  background: var(--env-local);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.nav-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: var(--active);
+  color: var(--text);
+}
+
+.nav-item .count {
+  margin-inline-start: auto;
+  font-size: var(--fs-ui-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* On the selected row's tint the muted grey drops under 4.5:1. */
+.nav-item.active .count {
+  color: var(--text-2);
+}
+
+.nav-item .key {
+  margin-inline-start: auto;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  opacity: 0;
+}
+
+.nav-item:hover .key {
+  opacity: 1;
+}
+
+.nav-item:hover .count + .key {
+  display: none;
+}
+
+.sidebar-section {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+  padding: 16px 8px 6px;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scan-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  border-radius: 6px;
+}
+
+.scan-status:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+
+/* An update the app found: the one item in the foot that asks for attention, and only by colour. */
+.update-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--accent);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  border-radius: 6px;
+}
+
+button.update-item:hover {
+  background: var(--accent-soft, var(--hover));
+}
+
+.update-item.busy {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.update-item.failed {
+  color: var(--high);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.topbar {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  margin: 0;
+}
+
+.topbar .context {
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar .spacer {
+  flex: 1;
+}
+
+.scan-error-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.scan-error-badge {
+  gap: 5px;
+  cursor: default;
+}
+
+.scan-error-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-end: 0;
+  z-index: 50;
+  width: min(420px, calc(100vw - 260px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: var(--fs-ui-sm);
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms;
+}
+
+.scan-error-popover::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
+  height: 8px;
+}
+
+.scan-error-anchor:hover .scan-error-popover,
+.scan-error-anchor:focus-within .scan-error-popover {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.scan-error-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--high);
+  margin-bottom: 4px;
+}
+
+.scan-error-msg {
+  margin: 0;
+  color: var(--text);
+}
+
+.scan-error-hint {
+  margin: 6px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+/* While the webview takes a screenshot of the workspace, the button that asked for it and any toast stay out of it. */
+.capturing .shot-btn {
+  visibility: hidden;
+}
+
+.capturing .toast {
+  display: none;
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-anchor {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-weight: 500;
+  font-size: var(--fs-ui);
+}
+
+.picker:hover,
+.picker[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.picker-note {
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+}
+
+.population-picker {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.population-picker > .picker {
+  min-width: 0;
+  max-width: 230px;
+}
+
+.population-picker .population-choice {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.population-menu {
+  width: min(390px, calc(100vw - 285px));
+  max-height: min(440px, 70vh);
+  overflow-y: auto;
+}
+
+.population-menu .menu-item {
+  height: auto;
+  min-height: 32px;
+  padding-block: 7px;
+  gap: 8px;
+}
+
+.population-option {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.population-option .menu-sub {
+  display: block;
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  white-space: normal;
+}
+
+.population-picker svg {
+  flex-shrink: 0;
+}
+
+.menu {
+  position: absolute;
+  top: 32px;
+  inset-inline-start: 0;
+  z-index: 40;
+  width: 260px;
+  padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 6px;
+  text-align: start;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--hover);
+}
+
+.menu-item.on {
+  font-weight: 600;
+}
+
+.menu-key {
+  color: var(--text-3);
+  font-size: var(--fs-ui-sm);
+  display: inline-flex;
+}
+
+.menu-hint {
+  margin-top: 4px;
+  padding: 7px 9px 5px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: var(--fs-ui-sm);
+  line-height: 1.45;
+}

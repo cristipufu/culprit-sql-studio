@@ -1,0 +1,167 @@
+/* ───────── index advisor ───────── */
+/* Sizes and radii go through the planned tokens (--fs-*, --r-*, --s-*) with today's values as fallbacks. */
+
+.tl-advisor {
+  margin-bottom: var(--s-1, 4px);
+  font-family: var(--font);
+}
+
+.tl-advisor .tl-name {
+  font-family: var(--font);
+  font-weight: 600;
+  font-size: var(--fs-meta);
+}
+
+.tl-advisor-icon {
+  flex: none;
+  color: var(--medium-text);
+}
+
+.ia {
+  max-width: 980px;
+  padding: var(--s-5, 20px) var(--s-6, 24px) var(--s-8, 32px);
+  overflow-y: auto;
+  height: 100%;
+}
+
+.ia-head h2 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.ia-sub {
+  margin: var(--s-1, 4px) 0 0;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+
+.ia-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-2, 8px);
+  margin: var(--s-4, 16px) 0 var(--s-3, 12px);
+}
+
+.ia-tile {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: var(--s-2, 8px);
+  align-items: baseline;
+  padding: var(--s-3, 12px) var(--s-3, 12px) 10px;
+  min-height: 62px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface);
+  text-align: start;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.ia-tile:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.ia-tile.on {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 16%, transparent);
+}
+
+.ia-tile.zero {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ia-tile-n {
+  grid-row: span 2;
+  font-size: var(--fs-metric);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.ia-tile-label {
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.ia-tile-sub {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ia-note {
+  display: flex;
+  gap: var(--s-2, 8px);
+  align-items: flex-start;
+  margin: 0 0 var(--s-2, 8px);
+  padding: var(--s-2, 8px) var(--s-3, 12px);
+  border-radius: var(--r-sm, 6px);
+  background: var(--sunken);
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.ia-note svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+
+.ia-section {
+  margin-top: var(--s-5, 20px);
+}
+
+.ia-section h3 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2, 8px);
+  margin: 0 0 var(--s-2, 8px);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.ia-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.ia-h-note {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+
+.ia-item {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface);
+  margin-bottom: var(--s-2, 8px);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.ia-item.focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 14%, transparent);
+}
+
+.ia-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3, 12px);
+  width: 100%;
+  padding: 10px var(--s-3, 12px);
+  text-align: start;
+  border-radius: var(--r-md, 8px);
+}

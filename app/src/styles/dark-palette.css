@@ -1,0 +1,78 @@
+/* One declaration per dark value. Existing media/attribute rules activate these named tokens.
+   Values stay separate from activation so system/light/dark require no extra JavaScript or newer color functions. */
+:root {
+  /* Surfaces, text, severity, code and native controls. */
+  --theme-dark-bg: #121211;
+  --theme-dark-surface: #171716;
+  --theme-dark-sidebar: #141413;
+  --theme-dark-raised: #1d1d1c;
+  --theme-dark-sunken: #1b1b1a;
+  --theme-dark-hover: rgba(255, 255, 255, 0.045);
+  --theme-dark-active: rgba(255, 255, 255, 0.08);
+  --theme-dark-border: #262624;
+  --theme-dark-border-strong: #353532;
+  --theme-dark-text: #ececea;
+  --theme-dark-text-2: #a5a39e;
+  --theme-dark-text-3: #6f6d68;
+  --theme-dark-text-inverse: #121211;
+  --theme-dark-select: #2a2412;
+  --theme-dark-select-border: #7a6420;
+  --theme-dark-high: #f0676b;
+  --theme-dark-high-bg: #3a1d1e;
+  --theme-dark-medium: #f0a740;
+  --theme-dark-medium-bg: #36290f;
+  --theme-dark-low: #8aa3cc;
+  --theme-dark-low-bg: #1f2633;
+  --theme-dark-good: #4cbb84;
+  --theme-dark-good-bg: #16291f;
+  --theme-dark-heat-1: #4a3d14;
+  --theme-dark-heat-2: #6b4c12;
+  --theme-dark-heat-3: #8a4a1c;
+  --theme-dark-heat-4: #a33a2b;
+  --theme-dark-code-bg: #1b1b1a;
+  --theme-dark-code-keyword: #c792ea;
+  --theme-dark-code-string: #8fd19e;
+  --theme-dark-code-number: #f2a66c;
+  --theme-dark-code-comment: #6f6d68;
+  --theme-dark-code-param: #82aaff;
+  --theme-dark-shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 48px rgba(0, 0, 0, 0.5);
+  --theme-dark-color-scheme: dark;
+
+  /* Wait categories stay independent of severity colors. */
+  --theme-dark-wait-cpu: #7aa3d6;
+  --theme-dark-wait-rpc: #ad94d3;
+  --theme-dark-wait-storage: #7dc1c4;
+  --theme-dark-wait-io: #6db8e3;
+  --theme-dark-wait-rows: #7ccbc1;
+  --theme-dark-wait-lock: #cd9cc1;
+  --theme-dark-wait-latch: #e6c661;
+  --theme-dark-wait-log: #c09c86;
+  --theme-dark-wait-network: #f5a7b8;
+  --theme-dark-wait-parallelism: #f4a565;
+  --theme-dark-wait-memory: #a9adec;
+  --theme-dark-wait-compilation: #95a2b6;
+  --theme-dark-wait-other: #8a837d;
+
+  /* Plan comparison tints and change markers. */
+  --theme-dark-tint-0: #1c2944;
+  --theme-dark-tint-1: #16301f;
+  --theme-dark-tint-2: #281f3e;
+  --theme-dark-tint-3: #352d17;
+  --theme-dark-tint-4: #142f33;
+  --theme-dark-tint-5: #371d24;
+  --theme-dark-changed: #e3a43f;
+
+  /* Late design-system contrast refinements retain their own source order. */
+  --theme-dark-contrast-text-3: #8f8c86;
+  --theme-dark-contrast-warn-text: #f0b45a;
+  --theme-dark-contrast-high-text: var(--high);
+  --theme-dark-contrast-link: #6b93f0;
+  --theme-dark-contrast-good-text: var(--good);
+  --theme-dark-contrast-low-text: var(--low);
+  --theme-dark-contrast-code-comment: #8a8781;
+  --theme-dark-contrast-danger: #e5585d;
+  --theme-dark-contrast-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
+
+  /* Monochrome product marks. */
+  --theme-dark-product-mark-filter: brightness(0) invert(1);
+}

@@ -1,0 +1,176 @@
+/* ───────── engine badges ───────── */
+
+.engine-badge {
+  --badge-ring: var(--sidebar);
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  user-select: none;
+}
+
+.engine-badge.size-md {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.engine-badge img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 2px;
+  object-fit: contain;
+}
+
+/* The environment sits on the badge's corner, ringed in the surface color so it reads on any engine color. */
+.engine-env {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--badge-ring);
+}
+
+.size-md .engine-env {
+  width: 9px;
+  height: 9px;
+}
+
+.nav-item.active .engine-badge,
+.conn-item.active .engine-badge {
+  --badge-ring: var(--active-ring, var(--sidebar));
+}
+
+.conn-card .engine-badge,
+.palette .engine-badge,
+.saved-rail .engine-badge {
+  --badge-ring: var(--surface);
+}
+
+.conn-item {
+  gap: 9px;
+}
+
+.palette .item .engine-badge {
+  margin-inline-end: 8px;
+}
+
+.saved-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.saved-conn .engine-badge {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.saved-conn .engine-badge img { padding: 0; }
+
+.saved-conn.other-engine {
+  opacity: 0.55;
+}
+
+.block-indent {
+  position: relative;
+  align-self: stretch;
+}
+
+.block-row:not(.head) .block-indent::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 4px;
+  top: -6px;
+  width: 11px;
+  height: calc(50% + 6px);
+  border-inline-start: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  border-bottom-left-radius: 5px;
+}
+
+.block-session {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: var(--fs-ui-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill.head {
+  background: var(--medium-bg);
+  color: var(--text);
+}
+
+.pill.waiting {
+  background: var(--sunken);
+  color: var(--text-2);
+}
+
+.pill.victim {
+  background: var(--high-bg);
+  color: var(--high-text);
+}
+
+.block-what {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.block-who {
+  flex: 0 1 auto;
+  max-width: 22ch;
+  overflow: hidden;
+  color: var(--text-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.block-lock {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.block-sql {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@container (max-width: 720px) {
+  .block-row {
+    grid-template-columns: calc(var(--depth) * 14px) 48px minmax(0, 1fr);
+  }
+
+  .block-row .block-state {
+    display: none;
+  }
+}

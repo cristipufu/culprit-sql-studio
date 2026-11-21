@@ -1,0 +1,108 @@
+/* ───────── coding agents ───────── */
+
+.agent-select {
+  margin-inline-start: 8px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-ui-sm);
+  cursor: pointer;
+}
+
+.agent-select:hover,
+.agent-select:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--text-2);
+}
+
+.agent-select.access-query {
+  color: var(--medium-text);
+  border-color: color-mix(in srgb, var(--medium) 45%, var(--border));
+}
+
+.approval-overlay {
+  align-items: center;
+  padding-top: 0;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.approval {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 16px;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+}
+
+.approval-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.approval-head > svg {
+  margin-top: 2px;
+  flex: none;
+  color: var(--medium-text);
+}
+
+.approval-head > svg.danger {
+  color: var(--high-text);
+}
+
+.approval-head h2 {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: 600;
+}
+
+.approval-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-size: var(--fs-ui);
+  color: var(--text-2);
+}
+
+.approval-sql {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.approval-note {
+  margin: 0;
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.approval-note b {
+  color: var(--high-text);
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-meta);
+}
+
+.approval .btn.danger {
+  background: var(--high);
+  border-color: var(--high);
+  color: var(--text-inverse);
+}
+
+.approval .btn.danger:hover {
+  filter: brightness(0.95);
+}

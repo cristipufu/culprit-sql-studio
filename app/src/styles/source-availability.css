@@ -1,0 +1,120 @@
+/* ───────── query statistics unlock + checked and fine ───────── */
+
+.unlock {
+  margin: 8px 4px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--focus);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+.unlock p {
+  margin: 6px 0 0;
+}
+
+.unlock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.unlock-sql {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 6px;
+  margin-top: 10px;
+  padding: 8px 8px 8px 10px;
+  border-radius: 6px;
+  background: var(--code-bg);
+}
+
+.unlock-sql code {
+  flex: 1 1 100%;
+  font-family: var(--mono);
+  font-size: var(--fs-ui);
+  color: var(--code-keyword);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.unlock-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.unlock-foot .muted {
+  flex: 1;
+  font-size: var(--fs-meta);
+}
+
+.checked-fine {
+  margin: 14px 4px 8px;
+}
+
+.checked-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 4px 2px;
+}
+
+.checked-head .n {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.checked-head { text-align: start; }
+.checked-head > svg { flex: none; }
+.checked-head > span { min-width: 0; }
+.checked-head .n { display: inline-block; margin-inline-start: 4px; }
+.checked-fine details { margin-top: 12px; }
+.checked-fine summary { cursor: pointer; }
+.checked-fine li > svg { flex: none; margin-top: 2px; }
+.checked-fine li > span { min-width: 0; overflow-wrap: anywhere; }
+
+.checked-head svg {
+  transition: transform 120ms ease;
+}
+
+.checked-head svg.turned {
+  transform: rotate(90deg);
+}
+
+.checked-fine ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.checked-fine li {
+  display: flex;
+  gap: 8px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-ui);
+}
+
+.checked-fine li .ok {
+  color: var(--good-text);
+  flex: none;
+  margin-top: 2px;
+}
+
+.checked-fine li .t {
+  font-weight: 500;
+  margin-inline-end: 6px;
+}
+
+.checked-fine li .d {
+  color: var(--text-3);
+}

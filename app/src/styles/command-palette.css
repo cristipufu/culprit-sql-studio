@@ -1,0 +1,97 @@
+/* ───────── palette ───────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  z-index: 50;
+}
+
+.palette {
+  width: min(620px, calc(100vw - 32px));
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+.palette input {
+  width: 100%;
+  height: 48px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 0 16px;
+  font-size: var(--fs-heading);
+  border-bottom: 1px solid var(--border);
+}
+
+.palette .results {
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.palette .item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: start;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--text-2);
+}
+
+.palette .item .t {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.palette .item .k {
+  margin-inline-start: auto;
+  font-size: var(--fs-ui-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.palette .item.on {
+  background: var(--active);
+}
+
+.palette .item.on .k {
+  color: var(--text-2);
+}
+
+.palette .section {
+  padding: 8px 10px 4px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--text-inverse);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-weight: 500;
+  box-shadow: var(--shadow-pop);
+  z-index: 60;
+  animation: toast-in 0.16s ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}

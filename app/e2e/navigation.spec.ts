@@ -44,3 +44,37 @@ test("The theme applies at once and is remembered", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
 });
+
+
+test("Theme colors follow system and explicit choices with the original palettes", async ({ page }) => {
+  await page.goto("/");
+  for (const system of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: system });
+    for (const choice of [
+      { label: "Follow the system", theme: "system" },
+      { label: "Light", theme: "light" },
+      { label: "Dark", theme: "dark" },
+    ] as const) {
+      await page.getByRole("radio", { name: choice.label, exact: true }).check();
+      const dark = choice.theme === "dark" || (choice.theme === "system" && system === "dark");
+      if (choice.theme === "system") await expect(page.locator("html")).not.toHaveAttribute("data-theme");
+      else await expect(page.locator("html")).toHaveAttribute("data-theme", choice.theme);
+      await expect.poll(() => page.evaluate(() => {
+        const root = getComputedStyle(document.documentElement);
+        return {
+          background: getComputedStyle(document.body).backgroundColor,
+          colorScheme: root.colorScheme,
+          mutedText: root.getPropertyValue("--text-3").trim(),
+          codeComment: root.getPropertyValue("--code-comment").trim(),
+          highText: root.getPropertyValue("--high-text").trim(),
+          waitCpu: root.getPropertyValue("--wait-cpu").trim(),
+          planTint: root.getPropertyValue("--tint-0").trim(),
+        };
+      })).toEqual(dark ? {
+        background: "rgb(18, 18, 17)", colorScheme: "dark", mutedText: "#8f8c86", codeComment: "#8a8781", highText: "#f0676b", waitCpu: "#7aa3d6", planTint: "#1c2944",
+      } : {
+        background: "rgb(250, 250, 249)", colorScheme: "light", mutedText: "#6b6862", codeComment: "#726f68", highText: "#b4232b", waitCpu: "#4e79a7", planTint: "#e8effd",
+      });
+    }
+  }
+});

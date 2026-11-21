@@ -1,0 +1,141 @@
+/* ───────── live session actions, connection import, Entra sign-in ───────── */
+
+.btn.small {
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--fs-meta);
+}
+
+.btn.danger {
+  background: var(--high);
+  border-color: var(--high);
+  color: #fff;
+}
+
+.btn.danger:hover {
+  background: var(--high);
+  opacity: 0.9;
+}
+
+table.grid td.session-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+table.grid tr.row .session-actions .btn.ghost {
+  opacity: 0;
+}
+
+table.grid tr.row:hover .session-actions .btn.ghost,
+table.grid tr.row .session-actions .btn.ghost:focus-visible,
+table.grid tr.row:has(td.session-actions .inline-confirm) .session-actions .btn.ghost {
+  opacity: 1;
+}
+
+table.grid tr.row:has(td.session-actions .inline-confirm) td {
+  background: var(--high-bg);
+}
+
+.inline-confirm.session-action-confirm {
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 32rem;
+  white-space: normal;
+}
+
+.inline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-confirm .muted {
+  font-size: var(--fs-meta);
+}
+
+.error-text {
+  display: inline-block;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: var(--high-text);
+  font-size: var(--fs-meta);
+}
+
+.live-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-inline-end: 12px;
+}
+
+.import-sources {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.import-note {
+  margin: -2px 0 4px 52px;
+  color: var(--medium-text);
+  font-size: var(--fs-meta);
+}
+
+.dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px 22px;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+}
+
+.dialog h2 {
+  margin: 0 0 6px;
+  font-size: var(--fs-heading);
+}
+
+.dialog p {
+  margin: 0 0 14px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.device-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.device-code .code {
+  font-family: var(--mono);
+  font-size: var(--fs-display);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  user-select: all;
+}
+
+.dialog .actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dialog .waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+}
