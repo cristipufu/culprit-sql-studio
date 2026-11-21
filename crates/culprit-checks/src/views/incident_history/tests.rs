@@ -36,7 +36,9 @@ fn first() -> DiagnosticRevision {
             .into(),
             partition: SourcePartition::Target,
             source: "activity".into(),
-            population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
+            population: DiagnosticPopulation::Activity {
+                population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
+            },
             measurement_scope: culprit_core::MeasurementScope::Database,
             native_epoch: Some("native-process".into()),
         },

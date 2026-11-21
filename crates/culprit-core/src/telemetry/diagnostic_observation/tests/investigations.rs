@@ -264,7 +264,11 @@ fn scope_epoch_component_recipe_and_receipt_changes_cannot_borrow_an_existing_in
                 let RecipeCostQualification::Measured(receipt) = &mut recipe.cost else { panic!() };
                 match changed {
                     "epoch" => activity_scope(receipt).native_epoch = Some("another-native-epoch".into()),
-                    "population" => activity_scope(receipt).population = ActivityPopulation::DefaultDatabaseConnections,
+                    "population" => {
+                        activity_scope(receipt).population = DiagnosticPopulation::Activity {
+                            population: ActivityPopulation::DefaultDatabaseConnections,
+                        }
+                    }
                     "scope" => activity_scope(receipt).measurement_scope = MeasurementScope::Server,
                     "native-cost-proof" => receipt.evidence.payload_sha256 = digest(b"different-native-proof"),
                     _ => receipt.read_metrics.templates[0].client_elapsed_ms = 2.0,

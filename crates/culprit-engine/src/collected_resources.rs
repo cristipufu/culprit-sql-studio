@@ -128,7 +128,7 @@ pub fn memory_failures(capture: &EvidenceCapture) -> Result<CollectedRetainedFai
         .collect::<Result<Vec<_>>>()?;
     observations.sort_by_key(|observation| observation.position);
     let source = input.outcome(observations.len())?;
-    let report = {
+    let mut report = {
         let evidence = MemoryFailureSnapshot {
             source: input.coverage.source.clone(),
             observed_from: input.native.observed_from.clone(),
@@ -139,6 +139,7 @@ pub fn memory_failures(capture: &EvidenceCapture) -> Result<CollectedRetainedFai
         };
         culprit_checks::memory_failures::explain(&evidence, Some(&source))?
     };
+    report.qualify_incident_input(capture.source());
     Ok(CollectedRetainedFailureAnalysis { context: crate::collected_context::from_capture(capture), report })
 }
 
@@ -158,7 +159,7 @@ pub fn native_failures(capture: &EvidenceCapture) -> Result<CollectedRetainedFai
         .collect::<Result<Vec<_>>>()?;
     observations.sort_by_key(NativeFailureRecord::position);
     let source = input.outcome(observations.len())?;
-    let report = {
+    let mut report = {
         let evidence = NativeFailureSnapshot {
             source: input.coverage.source.clone(),
             observed_from: input.native.observed_from.clone(),
@@ -168,6 +169,7 @@ pub fn native_failures(capture: &EvidenceCapture) -> Result<CollectedRetainedFai
         };
         culprit_checks::native_failures::explain(&evidence, Some(&source))?
     };
+    report.qualify_incident_input(capture.source());
     Ok(CollectedRetainedFailureAnalysis { context: crate::collected_context::from_capture(capture), report })
 }
 

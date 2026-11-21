@@ -2,12 +2,14 @@
 use super::*;
 use crate::SourceState;
 use std::collections::BTreeSet;
+mod originals;
 mod tasks;
+pub use originals::*;
 mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
 pub const MAX_DIAGNOSTIC_INPUTS: usize = 256;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 14;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 15;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -128,7 +130,7 @@ pub struct DiagnosticScope {
     pub target: CollectionTarget,
     pub partition: SourcePartition,
     pub source: String,
-    pub population: ActivityPopulation,
+    pub population: DiagnosticPopulation,
     pub measurement_scope: crate::MeasurementScope,
     /// A verified native generation, never a collector epoch or a fabricated uptime identity.
     pub native_epoch: Option<String>,
@@ -136,6 +138,7 @@ pub struct DiagnosticScope {
 impl DiagnosticScope {
     pub fn is_valid(&self) -> bool {
         self.partition.is_valid_for(&self.target)
+            && self.population.is_valid()
             && valid_key(&self.source)
             && self.native_epoch.as_deref().is_none_or(valid_key)
             && match &self.partition {
@@ -148,7 +151,7 @@ impl DiagnosticScope {
             return Err(invalid());
         }
         let native =
-            (self.target.telemetry_id()?, &self.source, &self.native_epoch, self.population, self.measurement_scope);
+            (self.target.telemetry_id()?, &self.source, &self.native_epoch, &self.population, self.measurement_scope);
         match &self.partition {
             SourcePartition::Target => digest_value(&native),
             partition => digest_value(&(partition, native)),
@@ -165,13 +168,15 @@ impl DiagnosticScope {
         if !source.partition_is_consistent() {
             return Err(invalid());
         }
-        let frame = source.observation.activity().filter(|frame| frame.is_valid()).ok_or_else(invalid)?;
+        let Some(frame) = source.observation.activity().filter(|frame| frame.is_valid()) else {
+            return originals::scope(source);
+        };
         let value = Self {
             target: source.target.clone(),
             partition: source.partition.clone(),
             source: source.source.clone(),
             native_epoch: frame.epoch.clone(),
-            population: frame.population,
+            population: DiagnosticPopulation::Activity { population: frame.population },
             measurement_scope: frame.scope,
         };
         if !value.is_valid() {
@@ -243,7 +248,7 @@ impl DiagnosticRecoveryProof {
         source: &CollectionDescription,
         capture: &DiagnosticCaptureRef,
     ) -> bool {
-        if episode.signal.is_task_point()
+        if episode.signal.is_capture_point()
             || self.capture() != capture
             || !self.qualifies(&episode.first)
             || !episode.scope.is_valid()
@@ -254,6 +259,9 @@ impl DiagnosticRecoveryProof {
             return false;
         }
         match self {
+            Self::CompleteScope { .. } if matches!(episode.signal, DiagnosticSignal::OriginalObservation { .. }) => {
+                episode.original_scope_can_resolve(source)
+            }
             Self::CompleteScope { .. } => source.observation.activity().is_some_and(|snapshot| {
                 snapshot.is_valid()
                     && ObservationBounds::new(&episode.last_seen_at, &snapshot.at).is_some()
@@ -326,6 +334,11 @@ impl DiagnosticRecoveryProof {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum DiagnosticSignal {
+    /// One authenticated source observation. It is not a request identity or an attribution authority.
+    OriginalObservation {
+        condition: DiagnosticOriginalCondition,
+        native_key: NativeRecordIdentity,
+    },
     Activity {
         key: ActivityKey,
         condition: ActivityCondition,
@@ -365,8 +378,9 @@ pub enum DiagnosticSignal {
 }
 impl DiagnosticSignal {
     pub fn is_valid(&self) -> bool {
-        self.activity_key().is_valid()
+        self.activity_key().is_none_or(ActivityKey::is_valid)
             && match self {
+                Self::OriginalObservation { condition, native_key } => condition.accepts_identity(native_key),
                 Self::Activity { policy, .. } => policy.validate().is_ok(),
                 Self::LockWait { key } => key.request.is_some(),
                 Self::RequestMemory { key, statement_identity }
@@ -390,23 +404,37 @@ impl DiagnosticSignal {
         if !self.is_valid() {
             return Err(invalid());
         }
-        digest_value(&("diagnostic-signal-v1", self))
-    }
-    pub fn activity_key(&self) -> &ActivityKey {
         match self {
+            Self::OriginalObservation {
+                condition: condition @ DiagnosticOriginalCondition::MssqlQueryHistory { .. },
+                ..
+            } => digest_value(&("diagnostic-original-history-population-v1", condition)),
+            _ => digest_value(&("diagnostic-signal-v1", self)),
+        }
+    }
+    pub fn activity_key(&self) -> Option<&ActivityKey> {
+        match self {
+            Self::OriginalObservation { .. } => None,
             Self::Activity { key, .. }
             | Self::LockWait { key }
             | Self::PageWait { key, .. }
             | Self::PageTaskWait { key, .. }
             | Self::RequestMemory { key, .. }
             | Self::LogRateGovernance { key, .. }
-            | Self::CompilationAdmission { key, .. } => key,
+            | Self::CompilationAdmission { key, .. } => Some(key),
         }
     }
     fn matches_reference(&self, reference: &DiagnosticEvidenceRef) -> bool {
         match self {
             Self::PageTaskWait { page, .. } => page.as_ref() == reference,
-            _ => matches!(&reference.native_key, NativeRecordIdentity::Activity(key) if key == self.activity_key()),
+            Self::OriginalObservation { condition, native_key } => {
+                condition.accepts_identity(&reference.native_key)
+                    && (matches!(condition, DiagnosticOriginalCondition::MssqlQueryHistory { .. })
+                        || native_key == &reference.native_key)
+            }
+            _ => {
+                matches!(&reference.native_key, NativeRecordIdentity::Activity(key) if Some(key) == self.activity_key())
+            }
         }
     }
 }
@@ -447,6 +475,7 @@ impl DiagnosticEpisode {
             && self.scope.is_valid()
             && self.signal.is_valid()
             && self.task_point_is_consistent()
+            && self.original_point_is_consistent()
             && self.source_read.as_deref().is_none_or(|stage| stage.matches_episode(self))
             && [&self.first, &self.latest]
                 .into_iter()
@@ -465,7 +494,8 @@ impl DiagnosticEpisode {
                 report.is_valid()
                     && matches!(
                         (&self.signal, report),
-                        (DiagnosticSignal::LockWait { .. }, DiagnosticReport::Blocking { .. })
+                        (DiagnosticSignal::OriginalObservation { .. }, DiagnosticReport::OriginalObservation { .. })
+                            | (DiagnosticSignal::LockWait { .. }, DiagnosticReport::Blocking { .. })
                             | (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWait { .. })
                             | (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWaitWriters { .. })
                             | (DiagnosticSignal::PageTaskWait { .. }, DiagnosticReport::PageTaskHolders { .. })
@@ -498,7 +528,7 @@ impl DiagnosticEpisode {
     ) -> Result<Self> {
         let id = digest_value(&("diagnostic-episode-v1", scope.key()?, &signal, evidence.key()?))?;
         let lifecycle =
-            if signal.is_task_point() { DiagnosticLifecycle::Uncertain } else { DiagnosticLifecycle::Active };
+            if signal.is_capture_point() { DiagnosticLifecycle::Uncertain } else { DiagnosticLifecycle::Active };
         let value = Self {
             id,
             scope,
@@ -590,7 +620,7 @@ impl DiagnosticEpisode {
     pub(super) fn matches_request_origin(&self, focus: &ActivityRequestFocus) -> bool {
         self.is_valid()
             && focus.is_valid()
-            && self.signal.activity_key() == &focus.original.key
+            && self.signal.activity_key() == Some(&focus.original.key)
             && self.scope.source == focus.source
             && self.scope.native_epoch.as_deref() == Some(focus.epoch.as_str())
             && self.scope.partition == focus.partition
@@ -655,6 +685,11 @@ impl CompilationAdmissionReport {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum DiagnosticReport {
+    /// Interpretation of the exact original source row, without issuing a native follow-up or supplying a cause.
+    OriginalObservation {
+        observation: DiagnosticEvidenceRef,
+        peers: Vec<DiagnosticEvidenceRef>,
+    },
     Blocking {
         observation: DiagnosticEvidenceRef,
         participants: Vec<DiagnosticEvidenceRef>,
@@ -693,6 +728,9 @@ impl DiagnosticReport {
         row: &ExportedRecord,
     ) -> bool {
         match (self, &source.observation, &row.record) {
+            (Self::OriginalObservation { observation, .. }, _, record) => {
+                observation == &episode.latest && episode.original_observation_matches(source, record)
+            }
             (
                 Self::Blocking { .. },
                 SourceObservation::FocusedBlocking { result, .. },
@@ -781,7 +819,8 @@ impl DiagnosticReport {
     }
     pub fn evidence(&self) -> &DiagnosticEvidenceRef {
         match self {
-            Self::Blocking { observation, .. }
+            Self::OriginalObservation { observation, .. }
+            | Self::Blocking { observation, .. }
             | Self::PageWait { observation, .. }
             | Self::PageWaitWriters { observation, .. }
             | Self::PageTaskHolders { observation, .. }
@@ -803,6 +842,7 @@ impl DiagnosticReport {
             }
             Self::RequestMemory { peers, .. } => (None, peers.as_slice(), &[][..]),
             Self::CompilationAdmission { report } => (None, report.gateways.as_slice(), &[][..]),
+            Self::OriginalObservation { peers, .. } => (None, peers.as_slice(), &[][..]),
             Self::CurrentRequestWork { .. } => (None, &[][..], &[][..]),
         };
         let mut seen = Vec::new();
@@ -822,6 +862,10 @@ impl DiagnosticReport {
             && self.references().all(|reference| reference.key().is_ok_and(|key| unique.insert(key)))
             && match self {
                 Self::Blocking { .. } => matches!(self.evidence().native_key, NativeRecordIdentity::Activity(_)),
+                Self::OriginalObservation { .. } => matches!(
+                    self.evidence().native_key,
+                    NativeRecordIdentity::Operational { .. } | NativeRecordIdentity::Runtime(_)
+                ),
                 _ => matches!(self.evidence().native_key, NativeRecordIdentity::Operational { .. }),
             }
     }
@@ -837,6 +881,14 @@ impl DiagnosticReport {
                             && matches!(reference.native_key, NativeRecordIdentity::Activity(_))
                             && reference.capture_ref() == self.evidence().capture_ref()
                             && reference != self.evidence()
+                    })
+            }
+            Self::OriginalObservation { peers, .. } => {
+                peers.len() < MAX_DIAGNOSTIC_INPUTS
+                    && unique_references(peers)
+                    && !peers.contains(self.evidence())
+                    && peers.iter().all(|peer| {
+                        peer.capture_ref() == self.evidence().capture_ref() && peer.stream == self.evidence().stream
                     })
             }
             Self::CurrentRequestWork { .. } => true,

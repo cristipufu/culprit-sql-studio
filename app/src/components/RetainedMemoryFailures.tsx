@@ -16,7 +16,7 @@ export function RetainedMemoryFailures({ evidence, report }: { evidence: MemoryF
     return observation
       ? <MemoryFailureRow key={entry.position} explanation={entry} observation={observation} />
       : <div className="operational-card" key={entry.position}><p>{t("ui.memory_failures.missing_row")}</p></div>;
-  }} />;
+  }}><p className="muted">{report.incident_input_explanation}</p></ObservationList>;
 }
 
 /** A rejected read must remain visible even when it could not admit a native wrapper or a derived explanation. */

@@ -1109,3 +1109,6 @@ pub use indexed_views::{IndexedViewsCase, indexed_views_evidence};
 
 mod incident_history;
 pub use incident_history::{IncidentHistoryCase, assert_incident_history_capture, incident_history_evidence};
+
+mod diagnostic_originals;
+pub use diagnostic_originals::{DiagnosticOriginalCase, diagnostic_original_evidence};

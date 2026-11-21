@@ -42,7 +42,8 @@ fn snapshot(source: &CollectionDescription, records: &[TelemetryRecord]) -> Snap
 #[tokio::test]
 async fn shared_native_errors_reuse_scan_diagnoses_without_provider_credentials_or_query_owner_joins() {
     for (source, records) in native_failure_evidence_cases() {
-        let expected = culprit_checks::analyze(snapshot(&source, &records)).native_failures.unwrap();
+        let mut expected = culprit_checks::analyze(snapshot(&source, &records)).native_failures.unwrap();
+        expected.qualify_incident_input(&source);
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(capture.is_read_complete(), "{:?}", capture.gaps());

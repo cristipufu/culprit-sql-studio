@@ -113,7 +113,17 @@ impl<R: ObservationReader> TelemetrySource for FrozenSource<R> {
         let description = self.description.as_ref().ok_or_else(invalid_source)?;
         let unchanged = self.reader.verify(description).await?;
         self.progress.verified();
-        Ok(SourceCompletion::verified_if(unchanged && self.streams.iter().all(|stream| stream.finished)))
+        if !unchanged || !self.streams.iter().all(|stream| stream.finished) {
+            return Ok(SourceCompletion::Changed);
+        }
+        // A frozen history reader verifies this exact original acquisition header. Keep its typed final
+        // witness rather than using generic Verified, which cannot attest an acquisition owner.
+        Ok(match &description.observation {
+            SourceObservation::QueryHistory(history) if history.acquisition_owner.is_some() => {
+                SourceCompletion::QueryHistory(Box::new(history.clone()))
+            }
+            _ => SourceCompletion::Verified,
+        })
     }
     async fn close(&mut self) -> SourceShutdown {
         self.progress.close();
@@ -131,5 +141,129 @@ mod tests {
             CollectionRead::Page { next_cursor: None, .. }
         ));
         assert!(stream.page(None, &CollectionBudget::default()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod history_completion_tests {
+    use super::*;
+    struct Reader {
+        source: CollectionDescription,
+        unchanged: bool,
+        reads: u32,
+        verifications: u32,
+    }
+    #[async_trait::async_trait]
+    impl ObservationReader for Reader {
+        async fn observe(&mut self, _: &CollectionRequest) -> Result<FrozenObservation> {
+            self.reads += 1;
+            Ok(FrozenObservation { description: self.source.clone(), records: vec![] })
+        }
+        async fn verify(&mut self, source: &CollectionDescription) -> Result<bool> {
+            self.verifications += 1;
+            Ok(self.unchanged && source == &self.source)
+        }
+        fn query_count(&self) -> u32 {
+            self.reads + self.verifications
+        }
+        fn read_metrics(&self) -> Option<ReadWorkMetrics> {
+            None
+        }
+        async fn close(&mut self) -> SourceShutdown {
+            SourceShutdown::Quiescent
+        }
+    }
+    fn source(owner: bool, unchanged: bool) -> FrozenSource<Reader> {
+        let mut database = culprit_core::DatabaseIdentity::server(
+            culprit_core::Engine::Mssql,
+            "controlled-db",
+            "fixture.invalid",
+            1433,
+            None,
+        );
+        database.incarnation = Some("controlled-logical-database".into());
+        let target = CollectionTarget::Database(database);
+        let context = NativeReadContext {
+            target: target.clone(),
+            partition: SourcePartition::InstanceLocal {
+                member: Some(SharedResourceIdentity {
+                    engine: culprit_core::Engine::Mssql,
+                    kind: SharedResourceKind::Instance,
+                    namespace: NativeIdentity::new("controlled-server"),
+                    native: NativeIdentity::new("controlled-member"),
+                }),
+                epoch: Some("controlled-process".into()),
+            },
+            observed_from: "2020-01-01T08:00:00Z".into(),
+            observed_until: "2020-01-01T08:00:01Z".into(),
+            database_writable: Some(true),
+        };
+        let description = CollectionDescription {
+            target,
+            partition: SourcePartition::Target,
+            source: "controlled-query-history".into(),
+            continuity: SourceContinuity::Unverified,
+            observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+                interval: TelemetryInterval {
+                    native_id: "original-interval".into(),
+                    from: "2020-01-01T06:00:00Z".into(),
+                    until: "2020-01-01T07:00:00Z".into(),
+                },
+                acquisition_owner: owner.then_some(Box::new(context)),
+                population_catalog: None,
+                population_binding: QueryHistoryPopulationBinding::Unknown,
+                waits: None,
+                dimensions: Default::default(),
+                native_properties: Default::default(),
+            }),
+        };
+        let request = CollectionRequest {
+            subject: CollectionSubject::Database,
+            selection: CollectionSelection::QueryHistory {
+                from: "2020-01-01T06:00:00Z".into(),
+                until: "2020-01-01T07:00:00Z".into(),
+            },
+            budget: CollectionBudget::default(),
+        };
+        FrozenSource::new(Reader { source: description, unchanged, reads: 0, verifications: 0 }, &request).unwrap()
+    }
+    async fn drain(source: &mut FrozenSource<Reader>) {
+        for stream in TelemetryCollection::QueryHistory.source_streams() {
+            assert!(matches!(
+                source.read_page(*stream, None).await.unwrap(),
+                CollectionRead::Page { next_cursor: None, .. }
+            ));
+        }
+    }
+    #[tokio::test]
+    async fn all_four_original_streams_and_the_same_reader_verify_preserve_the_exact_typed_history_witness() {
+        for owner in [false, true] {
+            let mut source = source(owner, true);
+            let original = source.describe().await.unwrap();
+            if owner {
+                assert!(original.completed(SourceCompletion::Verified).is_err());
+            }
+            drain(&mut source).await;
+            let completion = source.finish().await.unwrap();
+            assert_eq!(matches!(completion, SourceCompletion::QueryHistory(_)), owner);
+            assert_eq!(original.completed(completion).unwrap(), Some(original.clone()));
+            assert_eq!(source.query_count(), 2);
+            assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        }
+    }
+    #[tokio::test]
+    async fn missing_stream_or_changed_original_never_produces_a_verified_history_header() {
+        let mut undrained = source(true, true);
+        undrained.describe().await.unwrap();
+        undrained.read_page(TelemetryStream::QueryRuntime, None).await.unwrap();
+        assert!(undrained.finish().await.is_err());
+        assert_eq!(undrained.reader.verifications, 0);
+        let mut changed = source(true, false);
+        let original = changed.describe().await.unwrap();
+        drain(&mut changed).await;
+        let completion = changed.finish().await.unwrap();
+        assert!(!completion.is_verified());
+        assert_eq!(original.completed(completion).unwrap(), None);
+        assert_eq!(changed.reader.verifications, 1);
     }
 }

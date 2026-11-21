@@ -42,7 +42,12 @@ fn scan(source: &CollectionDescription, records: &[TelemetryRecord]) -> Snapshot
 #[tokio::test]
 async fn authenticated_memory_failures_reuse_scan_explanations_without_inventing_a_database_or_owner() {
     let (source, records) = memory_failure_evidence();
-    let expected = culprit_checks::analyze(scan(&source, &records)).memory_failures.unwrap();
+    let mut expected = culprit_checks::analyze(scan(&source, &records)).memory_failures.unwrap();
+    assert_eq!(
+        expected.incident_input,
+        DiagnosticInputQualification::Ineligible { reason: DiagnosticInputIneligibility::OriginalSourceUnavailable }
+    );
+    expected.qualify_incident_input(&source);
     let fixture = Fixture::new(source.clone(), records.clone()).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
@@ -162,7 +167,8 @@ async fn custom_source_identity_keeps_authenticated_native_coverage_without_an_e
         let TelemetryRecord::Operational(observation) = record else { panic!() };
         observation.source = "embedding-native-memory-source".into();
     }
-    let expected = culprit_checks::analyze(scan(&source, &records)).memory_failures.unwrap();
+    let mut expected = culprit_checks::analyze(scan(&source, &records)).memory_failures.unwrap();
+    expected.qualify_incident_input(&source);
     let fixture = Fixture::new(source.clone(), records).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     let analysis = collected_resources::memory_failures(&capture).unwrap();
@@ -198,5 +204,39 @@ async fn other_subjects_and_datasets_cannot_acquire_native_memory_failure_semant
             Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::UnsupportedSchema)),
             "{shape}"
         );
+    }
+}
+
+#[tokio::test]
+async fn original_instance_qualification_and_missing_pool_process_authority_are_visible_without_hiding_failure_rows_or_recovery()
+ {
+    use culprit_collector::analytical::test_support::{DiagnosticOriginalCase, diagnostic_original_evidence};
+    for case in [DiagnosticOriginalCase::Memory, DiagnosticOriginalCase::MemoryAmbiguousPool] {
+        let (source, records) = diagnostic_original_evidence(case);
+        let fixture = Fixture::new(source.clone(), records).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let analysis = collected_resources::memory_failures(&capture).unwrap();
+        let expected = diagnostic_original_input_qualification(Some(&source));
+        assert_eq!(analysis.report.incident_input, expected);
+        assert_eq!(analysis.report.incident_input_explanation, expected.explanation());
+        assert_eq!(analysis.report.entries.len(), 2);
+        assert_eq!(analysis.context.records.len(), 2);
+        assert!(analysis.context.source.target.database().is_none());
+        if case == DiagnosticOriginalCase::MemoryAmbiguousPool {
+            assert_eq!(
+                expected,
+                DiagnosticInputQualification::Ineligible {
+                    reason: DiagnosticInputIneligibility::SharedOwnershipUnavailable
+                }
+            );
+            assert_eq!(analysis.report.source_state, Some(SourceState::Collected));
+        } else {
+            assert!(matches!(
+                expected,
+                DiagnosticInputQualification::Qualified { source: DiagnosticSourceKind::MemoryFailures }
+            ));
+        }
+        assert_eq!(fixture.recovery_object_reads(), opened);
     }
 }

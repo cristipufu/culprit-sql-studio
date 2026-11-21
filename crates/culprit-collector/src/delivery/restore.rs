@@ -88,7 +88,11 @@ pub async fn restore_diagnostic_inputs_page(
         return Err(DeliveryProblem::Capacity.error());
     }
     for manifest in &page.ranges {
-        if crate::outbox::diagnostic_source_eligible(&manifest.source, manifest.investigation.as_ref())? {
+        if crate::outbox::diagnostic_manifest_eligible(
+            &manifest.source,
+            manifest.investigation.as_ref(),
+            &manifest.reference_coverage,
+        )? {
             let connection = connection_for(&manifest.source)?;
             outbox
                 .restore_diagnostic_input(&connection, load_diagnostic_input(store, &manifest.range_id).await?, store)

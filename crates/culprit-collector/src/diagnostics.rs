@@ -530,6 +530,21 @@ fn analyze(input: &DiagnosticInput, policy: &ActivityPolicy, analyzed_at: &str) 
             )?;
             (update.revisions, update.checkpoint)
         }
+        _ if diagnostic_original_source_kind(&input.source).is_some() => {
+            let rows = input
+                .rows
+                .iter()
+                .map(|row| DiagnosticOriginalRow { reference: &row.reference, record: &row.row.record })
+                .collect::<Vec<_>>();
+            let update = observe_diagnostic_original(
+                &input.source,
+                &input.parent,
+                &rows,
+                input.checkpoint.as_ref(),
+                analyzed_at,
+            )?;
+            (update.revisions, update.checkpoint)
+        }
         _ => return Err(CollectionStop::InvalidPage.error()),
     };
     let step_id = digest(

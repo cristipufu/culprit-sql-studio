@@ -161,7 +161,9 @@ fn request(selection: CollectionSelection) -> CollectionRequest {
 #[tokio::test]
 async fn archive_authenticates_the_writer_roster_and_every_original_role_without_losing_mars_contexts() {
     let fixture = WriterArchive::new().await;
-    authenticate_report_participants(&fixture.store, &fixture.native, &fixture.episode).await.unwrap();
+    authenticate_report_participants(&fixture.store, &fixture.native, &fixture.episode, &mut BTreeMap::new())
+        .await
+        .unwrap();
     for role in ["page", "candidate", "context"] {
         let mut episode = fixture.episode.clone();
         let Some(DiagnosticReport::PageWaitWriters { page, candidates, blocking_contexts, .. }) = &mut episode.report
@@ -179,7 +181,9 @@ async fn archive_authenticates_the_writer_roster_and_every_original_role_without
             _ => unreachable!(),
         }
         assert!(episode.is_valid(), "shape-only consistency does not authenticate {role}");
-        let error = authenticate_report_participants(&fixture.store, &fixture.native, &episode).await.unwrap_err();
+        let error = authenticate_report_participants(&fixture.store, &fixture.native, &episode, &mut BTreeMap::new())
+            .await
+            .unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{role}");
     }
 }
@@ -194,6 +198,10 @@ async fn archived_receipt_membership_does_not_authorize_a_missing_or_corrupt_ori
         let mut bytes = std::fs::read(&path).unwrap();
         assert_eq!(bytes.pop(), Some(b'\n'));
         std::fs::write(path, bytes).unwrap();
-        assert!(authenticate_report_participants(&fixture.store, &fixture.native, &fixture.episode).await.is_err());
+        assert!(
+            authenticate_report_participants(&fixture.store, &fixture.native, &fixture.episode, &mut BTreeMap::new())
+                .await
+                .is_err()
+        );
     }
 }

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import english from "../../locales/en.json" with { type: "json" };
 import type { NativeFailureSnapshot } from "../src/gen/NativeFailureSnapshot";
 import type { RetainedFailureReport } from "../src/gen/RetainedFailureReport";
 import type { SourceOutcome } from "../src/gen/SourceOutcome";
@@ -24,6 +25,8 @@ function evidence(): NativeFailureSnapshot {
 function explanations(evidence: NativeFailureSnapshot): RetainedFailureReport {
   return {
     title: "Retained native diagnostics", summary: "12 retained diagnostic records; no incident count established.",
+    incident_input: { kind: "ineligible", reason: "original-source-unavailable" },
+    incident_input_explanation: english["view.incident_input.original_unavailable"],
     source_state: "partial", source_reason: "The bounded native read retained only a subset.",
     limitations: ["No historical query owner is established."],
     entries: evidence.observations.map(({ observation }) => ({

@@ -15,7 +15,7 @@ export function RetainedNativeFailures({ evidence, report }: { evidence: NativeF
     return observation
       ? <NativeFailureRow key={entry.position} row={observation} explanation={entry} />
       : <div className="operational-card" key={entry.position}><p>{t("ui.memory_failures.missing_row")}</p></div>;
-  }} />;
+  }}><p className="muted">{report.incident_input_explanation}</p></ObservationList>;
 }
 
 export function nativeFailureReadIssue(source: string | undefined, sources: SourceOutcome[], requested = false): SourceOutcome | undefined {

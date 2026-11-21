@@ -454,7 +454,7 @@ fn a_large_checkpoint_is_packed_as_bounded_complete_parts_instead_of_one_oversiz
     for number in 0..100 {
         let mut episode = original.clone();
         episode.signal = DiagnosticSignal::PageWait {
-            key: episode.signal.activity_key().clone(),
+            key: episode.signal.activity_key().unwrap().clone(),
             statement_identity: None,
             resource: culprit_core::ObservedWaitResource {
                 kind: culprit_core::WaitResourceKind::MemoryPage,

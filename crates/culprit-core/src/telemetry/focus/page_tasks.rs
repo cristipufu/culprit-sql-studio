@@ -90,7 +90,7 @@ impl DiagnosticEpisode {
         if !frame.read_complete() {
             return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::EvidenceUnavailable));
         }
-        let Some(original) = frame.row(self.signal.activity_key()) else {
+        let Some(original) = self.signal.activity_key().and_then(|key| frame.row(key)) else {
             return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
         };
         let Some(reference) = original.reference else {

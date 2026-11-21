@@ -84,7 +84,8 @@ pub(super) fn qualify_questions(
             }
             continue;
         }
-        let row = rows.get(episode.signal.activity_key()).ok_or_else(|| CollectionStop::InvalidPage.error())?;
+        let key = episode.signal.activity_key().ok_or_else(|| CollectionStop::InvalidPage.error())?;
+        let row = rows.get(key).ok_or_else(|| CollectionStop::InvalidPage.error())?;
         if row.reference != episode.latest {
             return Err(CollectionStop::InvalidPage.error());
         }

@@ -34,7 +34,10 @@ pub fn explain(
         }
         Some(SourceState::Collected | SourceState::Empty) => {}
     }
+    let incident_input = culprit_core::telemetry::diagnostic_original_input_qualification(None);
     Ok(RetainedFailureReport {
+        incident_input,
+        incident_input_explanation: incident_input.explanation(),
         source_state: source.map(|source| source.state),
         source_reason: source.and_then(|source| source.reason.clone()),
         title: t!("view.memory_failures.title"),

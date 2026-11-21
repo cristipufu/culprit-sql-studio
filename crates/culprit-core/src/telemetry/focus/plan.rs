@@ -83,7 +83,7 @@ impl DiagnosticEpisode {
         let native = source.observation.activity().filter(|snapshot| snapshot.is_valid()).ok_or_else(invalid)?;
         DiagnosticActivityRow { reference, observation: original }.verify(source, &reference.capture_ref())?;
         let scope = DiagnosticScope::from_source(source)?;
-        if self.signal.activity_key() != &original.key
+        if self.signal.activity_key() != Some(&original.key)
             || scope.key()? != self.scope.key()?
             || !ObservationBounds::new(&self.first_seen_at, &self.last_seen_at)
                 .is_some_and(|bounds| bounds.contains(&native.at))

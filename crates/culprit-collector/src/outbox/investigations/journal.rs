@@ -11,7 +11,7 @@ pub(in crate::outbox) fn prepare_commit(
         manifest_sha256: validated.manifest_sha.clone(),
         source_scope_id: source.captured_range()?.scope_id,
     };
-    if eligible_source(source, validated.manifest.investigation.as_ref())? {
+    if eligible_manifest(source, validated.manifest.investigation.as_ref(), &validated.manifest.references)? {
         let investigation = encode_investigation(validated.manifest.investigation.as_ref())?;
         let parent_json = encode(&parent)?;
         let source_json = encode(source)?;

@@ -12552,5 +12552,14 @@
   "view.incident_history.selected_scope": "Selected immutable history, independent of the current database scan",
   "view.incident_history.source_stage": "{state, select, pending {A historical source question was pending.} deferred {A historical source question was deferred.} collecting {A historical source question was collecting evidence.} captured {A historical source result was retained.} stopped {A historical source question stopped.} other {Historical source status is unavailable.}}",
   "view.incident_history.summary": "{count} selected diagnostic revisions.",
-  "view.incident_history.title": "Recorded diagnostic history"
+  "view.incident_history.title": "Recorded diagnostic history",
+  "view.incident_input.epoch_unavailable": "The original native process generation is unavailable. These observations cannot establish durable incident continuity.",
+  "view.incident_input.history_namespace_unavailable": "The original historical database namespace is unqualified. The current read process or database name cannot establish ownership of these history fragments.",
+  "view.incident_input.invalid": "The original source scope is inconsistent, so incident input is withheld without replacing its native evidence.",
+  "view.incident_input.original_unavailable": "The original source ownership and generation were not retained here. Native failure observations remain available, but incident input qualification is unavailable.",
+  "view.incident_input.qualified": "The original owner and generation qualify this capture for observation grouping. This proves neither unique events nor a current cause and does not authorize another collection.",
+  "view.incident_input.read_owner_unavailable": "The original qualified database read owner is unavailable. A current connection or database name cannot supply it.",
+  "view.incident_input.shared_mismatch": "The original shared target and native member disagree. These failure observations cannot enter that resource’s incident controller.",
+  "view.incident_input.shared_unavailable": "This original does not prove the shared owner, member and native process generation required for incident grouping. Shared observations remain available without being assigned to a database.",
+  "view.incident_input.unsupported": "This source has no supported incident-input interpretation. Its native evidence remains available for separate analysis."
 }

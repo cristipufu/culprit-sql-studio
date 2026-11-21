@@ -162,7 +162,8 @@ fn event_relation_requires_the_original_native_focus_scope_and_monotonic_episode
                     other.intent.focus.activity_participant().unwrap().source.clone();
             }
             "population" => {
-                activity_scope(&mut other.intent.qualification).population = ActivityPopulation::ClientBackends
+                activity_scope(&mut other.intent.qualification).population =
+                    DiagnosticPopulation::Activity { population: ActivityPopulation::ClientBackends }
             }
             "scope" => activity_scope(&mut other.intent.qualification).measurement_scope = MeasurementScope::Server,
             "statement" => {

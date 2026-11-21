@@ -256,7 +256,11 @@ pub(super) fn validate_pending_input(
         return Err(DeliveryProblem::UnsupportedSchema.error());
     }
     if capture_reference(manifest)? != *input
-        || !crate::outbox::diagnostic_source_eligible(&manifest.source, manifest.investigation.as_ref())?
+        || !crate::outbox::diagnostic_manifest_eligible(
+            &manifest.source,
+            manifest.investigation.as_ref(),
+            &manifest.reference_coverage,
+        )?
     {
         return Err(invalid());
     }
@@ -264,7 +268,11 @@ pub(super) fn validate_pending_input(
 }
 pub async fn load_diagnostic_input(store: &dyn RecoveryStore, range_id: &str) -> Result<RecoveredDiagnosticInput> {
     let range = recovery::reopen(store, range_id).await?;
-    if !crate::outbox::diagnostic_source_eligible(&range.manifest().source, range.manifest().investigation.as_ref())? {
+    if !crate::outbox::diagnostic_manifest_eligible(
+        &range.manifest().source,
+        range.manifest().investigation.as_ref(),
+        &range.manifest().reference_coverage,
+    )? {
         return Err(invalid());
     }
     if matches!(range.manifest().source.observation, SourceObservation::SourceRead { .. }) {
@@ -328,6 +336,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
     let mut manifests = BTreeMap::new();
     let mut authenticated = BTreeSet::new();
     let mut authenticated_reports = BTreeSet::new();
+    let mut original_sources = BTreeMap::<String, DiagnosticOriginalEvidence>::new();
     let mut shared_references = BTreeMap::<String, BTreeSet<String>>::new();
     for revision in &references.diagnostic_revisions {
         let Some(event) = &revision.investigation else { continue };
@@ -397,9 +406,11 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         let native = manifests.get(&range_id).ok_or_else(invalid)?;
         let report_key = digest(&serde_json::to_vec(&(&episode.id, report)).map_err(|_| invalid())?);
         if authenticated_reports.insert(report_key) {
-            authenticate_report_participants(store, native, episode).await?;
+            authenticate_report_participants(store, native, episode, &mut original_sources).await?;
         }
-        if matches!(native.source.target, CollectionTarget::Shared(_)) {
+        if matches!(native.source.target, CollectionTarget::Shared(_))
+            && !matches!(report, DiagnosticReport::OriginalObservation { .. })
+        {
             let intent = authenticate_owned_report(store, native, episode, &mut authenticated).await?;
             authorize_shared_owner(&mut shared_references, &intent)?;
             shared_references.entry(episode.id.clone()).or_default().insert(report.evidence().key()?);
@@ -445,6 +456,12 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         };
         if !matches_source {
             return Err(invalid());
+        }
+        if matches!(episode.signal, DiagnosticSignal::OriginalObservation { .. }) {
+            let original = original_source_evidence(store, capture, &mut original_sources).await?;
+            if !original.can_resolve(&episode) {
+                return Err(invalid());
+            }
         }
         if let DiagnosticRecoveryProof::FocusedParticipantGone { parent, .. } = proof {
             let parent_key = range_id_for(&manifest.contract, &parent.capture)?;
@@ -548,12 +565,42 @@ fn input_rows(input: &RecoveredDiagnosticInput) -> Result<Vec<(DiagnosticEvidenc
         .collect()
 }
 
+async fn original_source_evidence<'a>(
+    store: &dyn RecoveryStore,
+    manifest: &RangeManifest,
+    originals: &'a mut BTreeMap<String, DiagnosticOriginalEvidence>,
+) -> Result<&'a DiagnosticOriginalEvidence> {
+    if !originals.contains_key(&manifest.range_id) {
+        if originals.len() >= MAX_DIAGNOSTIC_EPISODES {
+            return Err(DeliveryProblem::Capacity.error());
+        }
+        let input = load_diagnostic_input(store, &manifest.range_id).await?;
+        if input.range().manifest_digest() != manifest.digest()? {
+            return Err(invalid());
+        }
+        let rows = input_rows(&input)?;
+        let originals_rows = rows
+            .iter()
+            .map(|(reference, row)| DiagnosticOriginalRow { reference, record: &row.record })
+            .collect::<Vec<_>>();
+        let evidence =
+            DiagnosticOriginalEvidence::new(&manifest.source, &capture_reference(manifest)?, &originals_rows)?;
+        originals.insert(manifest.range_id.clone(), evidence);
+    }
+    originals.get(&manifest.range_id).ok_or_else(invalid)
+}
+
 async fn authenticate_report_participants(
     store: &dyn RecoveryStore,
     manifest: &RangeManifest,
     episode: &DiagnosticEpisode,
+    originals: &mut BTreeMap<String, DiagnosticOriginalEvidence>,
 ) -> Result<()> {
     let report = episode.report.as_ref().ok_or_else(invalid)?;
+    if matches!(report, DiagnosticReport::OriginalObservation { .. }) {
+        let original = original_source_evidence(store, manifest, originals).await?;
+        return original.matches_episode(episode).then_some(()).ok_or_else(invalid);
+    }
     let input = load_diagnostic_input(store, &manifest.range_id).await?;
     if input.range().manifest_digest() != manifest.digest()? {
         return Err(invalid());
@@ -564,6 +611,7 @@ async fn authenticate_report_participants(
         return Err(invalid());
     }
     match report {
+        DiagnosticReport::OriginalObservation { .. } => return Err(invalid()),
         DiagnosticReport::Blocking { .. } => {
             let activity = rows
                 .iter()

@@ -96,7 +96,11 @@ impl PendingRanges {
     pub fn observe(&mut self, order: u64, manifest: &super::evidence::RangeManifest) -> Result<()> {
         use culprit_core::telemetry::{DIAGNOSTIC_CONTROLLER_VERSION, DiagnosticCaptureRef, SourceObservation};
         self.insert(order, &manifest.range_id)?;
-        if crate::outbox::diagnostic_source_eligible(&manifest.source, manifest.investigation.as_ref())? {
+        if crate::outbox::diagnostic_manifest_eligible(
+            &manifest.source,
+            manifest.investigation.as_ref(),
+            &manifest.reference_coverage,
+        )? {
             let input = DiagnosticCaptureRef {
                 capture: manifest.capture.clone(),
                 manifest_sha256: manifest.capture_manifest_sha256.clone(),

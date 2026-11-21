@@ -40,7 +40,9 @@ fn episode() -> DiagnosticEpisode {
             target: crate::DatabaseIdentity::server(crate::Engine::Mssql, "db", "fixture.invalid", 1433, None).into(),
             source: "activity".into(),
             native_epoch: Some("native-start".into()),
-            population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
+            population: DiagnosticPopulation::Activity {
+                population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
+            },
             measurement_scope: crate::MeasurementScope::Database,
         },
         page_signal(&reference("baseline"), "5:1:42"),

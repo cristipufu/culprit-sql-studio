@@ -30,6 +30,8 @@ function explanation(positions = [0]): RetainedFailureReport {
   return {
     title: "Retained native diagnostics",
     summary: `${positions.length} retained diagnostic records; no incident count established.`,
+    incident_input: { kind: "ineligible", reason: "shared-ownership-unavailable" },
+    incident_input_explanation: "The original shared owner and process generation are unavailable for incident grouping.",
     source_state: "partial",
     source_reason: "The native source retained a bounded subset.",
     limitations: ["Query ownership remains unresolved.", "The buffer does not establish complete history."],
@@ -176,4 +178,19 @@ test("PostgreSQL metadata preserves unqualified local time and signed identities
   expect(html).not.toContain("Native connection ID");
   expect(html).not.toContain("Native subsystem");
   expect(html).not.toContain("MY-010935");
+});
+
+
+test("incident qualification uses the canonical explanation while native failures remain visible", () => {
+  const report = explanation();
+  const before = JSON.stringify(report.entries);
+  const unavailable = show(undefined, report);
+  expect(unavailable).toContain(report.incident_input_explanation);
+  expect(unavailable).toContain(report.entries[0]!.title);
+  report.incident_input = { kind: "qualified", source: "native-failures" };
+  report.incident_input_explanation = "The original instance generation qualifies observation grouping, not a current cause.";
+  const admitted = show(undefined, report);
+  expect(admitted).toContain(report.incident_input_explanation);
+  expect(admitted).not.toContain("The original shared owner and process generation are unavailable");
+  expect(JSON.stringify(report.entries)).toBe(before);
 });

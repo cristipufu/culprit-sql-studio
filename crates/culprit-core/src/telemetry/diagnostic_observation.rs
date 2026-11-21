@@ -2,7 +2,9 @@
 use super::*;
 use crate::WaitResourceKind;
 use std::collections::{BTreeMap, BTreeSet};
+mod originals;
 mod tasks;
+pub use originals::{DiagnosticOriginalEvidence, DiagnosticOriginalRow, observe_diagnostic_original};
 pub use tasks::observe_diagnostic_page_task;
 
 pub struct DiagnosticActivityRow<'a> {
@@ -124,7 +126,7 @@ pub fn observe_diagnostic_activity(
     let can_resolve = diagnostic_baseline_can_resolve(&scope, native.coverage.state, native.coverage.complete_scope);
     for episode in episodes.values_mut() {
         if !scope.partition.is_qualified()
-            || episode.signal.is_task_point()
+            || episode.signal.is_capture_point()
             || observed.contains(&episode.id)
             || episode.lifecycle == DiagnosticLifecycle::Resolved
         {
@@ -138,8 +140,9 @@ pub fn observe_diagnostic_activity(
         // condition is no longer measured is uncertainty, not a negative lock/resource observation.
         if episode.scope.key()? == scope_key
             && can_resolve
-            && !native_keys.contains(episode.signal.activity_key())
-            && !frame.session_generation_is_disqualified(&episode.signal.activity_key().session)
+            && episode.signal.activity_key().is_some_and(|key| {
+                !native_keys.contains(key) && !frame.session_generation_is_disqualified(&key.session)
+            })
         {
             episode.lifecycle = DiagnosticLifecycle::Resolved;
             episode.recovery = Some(DiagnosticRecoveryProof::CompleteScope { capture: input.clone() });

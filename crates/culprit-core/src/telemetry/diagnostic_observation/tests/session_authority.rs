@@ -66,7 +66,7 @@ fn canonical_saved_idle_transaction_rows_do_not_create_generation_authority_or_d
         original.2[0].0.validate_canonical_record(&original.0, &TelemetryRecord::from(head.clone())).unwrap();
         let update = observe(&original, None);
         assert_eq!(
-            update.checkpoint.episodes.iter().any(|episode| episode.signal.activity_key() == &head.key),
+            update.checkpoint.episodes.iter().any(|episode| episode.signal.activity_key() == Some(&head.key)),
             head.has_session_generation_authority()
         );
         assert!(update.focuses.iter().all(|(_, focus)| {

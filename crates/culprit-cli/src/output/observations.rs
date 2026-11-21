@@ -558,7 +558,7 @@ fn cached_plan_observations(entry: &CachedPlanEntry) -> String {
 }
 
 pub(crate) fn retained(report: &RetainedFailureReport) -> String {
-    render(
+    let mut text = render(
         Summary {
             title: &report.title,
             summary: &report.summary,
@@ -566,7 +566,10 @@ pub(crate) fn retained(report: &RetainedFailureReport) -> String {
             limitations: &report.limitations,
         },
         report.entries.iter().map(|entry| entry.title.as_str()),
-    )
+    );
+    text.push('\n');
+    text.push_str(&report.incident_input_explanation);
+    text
 }
 
 pub(crate) fn participants(report: &MemoryParticipantsReport) -> String {
@@ -1106,7 +1109,12 @@ mod tests {
 
     #[test]
     fn concise_retained_output_preserves_native_source_qualification_and_reason() {
+        let incident_input = culprit_core::telemetry::DiagnosticInputQualification::Ineligible {
+            reason: culprit_core::telemetry::DiagnosticInputIneligibility::SharedOwnershipUnavailable,
+        };
         let mut report = RetainedFailureReport {
+            incident_input,
+            incident_input_explanation: incident_input.explanation(),
             source_state: None,
             source_reason: Some("native source reason".into()),
             title: "retained diagnostics".into(),
@@ -1125,6 +1133,7 @@ mod tests {
             assert!(text.contains(&culprit_core::i18n::t(key, &[])));
             assert!(text.contains("native source reason"));
             assert!(text.contains("native retained-buffer limitation"));
+            assert!(text.contains(&report.incident_input_explanation));
         }
     }
 

@@ -385,8 +385,8 @@ async fn an_original_missing_token_cannot_starve_an_eligible_sibling_from_the_sa
         revisions: observed.revisions,
         checkpoint: observed.checkpoint,
     };
-    update.checkpoint.episodes.sort_by_key(|episode| episode.signal.activity_key() != &invalid);
-    assert_eq!(update.checkpoint.episodes[0].signal.activity_key(), &invalid);
+    update.checkpoint.episodes.sort_by_key(|episode| episode.signal.activity_key() != Some(&invalid));
+    assert_eq!(update.checkpoint.episodes[0].signal.activity_key(), Some(&invalid));
     runtime.fixture.outbox.commit_diagnostics(input, update).await.unwrap();
     let before = runtime.native_calls();
     assert!(runtime.enroll().await);

@@ -206,6 +206,16 @@ impl Files {
             None
         };
         let original_frame = paired_original.as_ref().map(DiagnosticInput::activity_frame).transpose()?;
+        let original_rows = current
+            .rows
+            .iter()
+            .map(|row| DiagnosticOriginalRow { reference: &row.reference, record: &row.row.record })
+            .collect::<Vec<_>>();
+        let original_source = if diagnostic_original_source_kind(&current.source).is_some() {
+            Some(DiagnosticOriginalEvidence::new(&current.source, &current.parent, &original_rows)?)
+        } else {
+            None
+        };
         for revision in &update.revisions {
             let source_read_result = revision
                 .investigation
@@ -214,7 +224,7 @@ impl Files {
                 .transpose()?
                 .flatten();
             if revision.previous_revision.is_none() {
-                validate_new_episode(&current, &revision.episode, original_frame.as_ref())?;
+                validate_new_episode(&current, &revision.episode, original_frame.as_ref(), original_source.as_ref())?;
             }
             if !revision.is_valid()
                 || revision.controller_version != input.controller_version
@@ -264,13 +274,20 @@ impl Files {
                     if !report.matches_observation(&revision.episode, &source, &row) {
                         return Err(integrity());
                     }
-                    let focus = source.observation.focus().ok_or_else(integrity)?;
+                    let focus = source.observation.focus();
+                    if !matches!(report, DiagnosticReport::OriginalObservation { .. }) && focus.is_none() {
+                        return Err(integrity());
+                    }
                     match &source.observation {
                         SourceObservation::PageWaitWriters { .. } => (),
                         SourceObservation::PageTaskHolders { focus, .. } => {
                             self.verify_page_task_holder_focus(focus)?
                         }
-                        _ => self.verify_focus_parent(focus)?,
+                        _ => {
+                            if let Some(focus) = focus {
+                                self.verify_focus_parent(focus)?;
+                            }
+                        }
                     }
                     let report_input =
                         self.diagnostic_input(&report.evidence().capture.observation_id, input.controller_version)?;
@@ -280,11 +297,18 @@ impl Files {
                         || report_input.controller_target()?.telemetry_id()?
                             != revision.episode.scope.target.telemetry_id()?
                         || report_intent.as_ref().is_some_and(|intent| !intent.matches_episode(&revision.episode))
-                        || !revision.inputs.contains(&focus.parent)
+                        || focus.is_some_and(|focus| !revision.inputs.contains(&focus.parent))
                     {
                         return Err(integrity());
                     }
-                    self.validate_report_participants(report, &revision.episode, &source, &row, &report_input)?;
+                    self.validate_report_participants(
+                        report,
+                        &revision.episode,
+                        &source,
+                        &row,
+                        &report_input,
+                        original_source.as_ref(),
+                    )?;
                     if let Some(intent) = &report_intent {
                         self.verify_investigation_intent(intent)?;
                         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
@@ -316,8 +340,13 @@ impl Files {
                 if matches!(proof, DiagnosticRecoveryProof::CompleteScope { .. })
                     && current.rows.iter().any(|row| {
                         matches!(&row.row.record, TelemetryRecord::Activity(observation)
-                            if &observation.key == revision.episode.signal.activity_key())
+                            if Some(&observation.key) == revision.episode.signal.activity_key())
                     })
+                {
+                    return Err(integrity());
+                }
+                if matches!(revision.episode.signal, DiagnosticSignal::OriginalObservation { .. })
+                    && !original_source.as_ref().is_some_and(|original| original.can_resolve(&revision.episode))
                 {
                     return Err(integrity());
                 }
@@ -342,8 +371,20 @@ impl Files {
         source: &CollectionDescription,
         row: &ExportedRecord,
         input: &DiagnosticInput,
+        original: Option<&DiagnosticOriginalEvidence>,
     ) -> Result<()> {
         match report {
+            DiagnosticReport::OriginalObservation { observation, .. } => {
+                if !original.ok_or_else(integrity)?.matches_episode(episode) {
+                    return Err(integrity());
+                }
+                if observation.capture_ref() != input.parent
+                    || !input.rows.iter().any(|input| input.reference == *observation && input.row == *row)
+                    || !report.matches_observation(episode, source, row)
+                {
+                    return Err(integrity());
+                }
+            }
             DiagnosticReport::Blocking { .. } => {
                 let rows = input
                     .rows
@@ -584,8 +625,16 @@ fn validate_new_episode(
     input: &DiagnosticInput,
     episode: &DiagnosticEpisode,
     original: Option<&ActivityFrameEvidence<'_>>,
+    source_original: Option<&DiagnosticOriginalEvidence>,
 ) -> Result<()> {
     let row = input.rows.iter().find(|row| row.reference == episode.first).ok_or_else(integrity)?;
+    if let DiagnosticSignal::OriginalObservation { condition, .. } = &episode.signal {
+        if source_original.ok_or_else(integrity)?.condition(&episode.first)? != Some(condition)
+            || !episode.original_observation_matches(&input.source, &row.row.record)
+        {
+            return Err(integrity());
+        }
+    }
     if matches!(episode.signal, DiagnosticSignal::PageTaskWait { .. }) {
         let frame = original.ok_or_else(integrity)?;
         let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) =

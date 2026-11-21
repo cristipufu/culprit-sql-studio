@@ -1,5 +1,6 @@
 use super::*;
 mod blocking;
+mod originals;
 mod partitions;
 mod planning;
 mod recovery;
@@ -155,10 +156,17 @@ impl Harness {
                 CollectionSelection::PageTaskHolders { focus: focus.clone() }
             }
             SourceObservation::Snapshot(snapshot) => CollectionSelection::Snapshot { dataset: snapshot.dataset },
+            SourceObservation::QueryHistory(history) => CollectionSelection::QueryHistory {
+                from: history.interval.from.clone(),
+                until: history.interval.until.clone(),
+            },
             _ => panic!("the controller fixture captures frozen observations only"),
         };
         let request = CollectionRequest {
-            subject: CollectionSubject::Database,
+            subject: match &frame.source.target {
+                CollectionTarget::Database(_) => CollectionSubject::Database,
+                CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
+            },
             selection,
             budget: CollectionBudget {
                 max_queries: 2,

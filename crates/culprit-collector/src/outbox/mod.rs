@@ -20,10 +20,12 @@ mod eviction;
 mod investigations;
 mod journal;
 mod qualifications;
+#[cfg(test)]
+pub(crate) use investigations::eligible_source as diagnostic_source_eligible;
 pub use investigations::{
     DiagnosticCheckpointPage, DiagnosticInput, DiagnosticInputRow, DiagnosticInputState, DiagnosticUpdate,
 };
-pub(crate) use investigations::{eligible_source as diagnostic_source_eligible, evidence_cache_source};
+pub(crate) use investigations::{eligible_manifest as diagnostic_manifest_eligible, evidence_cache_source};
 pub use qualifications::{
     IssuedQualification, NativeQualificationDecision, NativeQualificationEvidence, NativeQualificationOutcome,
     NativeQualificationRequest, NativeQualificationSource, QualificationBindingsRead,

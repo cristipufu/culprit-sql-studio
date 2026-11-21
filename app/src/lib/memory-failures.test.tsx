@@ -41,6 +41,8 @@ function explanation(positions = [0]): RetainedFailureReport {
   return {
     title: "Retained memory failures",
     summary: `${positions.length} retained observations; no incident count established.`,
+    incident_input: { kind: "ineligible", reason: "shared-ownership-unavailable" },
+    incident_input_explanation: "The original shared owner and process generation are unavailable for incident grouping.",
     source_state: "partial",
     source_reason: "The native source returned only bounded retained context.",
     limitations: ["Affected statements and memory owners are unresolved.", "Native read completeness was not established."],
@@ -177,4 +179,19 @@ test("an explicit unsupported memory diagnostic request remains visible without 
   const html = renderToStaticMarkup(<MemoryFailureSourceIssue source={source} />);
   expect(html).toContain(source.reason!);
   expect(html).not.toContain("0 failures");
+});
+
+
+test("incident qualification uses the canonical explanation while native failures remain visible", () => {
+  const report = explanation();
+  const before = JSON.stringify(report.entries);
+  const unavailable = show(undefined, report);
+  expect(unavailable).toContain(report.incident_input_explanation);
+  expect(unavailable).toContain(report.entries[0]!.title);
+  report.incident_input = { kind: "qualified", source: "memory-failures" };
+  report.incident_input_explanation = "The original instance generation qualifies observation grouping, not a current cause.";
+  const admitted = show(undefined, report);
+  expect(admitted).toContain(report.incident_input_explanation);
+  expect(admitted).not.toContain("The original shared owner and process generation are unavailable");
+  expect(JSON.stringify(report.entries)).toBe(before);
 });

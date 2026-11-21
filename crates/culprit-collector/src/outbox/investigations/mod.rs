@@ -115,6 +115,9 @@ pub(crate) fn eligible_source(
     investigation: Option<&DiagnosticInvestigationLineage>,
 ) -> Result<bool> {
     let intent = investigation_intent(source, investigation)?;
+    if diagnostic_original_source_kind(source).is_some() {
+        return Ok(investigation.is_none());
+    }
     Ok(match (&source.observation, &source.target) {
         (SourceObservation::Activity(_), CollectionTarget::Database(_)) => true,
         (SourceObservation::SourceRead { .. }, CollectionTarget::Database(_)) => {
@@ -140,6 +143,18 @@ pub(crate) fn eligible_source(
         ) => intent.is_some(),
         _ => false,
     })
+}
+
+/// Canonical identity closure is required for history receipts; unavailable SQL bodies remain independent.
+/// Both local commit and archive replay use the authenticated manifest's original reference coverage.
+pub(crate) fn eligible_manifest(
+    source: &CollectionDescription,
+    investigation: Option<&DiagnosticInvestigationLineage>,
+    references: &ReferenceCoverage,
+) -> Result<bool> {
+    Ok(eligible_source(source, investigation)?
+        && (diagnostic_original_source_kind(source) != Some(DiagnosticSourceKind::QueryHistory)
+            || references.is_valid() && references.complete))
 }
 
 /// Cached prerequisites retain immutable evidence only. They never recreate pending analysis obligations.

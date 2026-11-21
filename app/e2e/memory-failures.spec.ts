@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import english from "../../locales/en.json" with { type: "json" };
 import type { RetainedFailureReport } from "../src/gen/RetainedFailureReport";
 import type { MemoryFailureSnapshot } from "../src/gen/MemoryFailureSnapshot";
 import type { MssqlOutOfMemoryObservation } from "../src/gen/MssqlOutOfMemoryObservation";
@@ -52,6 +53,8 @@ function explanations(evidence: MemoryFailureSnapshot): RetainedFailureReport {
   return {
     title: "Retained memory failures",
     summary: "12 retained observations; no incident count established.",
+    incident_input: { kind: "ineligible", reason: "original-source-unavailable" },
+    incident_input_explanation: english["view.incident_input.original_unavailable"],
     source_state: "partial",
     source_reason: "Only a bounded native buffer was read.",
     limitations: ["Native clocks have no established UTC offset.", "Affected statements and memory owners are unresolved."],

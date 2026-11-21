@@ -265,6 +265,7 @@ fn link(label: String, reference: &DiagnosticEvidenceRef, availability: &str) ->
 // Names the controller's existing typed question, without reinterpreting a native wait or attributing a cause.
 fn question_label(signal: &DiagnosticSignal) -> String {
     let kind = match signal {
+        DiagnosticSignal::OriginalObservation { .. } => "other",
         DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. } => "long-running",
         DiagnosticSignal::Activity { condition: ActivityCondition::Blocked, .. } => "blocked",
         DiagnosticSignal::Activity { condition: ActivityCondition::IdleBlocker, .. } => "idle-blocker",
