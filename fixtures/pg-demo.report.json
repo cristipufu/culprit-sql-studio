@@ -2371,7 +2371,7 @@
         "table": "order_items"
       }
     ],
-    "format": 42,
+    "format": 43,
     "histograms": null,
     "id": "20261011T115421.485Z",
     "identity": {
@@ -2807,6 +2807,8 @@
     "missing_indexes": [],
     "notes": [],
     "operations": {
+      "cdc_history": [],
+      "change_feed_history": [],
       "cluster": null,
       "counters": [],
       "full_text_populations": [],

@@ -1,0 +1,4655 @@
+{
+  "cdc_denied": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "enabled": true,
+      "entries": [],
+      "limitations": [
+        "This is a bounded snapshot of retained CDC statistics, not a complete or unique error-event feed.",
+        "CDC can reset or reuse scan identifiers after disable/re-enable, restart or failover. Do not subtract or deduplicate these points across captures.",
+        "Native local timestamps and LSN positions remain native. Acquisition UTC does not convert them or establish a backlog or current lag.",
+        "Native visibility or retained bodies are incomplete; positive rows are a lower bound, and missing rows prove no absence.",
+        "The native CDC source requires VIEW DATABASE PERFORMANCE STATE on the original database."
+      ],
+      "read_complete": true,
+      "source_state": "partial",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc status",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": false,
+          "error_code": "permission_denied",
+          "records": 0,
+          "source": "cdc scan sessions",
+          "state": "unavailable",
+          "stopped": null
+        },
+        {
+          "complete_scope": false,
+          "error_code": "permission_denied",
+          "records": 0,
+          "source": "cdc processing errors",
+          "state": "unavailable",
+          "stopped": null
+        }
+      ],
+      "summary": "CDC processing evidence is incomplete or unavailable.",
+      "title": "CDC processing evidence"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "cdc",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 1,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc status",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": false,
+              "error_code": "permission_denied",
+              "records": 0,
+              "source": "cdc scan sessions",
+              "state": "unavailable",
+              "stopped": null
+            },
+            {
+              "complete_scope": false,
+              "error_code": "permission_denied",
+              "records": 0,
+              "source": "cdc processing errors",
+              "state": "unavailable",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-cdc",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "cdc_disabled": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "enabled": false,
+      "entries": [],
+      "limitations": [
+        "This is a bounded snapshot of retained CDC statistics, not a complete or unique error-event feed.",
+        "CDC can reset or reuse scan identifiers after disable/re-enable, restart or failover. Do not subtract or deduplicate these points across captures.",
+        "Native local timestamps and LSN positions remain native. Acquisition UTC does not convert them or establish a backlog or current lag."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc status",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": false,
+          "error_code": null,
+          "records": 0,
+          "source": "cdc scan sessions",
+          "state": "not-applicable",
+          "stopped": null
+        },
+        {
+          "complete_scope": false,
+          "error_code": null,
+          "records": 0,
+          "source": "cdc processing errors",
+          "state": "not-applicable",
+          "stopped": null
+        }
+      ],
+      "summary": "CDC was observed disabled at the original status point.",
+      "title": "CDC processing evidence"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "cdc",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 1,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc status",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": false,
+              "error_code": null,
+              "records": 0,
+              "source": "cdc scan sessions",
+              "state": "not-applicable",
+              "stopped": null
+            },
+            {
+              "complete_scope": false,
+              "error_code": null,
+              "records": 0,
+              "source": "cdc processing errors",
+              "state": "not-applicable",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-cdc",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "cdc_empty": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "enabled": true,
+      "entries": [
+        {
+          "explanation": "Do not add this aggregate to individual scan rows. Its latency retains the last nonzero native value, not a current lag measurement.",
+          "fields": [
+            {
+              "key": "scan_phase",
+              "label": "Native phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Started (native local time)",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Ended (native local time)",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native processed transactions",
+              "value": "2"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native scanned log records",
+              "value": "8"
+            },
+            {
+              "key": "error_count",
+              "label": "Native scan error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "last_commit_cdc_time",
+              "label": "Last processed CDC commit (native local time)",
+              "value": null
+            }
+          ],
+          "investigation": "Check whether CDC is expected to process on the original writable database. These rows do not identify an application query or a retaining transaction.",
+          "kind": "aggregate",
+          "observation_key": "cdc:cdc scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc scan sessions",
+          "title": "Native CDC aggregate (scan ID 0)",
+          "verify": "Compare later native scan context without subtracting these totals across captures; CDC can reset or reuse scan identifiers."
+        }
+      ],
+      "limitations": [
+        "This is a bounded snapshot of retained CDC statistics, not a complete or unique error-event feed.",
+        "CDC can reset or reuse scan identifiers after disable/re-enable, restart or failover. Do not subtract or deduplicate these points across captures.",
+        "Native local timestamps and LSN positions remain native. Acquisition UTC does not convert them or establish a backlog or current lag."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc status",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 0,
+          "source": "cdc processing errors",
+          "state": "empty",
+          "stopped": null
+        }
+      ],
+      "summary": "The original CDC status and retained row populations were observed. This does not establish successful processing.",
+      "title": "CDC processing evidence"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "cdc",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 2,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc status",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 0,
+              "source": "cdc processing errors",
+              "state": "empty",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-cdc",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "cdc_exact": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "enabled": true,
+      "entries": [
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "Do not add this aggregate to individual scan rows. Its latency retains the last nonzero native value, not a current lag measurement.",
+          "fields": [
+            {
+              "key": "scan_phase",
+              "label": "Native phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Started (native local time)",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Ended (native local time)",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native processed transactions",
+              "value": "2"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native scanned log records",
+              "value": "8"
+            },
+            {
+              "key": "error_count",
+              "label": "Native scan error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "last_commit_cdc_time",
+              "label": "Last processed CDC commit (native local time)",
+              "value": null
+            }
+          ],
+          "investigation": "Check whether CDC is expected to process on the original writable database. These rows do not identify an application query or a retaining transaction.",
+          "kind": "aggregate",
+          "observation_key": "cdc:cdc scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc scan sessions",
+          "title": "Native CDC aggregate (scan ID 0)",
+          "verify": "Compare later native scan context without subtracting these totals across captures; CDC can reset or reuse scan identifiers."
+        }
+      ],
+      "limitations": [
+        "This is a bounded snapshot of retained CDC statistics, not a complete or unique error-event feed.",
+        "CDC can reset or reuse scan identifiers after disable/re-enable, restart or failover. Do not subtract or deduplicate these points across captures.",
+        "Native local timestamps and LSN positions remain native. Acquisition UTC does not convert them or establish a backlog or current lag."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc status",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc processing errors",
+          "state": "collected",
+          "stopped": null
+        }
+      ],
+      "summary": "CDC error rows retained in this capture: 1. These are historical native observations.",
+      "title": "CDC processing evidence"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "cdc",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 3,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc status",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc processing errors",
+              "state": "collected",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-cdc",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "cdc_many": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "enabled": true,
+      "entries": [
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:3",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:4",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:5",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:6",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:7",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:8",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:9",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:10",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:11",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:12",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:13",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "Do not add this aggregate to individual scan rows. Its latency retains the last nonzero native value, not a current lag measurement.",
+          "fields": [
+            {
+              "key": "scan_phase",
+              "label": "Native phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Started (native local time)",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Ended (native local time)",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native processed transactions",
+              "value": "2"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native scanned log records",
+              "value": "8"
+            },
+            {
+              "key": "error_count",
+              "label": "Native scan error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "last_commit_cdc_time",
+              "label": "Last processed CDC commit (native local time)",
+              "value": null
+            }
+          ],
+          "investigation": "Check whether CDC is expected to process on the original writable database. These rows do not identify an application query or a retaining transaction.",
+          "kind": "aggregate",
+          "observation_key": "cdc:cdc scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc scan sessions",
+          "title": "Native CDC aggregate (scan ID 0)",
+          "verify": "Compare later native scan context without subtracting these totals across captures; CDC can reset or reuse scan identifiers."
+        }
+      ],
+      "limitations": [
+        "This is a bounded snapshot of retained CDC statistics, not a complete or unique error-event feed.",
+        "CDC can reset or reuse scan identifiers after disable/re-enable, restart or failover. Do not subtract or deduplicate these points across captures.",
+        "Native local timestamps and LSN positions remain native. Acquisition UTC does not convert them or establish a backlog or current lag."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc status",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 13,
+          "source": "cdc processing errors",
+          "state": "collected",
+          "stopped": null
+        }
+      ],
+      "summary": "CDC error rows retained in this capture: 13. These are historical native observations.",
+      "title": "CDC processing evidence"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "cdc",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 15,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc status",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 13,
+              "source": "cdc processing errors",
+              "state": "collected",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-cdc",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "cdc_partial": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "enabled": true,
+      "entries": [
+        {
+          "explanation": "This retained processing error does not identify an application query, current failure or retaining transaction.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native CDC scan ID (not a SQL session)",
+              "value": "7"
+            },
+            {
+              "key": "phase_number",
+              "label": "Native phase",
+              "value": "2"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Recorded at (native local time)",
+              "value": "2019-12-31T23:00:00.999"
+            }
+          ],
+          "investigation": "Look up the native error number and phase in the original database’s CDC configuration before choosing a fix. Error messages and SQL were not collected.",
+          "kind": "error",
+          "observation_key": "cdc:cdc processing errors:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc processing errors",
+          "title": "Recorded CDC error 2628",
+          "verify": "After investigating the native error, compare a new bounded capture with its own scan context. An empty retained error list does not prove recovery."
+        },
+        {
+          "explanation": "Do not add this aggregate to individual scan rows. Its latency retains the last nonzero native value, not a current lag measurement.",
+          "fields": [
+            {
+              "key": "scan_phase",
+              "label": "Native phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Started (native local time)",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Ended (native local time)",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native processed transactions",
+              "value": "2"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native scanned log records",
+              "value": "8"
+            },
+            {
+              "key": "error_count",
+              "label": "Native scan error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "last_commit_cdc_time",
+              "label": "Last processed CDC commit (native local time)",
+              "value": null
+            }
+          ],
+          "investigation": "Check whether CDC is expected to process on the original writable database. These rows do not identify an application query or a retaining transaction.",
+          "kind": "aggregate",
+          "observation_key": "cdc:cdc scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "cdc scan sessions",
+          "title": "Native CDC aggregate (scan ID 0)",
+          "verify": "Compare later native scan context without subtracting these totals across captures; CDC can reset or reuse scan identifiers."
+        }
+      ],
+      "limitations": [
+        "This is a bounded snapshot of retained CDC statistics, not a complete or unique error-event feed.",
+        "CDC can reset or reuse scan identifiers after disable/re-enable, restart or failover. Do not subtract or deduplicate these points across captures.",
+        "Native local timestamps and LSN positions remain native. Acquisition UTC does not convert them or establish a backlog or current lag.",
+        "Native visibility or retained bodies are incomplete; positive rows are a lower bound, and missing rows prove no absence."
+      ],
+      "read_complete": true,
+      "source_state": "partial",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc status",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": false,
+          "error_code": null,
+          "records": 1,
+          "source": "cdc processing errors",
+          "state": "partial",
+          "stopped": null
+        }
+      ],
+      "summary": "CDC error rows retained in this capture: 1. These are historical native observations.",
+      "title": "CDC processing evidence"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "cdc",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 3,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc status",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": false,
+              "error_code": null,
+              "records": 1,
+              "source": "cdc processing errors",
+              "state": "partial",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-cdc",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "change_feed_denied": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [],
+      "limitations": [
+        "Native errors rotate and can clear after restart or change-feed disablement. This is not a complete or unique event feed.",
+        "Scan identifiers and process ownership do not establish a change-feed reset or continuous history. No cross-capture delta is calculated.",
+        "UTC acquisition points and native history times without an offset are separate. This read is an interval, not an atomic sample.",
+        "Read coverage, configuration and log-scan phase do not prove successful publication, end-to-end lag or a query causing an error.",
+        "The original native population or retained body is incomplete; visible rows do not establish the missing history.",
+        "Reading these histories requires VIEW DATABASE STATE or VIEW DATABASE PERFORMANCE STATE in the selected database."
+      ],
+      "read_complete": true,
+      "source_state": "partial",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "change feed availability",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": false,
+          "error_code": "permission_denied",
+          "records": 0,
+          "source": "change feed scan sessions",
+          "state": "unavailable",
+          "stopped": null
+        },
+        {
+          "complete_scope": false,
+          "error_code": "permission_denied",
+          "records": 0,
+          "source": "change feed processing errors",
+          "state": "unavailable",
+          "stopped": null
+        }
+      ],
+      "summary": "Change-feed history is unavailable or partly retained.",
+      "title": "Change-feed progress and retained errors"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "change-feed",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 1,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "change feed availability",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": false,
+              "error_code": "permission_denied",
+              "records": 0,
+              "source": "change feed scan sessions",
+              "state": "unavailable",
+              "stopped": null
+            },
+            {
+              "complete_scope": false,
+              "error_code": "permission_denied",
+              "records": 0,
+              "source": "change feed processing errors",
+              "state": "unavailable",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-change-feed",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "change_feed_empty": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [],
+      "limitations": [
+        "Native errors rotate and can clear after restart or change-feed disablement. This is not a complete or unique event feed.",
+        "Scan identifiers and process ownership do not establish a change-feed reset or continuous history. No cross-capture delta is calculated.",
+        "UTC acquisition points and native history times without an offset are separate. This read is an interval, not an atomic sample.",
+        "Read coverage, configuration and log-scan phase do not prove successful publication, end-to-end lag or a query causing an error."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "change feed availability",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 0,
+          "source": "change feed scan sessions",
+          "state": "empty",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 0,
+          "source": "change feed processing errors",
+          "state": "empty",
+          "stopped": null
+        }
+      ],
+      "summary": "Change-feed history was read. An empty retained population does not establish delivery health.",
+      "title": "Change-feed progress and retained errors"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "change-feed",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 1,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "change feed availability",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 0,
+              "source": "change feed scan sessions",
+              "state": "empty",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 0,
+              "source": "change feed processing errors",
+              "state": "empty",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-change-feed",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "change_feed_exact": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "0"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "5"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": null
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": null
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": null
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": null
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The aggregate can retain the last nonzero phase-7 latency. It is not a current delivery-lag measurement.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "aggregate",
+          "observation_key": "change-feed:change feed scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Native change-feed aggregate",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        },
+        {
+          "explanation": "This is a retained native scan point. Reaching phase 7 does not establish downstream publication or commit completion.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "7: Last scan, publish and commit"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "scan-session",
+          "observation_key": "change-feed:change feed scan sessions:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Retained change-feed scan 7",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        }
+      ],
+      "limitations": [
+        "Native errors rotate and can clear after restart or change-feed disablement. This is not a complete or unique event feed.",
+        "Scan identifiers and process ownership do not establish a change-feed reset or continuous history. No cross-capture delta is calculated.",
+        "UTC acquisition points and native history times without an offset are separate. This read is an interval, not an atomic sample.",
+        "Read coverage, configuration and log-scan phase do not prove successful publication, end-to-end lag or a query causing an error."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "change feed availability",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed processing errors",
+          "state": "collected",
+          "stopped": null
+        }
+      ],
+      "summary": "This read retained 2 change-feed error rows.",
+      "title": "Change-feed progress and retained errors"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "change-feed",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 5,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "change feed availability",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed processing errors",
+              "state": "collected",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-change-feed",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "change_feed_many": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:3",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:4",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:5",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:6",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:7",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:8",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:9",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:10",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:11",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:12",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:13",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The aggregate can retain the last nonzero phase-7 latency. It is not a current delivery-lag measurement.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "aggregate",
+          "observation_key": "change-feed:change feed scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Native change-feed aggregate",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        },
+        {
+          "explanation": "This is a retained native scan point. Reaching phase 7 does not establish downstream publication or commit completion.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "7: Last scan, publish and commit"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "scan-session",
+          "observation_key": "change-feed:change feed scan sessions:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Retained change-feed scan 7",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        }
+      ],
+      "limitations": [
+        "Native errors rotate and can clear after restart or change-feed disablement. This is not a complete or unique event feed.",
+        "Scan identifiers and process ownership do not establish a change-feed reset or continuous history. No cross-capture delta is calculated.",
+        "UTC acquisition points and native history times without an offset are separate. This read is an interval, not an atomic sample.",
+        "Read coverage, configuration and log-scan phase do not prove successful publication, end-to-end lag or a query causing an error."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "change feed availability",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 13,
+          "source": "change feed processing errors",
+          "state": "collected",
+          "stopped": null
+        }
+      ],
+      "summary": "This read retained 13 change-feed error rows.",
+      "title": "Change-feed progress and retained errors"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "change-feed",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 16,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "change feed availability",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 13,
+              "source": "change feed processing errors",
+              "state": "collected",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-change-feed",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "change_feed_null": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": null
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": null
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": null
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": null
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "0"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "5"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": null
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": null
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": null
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": null
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The aggregate can retain the last nonzero phase-7 latency. It is not a current delivery-lag measurement.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": null
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": null
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "aggregate",
+          "observation_key": "change-feed:change feed scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Native change-feed aggregate",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        },
+        {
+          "explanation": "This is a retained native scan point. Reaching phase 7 does not establish downstream publication or commit completion.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "7: Last scan, publish and commit"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": null
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": null
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "scan-session",
+          "observation_key": "change-feed:change feed scan sessions:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Retained change-feed scan 7",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        }
+      ],
+      "limitations": [
+        "Native errors rotate and can clear after restart or change-feed disablement. This is not a complete or unique event feed.",
+        "Scan identifiers and process ownership do not establish a change-feed reset or continuous history. No cross-capture delta is calculated.",
+        "UTC acquisition points and native history times without an offset are separate. This read is an interval, not an atomic sample.",
+        "Read coverage, configuration and log-scan phase do not prove successful publication, end-to-end lag or a query causing an error."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "change feed availability",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed processing errors",
+          "state": "collected",
+          "stopped": null
+        }
+      ],
+      "summary": "This read retained 2 change-feed error rows.",
+      "title": "Change-feed progress and retained errors"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "change-feed",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 5,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "change feed availability",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed processing errors",
+              "state": "collected",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-change-feed",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "change_feed_partial": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "3"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "0"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "5"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": null
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": null
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": null
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": null
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The aggregate can retain the last nonzero phase-7 latency. It is not a current delivery-lag measurement.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "aggregate",
+          "observation_key": "change-feed:change feed scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Native change-feed aggregate",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        },
+        {
+          "explanation": "This is a retained native scan point. Reaching phase 7 does not establish downstream publication or commit completion.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "7: Last scan, publish and commit"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "scan-session",
+          "observation_key": "change-feed:change feed scan sessions:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Retained change-feed scan 7",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        }
+      ],
+      "limitations": [
+        "Native errors rotate and can clear after restart or change-feed disablement. This is not a complete or unique event feed.",
+        "Scan identifiers and process ownership do not establish a change-feed reset or continuous history. No cross-capture delta is calculated.",
+        "UTC acquisition points and native history times without an offset are separate. This read is an interval, not an atomic sample.",
+        "Read coverage, configuration and log-scan phase do not prove successful publication, end-to-end lag or a query causing an error.",
+        "The original native population or retained body is incomplete; visible rows do not establish the missing history."
+      ],
+      "read_complete": true,
+      "source_state": "partial",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "change feed availability",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": false,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed processing errors",
+          "state": "partial",
+          "stopped": null
+        }
+      ],
+      "summary": "This read retained 2 change-feed error rows.",
+      "title": "Change-feed progress and retained errors"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "change-feed",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 5,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "change feed availability",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": false,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed processing errors",
+              "state": "partial",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-change-feed",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "change_feed_unknown": {
+    "report": {
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T00:00:00Z",
+        "observed_until": "2020-01-01T00:00:01Z",
+        "partition": {
+          "epoch": "original-process-and-db",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "instance",
+            "namespace": {
+              "id": "machine",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "original-instance",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "original.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "7"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "255"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": "410"
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": "10000000-0000-0000-0000-000000000001"
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": "7"
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": "0"
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The native task code and table-group identifiers describe retained error context. They do not identify a current SQL session or prove current table ownership.",
+          "fields": [
+            {
+              "key": "session_id",
+              "label": "Native log-reader scan ID",
+              "value": "0"
+            },
+            {
+              "key": "source_task",
+              "label": "Native change-feed task code",
+              "value": "255"
+            },
+            {
+              "key": "table_id",
+              "label": "Native table object ID",
+              "value": null
+            },
+            {
+              "key": "table_group_id",
+              "label": "Native table-group ID",
+              "value": null
+            },
+            {
+              "key": "capture_phase_number",
+              "label": "Native processing phase",
+              "value": null
+            },
+            {
+              "key": "error_severity",
+              "label": "Native error severity",
+              "value": "16"
+            },
+            {
+              "key": "error_state",
+              "label": "Native error state",
+              "value": "1"
+            },
+            {
+              "key": "entry_time",
+              "label": "Native error time without offset",
+              "value": "2019-12-31T23:00:00.999"
+            },
+            {
+              "key": "command_id",
+              "label": "Native command ID",
+              "value": null
+            }
+          ],
+          "investigation": "Inspect the configured change-feed feature and the retained native task/table-group context through an authorized diagnostic path.",
+          "kind": "error",
+          "observation_key": "change-feed:change feed processing errors:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed processing errors",
+          "title": "Retained change-feed error 2628",
+          "verify": "Compare a later bounded capture with the original context, retaining rotation and reset uncertainty."
+        },
+        {
+          "explanation": "The aggregate can retain the last nonzero phase-7 latency. It is not a current delivery-lag measurement.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "Aggregate"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "aggregate",
+          "observation_key": "change-feed:change feed scan sessions:1",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Native change-feed aggregate",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        },
+        {
+          "explanation": "This is a retained native scan point. Reaching phase 7 does not establish downstream publication or commit completion.",
+          "fields": [
+            {
+              "key": "batch_processing_phase",
+              "label": "Native processing phase",
+              "value": "7: Last scan, publish and commit"
+            },
+            {
+              "key": "start_time",
+              "label": "Native start time without offset",
+              "value": "2019-12-31T23:00:00"
+            },
+            {
+              "key": "end_time",
+              "label": "Native end time without offset",
+              "value": null
+            },
+            {
+              "key": "tran_count",
+              "label": "Native transactions processed",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "error_count",
+              "label": "Native error count",
+              "value": "1"
+            },
+            {
+              "key": "latency",
+              "label": "Native phase-7 latency (s)",
+              "value": "3"
+            },
+            {
+              "key": "schema_change_count",
+              "label": "Native schema changes processed",
+              "value": "0"
+            },
+            {
+              "key": "empty_scan_count",
+              "label": "Consecutive native empty scans",
+              "value": "2"
+            },
+            {
+              "key": "duration",
+              "label": "Native duration (s)",
+              "value": "0"
+            },
+            {
+              "key": "log_record_count",
+              "label": "Native log records scanned",
+              "value": "8"
+            },
+            {
+              "key": "command_count",
+              "label": "Native commands processed",
+              "value": null
+            },
+            {
+              "key": "failed_sessions_count",
+              "label": "Native failed sessions",
+              "value": "1"
+            },
+            {
+              "key": "currently_processed_commit_time",
+              "label": "Native processed commit time without offset",
+              "value": null
+            }
+          ],
+          "investigation": "Compare the retained scan phase, commit-time context and per-population read coverage.",
+          "kind": "scan-session",
+          "observation_key": "change-feed:change feed scan sessions:2",
+          "observed_at": "2020-01-01T00:00:00.500Z",
+          "source": "change feed scan sessions",
+          "title": "Retained change-feed scan 7",
+          "verify": "Confirm publisher completion using its own native outcome; scan phase or latency alone is insufficient."
+        }
+      ],
+      "limitations": [
+        "Native errors rotate and can clear after restart or change-feed disablement. This is not a complete or unique event feed.",
+        "Scan identifiers and process ownership do not establish a change-feed reset or continuous history. No cross-capture delta is calculated.",
+        "UTC acquisition points and native history times without an offset are separate. This read is an interval, not an atomic sample.",
+        "Read coverage, configuration and log-scan phase do not prove successful publication, end-to-end lag or a query causing an error."
+      ],
+      "read_complete": true,
+      "source_state": "collected",
+      "sources": [
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 1,
+          "source": "change feed availability",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed scan sessions",
+          "state": "collected",
+          "stopped": null
+        },
+        {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 2,
+          "source": "change feed processing errors",
+          "state": "collected",
+          "stopped": null
+        }
+      ],
+      "summary": "This read retained 2 change-feed error rows.",
+      "title": "Change-feed progress and retained errors"
+    },
+    "source": {
+      "continuity": "unverified",
+      "observation": {
+        "data": {
+          "dataset": "change-feed",
+          "observed_from": "2020-01-01T00:00:00Z",
+          "observed_until": "2020-01-01T00:00:01Z",
+          "records": 5,
+          "sources": [
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "change feed availability",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed scan sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "change feed processing errors",
+              "state": "collected",
+              "stopped": null
+            }
+          ]
+        },
+        "kind": "snapshot"
+      },
+      "partition": {
+        "epoch": "original-process-and-db",
+        "kind": "instance-local",
+        "member": {
+          "engine": "mssql",
+          "kind": "instance",
+          "namespace": {
+            "id": "machine",
+            "qualifiers": {}
+          },
+          "native": {
+            "id": "original-instance",
+            "qualifiers": {}
+          }
+        }
+      },
+      "source": "mssql-change-feed",
+      "target": {
+        "identity": {
+          "database": "db",
+          "engine": "mssql",
+          "incarnation": null,
+          "location": {
+            "host": "original.invalid",
+            "instance": null,
+            "kind": "server",
+            "port": 1433
+          }
+        },
+        "scope": "database"
+      }
+    }
+  },
+  "withdrawn": {
+    "marker": {
+      "kind": "unavailable",
+      "reason": {
+        "arguments": {},
+        "key": "view.change_capture.history.sharing_withheld",
+        "kind": "catalog"
+      }
+    },
+    "report": {
+      "context": null,
+      "enabled": null,
+      "entries": [],
+      "limitations": [
+        "Each capture keeps its original database, member and acquisition interval. A later scan does not establish continuity or current delivery state."
+      ],
+      "read_complete": false,
+      "source_state": "unavailable",
+      "sources": [],
+      "summary": "Original change-capture history was withheld for sharing.",
+      "title": "CDC processing evidence"
+    }
+  }
+}

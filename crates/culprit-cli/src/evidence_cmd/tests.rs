@@ -1,4 +1,5 @@
 mod cdc;
+mod change_feed;
 mod rowgroups_backup;
 mod tempdb_metadata_memory;
 use super::*;

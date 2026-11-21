@@ -9,7 +9,7 @@ export function healthReportFixture(fields: DeepPartial<Report>): Report {
     snapshot: {
       ...fields.snapshot,
       operations: {
-        spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null,
+        spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null, cdc_history: [], change_feed_history: [],
         ...fields.snapshot?.operations,
       },
     },

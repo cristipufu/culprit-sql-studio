@@ -12,6 +12,7 @@ pub enum SnapshotDataset {
     Sequences,
     Cleanup,
     Cdc,
+    ChangeFeed,
     BackupHistory,
     ColumnstoreRowgroups,
     TableMemory,
@@ -68,6 +69,7 @@ impl SnapshotDataset {
             | Self::Sequences
             | Self::Cleanup
             | Self::Cdc
+            | Self::ChangeFeed
             | Self::BackupHistory
             | Self::ColumnstoreRowgroups
             | Self::TableMemory
@@ -495,6 +497,7 @@ pub enum OperationalFact {
     DiagnosticRevision(Box<DiagnosticRevision>),
     Queue(QueueSample),
     MssqlCdc(Box<MssqlCdcObservation>),
+    MssqlChangeFeed(Box<MssqlChangeFeedObservation>),
     MssqlBackupHistory(Box<MssqlBackupHistoryObservation>),
     MssqlColumnstoreRowgroup(Box<MssqlColumnstoreRowgroup>),
     MssqlTableMemory(Box<MssqlTableMemory>),
@@ -521,6 +524,7 @@ impl OperationalFact {
     fn matches_key(&self, key: &str) -> bool {
         let expected = match self {
             Self::MssqlCdc(point) => point.key(),
+            Self::MssqlChangeFeed(point) => point.key(),
             Self::MssqlBackupHistory(point) => point.key(),
             Self::MssqlColumnstoreRowgroup(point) => point.key(),
             Self::MssqlTableMemory(point) => point.key(),
@@ -583,6 +587,7 @@ impl OperationalFact {
         match self {
             Self::CompilerWaiter(waiter) => waiter.request.redact(engine),
             Self::MssqlCdc(_)
+            | Self::MssqlChangeFeed(_)
             | Self::MssqlBackupHistory(_)
             | Self::MssqlColumnstoreRowgroup(_)
             | Self::MssqlTableMemory(_)
@@ -719,6 +724,7 @@ impl OperationalFact {
             Self::TimescaleContinuousAggregate(point) => point.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
             Self::MssqlCdc(point) => point.is_valid(),
+            Self::MssqlChangeFeed(point) => point.is_valid(),
             Self::MssqlBackupHistory(point) => point.is_valid(),
             Self::MssqlColumnstoreRowgroup(point) => point.is_valid(),
             Self::MssqlTableMemory(point) => point.is_valid(),
@@ -776,6 +782,7 @@ impl OperationalObservation {
                     self.source == crate::source_id::PROCESSOR_TOPOLOGY
                 }
                 OperationalFact::MssqlCdc(point) => self.source == point.source(),
+                OperationalFact::MssqlChangeFeed(point) => self.source == point.source(),
                 OperationalFact::MssqlBackupHistory(_) => self.source == MSSQL_BACKUP_HISTORY_SOURCE,
                 OperationalFact::MssqlColumnstoreRowgroup(_) => self.source == MSSQL_COLUMNSTORE_ROWGROUPS_SOURCE,
                 OperationalFact::MssqlTableMemory(_) => self.source == MSSQL_TABLE_MEMORY_SOURCE,

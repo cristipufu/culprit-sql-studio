@@ -81,11 +81,11 @@ fn source_with_replies(
     rows: Vec<ReadResult<Vec<Rec>>>,
     request: &CollectionRequest,
     generation: Option<u64>,
-) -> (CdcSource<Reader>, Arc<Trace>) {
+) -> (ChangeCaptureSource<Reader>, Arc<Trace>) {
     let trace = Arc::new(Trace::default());
     let native = FakeRead::new(rows).with_query_limit(request.budget.max_queries);
     (
-        CdcSource::with_io(
+        ChangeCaptureSource::with_io(
             Reader { native, trace: trace.clone(), generation },
             request,
             "fixture.invalid".into(),
@@ -95,7 +95,7 @@ fn source_with_replies(
         trace,
     )
 }
-async fn drain(source: &mut CdcSource<Reader>) -> Vec<TelemetryRecord> {
+async fn drain(source: &mut ChangeCaptureSource<Reader>) -> Vec<TelemetryRecord> {
     let mut rows = Vec::new();
     let mut cursor = None;
     loop {
@@ -330,3 +330,5 @@ async fn one_row_budget_preserves_original_status_and_records_each_unread_popula
     assert!(!calls.iter().any(|(sql,_)|sql.contains("FROM sys.dm_cdc_log_scan_sessions")||sql.contains("FROM sys.dm_cdc_errors")));
     assert_eq!(trace.closed.load(Ordering::SeqCst), 1);
 }
+
+mod change_feed;

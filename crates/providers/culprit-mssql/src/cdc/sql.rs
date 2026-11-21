@@ -1,11 +1,5 @@
 //! Published DMV/catalog columns only. TOP caps output; it does not claim bounded internal engine work.
-fn layout(object: &str, columns: &[&str]) -> String {
-    let names = columns.iter().map(|name| format!("N'{name}'")).collect::<Vec<_>>().join(",");
-    format!(
-        "CASE WHEN (SELECT COUNT(*) FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{object}') AND name IN({names}))={} THEN 1 ELSE 0 END",
-        columns.len()
-    )
-}
+use crate::change_capture::layout;
 pub(super) fn status() -> String {
     let scan = layout(
         "sys.dm_cdc_log_scan_sessions",

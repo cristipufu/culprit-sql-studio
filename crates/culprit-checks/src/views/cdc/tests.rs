@@ -1,22 +1,9 @@
 use super::*;
-use culprit_core::{DatabaseIdentity, Engine, ResetMarker};
+use culprit_core::Engine;
+use culprit_core::ResetMarker;
 
 fn context() -> NativeReadContext {
-    NativeReadContext {
-        target: DatabaseIdentity::server(Engine::Mssql, "db", "original.invalid", 1433, None).into(),
-        partition: SourcePartition::InstanceLocal {
-            member: Some(SharedResourceIdentity {
-                engine: Engine::Mssql,
-                kind: SharedResourceKind::Instance,
-                namespace: NativeIdentity::new("machine"),
-                native: NativeIdentity::new("member"),
-            }),
-            epoch: Some("original-process-and-db".into()),
-        },
-        observed_from: "2020-01-01T00:00:00Z".into(),
-        observed_until: "2020-01-01T00:00:01Z".into(),
-        database_writable: Some(true),
-    }
+    super::super::change_capture::test_context()
 }
 fn observation(data: MssqlCdcData, position: u32) -> OperationalObservation {
     let point = MssqlCdcObservation {
@@ -108,9 +95,9 @@ fn genuine_native_error_and_scan_points_keep_independent_roles_units_and_clocks(
     assert_eq!(report.source_state, SourceState::Collected);
     assert_eq!(report.enabled, Some(true));
     assert_eq!(report.entries.len(), 3);
-    assert_eq!(report.entries[0].kind, CdcEntryKind::Error);
-    let aggregate = report.entries.iter().find(|entry| entry.kind == CdcEntryKind::Aggregate).unwrap();
-    let scan = report.entries.iter().find(|entry| entry.kind == CdcEntryKind::ScanSession).unwrap();
+    assert_eq!(report.entries[0].kind, ChangeCaptureEntryKind::Error);
+    let aggregate = report.entries.iter().find(|entry| entry.kind == ChangeCaptureEntryKind::Aggregate).unwrap();
+    let scan = report.entries.iter().find(|entry| entry.kind == ChangeCaptureEntryKind::ScanSession).unwrap();
     assert_eq!(aggregate.fields.iter().find(|field| field.key == "tran_count").unwrap().value.as_deref(), Some("1000"));
     assert_eq!(scan.fields.iter().find(|field| field.key == "tran_count").unwrap().value.as_deref(), Some("2"));
     assert_eq!(scan.fields.iter().find(|field| field.key == "end_time").unwrap().value, None);
@@ -137,7 +124,7 @@ fn duplicates_and_partial_body_are_original_lower_bounds_without_counter_deltas(
     header.records += 1;
     header.sources[2] = StateSourceCoverage::observed(MSSQL_CDC_ERRORS_SOURCE.into(), 2, false);
     let full = report(&source, &rows, true).unwrap();
-    assert_eq!(full.entries.iter().filter(|entry| entry.kind == CdcEntryKind::Error).count(), 2);
+    assert_eq!(full.entries.iter().filter(|entry| entry.kind == ChangeCaptureEntryKind::Error).count(), 2);
     assert_eq!(full.source_state, SourceState::Partial);
     let partial = report(&source, &rows[3..], false).unwrap();
     assert_eq!(partial.enabled, None);
@@ -153,7 +140,7 @@ fn empty_retained_errors_disabled_and_unavailable_never_become_a_healthy_result(
     header.records -= 1;
     header.sources[2] = StateSourceCoverage::collected(MSSQL_CDC_ERRORS_SOURCE.into(), 0);
     let empty = report(&source, &rows, true).unwrap();
-    assert!(empty.entries.iter().all(|entry| entry.kind != CdcEntryKind::Error));
+    assert!(empty.entries.iter().all(|entry| entry.kind != ChangeCaptureEntryKind::Error));
     assert_eq!(empty.summary, t!("view.cdc.summary.recorded"));
     assert!(!empty.limitations.is_empty());
     rows.truncate(1);

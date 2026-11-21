@@ -11,6 +11,8 @@ use serde_json::{Value, json};
 
 mod backup_history;
 mod cdc;
+mod change_capture;
+mod change_feed;
 mod columnstore_rowgroups;
 mod full_text_populations;
 mod table_full_text;
@@ -49,6 +51,7 @@ fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
     Ok(match analysis.report() {
         LocalSnapshotReport::PerformanceCounters(report) => performance_counters(report),
         LocalSnapshotReport::Cdc(report) => cdc::value(analysis, report),
+        LocalSnapshotReport::ChangeFeed(report) => change_feed::value(analysis, report),
         LocalSnapshotReport::TableMemory(report) => table_memory::value(analysis, report)?,
         LocalSnapshotReport::GroupReplication(report) => group_replication::value(analysis, report),
         LocalSnapshotReport::Galera(report) => galera::value(analysis, report),

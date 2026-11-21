@@ -165,16 +165,29 @@ impl OutboxCaptureReader {
                     )
                     .await
             }
-            LocalCaptureReadPlan::QueryHistory => {
+            LocalCaptureReadPlan::QueryHistory(selection) => {
                 delivery
-                    .with_completed_query_history(lookup, self.budget, request.operation, permit, move |capture| {
-                        let result = explain_page_server_reads(capture).map(LocalCapturedAnalysis::PageServerReads);
-                        #[cfg(test)]
-                        if let Some(boundary) = boundary {
-                            boundary()?;
-                        }
-                        result
-                    })
+                    .with_completed_query_history(
+                        lookup,
+                        selection,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        move |capture| {
+                            let result = match selection {
+                                culprit_collector::outbox::QueryHistoryReadKind::Runtime => {
+                                    explain_page_server_reads(capture).map(LocalCapturedAnalysis::PageServerReads)
+                                }
+                                culprit_collector::outbox::QueryHistoryReadKind::Waits => explain_query_waits(capture)
+                                    .map(|analysis| LocalCapturedAnalysis::QueryWaitFragments(Box::new(analysis))),
+                            };
+                            #[cfg(test)]
+                            if let Some(boundary) = boundary {
+                                boundary()?;
+                            }
+                            result
+                        },
+                    )
                     .await
             }
             LocalCaptureReadPlan::Snapshot(datasets) => {
@@ -398,4 +411,12 @@ fn explain_managed_instance_resources(
     let read = Box::new(captured.into_read()?);
     let report = Box::new(culprit_checks::managed_instance_resources::explain_captured(&read)?);
     Ok(super::LocalManagedInstanceResources { connection, read, report, collected_from, collected_until, bytes_read })
+}
+
+fn explain_query_waits(capture: CompletedQueryHistory) -> Result<LocalQueryWaitFragments> {
+    let connection = capture.connection().into();
+    let bytes_read = capture.bytes_read();
+    let read = Box::new(capture.into_wait_read()?);
+    let report = Box::new(culprit_checks::query_wait_fragments::explain(&read)?);
+    Ok(LocalQueryWaitFragments { connection, read, report, bytes_read })
 }

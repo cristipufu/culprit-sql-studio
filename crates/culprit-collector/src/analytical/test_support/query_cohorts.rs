@@ -208,6 +208,10 @@ fn wait(query: &QueryDefinition, plan: &PlanDefinition, id: &str, total_ms: &str
         average: None,
         minimum: None,
         maximum: None,
+        last: None,
+        standard_deviation: None,
+        category_description: None,
+        outcome_description: None,
     })
 }
 

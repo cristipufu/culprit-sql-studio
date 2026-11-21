@@ -8,6 +8,7 @@ mod blocking;
 mod cache_entry_memory;
 mod cached_plans;
 mod cdc;
+mod change_feed;
 mod cleanup;
 mod cohorts;
 mod columnstore;
@@ -56,6 +57,7 @@ mod temporary_space;
 mod tuning;
 mod variant_family;
 mod wait_counters;
+mod wait_fragments;
 mod waits;
 use fixture::Fixture;
 
@@ -345,6 +347,10 @@ async fn opaque_native_wait_codes_remain_exact_without_becoming_semantic_other_w
         average: Some(499.5),
         minimum: Some(MeasurementValue::Integer("0".into())),
         maximum: None,
+        last: None,
+        standard_deviation: None,
+        category_description: None,
+        outcome_description: None,
     };
     records.push(TelemetryRecord::QueryWaits(wait.clone()));
     let fixture = Fixture::new(source, records).await;

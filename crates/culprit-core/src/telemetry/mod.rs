@@ -43,6 +43,10 @@ pub use captured_reference::{
 mod backup_history;
 mod catalog;
 mod cdc;
+mod change_capture;
+mod change_feed;
+pub use change_capture::{MssqlChangeCaptureFamily, MssqlChangeCapturePoint, change_capture_owner_is_qualified};
+pub use change_feed::*;
 mod columnstore_rowgroups;
 mod full_text_populations;
 mod table_memory;
@@ -113,6 +117,7 @@ mod read_metrics;
 mod recipes;
 mod relational_input_proof;
 pub use hyperscale_replicas::*;
+mod query_wait_read;
 mod replication;
 mod replication_snapshot;
 mod request_resources;
@@ -121,6 +126,7 @@ mod retained_actual;
 mod retained_plans;
 mod retention;
 mod runtime;
+pub use query_wait_read::*;
 mod runtime_distributions;
 mod session_memory;
 mod settings;
@@ -795,6 +801,7 @@ impl TelemetryRecord {
                     (SourceObservation::ColumnstoreRowgroups { .. }, _) => false,
                     (SourceObservation::FullTextPopulations { .. }, _) => false,
                     (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::MssqlChangeFeed(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::CounterSet(sample)) if database_performance_candidate(sample) => {
                         accepted && database_performance_sample_fits_source(sample, source)
                     }
@@ -815,7 +822,11 @@ impl TelemetryRecord {
                     (SourceObservation::DatabasePerformanceCounters { .. }, _) => false,
                     (_, OperationalFact::MssqlBackupHistory(point)) => accepted && point.fits_source(source),
                     (SourceObservation::BackupHistory { .. }, _) => false,
-                    (SourceObservation::Snapshot(header), _) if header.dataset == SnapshotDataset::Cdc => false,
+                    (SourceObservation::Snapshot(header), _)
+                        if matches!(header.dataset, SnapshotDataset::Cdc | SnapshotDataset::ChangeFeed) =>
+                    {
+                        false
+                    }
                     (_, OperationalFact::ConfiguredLogRateLimits(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::HyperscaleLogComponent(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::DatabaseProperties(point)) => accepted && point.fits_source(source),
@@ -1202,6 +1213,10 @@ mod tests {
             average: Some(1.0),
             minimum: Some(crate::telemetry::MeasurementValue::Integer("1".into())),
             maximum: Some(crate::telemetry::MeasurementValue::Integer("2".into())),
+            last: None,
+            standard_deviation: None,
+            category_description: None,
+            outcome_description: None,
         };
         let first = TelemetryRecord::QueryWaits(wait.clone());
         wait.category = "2".into();

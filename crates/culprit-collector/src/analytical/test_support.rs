@@ -10,6 +10,10 @@ pub use suspect_pages::{SuspectPageHistoryCase, assert_suspect_page_history_capt
 mod backup_history;
 pub use backup_history::{BackupHistoryCase, assert_backup_history_capture, backup_history_evidence};
 mod cdc;
+mod change_capture;
+pub use change_capture::multiple_errors as change_capture_multiple_errors;
+mod change_feed;
+pub use change_feed::{ChangeFeedCase, change_feed_evidence};
 mod columnstore;
 mod columnstore_rowgroups;
 mod full_text_populations;
@@ -82,7 +86,9 @@ pub use investigations::{
 };
 
 mod queries;
-pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};
+pub use queries::{
+    query_evidence, query_variant_evidence, query_wait_evidence_cases, query_wait_fragment_evidence, wait_semantics,
+};
 mod informational;
 pub use informational::{assert_informational_capture, informational_query_evidence};
 mod local_capture;
@@ -690,6 +696,10 @@ pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
         average: None,
         minimum: None,
         maximum: None,
+        last: None,
+        standard_deviation: None,
+        category_description: None,
+        outcome_description: None,
     });
     let query = TelemetryRecord::QueryDefinition(QueryDefinition {
         variant_family: None,

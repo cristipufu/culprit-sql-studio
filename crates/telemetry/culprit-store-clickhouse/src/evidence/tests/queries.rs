@@ -50,3 +50,56 @@ async fn changing_or_removing_a_native_cohort_cannot_pass_the_original_row_recei
         }
     }
 }
+
+#[tokio::test]
+async fn changed_wait_last_deviation_or_native_descriptions_cannot_pass_the_original_projection_receipt() {
+    let (source, records) = test_support::query_wait_fragment_evidence();
+    let fixture = Fixture::new_for_stream(source, records, TelemetryStream::QueryWaits).await;
+    let schema = fixture.catalog.get(TelemetryStream::QueryWaits).unwrap();
+    let original = fixture.rows.clone();
+    for (name, changed) in [
+        ("LastWait", json!(serde_json::to_string(&json!({"kind":"integer","value":"7"})).unwrap())),
+        ("WaitStandardDeviation", json!(99.25)),
+        ("WaitCategoryDescription", json!("Different native category")),
+        ("ExecutionOutcomeDescription", Value::Null),
+    ] {
+        let column = schema.columns().iter().position(|column| column.name == name).unwrap();
+        let mut rows = original.clone();
+        rows[0][column] = changed;
+        fixture.replies(vec![rows]);
+        let error = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryWaits], EvidenceReadBudget::default(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn wait_fragment_originals_roundtrip_exact_statistics_native_labels_empty_and_unknown_populations() {
+    for (source, records) in test_support::query_wait_evidence_cases() {
+        let expected =
+            records.iter().filter(|row| matches!(row, TelemetryRecord::QueryWaits(_))).cloned().collect::<Vec<_>>();
+        let fixture = Fixture::new_for_stream(source.clone(), records, TelemetryStream::QueryWaits).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let capture = fixture
+            .reader
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::QueryWaits],
+                EvidenceReadBudget { page_rows: 1, ..Default::default() },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+        assert_eq!(capture.source(), &source);
+        assert_eq!(capture.records().len(), expected.len());
+        for original in expected {
+            let exported = ExportedRecord::new(&source, capture.capture(), original).unwrap();
+            assert!(capture.records().iter().any(|actual| actual.row() == &exported));
+        }
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+    }
+}

@@ -1,4 +1,5 @@
 use super::*;
+mod change_feed;
 use culprit_collector::analytical::test_support::*;
 use culprit_core::SourceState;
 
@@ -40,6 +41,7 @@ async fn every_new_snapshot_report_retains_one_exact_original_without_source_wor
             LocalCaptureAnalysisKind::ManagedInstanceResources
                 | LocalCaptureAnalysisKind::PoolSettings
                 | LocalCaptureAnalysisKind::Replication
+                | LocalCaptureAnalysisKind::QueryWaitFragments
                 | LocalCaptureAnalysisKind::PageServerReads
                 | LocalCaptureAnalysisKind::SessionCensus
                 | LocalCaptureAnalysisKind::Blocking

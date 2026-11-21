@@ -4,6 +4,48 @@ use culprit_core::{Report, Result, SnapshotOptions, telemetry::DeliveryProblem};
 use std::path::Path;
 
 impl Workspace {
+    /// Explicit original history stays separate from the later scan's database/member and workload.
+    pub async fn scan_with_captured_change_history(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalSnapshotAnalysis,
+    ) -> Result<Report> {
+        if captured.original().connection() != name {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let family = match captured.report().kind() {
+            crate::LocalCaptureAnalysisKind::Cdc => culprit_core::telemetry::MssqlChangeCaptureFamily::Cdc,
+            crate::LocalCaptureAnalysisKind::ChangeFeed => {
+                culprit_core::telemetry::MssqlChangeCaptureFamily::ChangeFeed
+            }
+            _ => return Err(DeliveryProblem::InvalidContract.error()),
+        };
+        let evidence = crate::scan::CapturedScanEvidence::change_capture(family, captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
+    /// Reinterpret one selected original history capture after ordinary scan shutdown. No current query/table,
+    /// routing member or database name supplies a relationship to that independent historical population.
+    pub async fn scan_with_captured_query_wait_fragments(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalQueryWaitFragments,
+    ) -> Result<Report> {
+        if captured.connection() != name {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::query_wait_fragments(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
     /// An authenticated shared-pool original remains independent of the later scanned database.
     pub async fn scan_with_captured_pool_settings(
         &self,

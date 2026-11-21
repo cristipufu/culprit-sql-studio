@@ -73,6 +73,9 @@ impl CulpritMcp {
             LocalCapturedAnalysis::PageServerReads(analysis) => {
                 crate::waits_view::page_server_reads::captured(&analysis)?
             }
+            LocalCapturedAnalysis::QueryWaitFragments(analysis) => {
+                json!({"query_wait_fragments": crate::waits_view::query_wait_fragments::value(analysis.report())?, "local_verification_bytes": analysis.bytes_read()})
+            }
             LocalCapturedAnalysis::MemoryClerks(analysis) => memory_clerks::captured(&analysis)?,
             LocalCapturedAnalysis::HyperscaleLogComponents(analysis) => hyperscale_log_components::captured(&analysis)?,
             LocalCapturedAnalysis::Snapshot(analysis) => snapshots::captured(&analysis)?,

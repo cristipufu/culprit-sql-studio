@@ -177,6 +177,10 @@ fn inputs() -> Vec<(&'static str, String, CollectionDescription, Vec<TelemetryRe
         let (s, r) = corpus::backup_history_evidence(case);
         cases.push(("backup-history", format!("{case:?}"), s, r));
     }
+    for case in corpus::ChangeFeedCase::ALL {
+        let (source, rows) = corpus::change_feed_evidence(case);
+        cases.push(("change-feed", format!("{case:?}"), source, rows));
+    }
     for case in corpus::CdcCase::ALL {
         let (s, r) = corpus::cdc_evidence(case);
         cases.push(("cdc", format!("{case:?}"), s, r));
@@ -252,6 +256,23 @@ fn inputs() -> Vec<(&'static str, String, CollectionDescription, Vec<TelemetryRe
 // This is controlled corpus replay, not a native source/profile or cost acceptance receipt.
 fn field_context(family: &str, source: &CollectionDescription, records: &[TelemetryRecord]) -> Option<Value> {
     match family {
+        "change-feed" => {
+            let rows = records
+                .iter()
+                .map(|record| {
+                    let TelemetryRecord::Operational(row) = record else { panic!("original change-feed rows") };
+                    row
+                })
+                .collect::<Vec<_>>();
+            let report = culprit_checks::change_feed::explain(culprit_checks::change_feed::ChangeFeedEvidence {
+                source,
+                observations: &rows,
+                read_complete: true,
+            })
+            .unwrap();
+            Some(json!({"change_feed":report}))
+        }
+
         "schedulers" => {
             let rows = records
                 .iter()

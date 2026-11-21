@@ -76,6 +76,10 @@ pub fn query_population_evidence() -> (CollectionDescription, Vec<TelemetryRecor
             average: None,
             minimum: None,
             maximum: None,
+            last: None,
+            standard_deviation: None,
+            category_description: None,
+            outcome_description: None,
         }));
     }
     assert!(source.query_history().unwrap().is_valid());

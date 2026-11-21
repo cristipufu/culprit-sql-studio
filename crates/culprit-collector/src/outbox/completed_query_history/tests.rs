@@ -19,6 +19,7 @@ async fn read(fixture: &LocalCaptureFixture, budget: CompletedCaptureBudget) -> 
                 connection: "local-evidence",
                 observation_id: &fixture.manifest.capture.observation_id,
             },
+            QueryHistoryReadKind::Runtime,
             budget,
             guard.handle(),
             (),
@@ -91,6 +92,7 @@ async fn journal_connection_and_settled_owner_cannot_be_substituted_by_tool_argu
                 connection: "foreign-connection",
                 observation_id: &fixture.manifest.capture.observation_id,
             },
+            QueryHistoryReadKind::Runtime,
             CompletedCaptureBudget::default(),
             guard.handle(),
             (),
@@ -123,6 +125,7 @@ async fn cancelled_lookup_and_post_verification_projection_never_publish_success
                 connection: "local-evidence",
                 observation_id: &fixture.manifest.capture.observation_id,
             },
+            QueryHistoryReadKind::Runtime,
             CompletedCaptureBudget::default(),
             operation,
             (),
@@ -143,6 +146,7 @@ async fn cancelled_lookup_and_post_verification_projection_never_publish_success
                 connection: "local-evidence",
                 observation_id: &fixture.manifest.capture.observation_id,
             },
+            QueryHistoryReadKind::Runtime,
             CompletedCaptureBudget::default(),
             operation,
             (),
@@ -173,6 +177,7 @@ async fn original_deadline_and_cancellation_include_waiting_for_the_existing_out
             delivery
                 .with_completed_query_history::<()>(
                     CompletedCaptureLookup { connection: "local-evidence", observation_id: &id },
+                    QueryHistoryReadKind::Runtime,
                     CompletedCaptureBudget::default(),
                     operation,
                     (),
@@ -212,6 +217,7 @@ async fn a_started_canonical_worker_is_joined_before_a_cancelled_projection_can_
         delivery
             .with_completed_query_history(
                 CompletedCaptureLookup { connection: "local-evidence", observation_id: &id },
+                QueryHistoryReadKind::Runtime,
                 CompletedCaptureBudget::default(),
                 operation,
                 (),

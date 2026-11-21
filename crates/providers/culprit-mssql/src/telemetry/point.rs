@@ -105,6 +105,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         | SnapshotDataset::Galera
         | SnapshotDataset::FullTextPopulations
         | SnapshotDataset::Cdc
+        | SnapshotDataset::ChangeFeed
         | SnapshotDataset::BackupHistory
         | SnapshotDataset::SessionMemory
         | SnapshotDataset::PageWaitTargets

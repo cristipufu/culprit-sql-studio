@@ -1,6 +1,6 @@
 //! Synthetic original CDC conformance points. Native acceptance is a separate owned experiment.
 use super::*;
-use culprit_core::{DatabaseIdentity, ErrorCode};
+use culprit_core::ErrorCode;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CdcCase {
     ErrorAndProgress,
@@ -27,21 +27,7 @@ impl CdcCase {
     ];
 }
 pub fn cdc_evidence(case: CdcCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
-    let context = NativeReadContext {
-        target: DatabaseIdentity::server(culprit_core::Engine::Mssql, "db", "original.invalid", 1433, None).into(),
-        partition: SourcePartition::InstanceLocal {
-            member: Some(SharedResourceIdentity {
-                engine: culprit_core::Engine::Mssql,
-                kind: SharedResourceKind::Instance,
-                namespace: NativeIdentity::new("machine"),
-                native: NativeIdentity::new("original-instance"),
-            }),
-            epoch: Some("original-process-and-db".into()),
-        },
-        observed_from: "2020-01-01T00:00:00Z".into(),
-        observed_until: "2020-01-01T00:00:01Z".into(),
-        database_writable: Some(case != CdcCase::Secondary),
-    };
+    let context = super::change_capture::context(case != CdcCase::Secondary);
     let mut status = MssqlCdcStatus {
         native_major: 16,
         native_edition: 3,

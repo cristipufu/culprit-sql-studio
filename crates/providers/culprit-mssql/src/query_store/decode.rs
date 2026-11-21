@@ -100,9 +100,25 @@ pub(crate) fn record(row: &Rec, stream: TelemetryStream, references: StatementRe
             average: Some(number(row, "avg_query_wait_time_ms")?),
             minimum: Some(MeasurementValue::Integer(integer(row, "min_query_wait_time_ms")?.to_string())),
             maximum: Some(MeasurementValue::Integer(integer(row, "max_query_wait_time_ms")?.to_string())),
+            last: crate::read::optional_integer(row, "last_query_wait_time_ms")?
+                .map(|value| MeasurementValue::Integer(value.to_string())),
+            standard_deviation: optional_number(row, "stdev_query_wait_time_ms")?,
+            category_description: wait_description(row, "wait_category_desc")?,
+            outcome_description: wait_description(row, "execution_type_desc")?,
         }),
         _ => return Err(malformed()),
     })
+}
+
+fn wait_description(row: &Rec, name: &str) -> Result<Option<String>> {
+    let value = crate::read::optional_text(row, name)?;
+    if value
+        .as_ref()
+        .is_some_and(|value| value.encode_utf16().count() > culprit_core::telemetry::MAX_NATIVE_WAIT_DESCRIPTION_UNITS)
+    {
+        return Err(malformed());
+    }
+    Ok(value)
 }
 
 /// Within the captured interval and exact native query incarnation, only the plan dimension is combinable.
@@ -199,6 +215,10 @@ mod tests {
             ("avg_query_wait_time_ms", Val::Float(25.0)),
             ("min_query_wait_time_ms", Val::Int(10)),
             ("max_query_wait_time_ms", Val::Int(50)),
+            ("last_query_wait_time_ms", Val::Null),
+            ("stdev_query_wait_time_ms", Val::Null),
+            ("wait_category_desc", Val::Null),
+            ("execution_type_desc", Val::Null),
         ]);
         let TelemetryRecord::QueryWaits(wait) =
             record(&row, TelemetryStream::QueryWaits, StatementReferences::default()).unwrap()
@@ -212,3 +232,6 @@ mod tests {
         assert!(!runtime.key.cohort.unwrap().qualifiers.contains_key("plan_id"));
     }
 }
+
+#[cfg(test)]
+mod wait_fragments;

@@ -1,6 +1,7 @@
 //! Startup composition reaches canonical saved originals without constructing a native provider or a warehouse.
 mod blocking;
 mod cdc;
+mod change_feed;
 mod full_text_populations;
 mod grant_output;
 mod hyperscale_log_components;
@@ -349,3 +350,5 @@ async fn temporal_table_configuration_uses_original_local_action_and_canonical_f
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
+
+mod query_wait_fragments;

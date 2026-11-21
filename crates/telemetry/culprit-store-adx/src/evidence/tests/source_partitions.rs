@@ -137,3 +137,63 @@ async fn cdc_native_snapshot_status_progress_errors_and_gaps_round_trip_without_
         }));
     }
 }
+
+#[tokio::test]
+async fn change_feed_original_availability_progress_errors_and_partial_coverage_round_trip_without_recovery() {
+    for case in test_support::ChangeFeedCase::ALL {
+        let (source, records) = test_support::change_feed_evidence(case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.reply_families(&[EvidenceFamily::OperationalSamples], 1);
+        let capture = fixture
+            .reader()
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..budget() },
+                None,
+            )
+            .await
+            .unwrap();
+        test_support::assert_operational_capture(&capture, &source, &records);
+        assert!(capture.is_read_complete());
+        assert!(capture.records().iter().all(|row|matches!(&row.row().record,TelemetryRecord::Operational(row) if matches!(row.fact,OperationalFact::MssqlChangeFeed(_)))));
+        assert_eq!(capture.metrics().recovery_objects, 0);
+    }
+}
+
+#[tokio::test]
+async fn changed_change_feed_task_or_table_group_cannot_borrow_the_original_native_receipt() {
+    for (pointer, replacement) in [
+        ("/data/value/source_task", json!(255)),
+        ("/data/value/table_group_id", json!("20000000-0000-0000-0000-000000000002")),
+    ] {
+        let (source, records) = test_support::change_feed_evidence(test_support::ChangeFeedCase::ProgressAndError);
+        let fixture = Fixture::new(source, records).await;
+        let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        let column = schema.columns().iter().position(|c| c.name == "Details").unwrap();
+        let mut rows = fixture.rows.clone();
+        let index = rows
+            .iter()
+            .position(|row| {
+                let details: Value = serde_json::from_str(row[column].as_str().unwrap()).unwrap();
+                details["data"]["kind"] == "error"
+            })
+            .unwrap();
+        let mut details: Value = serde_json::from_str(rows[index][column].as_str().unwrap()).unwrap();
+        *details.pointer_mut(pointer).unwrap() = replacement;
+        let altered: MssqlChangeFeedObservation = serde_json::from_value(details.clone()).unwrap();
+        assert!(altered.is_valid());
+        rows[index][column] = json!(serde_json::to_string(&details).unwrap());
+        fixture.replies(rows.into_iter().map(|row| vec![row]).collect());
+        let result = fixture
+            .reader()
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..budget() },
+                Some(fixture.recovery.as_ref()),
+            )
+            .await;
+        assert!(result.is_err(), "{pointer}");
+    }
+}

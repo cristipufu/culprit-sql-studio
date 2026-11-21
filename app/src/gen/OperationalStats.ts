@@ -21,6 +21,7 @@ import type { RecordedManagedInstanceResourceRead } from "./RecordedManagedInsta
 import type { RecordedOperationalRead } from "./RecordedOperationalRead";
 import type { RecordedPerformanceCounters } from "./RecordedPerformanceCounters";
 import type { RecordedPoolSettingsRead } from "./RecordedPoolSettingsRead";
+import type { RecordedQueryWaitRead } from "./RecordedQueryWaitRead";
 import type { SequenceCapacity } from "./SequenceCapacity";
 import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
@@ -31,7 +32,11 @@ import type { SuspectPageHistoryRead } from "./SuspectPageHistoryRead";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 
-export type OperationalStats = { managed_instance_resources?: RecordedManagedInstanceResourceRead, suspect_pages?: SuspectPageHistoryRead, storage?: StorageRead, cached_runtime?: CachedRuntimeRead, 
+export type OperationalStats = { 
+/**
+ * One explicitly selected original wait-history capture; never joined to current scan workload by names.
+ */
+query_wait_fragments?: RecordedQueryWaitRead, managed_instance_resources?: RecordedManagedInstanceResourceRead, suspect_pages?: SuspectPageHistoryRead, storage?: StorageRead, cached_runtime?: CachedRuntimeRead, 
 /**
  * An independent original capture; its shared target and receipts are never current database ownership.
  */
@@ -52,6 +57,10 @@ group_replication: Array<RecordedOperationalRead>,
  * Independently captured Galera node points never grade the current database or workload.
  */
 galera: Array<RecordedOperationalRead>, full_text_populations: Array<RecordedOperationalRead>, 
+/**
+ * Independent original native histories; current scan membership supplies no historical ownership.
+ */
+cdc_history: Array<RecordedOperationalRead>, change_feed_history: Array<RecordedOperationalRead>, 
 /**
  * Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
  */

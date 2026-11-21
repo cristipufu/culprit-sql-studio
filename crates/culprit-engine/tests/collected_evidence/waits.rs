@@ -60,7 +60,19 @@ fn native_wait(
     let TelemetryRecord::QueryRuntime(runtime) = &records[1] else { panic!() };
     let mut key = runtime.key.clone();
     key.native.id = id.into();
-    WaitMeasurement { key, category: category.into(), unit, total, average: None, minimum: None, maximum: None }
+    WaitMeasurement {
+        key,
+        category: category.into(),
+        unit,
+        total,
+        average: None,
+        minimum: None,
+        maximum: None,
+        last: None,
+        standard_deviation: None,
+        category_description: None,
+        outcome_description: None,
+    }
 }
 
 fn integer_wait(records: &[TelemetryRecord], category: &str, total: &str, id: &str) -> WaitMeasurement {

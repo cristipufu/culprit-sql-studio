@@ -121,6 +121,10 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
         average: Some(1.25),
         minimum: Some(MeasurementValue::Integer("0".into())),
         maximum: None,
+        last: Some(MeasurementValue::Integer("9007199254740993".into())),
+        standard_deviation: Some(0.75),
+        category_description: Some("Native Page IO".into()),
+        outcome_description: Some("Regular".into()),
     }));
     (source, records)
 }
@@ -212,5 +216,28 @@ pub fn query_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryR
     let SourceObservation::QueryHistory(history) = &mut source.observation else { panic!() };
     history.waits.as_mut().unwrap().coverage = WaitCaptureCoverage::Unverified;
     cases.push((source, records));
+    cases.push(query_wait_fragment_evidence());
     cases
+}
+
+/// Same-category fragments retain different outcomes and native routing dimensions; no last/stddev representative.
+pub fn query_wait_fragment_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (mut source, mut records) = query_evidence();
+    let SourceObservation::QueryHistory(history) = &mut source.observation else { panic!("native query history") };
+    history.waits = Some(wait_semantics(WaitCaptureState::Enabled));
+    let mut fragment = records
+        .iter()
+        .find_map(|record| match record {
+            TelemetryRecord::QueryWaits(wait) => Some(wait.clone()),
+            _ => None,
+        })
+        .unwrap();
+    fragment.key.native.id = "native-waits-2".into();
+    fragment.key.native.qualifiers.insert("execution_type".into(), "3".into());
+    fragment.key.native.qualifiers.insert("native-replica".into(), "other-original-member".into());
+    fragment.last = Some(MeasurementValue::Integer("7".into()));
+    fragment.standard_deviation = Some(1.25);
+    fragment.outcome_description = Some("Aborted".into());
+    records.push(TelemetryRecord::QueryWaits(fragment));
+    (source, records)
 }

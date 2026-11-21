@@ -20,6 +20,8 @@ mod scan_capture;
 mod service_cmd;
 mod share_cmd;
 mod ssh;
+#[cfg(test)]
+mod test_support;
 mod timeline_cmd;
 mod update_cmd;
 mod waits_cmd;

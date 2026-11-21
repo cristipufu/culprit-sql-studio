@@ -5,7 +5,7 @@ pub use completed_blocking::{CompletedActivity, CompletedBlocking};
 mod completed_capture;
 pub use completed_capture::{CompletedCaptureBudget, CompletedCaptureLookup};
 mod completed_query_history;
-pub use completed_query_history::CompletedQueryHistory;
+pub use completed_query_history::{CompletedQueryHistory, QueryHistoryReadKind};
 mod completed_snapshot;
 pub use completed_snapshot::CompletedSnapshot;
 mod artifacts;

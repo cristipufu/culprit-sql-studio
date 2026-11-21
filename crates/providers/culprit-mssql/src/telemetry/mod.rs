@@ -3,7 +3,7 @@ mod backup_history;
 mod cache_entry_memory;
 mod cached_definitions;
 mod cached_runtime;
-mod cdc;
+mod change_capture;
 mod check_constraints;
 mod cleanup;
 mod columns;

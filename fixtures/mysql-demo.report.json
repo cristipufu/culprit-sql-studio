@@ -1904,7 +1904,7 @@
         "table": "orders"
       }
     ],
-    "format": 42,
+    "format": 43,
     "histograms": [
       {
         "buckets": 4.0,
@@ -2316,6 +2316,8 @@
     "missing_indexes": [],
     "notes": [],
     "operations": {
+      "cdc_history": [],
+      "change_feed_history": [],
       "cluster": null,
       "counters": [],
       "full_text_populations": [],

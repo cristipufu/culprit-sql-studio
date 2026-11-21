@@ -443,11 +443,20 @@ impl Out {
         if let Some(pool) = &report.pool_settings {
             println!("\n{}", observations::pool_settings(pool));
         }
+        for history in report.cdc.as_deref().unwrap_or_default() {
+            println!("\n{}", observations::cdc(history));
+        }
+        for history in report.change_feed.as_deref().unwrap_or_default() {
+            println!("\n{}", observations::change_feed(history));
+        }
         for group in report.group_replication.as_deref().unwrap_or_default() {
             println!("\n{}", observations::group_replication(group));
         }
         for group in report.galera.as_deref().unwrap_or_default() {
             println!("\n{}", observations::galera(group));
+        }
+        if let Some(waits) = &report.query_wait_fragments {
+            println!("\n{}", observations::query_wait_fragments(waits));
         }
         for memory in report.table_memory.as_deref().unwrap_or_default() {
             println!("\n{}", observations::table_memory(memory));
@@ -799,6 +808,9 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "locked": report.locked,
         "assessments": report.assessments,
         "engine_limitations": s.server.engine.spec().limitations(),
+        "cdc":report.cdc.as_ref().map(|reports|reports.iter().map(|report|observations::compact_change_capture((&report.title,&report.summary),report.source_state,report.read_complete,report.context.as_ref(),&report.limitations,&report.entries,&report.sources)).collect::<Vec<_>>()),
+        "change_feed":report.change_feed.as_ref().map(|reports|reports.iter().map(|report|observations::compact_change_capture((&report.title,&report.summary),report.source_state,report.read_complete,report.context.as_ref(),&report.limitations,&report.entries,&report.sources)).collect::<Vec<_>>()),
+        "query_wait_fragments": report.query_wait_fragments.as_deref().map(observations::compact_query_wait_fragments),
         "table_memory": report.table_memory.as_ref().map(|reports|reports.iter().map(observations::compact_table_memory).collect::<Vec<_>>()),
         "group_replication": report.group_replication.as_ref().map(|reports|reports.iter().map(observations::compact_group_replication).collect::<Vec<_>>()),
         "galera": report.galera.as_ref().map(|reports|reports.iter().map(observations::compact_galera).collect::<Vec<_>>()),
@@ -849,11 +861,20 @@ pub(super) fn markdown_report(report: &Report) -> String {
         out.push_str(&format!("\n## {}\n\n", t!("cli.findings.history", count = stopped.len().to_string())));
         table(&mut out, &stopped, active.len());
     }
+    for history in report.cdc.as_deref().unwrap_or_default() {
+        out.push_str(&markdown_text_block(&observations::cdc(history)));
+    }
+    for history in report.change_feed.as_deref().unwrap_or_default() {
+        out.push_str(&markdown_text_block(&observations::change_feed(history)));
+    }
     for group in report.group_replication.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::group_replication(group)));
     }
     for group in report.galera.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::galera(group)));
+    }
+    if let Some(waits) = &report.query_wait_fragments {
+        out.push_str(&markdown_text_block(&observations::query_wait_fragments(waits)));
     }
     for memory in report.table_memory.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::table_memory(memory)));

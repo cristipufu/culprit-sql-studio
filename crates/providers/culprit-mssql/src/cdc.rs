@@ -1,4 +1,5 @@
 //! Read-only database-local CDC statistics. Native errors are retained without their private message text.
+use crate::change_capture::{local_time, native_id, native_lsn};
 use crate::{
     local_source::Context,
     read::{
@@ -112,22 +113,6 @@ pub(crate) async fn errors(reader: &mut impl NativeRead, database_id: u32, limit
             )
         })
         .collect()
-}
-fn native_id(row: &Rec, name: &str) -> Result<u32> {
-    integer(row, name)?.try_into().map_err(|_| invalid_data())
-}
-fn native_lsn(row: &Rec, name: &str) -> Result<Option<String>> {
-    // CDC's fixed-width native LSN values can include one terminal NUL. Preserve the LSN itself;
-    // embedded or repeated terminators still fail the domain validator instead of being cleaned away.
-    Ok(optional_text(row, name)?.map(|mut value| {
-        if value.ends_with('\0') {
-            value.pop();
-        }
-        value
-    }))
-}
-fn local_time(row: &Rec, name: &str) -> Result<Option<String>> {
-    optional_text(row, name)?.map(|value| crate::sql_time::native_time(&value)).transpose()
 }
 fn point(row: &Rec, database_id: u32, data: MssqlCdcData) -> Result<Point> {
     let native_database_id = native_id(row, "database_id")?;

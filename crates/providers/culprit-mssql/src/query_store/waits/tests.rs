@@ -114,6 +114,10 @@ fn unknown_raw_categories_survive_export_while_invalid_native_id_and_time_are_re
         ("avg_query_wait_time_ms", Val::Float(20.0)),
         ("min_query_wait_time_ms", Val::Int(10)),
         ("max_query_wait_time_ms", Val::Int(30)),
+        ("last_query_wait_time_ms", Val::Null),
+        ("stdev_query_wait_time_ms", Val::Null),
+        ("wait_category_desc", Val::Null),
+        ("execution_type_desc", Val::Null),
     ]);
     let TelemetryRecord::QueryWaits(wait) =
         super::super::decode::record(&row, TelemetryStream::QueryWaits, StatementReferences::default()).unwrap()

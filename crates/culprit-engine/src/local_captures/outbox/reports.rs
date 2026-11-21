@@ -98,6 +98,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::BackupHistory => {
             Ok(LocalSnapshotReport::BackupHistory(Box::new(culprit_checks::backup_history::explain_captured(read)?)))
         }
+        LocalCaptureAnalysisKind::ChangeFeed => {
+            Ok(LocalSnapshotReport::ChangeFeed(Box::new(culprit_checks::change_feed::explain_captured(read)?)))
+        }
         LocalCaptureAnalysisKind::Cdc => {
             Ok(LocalSnapshotReport::Cdc(Box::new(culprit_checks::cdc::explain_captured(read)?)))
         }
@@ -131,6 +134,7 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::ManagedInstanceResources
         | LocalCaptureAnalysisKind::PoolSettings
         | LocalCaptureAnalysisKind::Replication
+        | LocalCaptureAnalysisKind::QueryWaitFragments
         | LocalCaptureAnalysisKind::PageServerReads
         | LocalCaptureAnalysisKind::SessionCensus
         | LocalCaptureAnalysisKind::Blocking

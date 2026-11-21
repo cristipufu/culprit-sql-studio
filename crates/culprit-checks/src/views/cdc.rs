@@ -1,8 +1,9 @@
 //! One pure interpretation of original CDC snapshots. No event deduplication, cross-capture delta or health zero.
 use culprit_core::{
-    CdcEntry, CdcEntryKind, CdcField, CdcReport, ErrorCode, Result, SourceState, format, t, telemetry::*,
+    CdcReport, ChangeCaptureEntry, ChangeCaptureEntryKind, ChangeCaptureField, ErrorCode, Result, SourceState, format,
+    t, telemetry::*,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub struct CdcEvidence<'a> {
     pub source: &'a CollectionDescription,
@@ -20,7 +21,22 @@ pub fn explain_captured(read: &CapturedOperationalRead) -> Result<CdcReport> {
     })
 }
 pub fn explain(evidence: CdcEvidence<'_>) -> Result<CdcReport> {
-    let QualifiedEvidence { context, sources, points } = validate(&evidence)?;
+    let qualified = super::change_capture::qualify(
+        MssqlChangeCaptureFamily::Cdc,
+        evidence.source,
+        evidence.observations,
+        evidence.read_complete,
+    )?;
+    let context = qualified.context;
+    let sources = qualified.sources;
+    let points = qualified
+        .points
+        .into_iter()
+        .map(|(row, point)| {
+            let MssqlChangeCapturePoint::Cdc(point) = point else { unreachable!("qualified CDC family") };
+            (row, point)
+        })
+        .collect::<Vec<_>>();
     let status = points.iter().find_map(|(_, point)| match &point.data {
         MssqlCdcData::Status(status) => Some(status),
         _ => None,
@@ -74,7 +90,7 @@ pub fn explain(evidence: CdcEvidence<'_>) -> Result<CdcReport> {
         .map(|(row, point)| entry(row, point))
         .collect();
     Ok(CdcReport {
-        context,
+        context: Some(context),
         sources,
         source_state,
         read_complete: evidence.read_complete,
@@ -85,55 +101,10 @@ pub fn explain(evidence: CdcEvidence<'_>) -> Result<CdcReport> {
         entries,
     })
 }
-struct QualifiedEvidence<'a> {
-    context: NativeReadContext,
-    sources: Vec<StateSourceCoverage>,
-    points: Vec<(&'a OperationalObservation, &'a MssqlCdcObservation)>,
-}
-fn validate<'a>(evidence: &CdcEvidence<'a>) -> Result<QualifiedEvidence<'a>> {
-    let header = evidence.source.observation.snapshot().ok_or_else(invalid)?;
-    let fallback = NativeReadContext::from_snapshot(evidence.source)?;
-    if !cdc_header_is_valid(header)
-        || evidence.source.target.engine() != culprit_core::Engine::Mssql
-        || !fallback.has_qualified_local_owner()
-        || evidence.source.continuity != SourceContinuity::Unverified
-    {
-        return Err(invalid());
-    }
-    let mut sources =
-        header.sources.iter().map(|source| (source.source.as_str(), (source, 0usize))).collect::<BTreeMap<_, _>>();
-    let mut points = Vec::new();
-    let mut keys = BTreeSet::new();
-    let mut original: Option<&MssqlCdcObservation> = None;
-    for row in evidence.observations {
-        let OperationalFact::MssqlCdc(point) = &row.fact else { return Err(invalid()) };
-        let Some((coverage, count)) = sources.get_mut(row.source.as_str()) else { return Err(invalid()) };
-        if !row.is_valid()
-            || !point.fits_source(evidence.source)
-            || !matches!(coverage.state, SourceState::Collected | SourceState::Partial)
-            || point.position > coverage.records
-            || !keys.insert((row.source.as_str(), row.key.as_str()))
-            || original
-                .is_some_and(|original| original.database_id != point.database_id || original.context != point.context)
-        {
-            return Err(invalid());
-        }
-        original = Some(point);
-        *count += 1;
-        points.push((*row, point.as_ref()));
-    }
-    if sources.values().any(|(source, count)| {
-        *count > source.records as usize || evidence.read_complete && *count != source.records as usize
-    }) {
-        return Err(invalid());
-    }
-    let context = original.map(|point| point.context.clone()).unwrap_or(fallback);
-    Ok(QualifiedEvidence { context, sources: header.sources.clone(), points })
-}
-fn entry(row: &OperationalObservation, point: &MssqlCdcObservation) -> CdcEntry {
+fn entry(row: &OperationalObservation, point: &MssqlCdcObservation) -> ChangeCaptureEntry {
     let (kind, title, explanation, fields, investigation, verify) = match &point.data {
         MssqlCdcData::Error(error) => (
-            CdcEntryKind::Error,
+            ChangeCaptureEntryKind::Error,
             t!("view.cdc.entry.error", number = format::digits(error.error_number.to_string())),
             t!("view.cdc.entry.error_context"),
             vec![
@@ -149,7 +120,7 @@ fn entry(row: &OperationalObservation, point: &MssqlCdcObservation) -> CdcEntry 
         MssqlCdcData::ScanSession(scan) => {
             let aggregate = scan.session_id == 0;
             (
-                if aggregate { CdcEntryKind::Aggregate } else { CdcEntryKind::ScanSession },
+                if aggregate { ChangeCaptureEntryKind::Aggregate } else { ChangeCaptureEntryKind::ScanSession },
                 if aggregate {
                     t!("view.cdc.entry.aggregate")
                 } else {
@@ -184,7 +155,7 @@ fn entry(row: &OperationalObservation, point: &MssqlCdcObservation) -> CdcEntry 
         }
         MssqlCdcData::Status(_) => unreachable!("only native error and scan variants render entries"),
     };
-    CdcEntry {
+    ChangeCaptureEntry {
         source: row.source.clone(),
         observation_key: row.key.clone(),
         kind,
@@ -196,11 +167,31 @@ fn entry(row: &OperationalObservation, point: &MssqlCdcObservation) -> CdcEntry 
         verify,
     }
 }
-fn field(key: &str, label: String, value: Option<String>) -> CdcField {
-    CdcField { key: key.into(), label, value }
+fn field(key: &str, label: String, value: Option<String>) -> ChangeCaptureField {
+    ChangeCaptureField { key: key.into(), label, value }
 }
 fn invalid() -> culprit_core::Error {
     CollectionStop::InvalidPage.error()
 }
 #[cfg(test)]
 mod tests;
+
+pub fn explain_recorded(recorded: &RecordedOperationalRead) -> Result<CdcReport> {
+    match recorded {
+        RecordedOperationalRead::Captured { read } => explain_captured(read),
+        RecordedOperationalRead::Unavailable { reason } => Ok(unavailable(reason)),
+    }
+}
+pub fn unavailable(reason: &culprit_core::i18n::Message) -> CdcReport {
+    CdcReport {
+        context: None,
+        sources: vec![],
+        source_state: SourceState::Unavailable,
+        read_complete: false,
+        enabled: None,
+        title: t!("view.cdc.title"),
+        summary: reason.render(),
+        limitations: vec![t!("view.change_capture.history.original")],
+        entries: vec![],
+    }
+}

@@ -652,7 +652,7 @@
     "escalations_before": null,
     "evictions_before": null,
     "foreign_keys": [],
-    "format": 42,
+    "format": 43,
     "histograms": null,
     "id": "20261023T213241Z",
     "identity": {
@@ -773,6 +773,8 @@
       }
     ],
     "operations": {
+      "cdc_history": [],
+      "change_feed_history": [],
       "cluster": null,
       "counters": [
         {

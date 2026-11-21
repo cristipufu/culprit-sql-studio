@@ -1,7 +1,7 @@
-//! One optional original CDC capture. Native source rows and independent read gaps share the existing owner.
+//! One closed native log-capture owner. CDC and change feed retain distinct data and coverage.
 use super::state;
 use crate::{
-    cdc::{self, Point},
+    cdc, change_feed,
     conn::Pool,
     local_source::Context,
     read::{NativeRead, ReadError, ReadSession, invalid_data},
@@ -15,29 +15,91 @@ enum Population {
     Errors,
 }
 impl Population {
-    fn source(self) -> &'static str {
+    fn index(self) -> usize {
         match self {
-            Self::Scans => MSSQL_CDC_SCANS_SOURCE,
-            Self::Errors => MSSQL_CDC_ERRORS_SOURCE,
+            Self::Scans => 1,
+            Self::Errors => 2,
         }
     }
-    fn maximum(self) -> usize {
-        match self {
-            Self::Scans => MAX_MSSQL_CDC_SCAN_ROWS,
-            Self::Errors => MAX_MSSQL_CDC_ERROR_ROWS,
+    fn source(self, family: MssqlChangeCaptureFamily) -> &'static str {
+        family.sources()[self.index()]
+    }
+    fn maximum(self, family: MssqlChangeCaptureFamily) -> usize {
+        family.maximum(self.index())
+    }
+    async fn read(
+        self,
+        family: MssqlChangeCaptureFamily,
+        reader: &mut impl NativeRead,
+        database_id: u32,
+        limit: usize,
+    ) -> Result<Vec<Point>> {
+        match (family, self) {
+            (MssqlChangeCaptureFamily::Cdc, Self::Scans) => {
+                Ok(cdc::scans(reader, database_id, limit).await?.into_iter().map(Point::Cdc).collect())
+            }
+            (MssqlChangeCaptureFamily::Cdc, Self::Errors) => {
+                Ok(cdc::errors(reader, database_id, limit).await?.into_iter().map(Point::Cdc).collect())
+            }
+            (MssqlChangeCaptureFamily::ChangeFeed, Self::Scans) => {
+                Ok(change_feed::scans(reader, database_id, limit).await?.into_iter().map(Point::ChangeFeed).collect())
+            }
+            (MssqlChangeCaptureFamily::ChangeFeed, Self::Errors) => {
+                Ok(change_feed::errors(reader, database_id, limit).await?.into_iter().map(Point::ChangeFeed).collect())
+            }
         }
     }
-    fn layout_available(self, status: &MssqlCdcStatus) -> bool {
+}
+enum Point {
+    Cdc(cdc::Point),
+    ChangeFeed(change_feed::Point),
+}
+impl Point {
+    fn bind(self, context: &NativeReadContext, position: u32) -> Result<OperationalObservation> {
         match self {
-            Self::Scans => status.scan_layout_available,
-            Self::Errors => status.error_layout_available,
+            Self::Cdc(point) => point.bind(context, position),
+            Self::ChangeFeed(point) => point.bind(context, position),
         }
     }
-    async fn read(self, reader: &mut impl NativeRead, database_id: u32, limit: usize) -> Result<Vec<Point>> {
-        match self {
-            Self::Scans => cdc::scans(reader, database_id, limit).await,
-            Self::Errors => cdc::errors(reader, database_id, limit).await,
+}
+enum Availability {
+    Cdc(MssqlCdcStatus),
+    ChangeFeed(MssqlChangeFeedAvailability),
+}
+impl Availability {
+    fn from_point(point: &Point) -> Result<Self> {
+        match point {
+            Point::Cdc(cdc::Point { data: MssqlCdcData::Status(value), .. }) => Ok(Self::Cdc(value.clone())),
+            Point::ChangeFeed(change_feed::Point { data: MssqlChangeFeedData::Availability(value), .. }) => {
+                Ok(Self::ChangeFeed(value.clone()))
+            }
+            _ => Err(invalid_data()),
         }
+    }
+    fn unavailable(&self, population: Population, writable: Option<bool>) -> Option<StateSourceCoverage> {
+        match self {
+            Self::Cdc(status) => cdc_unavailable(population, status, writable),
+            Self::ChangeFeed(status) => change_feed_unavailable(population, status, writable),
+        }
+    }
+}
+async fn availability(
+    family: MssqlChangeCaptureFamily,
+    reader: &mut impl NativeRead,
+    context: &Context,
+) -> Result<Point> {
+    match family {
+        MssqlChangeCaptureFamily::Cdc => cdc::status(reader, context).await.map(Point::Cdc),
+        MssqlChangeCaptureFamily::ChangeFeed => change_feed::availability(reader, context).await.map(Point::ChangeFeed),
+    }
+}
+fn family(selection: &CollectionSelection) -> Result<MssqlChangeCaptureFamily> {
+    match selection {
+        CollectionSelection::Snapshot { dataset: SnapshotDataset::Cdc } => Ok(MssqlChangeCaptureFamily::Cdc),
+        CollectionSelection::Snapshot { dataset: SnapshotDataset::ChangeFeed } => {
+            Ok(MssqlChangeCaptureFamily::ChangeFeed)
+        }
+        _ => Err(invalid_data()),
     }
 }
 const MAX_ROWS: u32 = 1 + MAX_MSSQL_CDC_SCAN_ROWS as u32 + MAX_MSSQL_CDC_ERROR_ROWS as u32;
@@ -57,34 +119,38 @@ pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
         ..requested.clone()
     }
 }
-pub(super) struct CdcSource<R: NativeRead = ReadSession> {
-    inner: culprit_read::FrozenSource<CdcReader<R>>,
+pub(super) struct ChangeCaptureSource<R: NativeRead = ReadSession> {
+    inner: culprit_read::FrozenSource<ChangeCaptureReader<R>>,
 }
-struct CdcReader<R: NativeRead> {
+struct ChangeCaptureReader<R: NativeRead> {
     io: R,
     host: String,
     port: u16,
     context: Option<Context>,
+    family: MssqlChangeCaptureFamily,
 }
-impl CdcSource {
+impl ChangeCaptureSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         Self::with_io(ReadSession::collection(pool, bounded_budget(&request.budget))?, request, host, port)
     }
 }
-impl<R: NativeRead> CdcSource<R> {
+impl<R: NativeRead> ChangeCaptureSource<R> {
     fn with_io(io: R, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         request.validate()?;
         request.subject.require_database()?;
-        if request.selection != (CollectionSelection::Snapshot { dataset: SnapshotDataset::Cdc }) {
-            return Err(invalid_data());
-        }
+        let family = family(&request.selection)?;
         let mut request = request.clone();
         request.budget = bounded_budget(&request.budget);
         request.budget.validate()?;
-        Ok(Self { inner: culprit_read::FrozenSource::new(CdcReader { io, host, port, context: None }, &request)? })
+        Ok(Self {
+            inner: culprit_read::FrozenSource::new(
+                ChangeCaptureReader { io, host, port, context: None, family },
+                &request,
+            )?,
+        })
     }
 }
-impl<R: NativeRead> CdcReader<R> {
+impl<R: NativeRead> ChangeCaptureReader<R> {
     async fn admit(&mut self, context: &Context) -> Result<()> {
         if context.activity.edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
             crate::resources::admit_resources(&mut self.io).await
@@ -95,30 +161,29 @@ impl<R: NativeRead> CdcReader<R> {
     }
 }
 #[async_trait::async_trait]
-impl<R: NativeRead> culprit_read::ObservationReader for CdcReader<R> {
+impl<R: NativeRead> culprit_read::ObservationReader for ChangeCaptureReader<R> {
     async fn observe(&mut self, request: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
         let context = Context::read(&mut self.io, &self.host, self.port).await?;
         require_owner(&context)?;
         let mut points = Vec::new();
         let mut sources = Vec::new();
-        let status = match cdc::status(&mut self.io, &context).await {
+        let status = match availability(self.family, &mut self.io, &context).await {
             Ok(point) => {
-                let MssqlCdcData::Status(status) = &point.data else { return Err(invalid_data()) };
-                let status = status.clone();
+                let status = Availability::from_point(&point)?;
                 points.push((point, 1));
-                sources.push(StateSourceCoverage::collected(MSSQL_CDC_STATUS_SOURCE.into(), 1));
+                sources.push(StateSourceCoverage::collected(self.family.sources()[0].into(), 1));
                 Some(status)
             }
             Err(error) => {
-                sources.push(state::source_failure(MSSQL_CDC_STATUS_SOURCE.into(), error)?);
+                sources.push(state::source_failure(self.family.sources()[0].into(), error)?);
                 None
             }
         };
         for population in [Population::Scans, Population::Errors] {
-            let name = population.source();
-            let maximum = population.maximum();
+            let name = population.source(self.family);
+            let maximum = population.maximum(self.family);
             if let Some(unavailable) =
-                unavailable(population, status.as_ref(), sources.first(), context.activity.writable)
+                unavailable(self.family, population, status.as_ref(), sources.first(), context.activity.writable)
             {
                 sources.push(unavailable);
                 continue;
@@ -134,7 +199,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for CdcReader<R> {
             }
             self.admit(&context).await?;
             let limit = remaining.min(maximum);
-            let result = population.read(&mut self.io, context.database_id, limit).await;
+            let result = population.read(self.family, &mut self.io, context.database_id, limit).await;
             match result {
                 Ok(mut rows) => {
                     let complete = rows.len() <= limit;
@@ -167,10 +232,10 @@ impl<R: NativeRead> culprit_read::ObservationReader for CdcReader<R> {
         let description = CollectionDescription {
             target: read.target,
             partition: read.partition,
-            source: "mssql-cdc".into(),
+            source: self.family.source().into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::Cdc,
+                dataset: self.family.dataset(),
                 observed_from: read.observed_from,
                 observed_until: until,
                 records: records.len().try_into().map_err(|_| invalid_data())?,
@@ -210,36 +275,69 @@ fn require_owner(context: &Context) -> Result<()> {
     Ok(())
 }
 fn unavailable(
+    family: MssqlChangeCaptureFamily,
     population: Population,
-    status: Option<&MssqlCdcStatus>,
+    status: Option<&Availability>,
     status_source: Option<&StateSourceCoverage>,
     writable: Option<bool>,
 ) -> Option<StateSourceCoverage> {
-    let name = population.source();
     let Some(status) = status else {
-        let gap = status_source;
         return Some(StateSourceCoverage::unavailable(
-            name.into(),
-            gap.and_then(|source| source.error_code).unwrap_or(ErrorCode::QueryFailed),
-            gap.and_then(|source| source.stopped),
+            population.source(family).into(),
+            status_source.and_then(|source| source.error_code).unwrap_or(ErrorCode::QueryFailed),
+            status_source.and_then(|source| source.stopped),
         ));
     };
+    status.unavailable(population, writable)
+}
+fn cdc_unavailable(
+    population: Population,
+    status: &MssqlCdcStatus,
+    writable: Option<bool>,
+) -> Option<StateSourceCoverage> {
+    let name = population.source(MssqlChangeCaptureFamily::Cdc);
     if status.enabled == Some(false) {
         return Some(StateSourceCoverage::not_applicable(name.into()));
     }
-    let error = if status.enabled.is_none() || writable.is_none() || status.has_permission.is_none() {
-        Some(CollectionStop::SourceUnavailable)
-    } else {
-        None
-    };
-    if let Some(error) = error {
-        return Some(StateSourceCoverage::unavailable(name.into(), error.error().code, Some(error)));
+    if status.enabled.is_none() || writable.is_none() || status.has_permission.is_none() {
+        let stop = CollectionStop::SourceUnavailable;
+        return Some(StateSourceCoverage::unavailable(name.into(), stop.error().code, Some(stop)));
     }
+    let layout = match population {
+        Population::Scans => status.scan_layout_available,
+        Population::Errors => status.error_layout_available,
+    };
     let code = if writable != Some(true) {
         Some(ErrorCode::Unsupported)
     } else if status.has_permission != Some(true) {
         Some(ErrorCode::PermissionDenied)
-    } else if !population.layout_available(status) {
+    } else if !layout {
+        Some(ErrorCode::Unsupported)
+    } else {
+        None
+    };
+    code.map(|code| StateSourceCoverage::unavailable(name.into(), code, None))
+}
+fn change_feed_unavailable(
+    population: Population,
+    status: &MssqlChangeFeedAvailability,
+    writable: Option<bool>,
+) -> Option<StateSourceCoverage> {
+    let name = population.source(MssqlChangeCaptureFamily::ChangeFeed);
+    if writable.is_none() || status.has_permission().is_none() {
+        let stop = CollectionStop::SourceUnavailable;
+        return Some(StateSourceCoverage::unavailable(name.into(), stop.error().code, Some(stop)));
+    }
+    let layout = match population {
+        Population::Scans => status.scan_layout_available,
+        Population::Errors => status.error_layout_available,
+    };
+    let supported = status.native_major >= 16 || matches!(status.native_edition, 5 | 8);
+    let code = if !supported || writable != Some(true) {
+        Some(ErrorCode::Unsupported)
+    } else if status.has_permission() != Some(true) {
+        Some(ErrorCode::PermissionDenied)
+    } else if !layout {
         Some(ErrorCode::Unsupported)
     } else {
         None
@@ -247,7 +345,7 @@ fn unavailable(
     code.map(|code| StateSourceCoverage::unavailable(name.into(), code, None))
 }
 #[async_trait::async_trait]
-impl<R: NativeRead> TelemetrySource for CdcSource<R> {
+impl<R: NativeRead> TelemetrySource for ChangeCaptureSource<R> {
     async fn describe(&mut self) -> Result<CollectionDescription> {
         self.inner.describe().await
     }
@@ -269,3 +367,6 @@ impl<R: NativeRead> TelemetrySource for CdcSource<R> {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod native_tests;

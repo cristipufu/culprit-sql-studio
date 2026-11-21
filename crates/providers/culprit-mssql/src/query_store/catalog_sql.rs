@@ -131,7 +131,9 @@ pub(crate) fn waits(range: Option<super::replicas::Population>, layout: &super::
     format!(
         r#"{relation}
 SELECT TOP (@P1) /* culprit */ r.wait_stats_id AS row_id,r.plan_id,{population},r.execution_type,
- wait_category,total_query_wait_time_ms,avg_query_wait_time_ms,min_query_wait_time_ms,max_query_wait_time_ms,
+ wait_category,wait_category_desc,execution_type_desc,
+ total_query_wait_time_ms,avg_query_wait_time_ms,min_query_wait_time_ms,max_query_wait_time_ms,
+ last_query_wait_time_ms,stdev_query_wait_time_ms,
 {definitions}FROM culprit_waits r
 LEFT JOIN sys.query_store_plan p ON p.plan_id=r.plan_id
 LEFT JOIN sys.query_store_query q ON q.query_id=p.query_id

@@ -4,8 +4,18 @@ mod page_server_reads;
 pub use page_server_reads::{PageServerReadAvailability, PageServerReadStatistics, PageServerReadSummary};
 #[cfg(test)]
 mod cohort_tests;
+#[cfg(test)]
+mod wait_fragment_tests;
 
 pub const MAX_STATEMENT_METRICS: usize = 64;
+/// Query Store describes wait categories and execution outcomes with nvarchar(128).
+pub const MAX_NATIVE_WAIT_DESCRIPTION_UNITS: usize = 128;
+
+fn required_nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    reader: D,
+) -> std::result::Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(reader)
+}
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", content = "value", rename_all = "kebab-case", deny_unknown_fields)]
@@ -216,6 +226,17 @@ pub struct WaitMeasurement {
     pub average: Option<f64>,
     pub minimum: Option<MeasurementValue>,
     pub maximum: Option<MeasurementValue>,
+    /// Last value in this original native fragment; no order across independently sampled fragments is implied.
+    #[serde(deserialize_with = "required_nullable")]
+    pub last: Option<MeasurementValue>,
+    /// Native standard deviation in `unit`, never inferred from another fragment or from a total.
+    #[serde(deserialize_with = "required_nullable")]
+    pub standard_deviation: Option<f64>,
+    /// Original native labels, independent of the category/outcome identities used by interpretation.
+    #[serde(deserialize_with = "required_nullable")]
+    pub category_description: Option<String>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub outcome_description: Option<String>,
 }
 impl WaitMeasurement {
     pub fn is_valid(&self) -> bool {
@@ -224,6 +245,11 @@ impl WaitMeasurement {
             && self.unit.is_time()
             && self.total.is_valid()
             && self.average.is_none_or(|value| value.is_finite() && value >= 0.0)
-            && [&self.minimum, &self.maximum].into_iter().flatten().all(MeasurementValue::is_valid)
+            && [&self.minimum, &self.maximum, &self.last].into_iter().flatten().all(MeasurementValue::is_valid)
+            && self.standard_deviation.is_none_or(|value| value.is_finite() && value >= 0.0)
+            && [&self.category_description, &self.outcome_description]
+                .into_iter()
+                .flatten()
+                .all(|value| value.encode_utf16().count() <= MAX_NATIVE_WAIT_DESCRIPTION_UNITS)
     }
 }

@@ -15,6 +15,8 @@ mod cached_statements;
 mod catalog_expression;
 mod catalog_visibility;
 mod cdc;
+mod change_capture;
+mod change_feed;
 mod check_constraints;
 mod collect;
 mod columns;

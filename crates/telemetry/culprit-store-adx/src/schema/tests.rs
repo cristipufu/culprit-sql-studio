@@ -195,6 +195,10 @@ fn wait_totals_keep_exact_milliseconds_and_are_not_confused_with_average_waits()
         average: Some(13.5),
         minimum: Some(MeasurementValue::Integer("2".into())),
         maximum: Some(MeasurementValue::Integer("23".into())),
+        last: None,
+        standard_deviation: None,
+        category_description: None,
+        outcome_description: None,
     };
     let schema = Schema::from_logical(culprit_collector::analytical::schema::queries::waits(&[]).unwrap()).unwrap();
     let projected = schema.project(&json!({"record":{"data":native}})).unwrap();

@@ -23,6 +23,10 @@ pub(super) fn record(
             "average": field(values, "AverageWait")?,
             "minimum": field(values, "MinimumWait")?,
             "maximum": field(values, "MaximumWait")?,
+            "last": field(values, "LastWait")?,
+            "standard_deviation": field(values, "WaitStandardDeviation")?,
+            "category_description": field(values, "WaitCategoryDescription")?,
+            "outcome_description": field(values, "ExecutionOutcomeDescription")?,
         }),
         TelemetryStream::QueryDefinitions | TelemetryStream::PlanDefinitions => {
             let data = definition(stream, values, payloads)?;

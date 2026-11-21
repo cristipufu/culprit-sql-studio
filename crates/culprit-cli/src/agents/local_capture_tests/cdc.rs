@@ -18,6 +18,8 @@ async fn cdc_local_mcp_action_reuses_original_native_outcomes_without_source_cal
         assert_eq!(value["native_rows"], expected.records);
         assert_eq!(value["native_sources"].as_array().unwrap().len(), 3);
         assert_eq!(value["read_complete"], true);
+        assert_eq!(value["original_read_bounds"]["from"], expected.observed_from);
+        assert_eq!(value["original_read_bounds"]["until"], expected.observed_until);
         assert_eq!(
             value["cdc"]["enabled"],
             if case == CdcCase::Disabled {

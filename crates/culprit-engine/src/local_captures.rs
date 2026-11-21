@@ -28,6 +28,7 @@ pub use session_census::LocalSessionCensus;
 #[ts(export)]
 pub enum LocalCaptureAnalysisKind {
     PageServerReads,
+    QueryWaitFragments,
     MemoryClerks,
     TempdbMetadataMemory,
     HyperscaleLogComponents,
@@ -43,6 +44,7 @@ pub enum LocalCaptureAnalysisKind {
     ConnectionOutcomes,
     Jobs,
     Cdc,
+    ChangeFeed,
     ColumnstoreRowgroups,
     FullTextPopulations,
     TableMemory,
@@ -64,6 +66,7 @@ pub enum LocalCaptureAnalysisKind {
 impl LocalCaptureAnalysisKind {
     pub const ALL: &'static [Self] = &[
         Self::PageServerReads,
+        Self::QueryWaitFragments,
         Self::MemoryClerks,
         Self::TempdbMetadataMemory,
         Self::HyperscaleLogComponents,
@@ -79,6 +82,7 @@ impl LocalCaptureAnalysisKind {
         Self::ConnectionOutcomes,
         Self::Jobs,
         Self::Cdc,
+        Self::ChangeFeed,
         Self::ColumnstoreRowgroups,
         Self::FullTextPopulations,
         Self::TableMemory,
@@ -103,7 +107,8 @@ impl LocalCaptureAnalysisKind {
         use LocalCaptureReadPlan::{Activity, Blocking, QueryHistory, Snapshot};
         use culprit_core::telemetry::SnapshotDataset as Dataset;
         match self {
-            Self::PageServerReads => QueryHistory,
+            Self::PageServerReads => QueryHistory(culprit_collector::outbox::QueryHistoryReadKind::Runtime),
+            Self::QueryWaitFragments => QueryHistory(culprit_collector::outbox::QueryHistoryReadKind::Waits),
             Self::Replication => LocalCaptureReadPlan::Replication,
             Self::PoolSettings => LocalCaptureReadPlan::PoolSettings,
             Self::ManagedInstanceResources => LocalCaptureReadPlan::ManagedInstanceResources,
@@ -123,6 +128,7 @@ impl LocalCaptureAnalysisKind {
             Self::Compilation => Snapshot(&[Dataset::QueryCompilation]),
             Self::Jobs => Snapshot(&[Dataset::Jobs]),
             Self::Cdc => Snapshot(&[Dataset::Cdc]),
+            Self::ChangeFeed => Snapshot(&[Dataset::ChangeFeed]),
             Self::ColumnstoreRowgroups => Snapshot(&[Dataset::ColumnstoreRowgroups]),
             Self::FullTextPopulations => Snapshot(&[Dataset::FullTextPopulations]),
             Self::TableMemory => Snapshot(&[Dataset::TableMemory]),
@@ -149,7 +155,7 @@ enum LocalCaptureReadPlan {
     Replication,
     PoolSettings,
     Activity,
-    QueryHistory,
+    QueryHistory(culprit_collector::outbox::QueryHistoryReadKind),
     Snapshot(&'static [culprit_core::telemetry::SnapshotDataset]),
     Blocking,
 }
@@ -169,6 +175,7 @@ pub type LocalCaptureTask<'a> = Pin<Box<dyn Future<Output = Result<LocalCaptured
 pub enum LocalCapturedAnalysis {
     ManagedInstanceResources(Box<LocalManagedInstanceResources>),
     PageServerReads(LocalPageServerReads),
+    QueryWaitFragments(Box<LocalQueryWaitFragments>),
     MemoryClerks(LocalMemoryClerks),
     HyperscaleLogComponents(LocalHyperscaleLogComponents),
     Snapshot(LocalSnapshotAnalysis),
@@ -181,6 +188,7 @@ impl LocalCapturedAnalysis {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
         match self {
             Self::PageServerReads(_) => LocalCaptureAnalysisKind::PageServerReads,
+            Self::QueryWaitFragments(_) => LocalCaptureAnalysisKind::QueryWaitFragments,
             Self::MemoryClerks(_) => LocalCaptureAnalysisKind::MemoryClerks,
             Self::HyperscaleLogComponents(_) => LocalCaptureAnalysisKind::HyperscaleLogComponents,
             Self::Snapshot(analysis) => analysis.report().kind(),
@@ -277,3 +285,29 @@ impl LocalHyperscaleLogComponents {
 
 mod managed_instance_resources;
 pub use managed_instance_resources::LocalManagedInstanceResources;
+
+/// Exact original wait history, independent of later live database/member/interval metadata.
+#[derive(Debug)]
+pub struct LocalQueryWaitFragments {
+    connection: String,
+    read: Box<culprit_core::telemetry::CapturedQueryWaitRead>,
+    report: Box<culprit_core::query_wait_report::QueryWaitFragmentReport>,
+    bytes_read: u64,
+}
+impl LocalQueryWaitFragments {
+    pub fn connection(&self) -> &str {
+        &self.connection
+    }
+    pub fn read(&self) -> &culprit_core::telemetry::CapturedQueryWaitRead {
+        &self.read
+    }
+    pub fn report(&self) -> &culprit_core::query_wait_report::QueryWaitFragmentReport {
+        &self.report
+    }
+    pub fn bytes_read(&self) -> u64 {
+        self.bytes_read
+    }
+    pub(crate) fn into_read(self) -> Box<culprit_core::telemetry::CapturedQueryWaitRead> {
+        self.read
+    }
+}

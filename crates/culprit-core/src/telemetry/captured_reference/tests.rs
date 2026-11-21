@@ -214,6 +214,10 @@ fn unresolved_waits_keep_their_original_unit_and_position_too() {
             average: None,
             minimum: None,
             maximum: None,
+            last: None,
+            standard_deviation: None,
+            category_description: None,
+            outcome_description: None,
         }),
     )
     .unwrap();

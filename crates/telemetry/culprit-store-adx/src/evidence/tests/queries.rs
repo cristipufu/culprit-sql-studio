@@ -327,3 +327,28 @@ async fn all_declared_families_are_admitted_and_absent_families_remain_explicit(
     assert!(absent.into_iter().all(|stream| result.gaps().iter().any(|gap| gap.stream == Some(stream))));
     assert!(result.gaps().iter().all(|gap| gap.reason == EvidenceGapReason::FamilyNotCaptured));
 }
+
+#[tokio::test]
+async fn changed_wait_last_deviation_or_native_descriptions_cannot_pass_the_original_projection_receipt() {
+    let (source, records) = test_support::query_wait_fragment_evidence();
+    let fixture = Fixture::new(source, records).await;
+    let schema = fixture.catalog.get(TelemetryStream::QueryWaits).unwrap();
+    let original = fixture.rows_for(EvidenceFamily::QueryWaits);
+    for (name, changed) in [
+        ("LastWait", json!(serde_json::to_string(&json!({"kind":"integer","value":"7"})).unwrap())),
+        ("WaitStandardDeviation", json!(99.25)),
+        ("WaitCategoryDescription", json!("Different native category")),
+        ("ExecutionOutcomeDescription", Value::Null),
+    ] {
+        let column = schema.columns().iter().position(|column| column.name == name).unwrap();
+        let mut rows = original.clone();
+        rows[0][column] = changed;
+        fixture.replies(vec![rows]);
+        let error = fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryWaits], budget(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{name}");
+    }
+}

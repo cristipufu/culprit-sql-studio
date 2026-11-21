@@ -847,7 +847,7 @@
         "table": "orders"
       }
     ],
-    "format": 42,
+    "format": 43,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -998,6 +998,8 @@
       }
     ],
     "operations": {
+      "cdc_history": [],
+      "change_feed_history": [],
       "cluster": null,
       "counters": [],
       "full_text_populations": [],

@@ -378,6 +378,15 @@ pub struct SeverityCount {
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub cdc: Option<Vec<crate::CdcReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub change_feed: Option<Vec<crate::ChangeFeedReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub query_wait_fragments: Option<Box<crate::query_wait_report::QueryWaitFragmentReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub table_full_text: Option<Box<crate::TableFullTextReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

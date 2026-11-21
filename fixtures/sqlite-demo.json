@@ -10,7 +10,9 @@
     "multixacts": [],
     "sqlite": null,
     "cluster": null,
-    "galera": []
+    "galera": [],
+    "cdc_history": [],
+    "change_feed_history": []
   },
   "sources": [
     {
@@ -39,7 +41,7 @@
       "reason": null
     }
   ],
-  "format": 42,
+  "format": 43,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",

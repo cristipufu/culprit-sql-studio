@@ -1,4 +1,5 @@
 //! CDC DMV rows are retained points. Scan IDs and process epochs do not establish a CDC reset generation.
+use super::change_capture::{counter, local_time, lsn};
 use super::*;
 
 pub const MSSQL_CDC_STATUS_SOURCE: &str = "cdc status";
@@ -152,7 +153,7 @@ impl MssqlCdcObservation {
         self.is_valid().then(|| format!("cdc:{}:{}", self.source(), self.position)).ok_or_else(invalid)
     }
     pub fn is_valid(&self) -> bool {
-        cdc_owner_is_qualified(&self.context)
+        change_capture_owner_is_qualified(&self.context)
             && (1..=i16::MAX as u32).contains(&self.database_id)
             && ObservationBounds::new(&self.context.observed_from, &self.context.observed_until)
                 .is_some_and(|bounds| bounds.contains(&self.observed_at))
@@ -178,37 +179,9 @@ impl MssqlCdcObservation {
 }
 
 pub fn cdc_header_is_valid(header: &StateSnapshotDescription) -> bool {
-    header.dataset == SnapshotDataset::Cdc
-        && header.is_valid()
-        && header.sources.len() == 3
-        && [
-            (MSSQL_CDC_STATUS_SOURCE, 1),
-            (MSSQL_CDC_SCANS_SOURCE, MAX_MSSQL_CDC_SCAN_ROWS),
-            (MSSQL_CDC_ERRORS_SOURCE, MAX_MSSQL_CDC_ERROR_ROWS),
-        ]
-        .iter()
-        .all(|(name, maximum)| {
-            header.sources.iter().any(|source| source.source == *name && source.records as usize <= *maximum)
-        })
+    MssqlChangeCaptureFamily::Cdc.valid_header(header)
 }
 
-pub fn cdc_owner_is_qualified(context: &NativeReadContext) -> bool {
-    context.has_qualified_local_owner()
-        && matches!(context.partition,SourcePartition::InstanceLocal{member:Some(ref member),..} if matches!(member.kind,SharedResourceKind::Instance|SharedResourceKind::Node))
-        && context.database_writable.is_some()
-        && matches!(context.target, CollectionTarget::Database(ref database) if database.engine == crate::Engine::Mssql)
-}
-fn counter(value: &Option<String>) -> bool {
-    value.as_deref().is_none_or(valid_counter)
-}
-fn local_time(value: &Option<String>) -> bool {
-    value.as_deref().is_none_or(super::catalog::local_time)
-}
-fn lsn(value: &Option<String>) -> bool {
-    value.as_ref().is_none_or(|value| {
-        !value.is_empty() && value.len() <= 23 && value.bytes().all(|byte| byte.is_ascii_hexdigit() || byte == b':')
-    })
-}
 fn invalid() -> Error {
     CollectionStop::InvalidPage.error()
 }

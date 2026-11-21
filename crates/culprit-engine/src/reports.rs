@@ -39,6 +39,10 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         full_text_populations: &'a Option<Vec<culprit_core::FullTextPopulationReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        cdc: &'a Option<Vec<culprit_core::CdcReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        change_feed: &'a Option<Vec<culprit_core::ChangeFeedReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         tempdb_metadata_memory: &'a Option<Box<culprit_core::TempdbMetadataMemoryReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         database_properties: &'a Option<Box<culprit_core::DatabasePropertiesReport>>,
@@ -56,6 +60,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         page_server_reads: &'a Option<Box<culprit_core::page_server_read_report::PageServerReadReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query_wait_fragments: &'a Option<Box<culprit_core::query_wait_report::QueryWaitFragmentReport>>,
         snapshot: &'a culprit_core::Snapshot,
         findings: &'a [culprit_core::Finding],
         locked: &'a [culprit_core::LockedCheck],
@@ -103,6 +109,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         instance_resources,
         completed_spills,
         page_server_reads,
+        query_wait_fragments,
         snapshot,
         findings,
         locked,
@@ -128,6 +135,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         group_replication,
         galera,
         full_text_populations,
+        cdc,
+        change_feed,
         database_properties,
         pool_settings,
         managed_instance_resources,
@@ -148,6 +157,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         instance_resources,
         completed_spills,
         page_server_reads,
+        query_wait_fragments,
         snapshot,
         findings,
         locked,
@@ -173,6 +183,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         group_replication,
         galera,
         full_text_populations,
+        cdc,
+        change_feed,
         database_properties,
         pool_settings,
         managed_instance_resources,

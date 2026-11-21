@@ -24,6 +24,10 @@ const WAITS: &[Field] = &[
     Field::optional("AverageWait", "/record/data/average", Real),
     Field::optional("MinimumWait", "/record/data/minimum", JsonContainer),
     Field::optional("MaximumWait", "/record/data/maximum", JsonContainer),
+    Field::optional("LastWait", "/record/data/last", JsonContainer),
+    Field::optional("WaitStandardDeviation", "/record/data/standard_deviation", Real),
+    Field::optional("WaitCategoryDescription", "/record/data/category_description", String),
+    Field::optional("ExecutionOutcomeDescription", "/record/data/outcome_description", String),
 ];
 pub fn runtime(common: &[Field]) -> Result<LogicalSchema> {
     LogicalSchema::new("CulpritQueryRuntimeV1", common.iter().chain(KEY).chain(RUNTIME).copied())

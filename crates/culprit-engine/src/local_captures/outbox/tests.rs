@@ -1,3 +1,4 @@
+mod query_wait_fragments;
 mod replication;
 mod rowgroups_backup;
 mod suspect_pages;

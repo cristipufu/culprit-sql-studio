@@ -12,6 +12,8 @@ async fn cdc_originals_keep_all_native_outcomes_and_one_canonical_explanation_wi
         assert_operational_capture(&capture, &source, &rows);
         let analysis = collected_resources::cdc(&capture).unwrap();
         assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.report.context.as_ref().unwrap().target, source.target);
+        assert_eq!(analysis.report.context.as_ref().unwrap().partition, source.partition);
         assert_eq!(analysis.context.records.len(), rows.len());
         let observations = rows
             .iter()

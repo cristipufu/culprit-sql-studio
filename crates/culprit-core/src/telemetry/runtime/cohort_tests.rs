@@ -46,6 +46,10 @@ fn malformed_cohort_invalidates_both_runtime_and_wait_measurements() {
         average: None,
         minimum: None,
         maximum: None,
+        last: None,
+        standard_deviation: None,
+        category_description: None,
+        outcome_description: None,
     };
     assert!(!waits.is_valid());
 }

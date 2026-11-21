@@ -972,7 +972,7 @@
         "table": "orders"
       }
     ],
-    "format": 42,
+    "format": 43,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -3456,6 +3456,8 @@
           "weighted_observations": 720.0
         }
       },
+      "cdc_history": [],
+      "change_feed_history": [],
       "cluster": null,
       "counters": [],
       "full_text_populations": [],

@@ -122,7 +122,7 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(Source::new(pool, request, host, port)?)),
     )
     .baseline()
-    .version(4),
+    .version(5),
     Registration::database(
         "mssql.resource-history",
         RecipeSelector::Collection(TelemetryCollection::ResourceHistory),
@@ -298,10 +298,16 @@ const REGISTRATIONS: &[Registration] = &[
     Registration::database(
         "mssql.cdc",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cdc)),
-        |pool, request, host, port| Ok(Box::new(cdc::CdcSource::new(pool, request, host, port)?)),
+        |pool, request, host, port| Ok(Box::new(change_capture::ChangeCaptureSource::new(pool, request, host, port)?)),
     )
-    .bounded(cdc::bounded_budget)
+    .bounded(change_capture::bounded_budget)
     .version(2),
+    Registration::database(
+        "mssql.change-feed",
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::ChangeFeed)),
+        |pool, request, host, port| Ok(Box::new(change_capture::ChangeCaptureSource::new(pool, request, host, port)?)),
+    )
+    .bounded(change_capture::bounded_budget),
     Registration::database(
         "mssql.backup-history",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory)),

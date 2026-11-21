@@ -84,7 +84,7 @@ impl ReadControl {
 pub(super) enum ReadRequest {
     Snapshot { attempt: DiagnosticAttemptReceipt, dataset: SnapshotDataset },
     SnapshotLookup { connection: String, observation_id: String, datasets: Vec<SnapshotDataset> },
-    QueryHistory { connection: String, observation_id: String },
+    QueryHistory { connection: String, observation_id: String, selection: super::QueryHistoryReadKind },
     ManagedInstanceResources { connection: String, observation_id: String, attempt: Option<DiagnosticAttemptReceipt> },
     ActivityLookup { connection: String, observation_id: String },
     ActivityReference { connection: String, reference: DiagnosticCaptureRef },
@@ -106,9 +106,7 @@ impl ReadRequest {
             Self::Snapshot { dataset, .. } => stream == dataset.stream(),
             Self::SnapshotLookup { datasets, .. } => datasets.iter().any(|dataset| stream == dataset.stream()),
             Self::ManagedInstanceResources { .. } => stream == TelemetryStream::ResourceSamples,
-            Self::QueryHistory { .. } => {
-                matches!(stream, TelemetryStream::QueryRuntime | TelemetryStream::QueryDefinitions)
-            }
+            Self::QueryHistory { selection, .. } => selection.retains(stream),
             Self::ActivityLookup { .. } | Self::ActivityReference { .. } => {
                 stream == TelemetryStream::ActivityObservations
             }
@@ -207,6 +205,7 @@ impl CompletedCaptureRead {
 
     pub fn query_history(
         lookup: CompletedCaptureLookup<'_>,
+        selection: super::QueryHistoryReadKind,
         budget: CompletedCaptureBudget,
         operation: OperationHandle,
     ) -> Result<Self> {
@@ -214,6 +213,7 @@ impl CompletedCaptureRead {
             ReadRequest::QueryHistory {
                 connection: lookup.connection.into(),
                 observation_id: lookup.observation_id.into(),
+                selection,
             },
             lookup,
             budget,

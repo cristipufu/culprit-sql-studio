@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 71;
+pub const EXPORT_FORMAT_VERSION: u32 = 72;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -477,6 +477,10 @@ mod tests {
             average: Some(2.0),
             minimum: Some(crate::telemetry::MeasurementValue::Integer("2".into())),
             maximum: Some(crate::telemetry::MeasurementValue::Integer("2".into())),
+            last: None,
+            standard_deviation: None,
+            category_description: None,
+            outcome_description: None,
         })
     }
 

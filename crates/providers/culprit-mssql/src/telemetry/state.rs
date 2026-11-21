@@ -375,6 +375,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::Galera
                     | SnapshotDataset::FullTextPopulations
                     | SnapshotDataset::Cdc
+                    | SnapshotDataset::ChangeFeed
                     | SnapshotDataset::BackupHistory
                     | SnapshotDataset::SessionMemory
                     | SnapshotDataset::PageWaitTargets

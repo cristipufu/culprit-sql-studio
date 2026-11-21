@@ -1,4 +1,5 @@
 //! This is a local ownership/integration proof over controlled native-shaped facts, not native cost qualification.
+mod change_capture;
 mod hyperscale_log_components;
 mod tempdb_metadata_memory;
 use super::*;
@@ -418,7 +419,7 @@ async fn simultaneous_native_failure_and_cancellation_preserves_the_native_error
     let cancellation = CollectionCancellation::default();
     let error = scan_until_cancelled(&cancellation, || async {
         cancellation.cancel();
-        Err(CollectionStop::SourceChanged.error())
+        Err::<Box<Report>, _>(CollectionStop::SourceChanged.error())
     })
     .await
     .unwrap_err();

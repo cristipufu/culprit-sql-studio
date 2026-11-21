@@ -220,6 +220,7 @@ enum Analysis {
     StatementWork,
     CompletedSpills,
     PageServerReads,
+    QueryWaitFragments,
     StatementGrants,
     CacheEntryMemory,
     RuntimeDistributions,
@@ -247,6 +248,7 @@ enum Analysis {
     WaitCounters,
     Cleanup,
     Cdc,
+    ChangeFeed,
     ColumnstoreRowgroups,
     FullTextPopulations,
     TableMemory,
@@ -268,6 +270,7 @@ impl Analysis {
             Self::PoolSettings => vec![EvidenceFamily::SettingObservations],
             Self::ManagedInstanceResources => vec![EvidenceFamily::ResourceSamples],
             Self::PageServerReads => vec![EvidenceFamily::QueryRuntime],
+            Self::QueryWaitFragments => vec![EvidenceFamily::QueryWaits],
             Self::Queries => vec![
                 EvidenceFamily::QueryDefinitions,
                 EvidenceFamily::PlanDefinitions,
@@ -289,6 +292,7 @@ impl Analysis {
             | Self::PerformanceCounters
             | Self::MemoryClerks
             | Self::Cdc
+            | Self::ChangeFeed
             | Self::ColumnstoreRowgroups
             | Self::FullTextPopulations
             | Self::TableMemory
@@ -412,6 +416,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             let analysis = culprit_engine::collected_resources::completed_spills(&capture, definitions.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::completed_spills(&analysis.report))?;
         }
+        Some(Analysis::QueryWaitFragments) => {
+            let report = culprit_engine::collected_resources::query_wait_fragments(&capture)?;
+            emit(out, &report, common.max_output_bytes, || observations::query_wait_fragments(&report))?;
+        }
         Some(Analysis::PageServerReads) => {
             let analysis = culprit_engine::collected_resources::page_server_reads(&capture, definitions.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::collected_page_server_reads(&analysis))?;
@@ -531,6 +539,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::BackupHistory) => {
             let analysis = culprit_engine::collected_resources::backup_history(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::backup_history(&analysis.report))?;
+        }
+        Some(Analysis::ChangeFeed) => {
+            let analysis = culprit_engine::collected_resources::change_feed(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::change_feed(&analysis.report))?;
         }
         Some(Analysis::Cdc) => {
             let analysis = culprit_engine::collected_resources::cdc(&capture)?;

@@ -32,6 +32,21 @@ pub const FULL_TEXT_POPULATIONS: Source = Source {
     delivers: &[],
 };
 
+pub const CHANGE_FEED_AVAILABILITY: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CHANGE_FEED_STATUS_SOURCE,
+    reads: culprit_core::key!("view.change_feed.source.availability"),
+    delivers: &[],
+};
+pub const CHANGE_FEED_SCANS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CHANGE_FEED_SCANS_SOURCE,
+    reads: culprit_core::key!("view.change_feed.source.scans"),
+    delivers: &[],
+};
+pub const CHANGE_FEED_ERRORS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CHANGE_FEED_ERRORS_SOURCE,
+    reads: culprit_core::key!("view.change_feed.source.errors"),
+    delivers: &[],
+};
 pub const CDC_STATUS: Source = Source {
     name: culprit_core::telemetry::MSSQL_CDC_STATUS_SOURCE,
     reads: culprit_core::key!("view.cdc.source.status"),
@@ -469,6 +484,9 @@ pub const ALL: &[Source] = &[
     COLUMNSTORE_ROWGROUPS,
     FULL_TEXT_POPULATIONS,
     TABLE_MEMORY,
+    CHANGE_FEED_AVAILABILITY,
+    CHANGE_FEED_SCANS,
+    CHANGE_FEED_ERRORS,
     CDC_STATUS,
     CDC_SCANS,
     CDC_ERRORS,

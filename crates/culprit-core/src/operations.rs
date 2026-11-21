@@ -32,6 +32,10 @@ pub enum IndexUsageScope {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default)]
 #[ts(export)]
 pub struct OperationalStats {
+    /// One explicitly selected original wait-history capture; never joined to current scan workload by names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub query_wait_fragments: Option<Box<crate::telemetry::RecordedQueryWaitRead>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub managed_instance_resources: Option<Box<crate::telemetry::RecordedManagedInstanceResourceRead>>,
@@ -62,6 +66,9 @@ pub struct OperationalStats {
     /// Independently captured Galera node points never grade the current database or workload.
     pub galera: Vec<crate::telemetry::RecordedOperationalRead>,
     pub full_text_populations: Vec<crate::telemetry::RecordedOperationalRead>,
+    /// Independent original native histories; current scan membership supplies no historical ownership.
+    pub cdc_history: Vec<crate::telemetry::RecordedOperationalRead>,
+    pub change_feed_history: Vec<crate::telemetry::RecordedOperationalRead>,
     /// Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -202,6 +209,7 @@ impl OperationalStats {
             cluster: &'a Option<ClusterHealth>,
         }
         let Self {
+            query_wait_fragments: _,
             statement_work: _,
             cached_runtime: _,
             memory_clerks: _,
@@ -212,6 +220,8 @@ impl OperationalStats {
             group_replication: _,
             galera: _,
             full_text_populations: _,
+            cdc_history: _,
+            change_feed_history: _,
             tempdb_metadata_memory: _,
             storage: _,
             hyperscale_log_components: _,
@@ -524,6 +534,25 @@ mod tests {
             assert_eq!(restored.index_usage_scope, scope);
         }
         assert_eq!(OperationalStats::default().index_usage_scope, None);
+    }
+
+    #[test]
+    fn captured_change_histories_are_excluded_from_shared_counter_only_output() {
+        let marker = crate::telemetry::RecordedOperationalRead::Unavailable {
+            reason: crate::message!("view.change_capture.history.sharing_withheld"),
+        };
+        let operations = OperationalStats {
+            cdc_history: vec![marker.clone()],
+            change_feed_history: vec![marker],
+            ..Default::default()
+        };
+        let original = serde_json::to_value(&operations).unwrap();
+        let counters = serde_json::to_value(operations.counters_only()).unwrap();
+        for key in ["cdc_history", "change_feed_history"] {
+            assert!(original[key].is_array());
+            assert!(counters.get(key).is_none());
+        }
+        assert!(!counters.to_string().contains("sharing_withheld"));
     }
 
     #[test]

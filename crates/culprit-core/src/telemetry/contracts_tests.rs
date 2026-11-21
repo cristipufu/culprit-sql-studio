@@ -231,6 +231,10 @@ fn native_aggregate_precision_and_fractional_wait_units_are_preserved() {
         average: None,
         minimum: None,
         maximum: None,
+        last: None,
+        standard_deviation: None,
+        category_description: None,
+        outcome_description: None,
     };
     assert!(wait.is_valid());
     let encoded = serde_json::to_value(&wait).unwrap();

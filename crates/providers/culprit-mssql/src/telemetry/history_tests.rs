@@ -187,6 +187,10 @@ fn identified_wait(group: i64, total: i64) -> Rec {
         ("avg_query_wait_time_ms", Val::Float(total as f64)),
         ("min_query_wait_time_ms", Val::Int(total)),
         ("max_query_wait_time_ms", Val::Int(total)),
+        ("last_query_wait_time_ms", Val::Null),
+        ("stdev_query_wait_time_ms", Val::Null),
+        ("wait_category_desc", Val::Null),
+        ("execution_type_desc", Val::Null),
     ]);
     replace(&Rec::of(&fields), &[("row_id", Val::Int(100 + group))])
 }
@@ -337,6 +341,10 @@ async fn query_history_freezes_native_wait_semantics_without_an_additional_read(
                     ("avg_query_wait_time_ms", Val::Float(20.0)),
                     ("min_query_wait_time_ms", Val::Int(20)),
                     ("max_query_wait_time_ms", Val::Int(20)),
+                    ("last_query_wait_time_ms", Val::Null),
+                    ("stdev_query_wait_time_ms", Val::Null),
+                    ("wait_category_desc", Val::Null),
+                    ("execution_type_desc", Val::Null),
                 ])]),
             ]);
         }

@@ -53,3 +53,13 @@ fn cdc_human_native_values_are_escaped_and_entry_display_remains_bounded() {
     assert!(!text.contains('\u{1b}'));
     assert!(text.contains("\\n") && text.contains("\\u{1b}"));
 }
+
+#[test]
+fn withdrawn_cdc_has_no_fabricated_read_window_or_healthy_empty() {
+    let r = culprit_checks::cdc::unavailable(&culprit_core::message!("view.change_capture.history.sharing_withheld"));
+    assert!(r.context.is_none());
+    let text = cdc(&r);
+    assert!(text.contains(&r.summary));
+    assert!(!text.contains("2020-01-01"));
+    assert!(r.entries.is_empty() && !r.read_complete);
+}

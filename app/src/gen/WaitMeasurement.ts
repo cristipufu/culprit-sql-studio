@@ -7,4 +7,16 @@ export type WaitMeasurement = { key: NativeMeasurementKey,
 /**
  * Source-native category identity, independent of a localized label or a particular engine's numeric codes.
  */
-category: string, unit: RuntimeMetricUnit, total: MeasurementValue, average: number | null, minimum: MeasurementValue | null, maximum: MeasurementValue | null, };
+category: string, unit: RuntimeMetricUnit, total: MeasurementValue, average: number | null, minimum: MeasurementValue | null, maximum: MeasurementValue | null, 
+/**
+ * Last value in this original native fragment; no order across independently sampled fragments is implied.
+ */
+last: MeasurementValue | null, 
+/**
+ * Native standard deviation in `unit`, never inferred from another fragment or from a total.
+ */
+standard_deviation: number | null, 
+/**
+ * Original native labels, independent of the category/outcome identities used by interpretation.
+ */
+category_description: string | null, outcome_description: string | null, };

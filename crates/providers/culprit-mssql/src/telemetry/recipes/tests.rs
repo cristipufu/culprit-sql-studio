@@ -19,7 +19,7 @@ fn registered_source_versions_include_native_acquisition_policy_revisions() {
             ("mssql.suspect-pages", 2),
             ("mssql.agent-jobs", 2),
             ("mssql.hyperscale-log-components", 2),
-            ("mssql.query-history", 4),
+            ("mssql.query-history", 5),
             ("mssql.resource-history", 3),
             ("mssql.pool-resource-history", 2),
             ("mssql.deadlock-history", 2),
@@ -646,4 +646,20 @@ fn managed_instance_history_is_an_explicit_native_profile_with_a_single_total_in
     let baseline = recipes.iter().find(|recipe| recipe.id == "mssql.resource-history").unwrap();
     assert_eq!(baseline.version, 3);
     assert_eq!(baseline.subjects, [RecipeSubject::Database]);
+}
+
+#[test]
+fn change_feed_recipe_is_independent_manual_unqualified_and_pays_one_setup_inside_the_total() {
+    let recipe = declarations().into_iter().find(|r| r.id == "mssql.change-feed").unwrap();
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, [RecipeSubject::Database]);
+    assert_eq!(recipe.selector, RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::ChangeFeed)));
+    assert_eq!(recipe.budget.max_queries, 13);
+    assert_eq!(recipe.budget.max_snapshot_rows, 98);
+    assert_eq!(recipe.budget.page_rows, 32);
+    assert_eq!(recipe.budget.total_bytes, 256 * 1024);
+    assert_eq!(recipe.budget.statement_timeout_ms, 1000);
+    assert_eq!(recipe.budget.total_timeout_ms, 5000);
 }

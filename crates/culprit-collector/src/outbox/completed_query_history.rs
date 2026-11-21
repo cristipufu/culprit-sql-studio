@@ -5,13 +5,56 @@ use super::{
 };
 use culprit_core::{Result, limits::OperationHandle, telemetry::*};
 
-/// Canonical Runtime/QueryDefinition originals. Only the serialized Outbox verifier may construct this value.
+/// Closed native-history selection; this changes retained analysis rows, never artifact authentication.
+#[derive(Clone, Copy, Debug)]
+pub enum QueryHistoryReadKind {
+    Runtime,
+    Waits,
+}
+impl QueryHistoryReadKind {
+    pub(super) fn retains(self, stream: TelemetryStream) -> bool {
+        match self {
+            Self::Runtime => matches!(stream, TelemetryStream::QueryRuntime | TelemetryStream::QueryDefinitions),
+            Self::Waits => stream == TelemetryStream::QueryWaits,
+        }
+    }
+}
+
+/// Canonical native-history originals. Only the serialized Outbox verifier may construct this value.
 /// Every original artifact is verified once; retained definitions never upgrade unresolved runtime receipts.
 #[derive(Debug)]
 pub struct CompletedQueryHistory {
     completed: CompletedCapture,
 }
 impl CompletedQueryHistory {
+    pub fn connection(&self) -> &str {
+        &self.completed.connection
+    }
+
+    pub fn into_wait_read(self) -> Result<CapturedQueryWaitRead> {
+        let original = self.completed;
+        let selected = original
+            .streams
+            .iter()
+            .find(|selected| selected.stream == TelemetryStream::QueryWaits)
+            .cloned()
+            .ok_or_else(|| DeliveryProblem::UnsupportedSchema.error())?;
+        let read = CapturedReadRef::new(
+            &original.source,
+            original.capture.capture,
+            original.capture.manifest_sha256,
+            vec![selected],
+        )?;
+        CapturedQueryWaitRead::from_exports(
+            original.source,
+            read,
+            original.references,
+            (original.collected_from, original.collected_until),
+            original.records.into_iter().zip(original.row_ordinals),
+            true,
+        )
+    }
+
     pub fn source(&self) -> &CollectionDescription {
         &self.completed.source
     }
@@ -66,12 +109,13 @@ impl OutboxDelivery {
     pub async fn with_completed_query_history<T: Send + 'static>(
         &self,
         lookup: CompletedCaptureLookup<'_>,
+        selection: QueryHistoryReadKind,
         budget: CompletedCaptureBudget,
         operation: OperationHandle,
         worker_guard: impl Send + 'static,
         project: impl FnOnce(CompletedQueryHistory) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        let read = CompletedCaptureRead::query_history(lookup, budget, operation)?;
+        let read = CompletedCaptureRead::query_history(lookup, selection, budget, operation)?;
         self.with_completed_capture(read, worker_guard, move |completed| project(CompletedQueryHistory { completed }))
             .await
     }

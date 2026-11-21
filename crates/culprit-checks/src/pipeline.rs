@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot, t};
 
+mod change_capture;
 mod cleanup;
 mod compiler_admission;
 mod completed_spills;
@@ -38,6 +39,7 @@ mod memory_clerks;
 mod page_server_reads;
 mod performance_counters;
 mod pool_settings;
+mod query_wait_fragments;
 mod recorded_operational;
 mod replication;
 mod runtime_populations;
@@ -304,6 +306,8 @@ impl Pipeline {
         let group_replication = group_replication::explain(&mut snapshot);
         let galera = galera::explain(&mut snapshot);
         let full_text_populations = full_text_populations::explain(&mut snapshot);
+        let cdc = change_capture::cdc(&snapshot);
+        let change_feed = change_capture::change_feed(&snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
         let pool_settings = pool_settings::explain(&snapshot);
         let suspect_pages = suspect_pages::explain(&mut snapshot);
@@ -314,6 +318,7 @@ impl Pipeline {
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
         let page_server_reads = page_server_reads::explain(&mut snapshot);
+        let query_wait_fragments = query_wait_fragments::explain(&snapshot);
         let completed_spills = completed_spills::explain(&mut snapshot);
         let cleanup = cleanup::explain(&mut snapshot);
         let mut findings = Vec::new();
@@ -446,11 +451,14 @@ impl Pipeline {
             group_replication,
             galera,
             full_text_populations,
+            cdc,
+            change_feed,
             database_properties,
             pool_settings,
             suspect_pages,
             statement_work,
             page_server_reads,
+            query_wait_fragments,
             completed_spills,
             cleanup,
         }
