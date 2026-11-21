@@ -51,7 +51,7 @@ async fn authenticated_native_family_survives_analysis_with_scoped_ids_without_a
     let definition_id = definition.id.clone();
     let TelemetryRecord::QueryRuntime(runtime) = &records[1] else { panic!() };
     let executions = runtime.executions.parse::<f64>().unwrap();
-    let total = runtime.metric(&RuntimeMetricKey::Duration).unwrap().average * executions;
+    let total = runtime.metric(&RuntimeMetricKey::Duration).unwrap().average.unwrap() * executions;
     let references = runtime.key.references.clone();
     let measurement = runtime.key.clone();
     let fixture = Fixture::new(source.clone(), records).await;

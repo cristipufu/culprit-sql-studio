@@ -44,6 +44,7 @@ mod replication;
 mod request_memory;
 mod resource_io;
 mod runtime_distributions;
+mod runtime_fragments;
 mod session_census;
 mod session_memory;
 mod source_partitions;
@@ -109,7 +110,7 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
         }));
         let mut duration =
             RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, query.mean_time_ms);
-        duration.maximum = query.max_time_ms;
+        duration.maximum = query.max_time_ms.map(MeasurementValue::Real);
         duration.standard_deviation = query.stddev_time_ms;
         let mut metrics = vec![duration];
         if let Some(cpu) = query.cpu_time_ms {
@@ -467,7 +468,7 @@ async fn fragments_are_execution_weighted_and_different_outcomes_stay_separate()
     let mut second = runtime.clone();
     second.key.native.id = "another-native-fragment".into();
     second.executions = "9".into();
-    second.metrics[0].average = 1.0;
+    second.metrics[0].average = Some(1.0);
     let mut aborted = second.clone();
     aborted.key.native.id = "another-native-outcome".into();
     aborted.key.native.qualifiers.insert("execution_type".into(), "3".into());

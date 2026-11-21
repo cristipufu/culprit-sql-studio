@@ -134,6 +134,7 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::ManagedInstanceResources
         | LocalCaptureAnalysisKind::PoolSettings
         | LocalCaptureAnalysisKind::Replication
+        | LocalCaptureAnalysisKind::RuntimeFragments
         | LocalCaptureAnalysisKind::QueryWaitFragments
         | LocalCaptureAnalysisKind::PageServerReads
         | LocalCaptureAnalysisKind::SessionCensus

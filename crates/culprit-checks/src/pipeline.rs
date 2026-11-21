@@ -39,6 +39,7 @@ mod memory_clerks;
 mod page_server_reads;
 mod performance_counters;
 mod pool_settings;
+mod query_runtime_fragments;
 mod query_wait_fragments;
 mod recorded_operational;
 mod replication;
@@ -319,6 +320,7 @@ impl Pipeline {
         let statement_work = statement_work::explain(&mut snapshot);
         let page_server_reads = page_server_reads::explain(&mut snapshot);
         let query_wait_fragments = query_wait_fragments::explain(&snapshot);
+        let runtime_fragments = query_runtime_fragments::explain(&snapshot);
         let completed_spills = completed_spills::explain(&mut snapshot);
         let cleanup = cleanup::explain(&mut snapshot);
         let mut findings = Vec::new();
@@ -459,6 +461,7 @@ impl Pipeline {
             statement_work,
             page_server_reads,
             query_wait_fragments,
+            runtime_fragments,
             completed_spills,
             cleanup,
         }

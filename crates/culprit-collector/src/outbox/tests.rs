@@ -94,8 +94,8 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
             executions: "9007199254740993".into(),
             metrics: vec![
                 RuntimeMetric {
-                    minimum: Some(1.0),
-                    maximum: Some(3.0),
+                    minimum: Some(MeasurementValue::Real(1.0)),
+                    maximum: Some(MeasurementValue::Real(3.0)),
                     standard_deviation: Some(1.0),
                     ..RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Microseconds, 2.0)
                 },

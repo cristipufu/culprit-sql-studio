@@ -58,6 +58,10 @@ async fn fixture(analysis: LocalCaptureAnalysisKind) -> LocalCaptureFixture {
             );
             LocalCaptureFixture::activity(source, rows).await
         }
+        LocalCaptureAnalysisKind::RuntimeFragments => {
+            let (source, records) = culprit_collector::analytical::test_support::query_runtime_fragment_evidence(true);
+            LocalCaptureFixture::query_history(source, records).await
+        }
         LocalCaptureAnalysisKind::QueryWaitFragments => {
             let (source, records) = culprit_collector::analytical::test_support::query_wait_fragment_evidence();
             LocalCaptureFixture::query_history(source, records).await

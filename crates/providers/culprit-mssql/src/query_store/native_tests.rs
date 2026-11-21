@@ -193,9 +193,12 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
             };
             let n = raw.executions.parse::<u64>().unwrap();
             runtime_count += n;
-            duration_us += raw.metric(&culprit_core::telemetry::RuntimeMetricKey::Duration).unwrap().average * n as f64;
-            cpu_us += raw.metric(&culprit_core::telemetry::RuntimeMetricKey::CpuTime).unwrap().average * n as f64;
-            reads += raw.metric(&culprit_core::telemetry::RuntimeMetricKey::LogicalReads).unwrap().average * n as f64;
+            duration_us +=
+                raw.metric(&culprit_core::telemetry::RuntimeMetricKey::Duration).unwrap().average.unwrap() * n as f64;
+            cpu_us +=
+                raw.metric(&culprit_core::telemetry::RuntimeMetricKey::CpuTime).unwrap().average.unwrap() * n as f64;
+            reads += raw.metric(&culprit_core::telemetry::RuntimeMetricKey::LogicalReads).unwrap().average.unwrap()
+                * n as f64;
         }
         reader
             .read(

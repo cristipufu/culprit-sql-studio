@@ -4,8 +4,13 @@ import type { CheckAssessment } from "./CheckAssessment";
 import type { CollectedAnalysisLimitation } from "./CollectedAnalysisLimitation";
 import type { CollectedQueryInput } from "./CollectedQueryInput";
 import type { CollectedQueryPopulation } from "./CollectedQueryPopulation";
+import type { CollectedQueryRuntimeTotals } from "./CollectedQueryRuntimeTotals";
 import type { Finding } from "./Finding";
 import type { LockedCheck } from "./LockedCheck";
 import type { Workload } from "./Workload";
 
-export type CollectedQueryAnalysisResult = { population: CollectedQueryPopulation, query_inputs: Array<CollectedQueryInput>, workload: Workload | null, findings: Array<Finding>, assessments: Array<CheckAssessment>, locked: Array<LockedCheck>, limitations: Array<CollectedAnalysisLimitation>, provenance: AnalysisProvenance | null, };
+export type CollectedQueryAnalysisResult = { 
+/**
+ * Exact counts survive an unavailable time denominator. Totals are confined to this original population.
+ */
+runtime_totals: CollectedQueryRuntimeTotals | null, population: CollectedQueryPopulation, query_inputs: Array<CollectedQueryInput>, workload: Workload | null, findings: Array<Finding>, assessments: Array<CheckAssessment>, locked: Array<LockedCheck>, limitations: Array<CollectedAnalysisLimitation>, provenance: AnalysisProvenance | null, };

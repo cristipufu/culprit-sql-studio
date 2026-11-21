@@ -267,8 +267,8 @@ fn measurement(id: usize) -> TelemetryRecord {
         executions: "9007199254740993".into(),
         metrics: vec![
             RuntimeMetric {
-                minimum: Some(1.0),
-                maximum: Some(20.0),
+                minimum: Some(MeasurementValue::Real(1.0)),
+                maximum: Some(MeasurementValue::Real(20.0)),
                 standard_deviation: Some(2.0),
                 ..RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Microseconds, 10.0)
             },
@@ -480,7 +480,8 @@ impl TelemetrySource for TestSource {
         if matches!(self.0.scenario, Scenario::NonFinite)
             && let TelemetryRecord::QueryRuntime(row) = &mut rows[0]
         {
-            row.metrics.iter_mut().find(|metric| metric.key == RuntimeMetricKey::CpuTime).unwrap().average = f64::NAN;
+            row.metrics.iter_mut().find(|metric| metric.key == RuntimeMetricKey::CpuTime).unwrap().average =
+                Some(f64::NAN);
         }
         Ok(CollectionRead::Page {
             records: rows,

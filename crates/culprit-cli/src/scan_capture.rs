@@ -163,6 +163,7 @@ fn captured_action<'a>(
         LocalCapturedAnalysis::Replication(_)
         | LocalCapturedAnalysis::PageServerReads(_)
         | LocalCapturedAnalysis::QueryWaitFragments(_)
+        | LocalCapturedAnalysis::RuntimeFragments(_)
         | LocalCapturedAnalysis::Blocking(_)
         | LocalCapturedAnalysis::SessionCensus(_) => {
             Box::pin(std::future::ready(Err(DeliveryProblem::InvalidContract.error())))

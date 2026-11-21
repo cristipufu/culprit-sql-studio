@@ -186,8 +186,8 @@ fn runtime(query: &QueryDefinition, plan: &PlanDefinition, id: &str, count: &str
         executions: count.into(),
         metrics: vec![
             RuntimeMetric {
-                minimum: Some(mean_ms),
-                maximum: Some(mean_ms),
+                minimum: Some(MeasurementValue::Real(mean_ms)),
+                maximum: Some(MeasurementValue::Real(mean_ms)),
                 standard_deviation: Some(0.0),
                 ..RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, mean_ms)
             },

@@ -98,6 +98,40 @@ async fn run(fixture: &OwnedSourceFixture, directory: &Path, cancellation: &Coll
     }
     for row in &runtime {
         history.execution_population(&row.key.native.qualifiers)?;
+        // Same genuine source rows and native query; no observer read or fixture SQL is added here.
+        if row.metrics.len() != 12
+            || row.metrics.iter().any(|metric| {
+                !metric.is_valid()
+                    || metric.key == RuntimeMetricKey::PhysicalReadOperations
+                        && (metric.standard_deviation.is_some() || metric.unit != RuntimeMetricUnit::Count)
+            })
+        {
+            return Err(invalid_data());
+        }
+        if row
+            .metric(&RuntimeMetricKey::PhysicalReads)
+            .is_none_or(|metric| metric.unit != RuntimeMetricUnit::Pages { bytes_per_page: 8192 })
+            || row.page_server_reads.as_deref().is_none_or(|statistics| !statistics.is_valid())
+        {
+            return Err(invalid_data());
+        }
+    }
+    let native_waits = capture
+        .records
+        .iter()
+        .filter_map(|row| match &row.record {
+            TelemetryRecord::QueryWaits(wait)
+                if wait.key.references.query.as_ref().is_some_and(|reference| {
+                    reference.native == query.native() && reference.definition_id.as_ref() == Some(&definition.id)
+                }) =>
+            {
+                Some(wait)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if native_waits.iter().any(|wait| !wait.is_valid()) {
+        return Err(invalid_data());
     }
     captures.verify_retained(&capture).await?;
     let metrics = capture.manifest.read_metrics.as_ref().ok_or_else(invalid_data)?;
@@ -114,7 +148,7 @@ async fn run(fixture: &OwnedSourceFixture, directory: &Path, cancellation: &Coll
         "native_interval":history.interval,"acquisition_owner":owner,"logical_partition":source.partition,
         "global_database_incarnation":source.target.database().and_then(|database|database.incarnation.as_ref()),
         "population_binding":history.population_binding,"population_catalog":history.population_catalog,
-        "retained_rows":capture.records.len(),"owned_query_runtime_fragments":runtime.len(),"original_reference_resolved":true,
+        "retained_rows":capture.records.len(),"owned_query_wait_fragments":native_waits.len(),"native_wait_nonempty_population_observed":!native_waits.is_empty(),"native_wait_field_value_counts":{"last":native_waits.iter().filter(|row|row.last.is_some()).count(),"standard_deviation":native_waits.iter().filter(|row|row.standard_deviation.is_some()).count(),"category_description":native_waits.iter().filter(|row|row.category_description.is_some()).count(),"outcome_description":native_waits.iter().filter(|row|row.outcome_description.is_some()).count()},"owned_wait_native_fields":native_waits.iter().map(|row|json!({"category":row.category,"native":row.key.native,"last":row.last,"standard_deviation":row.standard_deviation,"category_description":row.category_description,"outcome_description":row.outcome_description})).collect::<Vec<_>>(),"owned_runtime_native_statistics":runtime.iter().map(|row|&row.metrics).collect::<Vec<_>>(),"owned_query_runtime_fragments":runtime.len(),"native_runtime_statistic_families":12,"native_statistics_nullable_means_and_exact_endpoints_verified":true,"physical_read_operations_distinct_from_pages":true,"original_reference_resolved":true,
         "canonical_outbox_verified":true,"capture_export_client_elapsed_ms":capture.capture_export_ms,
         "production_admission":"unqualified","native_cpu_io_cost_qualified":false}),
     )?;

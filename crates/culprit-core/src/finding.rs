@@ -384,6 +384,9 @@ pub struct Report {
     pub change_feed: Option<Vec<crate::ChangeFeedReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub runtime_fragments: Option<Box<crate::query_runtime_report::QueryRuntimeFragmentReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub query_wait_fragments: Option<Box<crate::query_wait_report::QueryWaitFragmentReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

@@ -36,8 +36,8 @@ fn history() -> (CollectionDescription, Vec<TelemetryRecord>) {
     let mut second = first.clone();
     second.key.native.id = "native-space-fragment-1".into();
     second.executions = "10".into();
-    second.metrics[0].average = 4000.0;
-    second.metrics[2].average = 0.5;
+    second.metrics[0].average = Some(4000.0);
+    second.metrics[2].average = Some(0.5);
     records.push(TelemetryRecord::QueryRuntime(second));
     (source, records)
 }
@@ -99,7 +99,7 @@ async fn native_zero_is_retained_while_missing_or_partially_measured_fragments_r
         for index in [1, 2] {
             let row = runtime(&mut records, index);
             if kind == "zero" {
-                row.metrics[2].average = 0.0;
+                row.metrics[2].average = Some(0.0);
             } else if kind == "missing" || index == 1 {
                 row.metrics.pop();
             }
@@ -128,7 +128,7 @@ async fn byte_units_page_conflicts_peak_metrics_and_opaque_native_lookalikes_do_
             "page-size" => row.metrics[2].unit = RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
             "peak" => row.metrics[2].key = RuntimeMetricKey::PeakMemory,
             "native-name" => row.metrics[2].key = RuntimeMetricKey::Native("mssql.avg_tempdb_space_used".into()),
-            "overflow" => row.metrics[2].average = f64::MAX,
+            "overflow" => row.metrics[2].average = Some(f64::MAX),
             _ => unreachable!(),
         }
         let fixture = Fixture::new(source, records).await;

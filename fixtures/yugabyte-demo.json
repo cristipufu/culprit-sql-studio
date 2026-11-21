@@ -2578,7 +2578,7 @@
     "cdc_history": [],
     "change_feed_history": []
   },
-  "format": 43,
+  "format": 44,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

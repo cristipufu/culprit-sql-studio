@@ -134,6 +134,8 @@ pub struct CollectedQueryAnalysis {
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
 pub struct CollectedQueryAnalysisResult {
+    /// Exact counts survive an unavailable time denominator. Totals are confined to this original population.
+    pub runtime_totals: Option<CollectedQueryRuntimeTotals>,
     pub population: CollectedQueryPopulation,
     pub query_inputs: Vec<CollectedQueryInput>,
     pub workload: Option<Workload>,
@@ -142,4 +144,23 @@ pub struct CollectedQueryAnalysisResult {
     pub locked: Vec<LockedCheck>,
     pub limitations: Vec<CollectedAnalysisLimitation>,
     pub provenance: Option<AnalysisProvenance>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum CollectedRuntimeTimeTotal {
+    Complete {
+        total_ms: f64,
+    },
+    /// A missing mean, unrepresentable execution multiplier or invalid derived sum cannot become zero cost.
+    Incomplete,
+}
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedQueryRuntimeTotals {
+    pub executions: String,
+    pub query_identities: String,
+    pub duration: CollectedRuntimeTimeTotal,
+    pub cpu: CollectedRuntimeTimeTotal,
 }

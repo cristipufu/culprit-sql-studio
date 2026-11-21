@@ -260,7 +260,7 @@ pub fn explain_workload(workload: &Workload, source: Option<&SourceOutcome>) -> 
     })
 }
 
-fn explain_statistics(
+pub(super) fn explain_statistics(
     statistics: &PageServerReadStatistics,
     derived: Option<(&str, bool)>,
 ) -> Result<PageServerReadExplanation> {

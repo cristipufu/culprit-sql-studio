@@ -342,8 +342,13 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             reason: crate::message!("view.pool_settings.sharing_withheld"),
         };
     }
+    if let Some(recorded) = &mut s.operations.runtime_fragments {
+        **recorded = crate::telemetry::RecordedQueryHistoryRead::Unavailable {
+            reason: crate::message!("view.runtime_fragments.sharing_withheld"),
+        };
+    }
     if let Some(recorded) = &mut s.operations.query_wait_fragments {
-        **recorded = crate::telemetry::RecordedQueryWaitRead::Unavailable {
+        **recorded = crate::telemetry::RecordedQueryHistoryRead::Unavailable {
             reason: crate::message!("view.query_wait_fragments.sharing_withheld"),
         };
     }

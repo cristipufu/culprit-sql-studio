@@ -24,7 +24,7 @@ fn report() -> QueryWaitFragmentReport {
         .enumerate()
         .map(|(ordinal, record)| (ExportedRecord::new(&source, &capture, record).unwrap(), ordinal as u32))
         .collect::<Vec<_>>();
-    let original = CapturedQueryWaitRead::from_exports(
+    let original = CapturedQueryHistoryRead::from_exports(
         source,
         read,
         ReferenceCoverage::default(),

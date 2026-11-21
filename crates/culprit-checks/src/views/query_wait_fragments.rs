@@ -8,10 +8,10 @@ use culprit_core::{
 
 pub const MAX_QUERY_WAIT_DETAIL_ENTRIES: usize = 256;
 
-pub fn explain_recorded(original: &RecordedQueryWaitRead) -> Result<QueryWaitFragmentReport> {
+pub fn explain_recorded(original: &RecordedQueryHistoryRead) -> Result<QueryWaitFragmentReport> {
     match original {
-        RecordedQueryWaitRead::Captured { read } => explain(read),
-        RecordedQueryWaitRead::Unavailable { reason } => Ok(unavailable(reason)),
+        RecordedQueryHistoryRead::Captured { read } => explain(read),
+        RecordedQueryHistoryRead::Unavailable { reason } => Ok(unavailable(reason)),
     }
 }
 
@@ -19,8 +19,8 @@ pub fn explain_snapshot(snapshot: &culprit_core::Snapshot) -> Result<Option<Quer
     snapshot.operations.query_wait_fragments.as_deref().map(explain_recorded).transpose()
 }
 
-pub fn explain(read: &CapturedQueryWaitRead) -> Result<QueryWaitFragmentReport> {
-    if !read.is_valid() {
+pub fn explain(read: &CapturedQueryHistoryRead) -> Result<QueryWaitFragmentReport> {
+    if !read.is_valid() || read.stream() != Some(TelemetryStream::QueryWaits) {
         return Err(CollectionStop::InvalidPage.error());
     }
     let observed = read.rows.len();
@@ -78,7 +78,7 @@ pub fn explain(read: &CapturedQueryWaitRead) -> Result<QueryWaitFragmentReport> 
         description: Some(Box::new(read.description.clone())),
         collected_from: Some(read.collected_from.clone()),
         collected_until: Some(read.collected_until.clone()),
-        entries: read.rows.iter().take(MAX_QUERY_WAIT_DETAIL_ENTRIES).map(entry).collect(),
+        entries: read.rows.iter().take(MAX_QUERY_WAIT_DETAIL_ENTRIES).map(entry).collect::<Result<Vec<_>>>()?,
     })
 }
 
@@ -105,9 +105,9 @@ pub fn unavailable(reason: &culprit_core::i18n::Message) -> QueryWaitFragmentRep
     }
 }
 
-fn entry(row: &CapturedQueryWaitRow) -> QueryWaitFragmentEntry {
-    let wait = &row.wait;
-    QueryWaitFragmentEntry {
+fn entry(row: &CapturedQueryHistoryRow) -> Result<QueryWaitFragmentEntry> {
+    let wait = row.fragment.wait().ok_or_else(|| CollectionStop::InvalidPage.error())?;
+    Ok(QueryWaitFragmentEntry {
         reference: row.reference.clone(),
         native: wait.key.clone(),
         category: wait.category.clone(),
@@ -125,28 +125,14 @@ fn entry(row: &CapturedQueryWaitRow) -> QueryWaitFragmentEntry {
         .into_iter()
         .map(|(key, value)| Metric::said_text(key, value.unwrap_or_else(|| t!("view.query_wait_fragments.unknown"))))
         .collect(),
-    }
+    })
 }
+
 fn value(value: &MeasurementValue, unit: RuntimeMetricUnit) -> String {
-    match value {
-        MeasurementValue::Integer(value) => quantity(format::digits(value.clone()), unit),
-        MeasurementValue::Real(value) => number(*value, unit),
-    }
+    super::native_statistics::value(value, unit, key!("view.query_wait_fragments.quantity"))
 }
 fn number(value: f64, unit: RuntimeMetricUnit) -> String {
-    quantity(format::digits(value.to_string()), unit)
-}
-fn quantity(value: String, unit: RuntimeMetricUnit) -> String {
-    // Native SI time symbols retain the source unit without converting wide integers through f64.
-    let symbol = match unit {
-        RuntimeMetricUnit::Picoseconds => "ps",
-        RuntimeMetricUnit::Nanoseconds => "ns",
-        RuntimeMetricUnit::Microseconds => "µs",
-        RuntimeMetricUnit::Milliseconds => "ms",
-        RuntimeMetricUnit::Seconds => "s",
-        _ => unreachable!("validated wait units are time units"),
-    };
-    t!("view.query_wait_fragments.quantity", value = value, unit = symbol)
+    super::native_statistics::number(value, unit, key!("view.query_wait_fragments.quantity"))
 }
 
 #[cfg(test)]

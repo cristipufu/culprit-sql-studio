@@ -4,6 +4,24 @@ use culprit_core::{Report, Result, SnapshotOptions, telemetry::DeliveryProblem};
 use std::path::Path;
 
 impl Workspace {
+    /// Attach the exact selected native runtime original after normal scan shutdown. It cannot replace the
+    /// independently retained wait original or establish a relationship to current query IDs, members or values.
+    pub async fn scan_with_captured_runtime_fragments(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalRuntimeFragments,
+    ) -> Result<Report> {
+        if captured.connection() != name {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::runtime_fragments(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
     /// Explicit original history stays separate from the later scan's database/member and workload.
     pub async fn scan_with_captured_change_history(
         &self,

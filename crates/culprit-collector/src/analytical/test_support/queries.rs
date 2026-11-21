@@ -79,8 +79,8 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
     ];
     for outcome in ["0", "3", "4"] {
         let mut duration = RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Microseconds, 1.25);
-        duration.minimum = Some(0.0);
-        duration.maximum = Some(3.0);
+        duration.minimum = Some(MeasurementValue::Real(0.0));
+        duration.maximum = Some(MeasurementValue::Real(3.0));
         duration.standard_deviation = Some(0.5);
         records.push(TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key: NativeMeasurementKey {
@@ -239,5 +239,56 @@ pub fn query_wait_fragment_evidence() -> (CollectionDescription, Vec<TelemetryRe
     fragment.standard_deviation = Some(1.25);
     fragment.outcome_description = Some("Aborted".into());
     records.push(TelemetryRecord::QueryWaits(fragment));
+    (source, records)
+}
+
+/// Exact endpoint/unknown-mean corpus shared by canonical SDK, local and both warehouse readers.
+pub fn query_runtime_fragment_evidence(missing_mean: bool) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (source, mut records) = query_evidence();
+    let first = records
+        .iter()
+        .find_map(|record| match record {
+            TelemetryRecord::QueryRuntime(row) => Some(row.clone()),
+            _ => None,
+        })
+        .unwrap();
+    records.retain(|record| !matches!(record, TelemetryRecord::QueryRuntime(_)));
+    for (index, outcome) in ["0", "3"].into_iter().enumerate() {
+        let mut row = first.clone();
+        row.key.native.id = format!("original-runtime-{index}");
+        row.key.native.qualifiers.insert("execution_type".into(), outcome.into());
+        row.executions = if index == 0 { "2".into() } else { "3".into() };
+        row.metrics = vec![
+            RuntimeMetric {
+                key: RuntimeMetricKey::Duration,
+                unit: RuntimeMetricUnit::Microseconds,
+                average: if missing_mean && index == 0 { None } else { Some(1000.0) },
+                minimum: Some(MeasurementValue::Integer("1".into())),
+                maximum: Some(MeasurementValue::Integer(i64::MAX.to_string())),
+                last: Some(MeasurementValue::Integer((9007199254740993u64 + index as u64).to_string())),
+                standard_deviation: Some(index as f64 + 0.75),
+            },
+            RuntimeMetric {
+                key: RuntimeMetricKey::PhysicalReadOperations,
+                unit: RuntimeMetricUnit::Count,
+                average: Some(1.25),
+                minimum: Some(MeasurementValue::Integer("0".into())),
+                maximum: Some(MeasurementValue::Integer("9".into())),
+                last: Some(MeasurementValue::Integer("7".into())),
+                standard_deviation: None,
+            },
+            RuntimeMetric::average(
+                RuntimeMetricKey::PhysicalReads,
+                RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                9.5,
+            ),
+            RuntimeMetric::average(
+                RuntimeMetricKey::TemporaryStorage,
+                RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                2.5,
+            ),
+        ];
+        records.push(TelemetryRecord::QueryRuntime(row));
+    }
     (source, records)
 }

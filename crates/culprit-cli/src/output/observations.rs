@@ -23,8 +23,10 @@ pub(crate) use completed_spills::completed_spills;
 pub(crate) use task_space::task_space;
 mod page_server_reads;
 mod query_wait_fragments;
+mod runtime_fragments;
 pub(crate) use page_server_reads::collected_page_server_reads;
 pub(crate) use query_wait_fragments::{compact_query_wait_fragments, query_wait_fragments};
+pub(crate) use runtime_fragments::{compact_runtime_fragments, runtime_fragments};
 mod source_overhead;
 pub(crate) use source_overhead::{collected_source_overhead, source_overhead};
 mod cache_entry_memory;
@@ -133,6 +135,14 @@ fn query_result(result: &CollectedQueryAnalysisResult) -> String {
         findings = format::count(result.findings.len() as f64),
         limitations = format::count(result.limitations.len() as f64)
     ));
+    if let Some(totals) = &result.runtime_totals {
+        text.push('\n');
+        text.push_str(&t!(
+            "evidence.cli.query_native_totals",
+            executions = format::digits(totals.executions.clone()),
+            queries = format::digits(totals.query_identities.clone())
+        ));
+    }
     if result.workload.is_none() {
         text.push('\n');
         text.push_str(&t!("evidence.cli.query_population_unavailable"));
@@ -922,6 +932,7 @@ mod tests {
     #[test]
     fn query_sections_keep_exact_native_context_and_distinguish_unknown_from_unpartitioned_history() {
         let mut result = CollectedQueryAnalysisResult {
+            runtime_totals: None,
             population: CollectedQueryPopulation::Population {
                 identity: culprit_core::telemetry::NativeIdentity::new("17")
                     .qualified("native-context", "readonly, original generation"),

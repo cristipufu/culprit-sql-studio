@@ -159,7 +159,7 @@ async fn readable_secondary_exports_exact_native_history_without_claiming_local_
         assert_eq!(runtime.key.native.qualifiers["replica_group_id"], "7");
         assert_eq!(runtime.key.native.qualifiers["execution_type"], "3");
         assert_eq!(runtime.executions, "1");
-        assert_eq!(runtime.metric(&RuntimeMetricKey::Duration).unwrap().average, 3000.0);
+        assert_eq!(runtime.metric(&RuntimeMetricKey::Duration).unwrap().average, Some(3000.0));
         assert_eq!(source.query_count(), 9, "same bounded description plus one pressure/page read");
         assert!(source.finish().await.is_err(), "unread waits/definitions cannot produce complete history");
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
@@ -243,7 +243,7 @@ async fn native_group_binding_reuses_the_catalog_read_and_keeps_query_runtime_an
             history.execution_population(&wait.key.native.qualifiers).unwrap(),
             QueryExecutionPopulation::Population(&bindings[index].population)
         );
-        assert_eq!(runtime.metric(&RuntimeMetricKey::Duration).unwrap().average, [1_000.0, 3_000.0][index]);
+        assert_eq!(runtime.metric(&RuntimeMetricKey::Duration).unwrap().average, Some([1_000.0, 3_000.0][index]));
         assert_eq!(wait.total.integer(), Some([7, 90][index]));
     }
     assert_eq!(runtime[0].measurement_key().unwrap().references, runtime[1].measurement_key().unwrap().references);

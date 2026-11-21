@@ -139,7 +139,7 @@ const REGISTRATIONS: &[Registration] = &[
         subject: RecipeSubject::Database,
         route: Route::Blocking,
     },
-    Registration::snapshot("postgres.statement-counters", Recipe::Statements).baseline(),
+    Registration::snapshot("postgres.statement-counters", Recipe::Statements).version(2).baseline(),
     Registration::snapshot("postgres.statement-definitions", Recipe::Definitions),
     Registration::snapshot("postgres.operational", Recipe::Operational).version(2).baseline(),
     Registration::snapshot("postgres.instance-operational", Recipe::InstanceOperational)

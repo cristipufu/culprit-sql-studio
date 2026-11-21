@@ -318,8 +318,8 @@ pub(crate) fn counters(row: &Row, meta: &Metadata) -> Result<StatementCounterSam
         if let Some(average) = number(row, mean)? {
             distributions.push(StatementDistribution {
                 statistics: RuntimeMetric {
-                    minimum: number(row, min)?,
-                    maximum: number(row, max)?,
+                    minimum: number(row, min)?.map(MeasurementValue::Real),
+                    maximum: number(row, max)?.map(MeasurementValue::Real),
                     standard_deviation: number(row, stddev)?,
                     ..RuntimeMetric::average(key, RuntimeMetricUnit::Milliseconds, average)
                 },

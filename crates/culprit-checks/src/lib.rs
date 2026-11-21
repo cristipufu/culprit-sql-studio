@@ -33,10 +33,10 @@ pub use views::{
     current_request_work, dashboard, database_properties, drift, focused_blocking, full_text_populations,
     hyperscale_log_components, instance_resources, jobs, maintenance, maintenance_blocking, maintenance_progress,
     memory_clerks, memory_failures, native_failures, page_server_reads, page_waits, performance_counters,
-    query_store_definitions, query_wait_fragments, replication, request_memory, runtime_distributions, session_census,
-    session_memory, source_overhead, statement_grants, statement_work, storage, suspect_pages, table_catalog,
-    table_full_text, table_memory, table_temporal, task_space, tempdb_metadata_memory, temporary_work, wait_counters,
-    waits,
+    query_runtime_fragments, query_store_definitions, query_wait_fragments, replication, request_memory,
+    runtime_distributions, session_census, session_memory, source_overhead, statement_grants, statement_work, storage,
+    suspect_pages, table_catalog, table_full_text, table_memory, table_temporal, task_space, tempdb_metadata_memory,
+    temporary_work, wait_counters, waits,
 };
 
 use std::sync::Arc;

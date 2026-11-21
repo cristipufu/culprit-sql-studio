@@ -19,7 +19,7 @@ fn registered_source_versions_include_native_acquisition_policy_revisions() {
             ("mssql.suspect-pages", 2),
             ("mssql.agent-jobs", 2),
             ("mssql.hyperscale-log-components", 2),
-            ("mssql.query-history", 5),
+            ("mssql.query-history", 6),
             ("mssql.resource-history", 3),
             ("mssql.pool-resource-history", 2),
             ("mssql.deadlock-history", 2),

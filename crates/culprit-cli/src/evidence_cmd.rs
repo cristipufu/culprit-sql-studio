@@ -221,6 +221,7 @@ enum Analysis {
     CompletedSpills,
     PageServerReads,
     QueryWaitFragments,
+    RuntimeFragments,
     StatementGrants,
     CacheEntryMemory,
     RuntimeDistributions,
@@ -271,6 +272,7 @@ impl Analysis {
             Self::ManagedInstanceResources => vec![EvidenceFamily::ResourceSamples],
             Self::PageServerReads => vec![EvidenceFamily::QueryRuntime],
             Self::QueryWaitFragments => vec![EvidenceFamily::QueryWaits],
+            Self::RuntimeFragments => vec![EvidenceFamily::QueryRuntime],
             Self::Queries => vec![
                 EvidenceFamily::QueryDefinitions,
                 EvidenceFamily::PlanDefinitions,
@@ -415,6 +417,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::CompletedSpills) => {
             let analysis = culprit_engine::collected_resources::completed_spills(&capture, definitions.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::completed_spills(&analysis.report))?;
+        }
+        Some(Analysis::RuntimeFragments) => {
+            let report = culprit_engine::collected_resources::query_runtime_fragments(&capture)?;
+            emit(out, &report, common.max_output_bytes, || observations::runtime_fragments(&report))?;
         }
         Some(Analysis::QueryWaitFragments) => {
             let report = culprit_engine::collected_resources::query_wait_fragments(&capture)?;

@@ -301,7 +301,7 @@ async fn query_runtime_keeps_typed_temporary_space_units_averages_and_exact_nati
         let TelemetryRecord::QueryRuntime(runtime) = &actual.row().record else { panic!() };
         let space = runtime.metric(&RuntimeMetricKey::TemporaryStorage).unwrap();
         assert_eq!(space.unit, RuntimeMetricUnit::Pages { bytes_per_page: 16384 });
-        assert_eq!(space.average, 1.25);
+        assert_eq!(space.average, Some(1.25));
         assert_eq!(runtime.executions, "9007199254740993");
     }
     assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));

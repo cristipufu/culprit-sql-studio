@@ -9,7 +9,7 @@ pub(super) const MAX_EXACT_COUNT: u64 = 9_007_199_254_740_992;
 
 pub(super) struct CapturedTotals {
     pub executions: u64,
-    pub time_ms: f64,
+    pub time_ms: Option<f64>,
     pub cpu_ms: Option<f64>,
     pub queries: usize,
 }
@@ -28,29 +28,24 @@ pub(super) fn captured_totals(
         return Ok(None);
     }
     let interval = &capture.source().query_history().ok_or_else(invalid)?.interval;
-    let mut totals = CapturedTotals { executions: 0, time_ms: 0.0, cpu_ms: Some(0.0), queries: 0 };
+    let mut totals = CapturedTotals { executions: 0, time_ms: Some(0.0), cpu_ms: Some(0.0), queries: 0 };
     let mut queries = std::collections::BTreeSet::new();
     for &(_, row) in &rows.runtime {
         if inclusion(definitions.join(&row.key.references)?.query) == QueryInclusion::Excluded {
             continue;
         }
-        let Some(n) = exact_count(&row.executions) else { return Ok(None) };
-        let Some(count) = totals.executions.checked_add(n).filter(|total| *total <= MAX_EXACT_COUNT) else {
+        let Some(n) = row.executions.parse::<u64>().ok() else { return Ok(None) };
+        let Some(count) = totals.executions.checked_add(n) else {
             return Ok(None);
         };
         totals.executions = count;
         if n == 0 {
             continue;
         }
-        let Some(metric) = row.metric(&RuntimeMetricKey::Duration) else { return Ok(None) };
-        let Some(mean) = milliseconds(metric.average, metric.unit) else { return Ok(None) };
         if !valid_bounds(row, interval)? {
             return Ok(None);
         }
-        totals.time_ms += mean * n as f64;
-        if !totals.time_ms.is_finite() {
-            return Ok(None);
-        }
+        totals.time_ms = optional_total(totals.time_ms, row.metric(&RuntimeMetricKey::Duration), n, milliseconds);
         totals.cpu_ms = optional_total(totals.cpu_ms, row.metric(&RuntimeMetricKey::CpuTime), n, milliseconds);
         let Some(query_id) = row.key.references.query.as_ref().and_then(|query| query.definition_id.as_deref()) else {
             return Ok(None);
@@ -59,6 +54,22 @@ pub(super) fn captured_totals(
     }
     totals.queries = queries.len();
     Ok(Some(totals))
+}
+
+impl CapturedTotals {
+    pub fn report(&self) -> culprit_core::collected_analysis::CollectedQueryRuntimeTotals {
+        use culprit_core::collected_analysis::{CollectedQueryRuntimeTotals, CollectedRuntimeTimeTotal};
+        let time = |value: Option<f64>| match value {
+            Some(total_ms) => CollectedRuntimeTimeTotal::Complete { total_ms },
+            None => CollectedRuntimeTimeTotal::Incomplete,
+        };
+        CollectedQueryRuntimeTotals {
+            executions: self.executions.to_string(),
+            query_identities: self.queries.to_string(),
+            duration: time(self.time_ms),
+            cpu: time(self.cpu_ms),
+        }
+    }
 }
 
 struct NativeGroup<'a> {
@@ -373,7 +384,7 @@ fn aggregate(
         let Some(duration) = row.metric(&RuntimeMetricKey::Duration) else {
             return omitted(export, CollectedAnalysisLimit::DurationUnavailable, limitations);
         };
-        let Some(mean) = milliseconds(duration.average, duration.unit) else {
+        let Some(mean) = duration.average.and_then(|value| milliseconds(value, duration.unit)) else {
             return omitted(export, CollectedAnalysisLimit::DurationUnavailable, limitations);
         };
         if !valid_bounds(row, interval)? {
@@ -384,8 +395,19 @@ fn aggregate(
             return omitted(export, CollectedAnalysisLimit::CounterPrecision, limitations);
         }
         let mut part = culprit_core::PeriodStats::new(n as f64, total);
-        part.min_ms = duration.minimum.and_then(|value| milliseconds(value, duration.unit));
-        part.max_ms = duration.maximum.and_then(|value| milliseconds(value, duration.unit));
+        part.min_ms = duration
+            .minimum
+            .as_ref()
+            .and_then(MeasurementValue::exact_real)
+            .and_then(|value| milliseconds(value, duration.unit));
+        part.max_ms = duration
+            .maximum
+            .as_ref()
+            .and_then(MeasurementValue::exact_real)
+            .and_then(|value| milliseconds(value, duration.unit));
+        if duration.minimum.is_some() && part.min_ms.is_none() || duration.maximum.is_some() && part.max_ms.is_none() {
+            limitations.push(limit(export.record_id.clone(), CollectedAnalysisLimit::CounterPrecision));
+        }
         has_min &= part.min_ms.is_some();
         has_max &= part.max_ms.is_some();
         stats.add(&part);
@@ -448,7 +470,11 @@ fn optional_total(
     n: u64,
     convert: impl Fn(f64, RuntimeMetricUnit) -> Option<f64>,
 ) -> Option<f64> {
-    let value = total? + convert(metric?.average, metric?.unit)? * n as f64;
+    if n > MAX_EXACT_COUNT {
+        return None;
+    }
+    let metric = metric?;
+    let value = total? + convert(metric.average?, metric.unit)? * n as f64;
     value.is_finite().then_some(value)
 }
 

@@ -41,6 +41,7 @@ async fn every_new_snapshot_report_retains_one_exact_original_without_source_wor
             LocalCaptureAnalysisKind::ManagedInstanceResources
                 | LocalCaptureAnalysisKind::PoolSettings
                 | LocalCaptureAnalysisKind::Replication
+                | LocalCaptureAnalysisKind::RuntimeFragments
                 | LocalCaptureAnalysisKind::QueryWaitFragments
                 | LocalCaptureAnalysisKind::PageServerReads
                 | LocalCaptureAnalysisKind::SessionCensus

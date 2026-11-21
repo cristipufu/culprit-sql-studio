@@ -32,10 +32,13 @@ pub enum IndexUsageScope {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default)]
 #[ts(export)]
 pub struct OperationalStats {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub runtime_fragments: Option<Box<crate::telemetry::RecordedQueryHistoryRead>>,
     /// One explicitly selected original wait-history capture; never joined to current scan workload by names.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub query_wait_fragments: Option<Box<crate::telemetry::RecordedQueryWaitRead>>,
+    pub query_wait_fragments: Option<Box<crate::telemetry::RecordedQueryHistoryRead>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub managed_instance_resources: Option<Box<crate::telemetry::RecordedManagedInstanceResourceRead>>,
@@ -209,6 +212,7 @@ impl OperationalStats {
             cluster: &'a Option<ClusterHealth>,
         }
         let Self {
+            runtime_fragments: _,
             query_wait_fragments: _,
             statement_work: _,
             cached_runtime: _,

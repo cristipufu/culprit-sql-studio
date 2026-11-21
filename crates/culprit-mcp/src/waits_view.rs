@@ -20,6 +20,7 @@ pub(crate) mod page_server_reads;
 mod page_waits;
 pub(crate) mod performance_counters;
 pub(crate) mod query_wait_fragments;
+pub(crate) mod runtime_fragments;
 mod statement_work;
 pub(crate) mod suspect_pages;
 pub(crate) mod table_memory;
@@ -123,6 +124,7 @@ pub fn report(report: &Report) -> Value {
     table_memory::attach(&mut response, report);
     query_wait_fragments::attach(&mut response, report);
     change_capture::attach(&mut response, report);
+    runtime_fragments::attach(&mut response, report);
     group_replication::attach(&mut response, report);
     galera::attach(&mut response, report);
     pool_settings::attach(&mut response, report);

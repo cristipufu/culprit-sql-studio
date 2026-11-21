@@ -29,6 +29,7 @@ pub use session_census::LocalSessionCensus;
 pub enum LocalCaptureAnalysisKind {
     PageServerReads,
     QueryWaitFragments,
+    RuntimeFragments,
     MemoryClerks,
     TempdbMetadataMemory,
     HyperscaleLogComponents,
@@ -67,6 +68,7 @@ impl LocalCaptureAnalysisKind {
     pub const ALL: &'static [Self] = &[
         Self::PageServerReads,
         Self::QueryWaitFragments,
+        Self::RuntimeFragments,
         Self::MemoryClerks,
         Self::TempdbMetadataMemory,
         Self::HyperscaleLogComponents,
@@ -107,7 +109,9 @@ impl LocalCaptureAnalysisKind {
         use LocalCaptureReadPlan::{Activity, Blocking, QueryHistory, Snapshot};
         use culprit_core::telemetry::SnapshotDataset as Dataset;
         match self {
-            Self::PageServerReads => QueryHistory(culprit_collector::outbox::QueryHistoryReadKind::Runtime),
+            Self::PageServerReads | Self::RuntimeFragments => {
+                QueryHistory(culprit_collector::outbox::QueryHistoryReadKind::Runtime)
+            }
             Self::QueryWaitFragments => QueryHistory(culprit_collector::outbox::QueryHistoryReadKind::Waits),
             Self::Replication => LocalCaptureReadPlan::Replication,
             Self::PoolSettings => LocalCaptureReadPlan::PoolSettings,
@@ -176,6 +180,7 @@ pub enum LocalCapturedAnalysis {
     ManagedInstanceResources(Box<LocalManagedInstanceResources>),
     PageServerReads(LocalPageServerReads),
     QueryWaitFragments(Box<LocalQueryWaitFragments>),
+    RuntimeFragments(Box<LocalRuntimeFragments>),
     MemoryClerks(LocalMemoryClerks),
     HyperscaleLogComponents(LocalHyperscaleLogComponents),
     Snapshot(LocalSnapshotAnalysis),
@@ -189,6 +194,7 @@ impl LocalCapturedAnalysis {
         match self {
             Self::PageServerReads(_) => LocalCaptureAnalysisKind::PageServerReads,
             Self::QueryWaitFragments(_) => LocalCaptureAnalysisKind::QueryWaitFragments,
+            Self::RuntimeFragments(_) => LocalCaptureAnalysisKind::RuntimeFragments,
             Self::MemoryClerks(_) => LocalCaptureAnalysisKind::MemoryClerks,
             Self::HyperscaleLogComponents(_) => LocalCaptureAnalysisKind::HyperscaleLogComponents,
             Self::Snapshot(analysis) => analysis.report().kind(),
@@ -290,7 +296,7 @@ pub use managed_instance_resources::LocalManagedInstanceResources;
 #[derive(Debug)]
 pub struct LocalQueryWaitFragments {
     connection: String,
-    read: Box<culprit_core::telemetry::CapturedQueryWaitRead>,
+    read: Box<culprit_core::telemetry::CapturedQueryHistoryRead>,
     report: Box<culprit_core::query_wait_report::QueryWaitFragmentReport>,
     bytes_read: u64,
 }
@@ -298,7 +304,7 @@ impl LocalQueryWaitFragments {
     pub fn connection(&self) -> &str {
         &self.connection
     }
-    pub fn read(&self) -> &culprit_core::telemetry::CapturedQueryWaitRead {
+    pub fn read(&self) -> &culprit_core::telemetry::CapturedQueryHistoryRead {
         &self.read
     }
     pub fn report(&self) -> &culprit_core::query_wait_report::QueryWaitFragmentReport {
@@ -307,7 +313,32 @@ impl LocalQueryWaitFragments {
     pub fn bytes_read(&self) -> u64 {
         self.bytes_read
     }
-    pub(crate) fn into_read(self) -> Box<culprit_core::telemetry::CapturedQueryWaitRead> {
+    pub(crate) fn into_read(self) -> Box<culprit_core::telemetry::CapturedQueryHistoryRead> {
+        self.read
+    }
+}
+
+#[derive(Debug)]
+pub struct LocalRuntimeFragments {
+    connection: String,
+    read: Box<culprit_core::telemetry::CapturedQueryHistoryRead>,
+    report: Box<culprit_core::query_runtime_report::QueryRuntimeFragmentReport>,
+    bytes_read: u64,
+}
+impl LocalRuntimeFragments {
+    pub fn connection(&self) -> &str {
+        &self.connection
+    }
+    pub fn read(&self) -> &culprit_core::telemetry::CapturedQueryHistoryRead {
+        &self.read
+    }
+    pub fn report(&self) -> &culprit_core::query_runtime_report::QueryRuntimeFragmentReport {
+        &self.report
+    }
+    pub fn bytes_read(&self) -> u64 {
+        self.bytes_read
+    }
+    pub(crate) fn into_read(self) -> Box<culprit_core::telemetry::CapturedQueryHistoryRead> {
         self.read
     }
 }

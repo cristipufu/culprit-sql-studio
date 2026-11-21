@@ -5,6 +5,8 @@ pub use page_server_reads::{PageServerReadAvailability, PageServerReadStatistics
 #[cfg(test)]
 mod cohort_tests;
 #[cfg(test)]
+mod runtime_fragment_tests;
+#[cfg(test)]
 mod wait_fragment_tests;
 
 pub const MAX_STATEMENT_METRICS: usize = 64;
@@ -34,6 +36,15 @@ impl MeasurementValue {
         }
     }
 
+    pub fn exact_real(&self) -> Option<f64> {
+        match self {
+            Self::Integer(value) => {
+                value.parse::<u64>().ok().filter(|value| *value <= (1u64 << 53)).map(|value| value as f64)
+            }
+            Self::Real(value) => (value.is_finite() && *value >= 0.0).then_some(*value),
+        }
+    }
+
     pub(super) fn is_valid(&self) -> bool {
         match self {
             Self::Integer(value) => valid_counter(value),
@@ -54,6 +65,8 @@ pub enum RuntimeMetricKey {
     CpuTime,
     LogicalReads,
     PhysicalReads,
+    /// Native read I/O operations, independent of pages read, bytes or page-server requests.
+    PhysicalReadOperations,
     LogicalWrites,
     Rows,
     Parallelism,
@@ -99,7 +112,8 @@ impl RuntimeMetricKey {
         unit.is_valid()
             && match self {
                 Self::Duration | Self::CpuTime | Self::TemporaryReadTime | Self::TemporaryWriteTime => unit.is_time(),
-                Self::Executions
+                Self::PhysicalReadOperations
+                | Self::Executions
                 | Self::Errors
                 | Self::Warnings
                 | Self::Rows
@@ -128,20 +142,27 @@ impl RuntimeMetricKey {
 pub struct RuntimeMetric {
     pub key: RuntimeMetricKey,
     pub unit: RuntimeMetricUnit,
-    pub average: f64,
-    pub minimum: Option<f64>,
-    pub maximum: Option<f64>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub average: Option<f64>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub minimum: Option<MeasurementValue>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub maximum: Option<MeasurementValue>,
+    /// Native last value in this exact original fragment, not a cross-fragment representative.
+    #[serde(deserialize_with = "required_nullable")]
+    pub last: Option<MeasurementValue>,
+    #[serde(deserialize_with = "required_nullable")]
     pub standard_deviation: Option<f64>,
 }
 impl RuntimeMetric {
     pub fn average(key: RuntimeMetricKey, unit: RuntimeMetricUnit, average: f64) -> Self {
-        Self { key, unit, average, minimum: None, maximum: None, standard_deviation: None }
+        Self { key, unit, average: Some(average), minimum: None, maximum: None, last: None, standard_deviation: None }
     }
     pub fn is_valid(&self) -> bool {
         let number = |value: f64| value.is_finite() && value >= 0.0;
         self.key.accepts(self.unit)
-            && number(self.average)
-            && [self.minimum, self.maximum, self.standard_deviation].into_iter().flatten().all(number)
+            && [self.average, self.standard_deviation].into_iter().flatten().all(number)
+            && [&self.minimum, &self.maximum, &self.last].into_iter().flatten().all(MeasurementValue::is_valid)
     }
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, Hash)]

@@ -62,6 +62,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         page_server_reads: &'a Option<Box<culprit_core::page_server_read_report::PageServerReadReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         query_wait_fragments: &'a Option<Box<culprit_core::query_wait_report::QueryWaitFragmentReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        runtime_fragments: &'a Option<Box<culprit_core::query_runtime_report::QueryRuntimeFragmentReport>>,
         snapshot: &'a culprit_core::Snapshot,
         findings: &'a [culprit_core::Finding],
         locked: &'a [culprit_core::LockedCheck],
@@ -110,6 +112,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         completed_spills,
         page_server_reads,
         query_wait_fragments,
+        runtime_fragments,
         snapshot,
         findings,
         locked,
@@ -158,6 +161,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         completed_spills,
         page_server_reads,
         query_wait_fragments,
+        runtime_fragments,
         snapshot,
         findings,
         locked,

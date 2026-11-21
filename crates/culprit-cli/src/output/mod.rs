@@ -455,6 +455,9 @@ impl Out {
         for group in report.galera.as_deref().unwrap_or_default() {
             println!("\n{}", observations::galera(group));
         }
+        if let Some(runtime) = &report.runtime_fragments {
+            println!("\n{}", observations::runtime_fragments(runtime));
+        }
         if let Some(waits) = &report.query_wait_fragments {
             println!("\n{}", observations::query_wait_fragments(waits));
         }
@@ -810,6 +813,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "engine_limitations": s.server.engine.spec().limitations(),
         "cdc":report.cdc.as_ref().map(|reports|reports.iter().map(|report|observations::compact_change_capture((&report.title,&report.summary),report.source_state,report.read_complete,report.context.as_ref(),&report.limitations,&report.entries,&report.sources)).collect::<Vec<_>>()),
         "change_feed":report.change_feed.as_ref().map(|reports|reports.iter().map(|report|observations::compact_change_capture((&report.title,&report.summary),report.source_state,report.read_complete,report.context.as_ref(),&report.limitations,&report.entries,&report.sources)).collect::<Vec<_>>()),
+        "runtime_fragments": report.runtime_fragments.as_deref().map(observations::compact_runtime_fragments),
         "query_wait_fragments": report.query_wait_fragments.as_deref().map(observations::compact_query_wait_fragments),
         "table_memory": report.table_memory.as_ref().map(|reports|reports.iter().map(observations::compact_table_memory).collect::<Vec<_>>()),
         "group_replication": report.group_replication.as_ref().map(|reports|reports.iter().map(observations::compact_group_replication).collect::<Vec<_>>()),
@@ -872,6 +876,9 @@ pub(super) fn markdown_report(report: &Report) -> String {
     }
     for group in report.galera.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::galera(group)));
+    }
+    if let Some(runtime) = &report.runtime_fragments {
+        out.push_str(&markdown_text_block(&observations::runtime_fragments(runtime)));
     }
     if let Some(waits) = &report.query_wait_fragments {
         out.push_str(&markdown_text_block(&observations::query_wait_fragments(waits)));

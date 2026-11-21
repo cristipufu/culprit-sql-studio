@@ -253,8 +253,8 @@ async fn source_cohort_outcomes_stay_separate_inside_a_selected_population() {
     failed.key.native.qualifiers.insert("execution_type".into(), "4".into());
     failed.key.cohort.as_mut().unwrap().qualifiers.insert("native-outcome".into(), "failed".into());
     failed.executions = "3".into();
-    failed.metrics[0].average = 50.0;
-    failed.metrics[0].maximum = Some(50.0);
+    failed.metrics[0].average = Some(50.0);
+    failed.metrics[0].maximum = Some(MeasurementValue::Real(50.0));
     records.push(TelemetryRecord::QueryRuntime(failed));
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read().await;
@@ -378,9 +378,9 @@ async fn the_maximum_declared_population_set_assigns_every_measurement_to_one_in
             key.native.qualifiers.extend(qualifiers.clone());
         }
         runtime.executions = (index + 1).to_string();
-        runtime.metrics[0].average = 1.0;
-        runtime.metrics[0].minimum = Some(0.5);
-        runtime.metrics[0].maximum = Some(2.0);
+        runtime.metrics[0].average = Some(1.0);
+        runtime.metrics[0].minimum = Some(MeasurementValue::Real(0.5));
+        runtime.metrics[0].maximum = Some(MeasurementValue::Real(2.0));
         wait.total = MeasurementValue::Integer((index + 1).to_string());
         records.push(TelemetryRecord::QueryRuntime(runtime));
         records.push(TelemetryRecord::QueryWaits(wait));

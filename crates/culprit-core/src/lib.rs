@@ -111,6 +111,7 @@ pub mod plan_view;
 pub mod platform;
 pub mod provenance;
 pub mod provider;
+pub mod query_runtime_report;
 pub mod query_store_statement_report;
 pub mod query_temporary_work;
 pub mod query_wait_report;

@@ -100,8 +100,7 @@ fn history_population(layout: &super::layout::NativeLayout) -> super::replicas::
 }
 pub(crate) fn runtime(range: Option<super::replicas::Population>, layout: &super::layout::NativeLayout) -> String {
     let population = history_population(layout).projection("r");
-    let log_bytes = if layout.log_bytes { "r.avg_log_bytes_used" } else { "CAST(NULL AS float)" };
-    let tempdb = if layout.tempdb { "r.avg_tempdb_space_used" } else { "CAST(NULL AS float)" };
+    let metrics = super::runtime_fields::columns(layout);
     let relation = super::runtime::relation(false);
     let page_server = super::page_server::columns(layout.page_server_reads, "r");
     let definitions = definition_columns!();
@@ -110,8 +109,7 @@ pub(crate) fn runtime(range: Option<super::replicas::Population>, layout: &super
     format!(
         r#"{relation}
 SELECT TOP (@P1) /* culprit */ r.runtime_stats_id AS row_id,r.plan_id,{population},r.execution_type,
- count_executions,avg_duration,stdev_duration,min_duration,max_duration,avg_cpu_time,avg_logical_io_reads,avg_physical_io_reads,
- avg_logical_io_writes,avg_rowcount,avg_dop,avg_query_max_used_memory,avg_clr_time,{log_bytes} AS avg_log_bytes_used,{tempdb} AS avg_tempdb_space_used,
+ count_executions,{metrics},
 {page_server},
  CONVERT(varchar(40),first_execution_time,127) AS first_execution_at,
  CONVERT(varchar(40),r.last_execution_time,127) AS last_execution_at,

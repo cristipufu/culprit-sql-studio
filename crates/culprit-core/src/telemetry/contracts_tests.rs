@@ -44,7 +44,7 @@ fn invalid_or_ambiguous_metrics_cannot_enter_an_export() {
     }
     for value in [f64::NAN, f64::INFINITY, -1.0] {
         let mut changed = row.clone();
-        changed.metrics[0].average = value;
+        changed.metrics[0].average = Some(value);
         assert!(!changed.is_valid());
     }
     let mut duplicate = row.clone();
@@ -218,8 +218,8 @@ fn sql_markers_in_literals_never_change_statement_provenance() {
 fn native_aggregate_precision_and_fractional_wait_units_are_preserved() {
     // Providers may expose average and extrema at different native precision.
     let metric = RuntimeMetric {
-        minimum: Some(1.0),
-        maximum: Some(1.0),
+        minimum: Some(MeasurementValue::Real(1.0)),
+        maximum: Some(MeasurementValue::Real(1.0)),
         ..RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Microseconds, 1.25)
     };
     assert!(metric.is_valid());

@@ -77,12 +77,18 @@ fn analyze_population(
         limit(None, CollectedAnalysisLimit::MissingSettings),
         limit(None, CollectedAnalysisLimit::MissingResourceMeasurements),
     ];
+    let totals = if population == CollectedQueryPopulation::Unknown {
+        None
+    } else {
+        groups::captured_totals(capture, definitions, rows)?
+    };
+    let runtime_totals = totals.as_ref().map(groups::CapturedTotals::report);
     let (workload, query_inputs, partial) = if population == CollectedQueryPopulation::Unknown {
         limitations.push(limit(None, CollectedAnalysisLimit::ExecutionPopulationUnknown));
         (None, vec![], true)
     } else {
         let (queries, inputs, partial) = groups::project(capture, definitions, &population, rows, &mut limitations)?;
-        (workload(capture, definitions, &population, rows, queries, &mut limitations)?, inputs, partial)
+        (workload(capture, &population, totals.as_ref(), queries, &mut limitations)?, inputs, partial)
     };
     let membership_incomplete = capture
         .source()
@@ -96,6 +102,7 @@ fn analyze_population(
     }
     apply_executable_fix_policy(&mut report.findings, report.snapshot.workload.as_mut(), &mut limitations);
     Ok(CollectedQueryAnalysisResult {
+        runtime_totals,
         population,
         query_inputs,
         workload: report.snapshot.workload,
@@ -109,9 +116,8 @@ fn analyze_population(
 
 fn workload(
     capture: &EvidenceCapture,
-    definitions: &validation::Definitions<'_>,
     population: &CollectedQueryPopulation,
-    rows: &populations::NativeRows<'_>,
+    totals: Option<&groups::CapturedTotals>,
     queries: Vec<culprit_core::QueryStat>,
     limitations: &mut Vec<CollectedAnalysisLimitation>,
 ) -> Result<Option<Workload>> {
@@ -119,7 +125,11 @@ fn workload(
         return Ok(None);
     }
     let history = capture.source().query_history().ok_or_else(invalid)?;
-    let Some(totals) = groups::captured_totals(capture, definitions, rows)? else {
+    let Some(totals) = totals else {
+        limitations.push(limit(None, CollectedAnalysisLimit::RuntimeDenominatorUnavailable));
+        return Ok(None);
+    };
+    let Some(time_ms) = totals.time_ms.filter(|_| totals.executions <= groups::MAX_EXACT_COUNT) else {
         limitations.push(limit(None, CollectedAnalysisLimit::RuntimeDenominatorUnavailable));
         return Ok(None);
     };
@@ -137,7 +147,7 @@ fn workload(
         window_start: Some(history.interval.from.clone()),
         window_end: Some(history.interval.until.clone()),
         window_hours: hours,
-        total_time_ms: totals.time_ms,
+        total_time_ms: time_ms,
         total_cpu_ms: totals.cpu_ms,
         total_executions: totals.executions as f64,
         query_count: totals.queries as f64,

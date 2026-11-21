@@ -49,7 +49,7 @@ pub(crate) fn summary_row() -> Rec {
     ])
 }
 pub(crate) fn runtime_row(duration: i64) -> Rec {
-    Rec::of(&[
+    super::runtime_fields::with_nullable_columns(&Rec::of(&[
         ("row_id", Val::Int(duration)),
         ("plan_id", Val::Int(4)),
         ("replica_group_id", Val::Int(7)),
@@ -77,7 +77,7 @@ pub(crate) fn runtime_row(duration: i64) -> Rec {
         ("stdev_page_server_io_reads", Val::Null),
         ("first_execution_at", Val::Text("2020-01-01T06:00:00.1533333Z".into())),
         ("last_execution_at", Val::Text("2020-01-01T06:00:01.3066667Z".into())),
-    ])
+    ]))
 }
 #[tokio::test]
 async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_counts() {
@@ -103,7 +103,8 @@ async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_c
         .iter()
         .map(|record| match record {
             TelemetryRecord::QueryRuntime(row) => {
-                row.metric(&RuntimeMetricKey::Duration).unwrap().average * row.executions.parse::<f64>().unwrap()
+                row.metric(&RuntimeMetricKey::Duration).unwrap().average.unwrap()
+                    * row.executions.parse::<f64>().unwrap()
             }
             _ => panic!("runtime"),
         })
@@ -239,9 +240,9 @@ fn optional_runtime_costs_preserve_nulls_and_reject_invalid_values() {
     else {
         panic!("runtime")
     };
-    assert_eq!(record.metric(&RuntimeMetricKey::Rows).map(|metric| metric.average), Some(1.0));
-    assert_eq!(record.metric(&RuntimeMetricKey::PeakMemory), None);
-    assert_eq!(record.metric(&RuntimeMetricKey::LogBytes), None);
+    assert_eq!(record.metric(&RuntimeMetricKey::Rows).and_then(|metric| metric.average), Some(1.0));
+    assert_eq!(record.metric(&RuntimeMetricKey::PeakMemory).unwrap().average, None);
+    assert_eq!(record.metric(&RuntimeMetricKey::LogBytes).unwrap().average, None);
     let with_peak = replace(&runtime_row(1000), &[("avg_query_max_used_memory", Val::Float(19.5))]);
     let TelemetryRecord::QueryRuntime(record) =
         decode::record(&with_peak, TelemetryStream::QueryRuntime, StatementReferences::default()).unwrap()
@@ -249,7 +250,7 @@ fn optional_runtime_costs_preserve_nulls_and_reject_invalid_values() {
         panic!("runtime")
     };
     let peak = record.metric(&RuntimeMetricKey::PeakMemory).unwrap();
-    assert_eq!(peak.average, 19.5);
+    assert_eq!(peak.average, Some(19.5));
     assert_eq!(peak.unit, RuntimeMetricUnit::Pages { bytes_per_page: 8192 });
     assert!(
         decode::record(

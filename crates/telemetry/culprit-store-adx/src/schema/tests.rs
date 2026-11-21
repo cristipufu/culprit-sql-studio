@@ -105,8 +105,8 @@ fn runtime_projection_covers_the_native_contract_and_preserves_counts_units_and_
         executions: "9007199254740993".into(),
         metrics: vec![
             RuntimeMetric {
-                minimum: Some(2.5),
-                maximum: Some(24.5),
+                minimum: Some(MeasurementValue::Real(2.5)),
+                maximum: Some(MeasurementValue::Real(24.5)),
                 standard_deviation: Some(3.5),
                 ..RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Microseconds, 13.5)
             },

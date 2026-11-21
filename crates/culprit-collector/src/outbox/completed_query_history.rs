@@ -31,12 +31,15 @@ impl CompletedQueryHistory {
         &self.completed.connection
     }
 
-    pub fn into_wait_read(self) -> Result<CapturedQueryWaitRead> {
+    pub fn into_fragment_read(self, stream: TelemetryStream) -> Result<CapturedQueryHistoryRead> {
+        if !matches!(stream, TelemetryStream::QueryRuntime | TelemetryStream::QueryWaits) {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
         let original = self.completed;
         let selected = original
             .streams
             .iter()
-            .find(|selected| selected.stream == TelemetryStream::QueryWaits)
+            .find(|selected| selected.stream == stream)
             .cloned()
             .ok_or_else(|| DeliveryProblem::UnsupportedSchema.error())?;
         let read = CapturedReadRef::new(
@@ -45,12 +48,14 @@ impl CompletedQueryHistory {
             original.capture.manifest_sha256,
             vec![selected],
         )?;
-        CapturedQueryWaitRead::from_exports(
+        let rows =
+            original.records.into_iter().zip(original.row_ordinals).filter(|(row, _)| row.record.stream() == stream);
+        CapturedQueryHistoryRead::from_exports(
             original.source,
             read,
             original.references,
             (original.collected_from, original.collected_until),
-            original.records.into_iter().zip(original.row_ordinals),
+            rows,
             true,
         )
     }

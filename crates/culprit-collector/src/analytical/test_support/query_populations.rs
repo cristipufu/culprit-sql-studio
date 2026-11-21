@@ -54,8 +54,8 @@ pub fn query_population_evidence() -> (CollectionDescription, Vec<TelemetryRecor
             cohort: Some(cohort.clone()),
         };
         let mut metric = RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, duration);
-        metric.minimum = Some(duration / 2.0);
-        metric.maximum = Some(duration * 2.0);
+        metric.minimum = Some(MeasurementValue::Real(duration / 2.0));
+        metric.maximum = Some(MeasurementValue::Real(duration * 2.0));
         metric.standard_deviation = Some(1.0);
         records.push(TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key: key("same-native-runtime-fragment-id"),

@@ -166,6 +166,7 @@ impl OutboxCaptureReader {
                     .await
             }
             LocalCaptureReadPlan::QueryHistory(selection) => {
+                let analysis = request.analysis;
                 delivery
                     .with_completed_query_history(
                         lookup,
@@ -174,13 +175,7 @@ impl OutboxCaptureReader {
                         request.operation,
                         permit,
                         move |capture| {
-                            let result = match selection {
-                                culprit_collector::outbox::QueryHistoryReadKind::Runtime => {
-                                    explain_page_server_reads(capture).map(LocalCapturedAnalysis::PageServerReads)
-                                }
-                                culprit_collector::outbox::QueryHistoryReadKind::Waits => explain_query_waits(capture)
-                                    .map(|analysis| LocalCapturedAnalysis::QueryWaitFragments(Box::new(analysis))),
-                            };
+                            let result = explain_history(capture, analysis);
                             #[cfg(test)]
                             if let Some(boundary) = boundary {
                                 boundary()?;
@@ -416,7 +411,34 @@ fn explain_managed_instance_resources(
 fn explain_query_waits(capture: CompletedQueryHistory) -> Result<LocalQueryWaitFragments> {
     let connection = capture.connection().into();
     let bytes_read = capture.bytes_read();
-    let read = Box::new(capture.into_wait_read()?);
+    let read = Box::new(capture.into_fragment_read(TelemetryStream::QueryWaits)?);
     let report = Box::new(culprit_checks::query_wait_fragments::explain(&read)?);
     Ok(LocalQueryWaitFragments { connection, read, report, bytes_read })
+}
+
+fn explain_history(
+    capture: CompletedQueryHistory,
+    analysis: LocalCaptureAnalysisKind,
+) -> Result<LocalCapturedAnalysis> {
+    match analysis {
+        LocalCaptureAnalysisKind::PageServerReads => {
+            explain_page_server_reads(capture).map(LocalCapturedAnalysis::PageServerReads)
+        }
+        LocalCaptureAnalysisKind::QueryWaitFragments => {
+            explain_query_waits(capture).map(|value| LocalCapturedAnalysis::QueryWaitFragments(Box::new(value)))
+        }
+        LocalCaptureAnalysisKind::RuntimeFragments => {
+            let connection = capture.connection().into();
+            let bytes_read = capture.bytes_read();
+            let read = Box::new(capture.into_fragment_read(TelemetryStream::QueryRuntime)?);
+            let report = Box::new(culprit_checks::query_runtime_fragments::explain(&read)?);
+            Ok(LocalCapturedAnalysis::RuntimeFragments(Box::new(LocalRuntimeFragments {
+                connection,
+                read,
+                report,
+                bytes_read,
+            })))
+        }
+        _ => Err(DeliveryProblem::UnsupportedSchema.error()),
+    }
 }

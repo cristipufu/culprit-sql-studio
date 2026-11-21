@@ -3,8 +3,8 @@ use culprit_core::{
     Result,
     telemetry::{
         MeasurementValue, NativeIdentity, NativeMeasurementKey, NativePlanIdentity, NativeQueryIdentity,
-        RuntimeMeasurement, RuntimeMetric, RuntimeMetricKey, RuntimeMetricUnit, StatementReferences, TelemetryRecord,
-        TelemetryStream, WaitMeasurement, canonical_time,
+        RuntimeMeasurement, RuntimeMetric, RuntimeMetricUnit, StatementReferences, TelemetryRecord, TelemetryStream,
+        WaitMeasurement, canonical_time,
     },
 };
 
@@ -131,33 +131,7 @@ fn cohort(native: &NativeIdentity) -> NativeIdentity {
 }
 
 fn runtime_metrics(row: &Rec) -> Result<Vec<RuntimeMetric>> {
-    use RuntimeMetricKey as Key;
-    use RuntimeMetricUnit as Unit;
-    let pages = Unit::Pages { bytes_per_page: SQL_SERVER_PAGE_BYTES };
-    let mut duration = RuntimeMetric::average(Key::Duration, Unit::Microseconds, number(row, "avg_duration")?);
-    duration.minimum = Some(number(row, "min_duration")?);
-    duration.maximum = Some(number(row, "max_duration")?);
-    duration.standard_deviation = Some(number(row, "stdev_duration")?);
-    let mut metrics = vec![
-        duration,
-        RuntimeMetric::average(Key::CpuTime, Unit::Microseconds, number(row, "avg_cpu_time")?),
-        RuntimeMetric::average(Key::LogicalReads, pages, number(row, "avg_logical_io_reads")?),
-        RuntimeMetric::average(Key::PhysicalReads, pages, number(row, "avg_physical_io_reads")?),
-    ];
-    for (name, key, unit) in [
-        ("avg_logical_io_writes", Key::LogicalWrites, pages),
-        ("avg_rowcount", Key::Rows, Unit::Count),
-        ("avg_dop", Key::Parallelism, Unit::Ratio),
-        ("avg_query_max_used_memory", Key::PeakMemory, pages),
-        ("avg_clr_time", Key::Native("mssql.clr-time".into()), Unit::Microseconds),
-        ("avg_log_bytes_used", Key::LogBytes, Unit::Bytes),
-        ("avg_tempdb_space_used", Key::TemporaryStorage, pages),
-    ] {
-        if let Some(value) = optional_number(row, name)? {
-            metrics.push(RuntimeMetric::average(key, unit, value));
-        }
-    }
-    Ok(metrics)
+    super::runtime_fields::decode(row)
 }
 
 #[cfg(test)]

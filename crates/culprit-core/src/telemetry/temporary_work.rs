@@ -34,7 +34,7 @@ pub fn runtime_temporary_space<'a>(
             return None;
         }
         page_bytes = Some(bytes_per_page);
-        usage_pages_total += metric.average * n as f64;
+        usage_pages_total += metric.average? * n as f64;
         if !usage_pages_total.is_finite() {
             return None;
         }

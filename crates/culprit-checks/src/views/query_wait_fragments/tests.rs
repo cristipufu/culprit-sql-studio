@@ -1,7 +1,7 @@
 use super::*;
 use culprit_core::Engine;
 
-fn original(count: usize) -> CapturedQueryWaitRead {
+fn original(count: usize) -> CapturedQueryHistoryRead {
     let source = CollectionDescription {
         target: culprit_core::DatabaseIdentity::server(Engine::Postgres, "original-db", "original.invalid", 5432, None)
             .into(),
@@ -61,7 +61,7 @@ fn original(count: usize) -> CapturedQueryWaitRead {
             (ExportedRecord::new(&source, &capture, TelemetryRecord::QueryWaits(wait)).unwrap(), i as u32)
         })
         .collect::<Vec<_>>();
-    CapturedQueryWaitRead::from_exports(
+    CapturedQueryHistoryRead::from_exports(
         source,
         read,
         ReferenceCoverage::default(),
@@ -104,16 +104,16 @@ fn original_fragments_keep_wide_last_distinct_outcomes_replicas_and_native_devia
 #[test]
 fn native_null_partial_and_empty_are_distinct_from_missing_or_withdrawn_originals() {
     let mut read = original(2);
-    let mut raw = read.rows[0].wait.clone();
+    let mut raw = read.rows[0].fragment.wait().unwrap().clone();
     raw.last = None;
     raw.standard_deviation = None;
     raw.category_description = None;
     raw.outcome_description = None;
     let row =
         ExportedRecord::new(&read.description, &read.read.capture, TelemetryRecord::QueryWaits(raw.clone())).unwrap();
-    read.rows[0] = CapturedQueryWaitRow {
+    read.rows[0] = CapturedQueryHistoryRow {
         reference: read.read.bind(&read.description).unwrap().reference(&row, 0).unwrap(),
-        wait: raw,
+        fragment: QueryHistoryFragment::Waits(Box::new(raw)),
     };
     read.rows.truncate(1);
     read.read_complete = false;
@@ -142,10 +142,10 @@ fn source_clocks_original_positions_and_changed_fragment_bytes_cannot_be_repaire
     changed.description.source = "different-source".into();
     assert!(explain(&changed).is_err());
     let mut changed = read.clone();
-    changed.rows[0].wait.last = Some(MeasurementValue::Integer("7".into()));
+    wait_mut(&mut changed.rows[0]).last = Some(MeasurementValue::Integer("7".into()));
     assert!(explain(&changed).is_err());
     let mut changed = read.clone();
-    changed.rows[0].wait.outcome_description = Some("Regular".repeat(20));
+    wait_mut(&mut changed.rows[0]).outcome_description = Some("Regular".repeat(20));
     assert!(explain(&changed).is_err());
     let mut changed = read.clone();
     changed.rows[1] = changed.rows[0].clone();
@@ -166,6 +166,11 @@ fn bounded_presentation_validates_the_whole_original_including_a_malformed_suffi
     assert_eq!(report.entries.len(), 256);
     assert!(report.presentation_limited);
     assert!(report.limitations.contains(&t!("view.query_wait_fragments.limit.presentation", count = "256")));
-    read.rows.last_mut().unwrap().wait.standard_deviation = Some(-1.0);
+    wait_mut(read.rows.last_mut().unwrap()).standard_deviation = Some(-1.0);
     assert!(explain(&read).is_err());
+}
+
+fn wait_mut(row: &mut CapturedQueryHistoryRow) -> &mut WaitMeasurement {
+    let QueryHistoryFragment::Waits(wait) = &mut row.fragment else { panic!("wait fixture") };
+    wait
 }

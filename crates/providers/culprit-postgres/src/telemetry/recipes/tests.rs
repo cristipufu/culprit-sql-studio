@@ -70,7 +70,7 @@ fn every_public_declaration_has_one_actual_offline_constructor_and_no_native_cos
                 Route::MaintenanceProgress
                 | Route::CurrentRequestWork
                 | Route::Blocking
-                | Route::Snapshot(Recipe::Operational) => 2,
+                | Route::Snapshot(Recipe::Operational | Recipe::Statements) => 2,
                 _ => 1,
             }
         );

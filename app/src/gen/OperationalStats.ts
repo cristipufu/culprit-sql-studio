@@ -21,7 +21,7 @@ import type { RecordedManagedInstanceResourceRead } from "./RecordedManagedInsta
 import type { RecordedOperationalRead } from "./RecordedOperationalRead";
 import type { RecordedPerformanceCounters } from "./RecordedPerformanceCounters";
 import type { RecordedPoolSettingsRead } from "./RecordedPoolSettingsRead";
-import type { RecordedQueryWaitRead } from "./RecordedQueryWaitRead";
+import type { RecordedQueryHistoryRead } from "./RecordedQueryHistoryRead";
 import type { SequenceCapacity } from "./SequenceCapacity";
 import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
@@ -32,11 +32,11 @@ import type { SuspectPageHistoryRead } from "./SuspectPageHistoryRead";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 
-export type OperationalStats = { 
+export type OperationalStats = { runtime_fragments?: RecordedQueryHistoryRead, 
 /**
  * One explicitly selected original wait-history capture; never joined to current scan workload by names.
  */
-query_wait_fragments?: RecordedQueryWaitRead, managed_instance_resources?: RecordedManagedInstanceResourceRead, suspect_pages?: SuspectPageHistoryRead, storage?: StorageRead, cached_runtime?: CachedRuntimeRead, 
+query_wait_fragments?: RecordedQueryHistoryRead, managed_instance_resources?: RecordedManagedInstanceResourceRead, suspect_pages?: SuspectPageHistoryRead, storage?: StorageRead, cached_runtime?: CachedRuntimeRead, 
 /**
  * An independent original capture; its shared target and receipts are never current database ownership.
  */

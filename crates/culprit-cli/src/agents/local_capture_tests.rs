@@ -352,3 +352,5 @@ async fn temporal_table_configuration_uses_original_local_action_and_canonical_f
 }
 
 mod query_wait_fragments;
+
+mod runtime_fragments;

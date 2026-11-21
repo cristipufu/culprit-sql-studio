@@ -103,3 +103,47 @@ async fn wait_fragment_originals_roundtrip_exact_statistics_native_labels_empty_
         assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
     }
 }
+
+#[tokio::test]
+async fn nullable_runtime_means_keep_exact_bigint_endpoints_counts_and_native_read_operation_units() {
+    for missing in [false, true] {
+        let (source, records) = test_support::query_runtime_fragment_evidence(missing);
+        let expected =
+            records.iter().filter(|row| matches!(row, TelemetryRecord::QueryRuntime(_))).cloned().collect::<Vec<_>>();
+        let fixture = Fixture::new_for_stream(source.clone(), records, TelemetryStream::QueryRuntime).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let capture = fixture
+            .reader
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::QueryRuntime],
+                EvidenceReadBudget { page_rows: 1, ..Default::default() },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+        assert_eq!(capture.records().len(), 2);
+        for row in &expected {
+            let exported = ExportedRecord::new(&source, capture.capture(), row.clone()).unwrap();
+            assert!(capture.records().iter().any(|actual| actual.row() == &exported));
+        }
+        let TelemetryRecord::QueryRuntime(first) = &capture.records()[0].row().record else { panic!() };
+        let duration = first.metric(&RuntimeMetricKey::Duration).unwrap();
+        assert_eq!(duration.average.is_none(), missing);
+        assert!(matches!(&duration.last,Some(MeasurementValue::Integer(value)) if value=="9007199254740993"));
+        let schema = fixture.catalog.get(TelemetryStream::QueryRuntime).unwrap();
+        let column = schema.columns().iter().position(|column| column.name == "Metrics").unwrap();
+        let mut rows = fixture.rows.clone();
+        let mut metrics: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
+        metrics[0]["last"]["value"] = json!("9007199254740992");
+        rows[0][column] = json!(serde_json::to_string(&metrics).unwrap());
+        fixture.replies(vec![rows]);
+        let error = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryRuntime], EvidenceReadBudget::default(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    }
+}

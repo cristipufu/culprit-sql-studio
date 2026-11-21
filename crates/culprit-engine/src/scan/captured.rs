@@ -12,7 +12,8 @@ pub(crate) enum CapturedScanEvidence {
         family: culprit_core::telemetry::MssqlChangeCaptureFamily,
         read: Box<CapturedOperationalRead>,
     },
-    QueryWaitFragments(Box<culprit_core::telemetry::CapturedQueryWaitRead>),
+    RuntimeFragments(Box<culprit_core::telemetry::CapturedQueryHistoryRead>),
+    QueryWaitFragments(Box<culprit_core::telemetry::CapturedQueryHistoryRead>),
     ManagedInstanceResources(Box<culprit_core::telemetry::CapturedManagedInstanceResourceRead>),
     #[cfg(feature = "collector")]
     CachedRuntime(Box<CachedRuntimeRead>),
@@ -42,7 +43,12 @@ impl CapturedScanEvidence {
         Ok(Self::ChangeCapture { family, read })
     }
 
-    pub(crate) fn query_wait_fragments(read: Box<culprit_core::telemetry::CapturedQueryWaitRead>) -> Result<Self> {
+    pub(crate) fn runtime_fragments(read: Box<culprit_core::telemetry::CapturedQueryHistoryRead>) -> Result<Self> {
+        culprit_checks::query_runtime_fragments::explain(&read)?;
+        Ok(Self::RuntimeFragments(read))
+    }
+
+    pub(crate) fn query_wait_fragments(read: Box<culprit_core::telemetry::CapturedQueryHistoryRead>) -> Result<Self> {
         culprit_checks::query_wait_fragments::explain(&read)?;
         Ok(Self::QueryWaitFragments(read))
     }
@@ -108,16 +114,13 @@ impl CapturedScanEvidence {
                 culprit_core::telemetry::append_recorded_operational_read(originals, read)?;
             }
 
+            Self::RuntimeFragments(read) => {
+                culprit_checks::query_runtime_fragments::explain(&read)?;
+                retain_history_original(&mut snapshot.operations.runtime_fragments, read)?;
+            }
             Self::QueryWaitFragments(read) => {
                 culprit_checks::query_wait_fragments::explain(&read)?;
-                if snapshot.operations.query_wait_fragments.as_deref().is_some_and(|previous| {
-                    !matches!(previous, culprit_core::telemetry::RecordedQueryWaitRead::Captured { read: original } if original.as_ref() == read.as_ref())
-                }) {
-                    return Err(DeliveryProblem::Conflict.error());
-                }
-                // Original connection authorizes historical attachment; current DB/member/workload establish no join.
-                snapshot.operations.query_wait_fragments =
-                    Some(Box::new(culprit_core::telemetry::RecordedQueryWaitRead::Captured { read }));
+                retain_history_original(&mut snapshot.operations.query_wait_fragments, read)?;
             }
             Self::ManagedInstanceResources(read) => {
                 culprit_checks::managed_instance_resources::explain_captured(&read)?;
@@ -224,3 +227,15 @@ mod query_wait_tests;
 
 #[cfg(all(test, feature = "collector"))]
 mod change_capture_tests;
+fn retain_history_original(
+    slot: &mut Option<Box<culprit_core::telemetry::RecordedQueryHistoryRead>>,
+    read: Box<culprit_core::telemetry::CapturedQueryHistoryRead>,
+) -> Result<()> {
+    use culprit_core::telemetry::RecordedQueryHistoryRead;
+    if !read.is_valid() {
+        return Err(DeliveryProblem::InvalidContract.error());
+    }
+    if slot.as_deref().is_some_and(|original|!matches!(original,RecordedQueryHistoryRead::Captured {read:before} if before.as_ref()==read.as_ref())) {return Err(DeliveryProblem::Conflict.error())}
+    *slot = Some(Box::new(RecordedQueryHistoryRead::Captured { read }));
+    Ok(())
+}

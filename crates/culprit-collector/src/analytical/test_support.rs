@@ -87,7 +87,8 @@ pub use investigations::{
 
 mod queries;
 pub use queries::{
-    query_evidence, query_variant_evidence, query_wait_evidence_cases, query_wait_fragment_evidence, wait_semantics,
+    query_evidence, query_runtime_fragment_evidence, query_variant_evidence, query_wait_evidence_cases,
+    query_wait_fragment_evidence, wait_semantics,
 };
 mod informational;
 pub use informational::{assert_informational_capture, informational_query_evidence};
