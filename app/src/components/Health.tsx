@@ -266,58 +266,58 @@ export function HealthTab({
       <Replication replicas={pressure?.replicas ?? []} report={report} />
       <OperationalHealth report={report} />
       <SourceAcquisitions reports={sourceAcquisitions} />
-      {memoryFailures && memoryReport && <RetainedMemoryFailures key={memoryFailures.observed_until} evidence={memoryFailures} report={memoryReport} />}
+      {memoryFailures && memoryReport && <RetainedMemoryFailures key={`retained-memory-failures:${memoryFailures.observed_until}`} evidence={memoryFailures} report={memoryReport} />}
       {!(memoryFailures && memoryReport) && memoryIssue && <MemoryFailureSourceIssue source={memoryIssue} />}
-      {nativeFailures && nativeReport && <RetainedNativeFailures key={nativeFailures.observed_until} evidence={nativeFailures} report={nativeReport} />}
+      {nativeFailures && nativeReport && <RetainedNativeFailures key={`retained-native-failures:${nativeFailures.observed_until}`} evidence={nativeFailures} report={nativeReport} />}
       {!(nativeFailures && nativeReport) && nativeIssue && <NativeFailureSourceIssue source={nativeIssue} />}
-      {requests && requestReport && <RequestMemoryParticipants key={requests.observed_at} evidence={requests} report={requestReport} />}
+      {requests && requestReport && <RequestMemoryParticipants key={`request-memory-participants:${requests.observed_at}`} evidence={requests} report={requestReport} />}
       {!(requests && requestReport) && requestIssue && <ObservationSourceIssue source={requestIssue} title={t("view.request_memory.title")} />}
-      {sessions && sessionReport && <SessionMemoryParticipants key={sessions.observed_until} evidence={sessions} report={sessionReport} />}
+      {sessions && sessionReport && <SessionMemoryParticipants key={`session-memory-participants:${sessions.observed_until}`} evidence={sessions} report={sessionReport} />}
       {!(sessions && sessionReport) && sessionIssue && <ObservationSourceIssue source={sessionIssue} title={t("view.session_memory.title")} />}
-      {pageWaits && pageReport && <PageWaitTargets key={pageWaits.observed_until} evidence={pageWaits} report={pageReport} />}
+      {pageWaits && pageReport && <PageWaitTargets key={`page-wait-targets:${pageWaits.observed_until}`} evidence={pageWaits} report={pageReport} />}
       {!(pageWaits && pageReport) && pageIssue && <ObservationSourceIssue source={pageIssue} title={t("view.page_waits.title")} />}
-      {tasks && taskReport && <TaskSpace key={tasks.observed_until} evidence={tasks} report={taskReport} />}
+      {tasks && taskReport && <TaskSpace key={`task-space:${tasks.observed_until}`} evidence={tasks} report={taskReport} />}
       {!(tasks && taskReport) && taskIssue && <ObservationSourceIssue source={taskIssue} title={t("view.task_space.title")} />}
-      {compilation && compilationReport && <QueryCompilation key={compilation.observed_until} evidence={compilation} report={compilationReport} />}
+      {compilation && compilationReport && <QueryCompilation key={`query-compilation:${compilation.observed_until}`} evidence={compilation} report={compilationReport} />}
       {!(compilation && compilationReport) && compilationIssue && <ObservationSourceIssue source={compilationIssue} title={t("view.compilation.title")} />}
-      {completedSpillRead && completedSpillReport && <CompletedSpills key={report.snapshot.id} report={completedSpillReport} />}
+      {completedSpillRead && completedSpillReport && <CompletedSpills key={`completed-spills:${report.snapshot.id}`} report={completedSpillReport} />}
       {!(completedSpillRead && completedSpillReport) && completedSpillIssue && <ObservationSourceIssue source={completedSpillIssue} title={t("view.completed_spills.title")} />}
       {completedSpillUnexplained && !completedSpillIssue && <ObservationExplanationIssue title={t("view.completed_spills.title")} reason={t("view.completed_spills.invalid")} />}
-      {compilerAdmission && compilerAdmissionReport && <CompilerAdmission key={report.snapshot.id} evidence={compilerAdmission} report={compilerAdmissionReport} />}
+      {compilerAdmission && compilerAdmissionReport && <CompilerAdmission key={`compiler-admission:${report.snapshot.id}`} evidence={compilerAdmission} report={compilerAdmissionReport} />}
       {!(compilerAdmission && compilerAdmissionReport) && compilerAdmissionIssue && <ObservationSourceIssue source={compilerAdmissionIssue} title={t("view.compiler_admission.title")} />}
-      {jobs && jobsReport && <Jobs key={report.snapshot.id} evidence={jobs} report={jobsReport} />}
+      {jobs && jobsReport && <Jobs key={`jobs:${report.snapshot.id}`} evidence={jobs} report={jobsReport} />}
       {!(jobs && jobsReport) && jobsIssues.length > 0 && <ObservationSourceIssue sources={jobsIssues} title={jobsTitle} />}
       {!(jobs && jobsReport) && (jobs || jobsSources.length > 0) && jobsIssues.length === 0 && <ObservationExplanationIssue title={jobsTitle} reason={t("view.jobs.invalid")} />}
-      {statementWork && statementWorkReport && <StatementWork key={report.snapshot.id} evidence={statementWork} report={statementWorkReport} />}
+      {statementWork && statementWorkReport && <StatementWork key={`statement-work:${report.snapshot.id}`} evidence={statementWork} report={statementWorkReport} />}
       {statementWorkUnexplained && <ObservationExplanationIssue title={t("view.statement_work.title")} reason={t("view.statement_work.invalid")} />}
-      {hyperscaleLogComponents && <HyperscaleLogComponents key={report.snapshot.id} report={hyperscaleLogComponents} />}
+      {hyperscaleLogComponents && <HyperscaleLogComponents key={`hyperscale-log-components:${report.snapshot.id}`} report={hyperscaleLogComponents} />}
       {!hyperscaleLogComponents && hyperscaleLogIssue && <ObservationSourceIssue source={hyperscaleLogIssue} title={t("view.hyperscale_log_components.title")} />}
       {!hyperscaleLogComponents && (hyperscaleLogRead || hyperscaleLogRecorded) && !hyperscaleLogIssue && <ObservationExplanationIssue title={t("view.hyperscale_log_components.title")} reason={t("view.hyperscale_log_components.invalid")} />}
-      {configuredLogRates && <ConfiguredLogRates key={report.snapshot.id} report={configuredLogRates} />}
+      {configuredLogRates && <ConfiguredLogRates key={`configured-log-rates:${report.snapshot.id}`} report={configuredLogRates} />}
       {!configuredLogRates && configuredLogRateIssue && <ObservationSourceIssue source={configuredLogRateIssue} title={t("view.configured_log_rates.title")} />}
       {!configuredLogRates && configuredLogRateRead && !configuredLogRateIssue && <ObservationExplanationIssue title={t("view.configured_log_rates.title")} reason={t("view.configured_log_rates.invalid")} />}
-      {waitCounters && <WaitCounters key={report.snapshot.id} report={waitCounters} />}
+      {waitCounters && <WaitCounters key={`wait-counters:${report.snapshot.id}`} report={waitCounters} />}
       {!waitCounters && waitCounterIssue && <ObservationSourceIssue source={waitCounterIssue} title={t("view.wait_counters.title")} />}
       {!waitCounters && waitCounterRead && !waitCounterIssue && <ObservationExplanationIssue title={t("view.wait_counters.title")} reason={t("view.wait_counters.invalid")} />}
-      {suspectPages && <SuspectPageHistory key={report.snapshot.id} report={suspectPages} />}
+      {suspectPages && <SuspectPageHistory key={`suspect-page-history:${report.snapshot.id}`} report={suspectPages} />}
       {!suspectPages && suspectIssue && <ObservationSourceIssue source={suspectIssue} title={t("view.suspect_pages.title")} />}
       {!suspectPages && suspectRecorded && !suspectIssue && <ObservationExplanationIssue title={t("view.suspect_pages.title")} reason={t("view.suspect_pages.invalid")} />}
-      {performanceCounters.map((counters) => <PerformanceCounters key={`${report.snapshot.id}:${counters.population}`} report={counters} />)}
+      {performanceCounters.map((counters) => <PerformanceCounters key={`performance-counters:${report.snapshot.id}:${counters.population}`} report={counters} />)}
       {!hasSharedPerformanceCounters && performanceIssue && <ObservationSourceIssue source={performanceIssue} title={t("view.performance_counters.title")} />}
       {!hasSharedPerformanceCounters && performanceRecorded && !performanceIssue && <ObservationExplanationIssue title={t("view.performance_counters.title")} reason={t("view.performance_counters.invalid")} />}
-      {!performanceCounters.some((counters) => counters.ratios) && counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
+      {!performanceCounters.some((counters) => counters.ratios) && counterRatios && <CounterRatios key={`counter-ratios:${report.snapshot.id}`} report={counterRatios} />}
       {!hasSharedPerformanceCounters && !counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
       {!hasSharedPerformanceCounters && !counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
-      {numaNodes.map((nodes, index) => <InstanceResources key={`${report.snapshot.id}:numa:${index}`} report={nodes} />)}
+      {numaNodes.map((nodes, index) => <InstanceResources key={`numa-nodes:${report.snapshot.id}:${index}`} report={nodes} />)}
       {numaNodes.length === 0 && numaRecorded && <ObservationExplanationIssue title={t("view.numa_nodes.title")} reason={t("view.numa_nodes.invalid")} />}
-      {instanceResources && <InstanceResources key={report.snapshot.id} report={instanceResources} />}
+      {instanceResources && <InstanceResources key={`instance-resources:${report.snapshot.id}`} report={instanceResources} />}
       {!instanceResources && instanceResourceIssue && <ObservationSourceIssue source={instanceResourceIssue} title={t("view.instance_resources.title")} />}
       {!instanceResources && (instanceResourceRead || instanceResourceRecorded) && !instanceResourceIssue && <ObservationExplanationIssue title={t("view.instance_resources.title")} reason={t("view.instance_resources.invalid")} />}
-      {storage && <StorageEvidence key={report.snapshot.id} report={storage} />}
+      {storage && <StorageEvidence key={`storage-evidence:${report.snapshot.id}`} report={storage} />}
       {!storage && storageIssue && <ObservationSourceIssue source={storageIssue} title={t("view.storage.title")} />}
       {!storage && storageRead && !storageIssue && <ObservationExplanationIssue title={t("view.storage.title")} reason={t("view.storage.invalid")} />}
-      {databaseProperties && <DatabaseProperties key={report.snapshot.id} report={databaseProperties} />}
-      {poolSettings && <PoolSettings key={report.snapshot.id} report={poolSettings} />}
+      {databaseProperties && <DatabaseProperties key={`database-properties:${report.snapshot.id}`} report={databaseProperties} />}
+      {poolSettings && <PoolSettings key={`pool-settings:${report.snapshot.id}`} report={poolSettings} />}
       {!poolSettings && poolSettingsRead && <ObservationExplanationIssue title={t("view.pool_settings.title")} reason={t("view.pool_settings.invalid")} />}
       {!databaseProperties && databasePropertiesIssue && <ObservationSourceIssue source={databasePropertiesIssue} title={t("view.database_properties.title")} />}
       {!databaseProperties && (databasePropertiesRead || databasePropertiesRecorded) && !databasePropertiesIssue && <ObservationExplanationIssue title={t("view.database_properties.title")} reason={t("view.database_properties.invalid")} />}
@@ -325,27 +325,27 @@ export function HealthTab({
       <ChangeCaptureHistory title={t("view.change_capture.history.change_feed")} reports={changeFeedHistory.reports} unexplained={changeFeedHistory.unexplained} />
       {runtimeFragments && <RuntimeFragments report={runtimeFragments} />}
       {queryWaitFragments && <QueryWaitFragments report={queryWaitFragments} />}
-      <IndexConfigurations key={report.snapshot.id} reports={indexConfiguration} />
+      <IndexConfigurations key={`index-configurations:${report.snapshot.id}`} reports={indexConfiguration} />
       <IndexedViews key={`indexed-views:${report.snapshot.id}`} reports={report.indexed_views} />
-      {tableMemory.length > 0 && <TableMemory key={report.snapshot.id} reports={tableMemory} />}
-      {groupReplication.length > 0 && <GroupReplication key={report.snapshot.id} reports={groupReplication} />}
-      {managedInstanceResources && <ManagedInstanceResources key={managedInstanceResourcesRead?.kind === "captured" ? managedInstanceResourcesRead.read.origin.capture.manifest_sha256 : report.snapshot.id} report={managedInstanceResources} />}
+      {tableMemory.length > 0 && <TableMemory key={`table-memory:${report.snapshot.id}`} reports={tableMemory} />}
+      {groupReplication.length > 0 && <GroupReplication key={`group-replication:${report.snapshot.id}`} reports={groupReplication} />}
+      {managedInstanceResources && <ManagedInstanceResources key={`managed-instance-resources:${managedInstanceResourcesRead?.kind === "captured" ? managedInstanceResourcesRead.read.origin.capture.manifest_sha256 : report.snapshot.id}`} report={managedInstanceResources} />}
       {managedInstanceResourcesRead && !managedInstanceResources && <ObservationExplanationIssue title={t("view.mi_resources.title")} reason={t("view.mi_resources.invalid")} />}
-      {galera.length > 0 && <Galera key={report.snapshot.id} reports={galera} />}
-      {fullTextPopulations.length > 0 && <FullTextPopulations key={report.snapshot.id} reports={fullTextPopulations} />}
-      {tempdbMetadataMemory && <TempdbMetadataMemory key={report.snapshot.id} report={tempdbMetadataMemory} />}
+      {galera.length > 0 && <Galera key={`galera:${report.snapshot.id}`} reports={galera} />}
+      {fullTextPopulations.length > 0 && <FullTextPopulations key={`full-text-populations:${report.snapshot.id}`} reports={fullTextPopulations} />}
+      {tempdbMetadataMemory && <TempdbMetadataMemory key={`tempdb-metadata-memory:${report.snapshot.id}`} report={tempdbMetadataMemory} />}
       {!tempdbMetadataMemory && tempdbMetadataIssue && <ObservationSourceIssue source={tempdbMetadataIssue} title={t("view.tempdb_metadata_memory.title")} />}
       {!tempdbMetadataMemory && tempdbMetadataRecorded && !tempdbMetadataIssue && <ObservationExplanationIssue title={t("view.tempdb_metadata_memory.title")} reason={t("view.tempdb_metadata_memory.invalid")} />}
-      {memoryClerks && <MemoryClerks key={report.snapshot.id} report={memoryClerks} />}
+      {memoryClerks && <MemoryClerks key={`memory-clerks:${report.snapshot.id}`} report={memoryClerks} />}
       {!memoryClerks && memoryClerkIssue && <ObservationSourceIssue source={memoryClerkIssue} title={t("collected.memory_clerks.title")} />}
       {!memoryClerks && memoryClerkRecorded && !memoryClerkIssue && <ObservationExplanationIssue title={t("collected.memory_clerks.title")} reason={t("collected.memory_clerks.invalid")} />}
-      {connectionOutcomes && <ConnectionOutcomes key={report.snapshot.id} report={connectionOutcomes} />}
-      {pageServerReads && <PageServerReads key={report.snapshot.id} report={pageServerReads} />}
+      {connectionOutcomes && <ConnectionOutcomes key={`connection-outcomes:${report.snapshot.id}`} report={connectionOutcomes} />}
+      {pageServerReads && <PageServerReads key={`page-server-reads:${report.snapshot.id}`} report={pageServerReads} />}
       {!pageServerReads && pageServerIssue && <ObservationSourceIssue source={pageServerIssue} title={t("view.page_server_reads.title")} />}
       {!pageServerReads && !pageServerIssue && pageServerCarrier && <ObservationExplanationIssue title={t("view.page_server_reads.title")} reason={t("view.page_server_reads.invalid")} />}
       {!connectionOutcomes && connectionOutcomesIssue && <ObservationSourceIssue source={connectionOutcomesIssue} title={t("view.connection_outcomes.title")} />}
       {connectionOutcomesRead && !connectionOutcomes && !connectionOutcomesIssue && <ObservationExplanationIssue title={t("view.connection_outcomes.title")} reason={t("view.connection_outcomes.invalid")} />}
-      {cleanup && <CleanupEvidence key={report.snapshot.id} reads={cleanupReads} retention={retention} report={cleanup} />}
+      {cleanup && <CleanupEvidence key={`cleanup-evidence:${report.snapshot.id}`} reads={cleanupReads} retention={retention} report={cleanup} />}
       {!cleanup && cleanupIssues.length > 0 && <ObservationSourceIssue sources={cleanupIssues} title={t("view.cleanup.title")} />}
       {cleanupUnexplained && cleanupIssues.length === 0 && <ObservationExplanationIssue title={t("view.cleanup.title")} reason={t("view.cleanup.invalid")} />}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
