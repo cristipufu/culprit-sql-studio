@@ -59,7 +59,7 @@ impl ReplicationSnapshot {
             if self.context.native().is_some_and(|context| !context.partition.is_qualified()) && source.complete_scope {
                 return false;
             }
-            if source.source == MSSQL_HYPERSCALE_REPLICAS_SOURCE
+            if matches!(source.source.as_str(), MSSQL_HYPERSCALE_REPLICAS_SOURCE | MSSQL_AZURE_REPLICA_STATE_SOURCE)
                 && (source.complete_scope || (source.records > 0 && self.mssql_scope.is_none()))
             {
                 return false;
@@ -78,13 +78,21 @@ impl ReplicationSnapshot {
             {
                 return false;
             }
-            if let ReplicationFact::HyperscaleReplica(point) = &row.fact {
-                let (Some(scope), Some(context)) = (self.mssql_scope.as_deref(), self.context.native()) else {
-                    return false;
-                };
-                if source.complete_scope || !point.fits_read(scope, context) {
-                    return false;
-                }
+            let fits = match &row.fact {
+                ReplicationFact::HyperscaleReplica(point) => self
+                    .mssql_scope
+                    .as_deref()
+                    .zip(self.context.native())
+                    .is_some_and(|(scope, context)| point.fits_read(scope, context)),
+                ReplicationFact::AzureReplicaState(point) => self
+                    .mssql_scope
+                    .as_deref()
+                    .zip(self.context.native())
+                    .is_some_and(|(scope, context)| point.fits_read(scope, context)),
+                _ => true,
+            };
+            if !fits {
+                return false;
             }
             *observed += 1;
         }

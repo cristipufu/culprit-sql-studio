@@ -5,15 +5,20 @@ use culprit_core::{MeasurementScope, ReplicationCondition, ReplicationEntry, Rep
 use fields::{clock_fields, database_fields, group_fields, movement_fields, position_fields, replica_fields};
 
 pub(super) fn availability_conditions(sample: &AvailabilityReplicaSample) -> Vec<ReplicationCondition> {
-    let mut conditions = Vec::new();
-    if sample.is_suspended == Some(true) {
-        conditions.push(ReplicationCondition::MovementSuspended);
-    }
-    if sample.state == Some(0) {
-        conditions.push(ReplicationCondition::NotSynchronizing);
-    }
+    let mut conditions = database_conditions(&sample.progress);
     if sample.replica.as_ref().and_then(|replica| replica.connected_state) == Some(0) {
         conditions.push(ReplicationCondition::Disconnected);
+    }
+    conditions
+}
+
+pub(super) fn database_conditions(progress: &MssqlReplicaDatabaseProgress) -> Vec<ReplicationCondition> {
+    let mut conditions = Vec::new();
+    if progress.is_suspended == Some(true) {
+        conditions.push(ReplicationCondition::MovementSuspended)
+    }
+    if progress.state == Some(0) {
+        conditions.push(ReplicationCondition::NotSynchronizing)
     }
     conditions
 }
@@ -44,10 +49,22 @@ pub(super) fn availability(row: &ReplicationObservation, sample: &AvailabilityRe
         native("replica_name", t!("view.replication.mssql.field.replica_name"), sample.native_name.as_deref()),
     ];
     result.groups = vec![
-        ReplicationFieldGroup { title: t!("view.replication.mssql.group.database"), fields: database_fields(sample) },
-        ReplicationFieldGroup { title: t!("view.replication.mssql.group.movement"), fields: movement_fields(sample) },
-        ReplicationFieldGroup { title: t!("view.replication.mssql.group.positions"), fields: position_fields(sample) },
-        ReplicationFieldGroup { title: t!("view.replication.mssql.group.clocks"), fields: clock_fields(sample) },
+        ReplicationFieldGroup {
+            title: t!("view.replication.mssql.group.database"),
+            fields: database_fields(&sample.progress, sample.is_local),
+        },
+        ReplicationFieldGroup {
+            title: t!("view.replication.mssql.group.movement"),
+            fields: movement_fields(&sample.progress),
+        },
+        ReplicationFieldGroup {
+            title: t!("view.replication.mssql.group.positions"),
+            fields: position_fields(&sample.progress),
+        },
+        ReplicationFieldGroup {
+            title: t!("view.replication.mssql.group.clocks"),
+            fields: clock_fields(&sample.progress),
+        },
         ReplicationFieldGroup {
             title: t!("view.replication.mssql.group.group"),
             fields: group_fields(sample.group.as_deref()),
@@ -183,6 +200,48 @@ pub(super) fn hyperscale(row: &ReplicationObservation, sample: &MssqlHyperscaleR
     ];
     result.investigation = t!("view.replication.mssql.hyperscale.investigate");
     result.verify = t!("view.replication.mssql.hyperscale.verify");
+    result
+}
+
+pub(super) fn azure_local(row: &ReplicationObservation, point: &MssqlAzureReplicaState) -> ReplicationEntry {
+    let mut result = entry(
+        row,
+        MeasurementScope::Database,
+        t!("view.replication.mssql.azure_local.title"),
+        t!("view.replication.mssql.azure_local.explanation"),
+    );
+    result.conditions = database_conditions(&point.progress);
+    result.fields = vec![
+        native("database_id", t!("view.replication.mssql.field.database_id"), Some(point.database_id)),
+        native("replica_id", t!("view.replication.mssql.field.replica_id"), Some(point.replica_id.as_str())),
+        native("group_id", t!("view.replication.mssql.field.group_id"), point.group_id.as_deref()),
+        native(
+            "group_database_id",
+            t!("view.replication.mssql.field.group_database_id"),
+            point.group_database_id.as_deref(),
+        ),
+        native("observed_at", t!("view.replication.mssql.hyperscale.observed_at"), Some(point.observed_at.as_str())),
+    ];
+    result.groups = vec![
+        ReplicationFieldGroup {
+            title: t!("view.replication.mssql.group.database"),
+            fields: database_fields(&point.progress, Some(point.is_local)),
+        },
+        ReplicationFieldGroup {
+            title: t!("view.replication.mssql.group.movement"),
+            fields: movement_fields(&point.progress),
+        },
+        ReplicationFieldGroup {
+            title: t!("view.replication.mssql.group.positions"),
+            fields: position_fields(&point.progress),
+        },
+        ReplicationFieldGroup {
+            title: t!("view.replication.mssql.group.clocks"),
+            fields: clock_fields(&point.progress),
+        },
+    ];
+    result.investigation = t!("view.replication.mssql.azure_local.investigate");
+    result.verify = t!("view.replication.mssql.azure_local.verify");
     result
 }
 

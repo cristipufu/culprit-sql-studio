@@ -33,6 +33,26 @@ async function openEvidence(region: Locator) {
   await region.locator(".replication-disclosure > summary").click();
 }
 
+test("Azure local state keeps nullable group identity and exact log positions beside independent topology", async ({ page }) => {
+  const view = replicationReport("mssql_azure_local_and_topology");
+  await openConnection(page, "mssql-demo");
+  await inject(page, view);
+  const region = await openHealth(page, view);
+  await openEvidence(region);
+  await expect(region.locator(".replication-entry")).toHaveCount(view.entries.length);
+  const entry = region.locator(".replication-entry").filter({ hasText: english["view.replication.mssql.azure_local.title"] });
+  await entry.locator(":scope > summary").click();
+  const identity = entry.locator(".replication-entry-body > .replication-fields");
+  await expect(identity.getByText(english["ui.memory_failures.not_reported"], { exact: true })).toHaveCount(2);
+  const positions = entry.locator(".replication-group").filter({ hasText: english["view.replication.mssql.group.positions"] });
+  await positions.locator(":scope > summary").click();
+  await expect(positions.getByText("1234567890123456789012345", { exact: true })).toBeVisible();
+  const movement = entry.locator(".replication-group").filter({ hasText: english["view.replication.mssql.group.movement"] });
+  await movement.locator(":scope > summary").click();
+  await expect(movement.getByText("0", { exact: true })).toBeVisible();
+  await expect(entry.locator(".sig-dot")).toHaveCount(0);
+});
+
 test("native replication starts compact and lazily separates database, group and replica fields", async ({ page }, testInfo) => {
   const view = replicationReport("mssql_availability_group");
   await openConnection(page, "mssql-demo");

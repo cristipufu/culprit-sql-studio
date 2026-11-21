@@ -5,96 +5,36 @@ use culprit_core::{Error, ErrorCode, telemetry::*};
 
 pub(crate) const MAX_TOPOLOGY_ROWS: usize = 64;
 const NATIVE_COLUMNS: i64 = 8;
-fn layout_sql() -> String {
-    let replica = crate::replica::ID_EXPRESSION;
-    format!(
-        r#"SELECT /* culprit */ DB_ID() AS selected_database_id,
- {replica} AS observer_replica_id,
- CONVERT(nvarchar(128),DATABASEPROPERTYEX(DB_NAME(),N'Edition')) AS database_edition,
- CONVERT(nvarchar(60),DATABASEPROPERTYEX(DB_NAME(),N'Updateability')) AS updateability,
- CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,
- (SELECT COUNT(*) FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.dm_hs_database_replicas') AND
- ((name IN(N'replica_id',N'parent_replica_id') AND system_type_id=36 AND max_length=16)
- OR(name IN(N'replica_server_name',N'replica_database_name') AND system_type_id=231 AND max_length=256)
- OR(name=N'replica_role_desc' AND system_type_id=231 AND max_length=512)
- OR(name=N'is_local' AND system_type_id=104 AND max_length=1) OR(name=N'replica_role' AND system_type_id=48 AND max_length=1)
- OR(name=N'local_database_id' AND system_type_id=56 AND max_length=4))) AS supported_columns"#
-    )
-}
-
-#[derive(Clone)]
-pub(crate) struct Witness {
-    pub scope: MssqlReplicationScope,
-    pub observed_at: String,
-    writable: bool,
-}
-impl Witness {
-    pub(crate) async fn verify<R: NativeRead>(&self, reader: &mut R, owner: &Context, until: &str) -> Result<bool> {
-        let Ok(row) = metadata(reader).await? else { return Ok(false) };
-        let at = validate_witness(&row, owner, &self.scope)?;
-        Ok(text(&row, "database_edition")? == "Hyperscale"
-            && integer(&row, "supported_columns")? == NATIVE_COLUMNS
-            && crate::read::database_writable(&row)? == Some(self.writable)
-            && ObservationBounds::new(until, &at).is_some())
-    }
-}
-pub(crate) fn scope(owner: &Context) -> Result<MssqlReplicationScope> {
-    let scope = MssqlReplicationScope {
-        database_id: owner.database_id,
-        replica_id: owner.activity.replica_id.clone().ok_or_else(invalid_data)?,
-    };
-    let context = owner.completed(owner)?;
-    if owner.activity.edition != 5 || !scope.is_valid_for(&context) {
-        return Err(CollectionStop::SourceUnavailable.error());
-    }
-    Ok(scope)
-}
-async fn metadata(reader: &mut impl NativeRead) -> Result<std::result::Result<Rec, Error>> {
-    match native::read(reader, &layout_sql(), 1).await? {
-        native::NativeRows::Available(mut rows) if rows.len() == 1 => Ok(Ok(rows.remove(0))),
-        native::NativeRows::Available(_) => Err(invalid_data()),
-        native::NativeRows::Unavailable(error) => Ok(Err(error)),
-    }
-}
-fn validate_witness(row: &Rec, owner: &Context, scope: &MssqlReplicationScope) -> Result<String> {
-    let database = integer(row, "selected_database_id")?;
-    let replica = crate::replica::id(row, "observer_replica_id")?.ok_or_else(invalid_data)?;
-    let at = canonical_time(&text(row, "observed_at")?)?;
-    if database != i64::from(scope.database_id)
-        || !replica.eq_ignore_ascii_case(&scope.replica_id)
-        || crate::read::database_writable(row)? != owner.activity.writable
-        || ObservationBounds::new(&owner.activity.at, &at).is_none()
-    {
-        return Err(CollectionStop::SourceChanged.error());
-    }
-    Ok(at)
-}
+#[cfg(test)]
 pub(crate) async fn read(
     reader: &mut impl NativeRead,
     owner: &Context,
     limit: usize,
-) -> Result<(Part, Option<Witness>)> {
-    let scope = match scope(owner) {
-        Ok(scope) => scope,
-        Err(error) => return Ok(unavailable(error)),
-    };
+) -> Result<(Part, Option<super::authority::Witness>)> {
+    let scope = super::authority::scope(owner).ok();
+    let (parts, witness) = super::authority::selected(reader, owner, scope.as_ref(), limit).await?;
+    let first = parts.into_iter().next().ok_or_else(invalid_data)?;
+    Ok((first, witness))
+}
+pub(crate) async fn read_with_authority(
+    reader: &mut impl NativeRead,
+    owner: &Context,
+    layout: &super::authority::Layout,
+    limit: usize,
+) -> Result<(Part, Option<String>)> {
     if limit == 0 {
         return Ok(unavailable(CollectionStop::RowLimit.error()));
     }
-    let row = match metadata(reader).await? {
-        Ok(row) => row,
-        Err(error) => return Ok(unavailable(error)),
-    };
-    let first_at = validate_witness(&row, owner, &scope)?;
-    if text(&row, "database_edition")? != "Hyperscale" {
+    if layout.database_edition != "Hyperscale" {
         return Ok((Part::NotApplicable { selection: Selection::Hyperscale }, None));
     }
-    if integer(&row, "supported_columns")? != NATIVE_COLUMNS {
+    if layout.hyperscale_columns != NATIVE_COLUMNS {
         return Ok(unavailable(Error::new(
             ErrorCode::Unsupported,
             culprit_core::t!("provider.mssql.replication.native_unavailable"),
         )));
     }
+    let scope = &layout.scope;
     let limit = limit.min(MAX_TOPOLOGY_ROWS);
     let rows = match native::read(reader, &sql(limit + 1, scope.database_id), limit + 1).await? {
         native::NativeRows::Available(rows) => rows,
@@ -107,10 +47,7 @@ pub(crate) async fn read(
     let mut keys = BTreeSet::new();
     let mut at = None;
     for row in &rows {
-        let current = validate_witness(row, owner, &scope)?;
-        if ObservationBounds::new(&first_at, &current).is_none() || at.as_ref().is_some_and(|at| at != &current) {
-            return Err(CollectionStop::SourceChanged.error());
-        }
+        let current = super::authority::batch_frame(row, owner, layout, at.as_deref())?;
         at = Some(current.clone());
         if !crate::read::boolean(row, "topology_present")? {
             if rows.len() != 1
@@ -156,14 +93,9 @@ pub(crate) async fn read(
     let limited = facts.len() > limit;
     facts.truncate(limit);
     let part = Part::Observed { selection: Selection::Hyperscale, facts, complete: false, limited };
-    let witness = Witness {
-        scope,
-        observed_at: at.ok_or_else(invalid_data)?,
-        writable: owner.activity.writable.ok_or_else(invalid_data)?,
-    };
-    Ok((part, Some(witness)))
+    Ok((part, at))
 }
-fn unavailable(error: Error) -> (Part, Option<Witness>) {
+fn unavailable(error: Error) -> (Part, Option<String>) {
     (Part::Unavailable { selection: Selection::Hyperscale, error }, None)
 }
 fn sql(limit: usize, database_id: u32) -> String {

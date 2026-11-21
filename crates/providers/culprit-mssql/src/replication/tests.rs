@@ -166,9 +166,9 @@ async fn native_ag_identity_direction_units_and_optional_layout_are_shared_with_
         assert!(reader.calls[1].sql.contains("LEFT JOIN sys.availability_replicas"));
         assert_eq!(reader.calls[1].sql.contains("drs.secondary_lag_seconds"), lag == 1);
         let ReplicationFact::AvailabilityGroup(raw) = &facts[0] else { panic!("AG") };
-        assert_eq!(raw.log_send_queue_kb.as_deref(), Some("9007199254740993"));
-        assert_eq!(raw.log_send_rate_kb_per_second, None);
-        assert_eq!(raw.redo_rate_kb_per_second.as_deref(), Some("0"));
+        assert_eq!(raw.progress.log_send_queue_kb.as_deref(), Some("9007199254740993"));
+        assert_eq!(raw.progress.log_send_rate_kb_per_second, None);
+        assert_eq!(raw.progress.redo_rate_kb_per_second.as_deref(), Some("0"));
         let app = application(&facts[0]).unwrap();
         assert_eq!(app.role, ReplicaRole::Replica);
         assert_eq!(app.condition, ReplicaCondition::Stopped);

@@ -324,7 +324,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(replication::bounded_budget)
     .baseline()
-    .version(3),
+    .version(4),
     state!("mssql.settings", Settings).bounded(state::settings_budget).baseline().version(5),
     streamed!("mssql.statement-grants", StatementGrants, grants::Grants).version(2),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations).version(2),

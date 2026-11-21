@@ -60,6 +60,9 @@ pub fn explain_bounded(
     if snapshot.sources.iter().any(|source| source.source == MSSQL_HYPERSCALE_REPLICAS_SOURCE) {
         limitations.push(t!("view.replication.mssql.hyperscale.limit"));
     }
+    if snapshot.sources.iter().any(|source| source.source == MSSQL_AZURE_REPLICA_STATE_SOURCE) {
+        limitations.push(t!("view.replication.mssql.azure_local.limit"));
+    }
     if snapshot.context.native().is_none() {
         limitations.push(t!("view.replication.limit.collector_clock"));
     } else if snapshot.context.native().is_some_and(|context| !context.has_qualified_local_owner()) {
@@ -98,6 +101,7 @@ pub fn explain_bounded(
 fn conditions(row: &ReplicationObservation) -> Vec<ReplicationCondition> {
     match &row.fact {
         ReplicationFact::HyperscaleReplica(_) => vec![],
+        ReplicationFact::AzureReplicaState(point) => mssql::database_conditions(&point.progress),
         ReplicationFact::AvailabilityGroup(sample) => mssql::availability_conditions(sample),
         ReplicationFact::GeoLink(sample) => mssql::geo_conditions(sample),
         ReplicationFact::Native(sample) => {
@@ -109,6 +113,7 @@ fn conditions(row: &ReplicationObservation) -> Vec<ReplicationCondition> {
 fn render(row: &ReplicationObservation) -> ReplicationEntry {
     match &row.fact {
         ReplicationFact::HyperscaleReplica(sample) => mssql::hyperscale(row, sample),
+        ReplicationFact::AzureReplicaState(point) => mssql::azure_local(row, point),
         ReplicationFact::AvailabilityGroup(sample) => mssql::availability(row, sample),
         ReplicationFact::GeoLink(sample) => mssql::geo(row, sample),
         ReplicationFact::Native(sample) => {

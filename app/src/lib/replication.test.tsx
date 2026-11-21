@@ -93,3 +93,22 @@ test("Hyperscale topology retains all native roles and nullable parent meaning w
   const native = renderToStaticMarkup(<ReplicationFields fields={replicationFields(nulls)} />);
   expect(native).toContain(t("ui.memory_failures.not_reported"));
 });
+
+
+test("Azure local replica progress keeps nullable group identity distinct from topology and global health", () => {
+  const report = replicationReport("mssql_azure_local");
+  expect(report.state_rows).toBe(1);
+  const fields = replicationFields(report);
+  expect(fields.find((field) => field.key === "group_id")?.value).toBeNull();
+  expect(fields.find((field) => field.key === "group_database_id")?.value).toBeNull();
+  expect(fields.find((field) => field.key === "recovery_lsn")?.value).toBe("1234567890123456789012345");
+  expect(fields.find((field) => field.key === "redo_queue_kb")?.value).toBe("0");
+  expect(fields.find((field) => field.key === "secondary_lag_seconds")?.value).toBeNull();
+  expect(report.entries[0]?.session).toBeNull();
+  expect(report.sources[0]?.state).toBe("partial");
+  const unknown = replicationReport("mssql_azure_local_nulls");
+  expect(unknown.state_rows).toBe(0);
+  expect(replicationFields(unknown).find((field) => field.key === "redo_queue_kb")?.value).toBeNull();
+  const html = renderToStaticMarkup(<ReplicationFields fields={replicationFields(unknown)} />);
+  expect(html).toContain(t("ui.memory_failures.not_reported"));
+});

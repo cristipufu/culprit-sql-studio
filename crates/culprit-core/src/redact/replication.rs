@@ -9,9 +9,11 @@ pub(super) fn redact(mut read: Box<ReplicationSnapshot>) -> Result<Box<Replicati
     }
     // The private original selected DB/member proof is indivisible; sharing cannot recreate it from labels.
     read.mssql_scope = None;
-    read.observations.retain(|row| !matches!(row.fact, ReplicationFact::HyperscaleReplica(_)));
+    read.observations.retain(|row| {
+        !matches!(row.fact, ReplicationFact::HyperscaleReplica(_) | ReplicationFact::AzureReplicaState(_))
+    });
     for source in &mut read.sources {
-        if source.source == MSSQL_HYPERSCALE_REPLICAS_SOURCE {
+        if matches!(source.source.as_str(), MSSQL_HYPERSCALE_REPLICAS_SOURCE | MSSQL_AZURE_REPLICA_STATE_SOURCE) {
             *source = StateSourceCoverage::unavailable(source.source.clone(), crate::ErrorCode::Unsupported, None);
         }
     }
@@ -26,7 +28,9 @@ pub(super) fn redact(mut read: Box<ReplicationSnapshot>) -> Result<Box<Replicati
                 pseudonymize(&mut sample.partner_database);
             }
             ReplicationFact::Native(sample) => native(sample)?,
-            ReplicationFact::HyperscaleReplica(_) => return Err(CollectionStop::InvalidPage.error()),
+            ReplicationFact::HyperscaleReplica(_) | ReplicationFact::AzureReplicaState(_) => {
+                return Err(CollectionStop::InvalidPage.error());
+            }
         }
     }
     read.is_valid_read(false).then_some(read).ok_or_else(|| CollectionStop::InvalidPage.error())

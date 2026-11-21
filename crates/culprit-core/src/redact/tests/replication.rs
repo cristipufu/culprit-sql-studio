@@ -67,21 +67,6 @@ fn availability() -> AvailabilityReplicaSample {
         database_name: Some("REPLICATION-PRIVATE-database".into()),
         native_name: Some("REPLICATION-PRIVATE-replica.example".into()),
         is_local: Some(false),
-        is_primary: Some(false),
-        state: Some(0),
-        native_state: Some("NOT SYNCHRONIZING".into()),
-        is_suspended: Some(true),
-        suspend_reason: Some(2),
-        native_suspend_reason: Some("SUSPEND_FROM_REDO".into()),
-        synchronization_health: Some(0),
-        native_synchronization_health: Some("NOT_HEALTHY".into()),
-        log_send_queue_kb: Some("9007199254740993".into()),
-        redo_queue_kb: Some("0".into()),
-        recovery_lsn: Some("9999999999999999999999999".into()),
-        last_sent_lsn: Some("9007199254740993".into()),
-        last_redone_lsn: Some("0".into()),
-        last_sent_without_offset: Some("2026-11-16T09:00:00.0030000".into()),
-        last_commit_without_offset: Some("2026-11-16T09:00:00.1234567".into()),
         group: Some(Box::new(AvailabilityGroupContext {
             catalog_observed: true,
             state_observed: true,
@@ -139,6 +124,25 @@ fn availability() -> AvailabilityReplicaSample {
             created_without_offset: Some("2026-11-01T09:00:00.0030000".into()),
             modified_without_offset: None,
         })),
+        progress: MssqlReplicaDatabaseProgress {
+            is_primary: Some(false),
+            state: Some(0),
+            native_state: Some("NOT SYNCHRONIZING".into()),
+            is_suspended: Some(true),
+            suspend_reason: Some(2),
+            native_suspend_reason: Some("SUSPEND_FROM_REDO".into()),
+            synchronization_health: Some(0),
+            native_synchronization_health: Some("NOT_HEALTHY".into()),
+            log_send_queue_kb: Some("9007199254740993".into()),
+            redo_queue_kb: Some("0".into()),
+            recovery_lsn: Some("9999999999999999999999999".into()),
+            last_sent_lsn: Some("9007199254740993".into()),
+            last_redone_lsn: Some("0".into()),
+            last_sent_without_offset: Some("2026-11-16T09:00:00.0030000".into()),
+            last_commit_without_offset: Some("2026-11-16T09:00:00.1234567".into()),
+            ..Default::default()
+        },
+
         ..Default::default()
     }
 }
@@ -604,5 +608,46 @@ fn sharing_withdraws_indivisible_hyperscale_native_scope_and_points_while_preser
     assert_eq!(source.state, crate::SourceState::Unavailable);
     assert_eq!(source.records, 0);
     assert!(!source.complete_scope);
+    assert_private_and_idempotent(&original, &shared);
+}
+
+#[test]
+fn sharing_withdraws_azure_local_progress_and_indivisible_native_scope_without_turning_it_into_healthy_zero() {
+    let mut context = native_context(Engine::Mssql);
+    let ObservationReadContext::Native { context: native } = &mut context else { panic!() };
+    let replica_id = "91487244-730d-4b83-8e49-d482241c7288";
+    let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut native.partition else { panic!() };
+    member.kind = SharedResourceKind::Node;
+    member.native = NativeIdentity::new(replica_id).qualified("kind", "azure-sql-hyperscale-replica");
+    member.namespace = NativeIdentity::new(native.target.database().unwrap().incarnation.as_ref().unwrap())
+        .qualified("kind", "azure-sql-logical-database");
+    let point = MssqlAzureReplicaState {
+        database_id: 7,
+        replica_id: replica_id.into(),
+        is_local: true,
+        database_writable: false,
+        observed_at: FROM.into(),
+        group_id: None,
+        group_database_id: None,
+        progress: MssqlReplicaDatabaseProgress { redo_queue_kb: Some("9007199254740993".into()), ..Default::default() },
+    };
+    let mut read = carrier(
+        context,
+        vec![ReplicationObservation {
+            source: MSSQL_AZURE_REPLICA_STATE_SOURCE.into(),
+            fact: ReplicationFact::AzureReplicaState(Box::new(point)),
+        }],
+    );
+    read.mssql_scope = Some(Box::new(MssqlReplicationScope { database_id: 7, replica_id: replica_id.into() }));
+    assert!(read.is_valid());
+    let original = snapshot(Engine::Mssql, read);
+    let shared = redact_snapshot(&original);
+    let read = shared_read(&shared);
+    assert!(read.is_valid());
+    assert!(read.mssql_scope.is_none());
+    assert!(read.observations.is_empty());
+    assert_eq!(read.sources[0].state, crate::SourceState::Unavailable);
+    assert_eq!(read.sources[0].records, 0);
+    assert!(!read.sources[0].complete_scope);
     assert_private_and_idempotent(&original, &shared);
 }

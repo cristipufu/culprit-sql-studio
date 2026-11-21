@@ -114,12 +114,14 @@ pub fn mssql_replication_scope(source: &CollectionDescription) -> Result<Option<
     if snapshot.dataset != SnapshotDataset::Replication || !snapshot.is_valid() || !scope.is_valid_for(&context) {
         return Err(CollectionStop::InvalidPage.error());
     }
-    if snapshot.sources.iter().any(|source| source.source == MSSQL_HYPERSCALE_REPLICAS_SOURCE && source.complete_scope)
-    {
+    if snapshot.sources.iter().any(|source| {
+        matches!(source.source.as_str(), MSSQL_HYPERSCALE_REPLICAS_SOURCE | MSSQL_AZURE_REPLICA_STATE_SOURCE)
+            && source.complete_scope
+    }) {
         return Err(CollectionStop::InvalidPage.error());
     }
     Ok(Some(scope))
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

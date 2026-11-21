@@ -202,3 +202,59 @@ async fn hyperscale_original_topology_stays_database_scoped_and_missing_archive_
         }
     }
 }
+
+#[tokio::test]
+async fn azure_local_state_replays_nullable_identity_wide_progress_and_missing_originals_without_ag_or_geo_role_inference()
+ {
+    for case in [
+        ReplicationCase::MssqlAzureLocalState,
+        ReplicationCase::MssqlAzureLocalNulls,
+        ReplicationCase::MssqlAzureLocalUnavailable,
+        ReplicationCase::MssqlAzureLocalAndTopology,
+    ] {
+        let (source, records) = replication_evidence(case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let captured = fixture.read_families(FAMILY).await;
+        let analysis = collected_resources::replication(&captured).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert!(
+            analysis
+                .report
+                .sources
+                .iter()
+                .all(|source| source.state != SourceState::Empty && source.state != SourceState::Collected)
+        );
+        for record in &records {
+            let TelemetryRecord::Replication(row) = record else { panic!() };
+            let ReplicationFact::AzureReplicaState(point) = &row.fact else { continue };
+            let entry =
+                analysis.report.entries.iter().find(|entry| entry.reference.observation_key == row.fact.key()).unwrap();
+            assert_eq!(entry.title, culprit_core::t!("view.replication.mssql.azure_local.title"));
+            let field = |key: &str| {
+                entry
+                    .fields
+                    .iter()
+                    .chain(entry.groups.iter().flat_map(|group| group.fields.iter()))
+                    .find(|field| field.key == key)
+                    .unwrap()
+                    .value
+                    .clone()
+            };
+            assert_eq!(field("group_id"), None);
+            assert_eq!(field("group_database_id"), None);
+            assert_eq!(field("redo_queue_kb"), point.progress.redo_queue_kb);
+            assert_eq!(field("recovery_lsn"), point.progress.recovery_lsn);
+            assert_eq!(field("last_commit_without_offset"), point.progress.last_commit_without_offset);
+            assert_eq!(entry.investigation, culprit_core::t!("view.replication.mssql.azure_local.investigate"));
+        }
+        if records.len() == 1 {
+            fixture.remove_first_row(TelemetryStream::ReplicationSamples);
+            let captured = fixture.read_families(FAMILY).await;
+            let missing = collected_resources::replication(&captured).unwrap();
+            assert!(!missing.report.read_complete);
+            assert_eq!(missing.report.native_rows, 1);
+            assert_eq!(missing.report.observed_rows, 0);
+            assert!(missing.report.entries.is_empty());
+        }
+    }
+}

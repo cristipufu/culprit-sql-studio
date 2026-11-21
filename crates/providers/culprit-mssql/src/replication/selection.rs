@@ -27,6 +27,7 @@ impl Selection {
             Self::AvailabilityGroup => AVAILABILITY_SOURCE,
             Self::GeoLinks => GEO_SOURCE,
             Self::Hyperscale => MSSQL_HYPERSCALE_REPLICAS_SOURCE,
+            Self::AzureLocalState => MSSQL_AZURE_REPLICA_STATE_SOURCE,
         }
     }
 }
@@ -126,21 +127,21 @@ fn selections(edition: i64) -> Result<&'static [Selection]> {
 
 fn scope_complete(selection: Selection, facts: &[ReplicationFact]) -> bool {
     if facts.is_empty() {
-        return selection != Selection::Hyperscale;
+        return !matches!(selection, Selection::Hyperscale | Selection::AzureLocalState);
     }
     match selection {
-        Selection::Hyperscale => false,
+        Selection::Hyperscale | Selection::AzureLocalState => false,
         Selection::GeoLinks => facts.iter().all(direction_known),
         Selection::AvailabilityGroup => {
             // Secondary-side visibility is local, not a complete partner inventory. Even a primary cannot
             // establish catalog completeness where replica names/modes or local role are unavailable.
             facts.iter().any(|fact| {
                 matches!(fact, ReplicationFact::AvailabilityGroup(row)
-                    if row.is_local == Some(true) && row.is_primary == Some(true))
+                    if row.is_local == Some(true) && row.progress.is_primary == Some(true))
             }) && facts.iter().all(|fact| {
                 matches!(fact, ReplicationFact::AvailabilityGroup(row)
-                    if row.is_local.is_some() && row.is_primary.is_some()
-                        && row.native_name.is_some() && row.mode.is_some() && row.state.is_some()
+                    if row.is_local.is_some() && row.progress.is_primary.is_some()
+                        && row.native_name.is_some() && row.progress.mode.is_some() && row.progress.state.is_some()
                         && row.group.as_ref().is_some_and(|context| context.catalog_observed && context.state_observed)
                         && row.replica.as_ref().is_some_and(|context| context.catalog_observed && context.state_observed))
             })

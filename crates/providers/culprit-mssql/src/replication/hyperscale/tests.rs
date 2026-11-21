@@ -17,6 +17,7 @@ pub(crate) fn metadata(edition: &str, at: &str) -> Rec {
         ("updateability", Val::Text("READ_WRITE".into())),
         ("observed_at", Val::Text(at.into())),
         ("supported_columns", Val::Int(8)),
+        ("local_state_columns", Val::Int(0)),
     ])
 }
 pub(crate) fn topology(role: u8) -> Rec {
@@ -36,7 +37,7 @@ pub(crate) fn topology(role: u8) -> Rec {
         ("parent_replica_id", if role == 1 { Val::Text(LOCAL.into()) } else { Val::Null }),
     ])
 }
-async fn owner() -> Context {
+pub(crate) async fn owner() -> Context {
     let mut io = FakeRead::new(vec![Ok(vec![replace(&platform(), &[("edition", Val::Int(5))])]), Ok(vec![row(5)])]);
     let result = Context::read(&mut io, "fixture.invalid", 1433).await.unwrap();
     assert_eq!(io.queries(), 2);
@@ -59,7 +60,7 @@ async fn native_hyperscale_roles_keep_parent_edges_nulls_and_remote_local_databa
         assert_eq!(point.replica_role, Some(role));
         assert_eq!(point.local_database_id, Some(70));
         assert_eq!(point.parent_replica_id.as_deref(), (role == 1).then_some(LOCAL));
-        assert_eq!(witness.unwrap().scope.database_id, 7);
+        assert_eq!(witness.unwrap().layout.scope.database_id, 7);
         assert_eq!(reader.queries(), 2);
         assert!(reader.calls[1].sql.contains("sys.dm_hs_database_replicas(@selected_database_id)"));
         assert!(reader.calls[1].sql.contains("@selected_database_id int=DB_ID()"));

@@ -17,6 +17,12 @@ pub(super) fn availability_replica(row: &Rec) -> Result<ReplicationFact> {
         database_name: optional_text(row, "database_name")?,
         native_name: optional_text(row, "native_name")?,
         is_local: crate::read::optional_boolean(row, "is_local")?,
+        progress: database_progress(row)?,
+    })))
+}
+
+pub(super) fn database_progress(row: &Rec) -> Result<culprit_core::telemetry::MssqlReplicaDatabaseProgress> {
+    Ok(culprit_core::telemetry::MssqlReplicaDatabaseProgress {
         is_primary: crate::read::optional_boolean(row, "is_primary")?,
         state: native_code(row, "state")?,
         native_state: optional_text(row, "native_state")?,
@@ -50,7 +56,7 @@ pub(super) fn availability_replica(row: &Rec) -> Result<ReplicationFact> {
         last_hardened_without_offset: local_time(row, "last_hardened_without_offset")?,
         last_redone_without_offset: local_time(row, "last_redone_without_offset")?,
         last_commit_without_offset: local_time(row, "last_commit_without_offset")?,
-    })))
+    })
 }
 
 fn group_context(row: &Rec, group: &str) -> Result<Option<Box<AvailabilityGroupContext>>> {
@@ -146,7 +152,7 @@ fn require_absent_context(row: &Rec, prefix: &str, except: &[&str]) -> Result<()
     }
 }
 
-fn local_time(row: &Rec, field: &str) -> Result<Option<String>> {
+pub(super) fn local_time(row: &Rec, field: &str) -> Result<Option<String>> {
     optional_text(row, field)?.map(|value| crate::sql_time::native_time(&value)).transpose()
 }
 

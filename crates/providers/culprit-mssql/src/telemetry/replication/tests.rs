@@ -114,9 +114,9 @@ async fn boxed_and_managed_instance_snapshots_export_the_same_native_ag_reader_w
         }
         let TelemetryRecord::Replication(remote) = &rows[1] else { panic!() };
         let ReplicationFact::AvailabilityGroup(native) = &remote.fact else { panic!() };
-        assert_eq!(native.log_send_queue_kb.as_deref(), Some("9007199254740993"));
+        assert_eq!(native.progress.log_send_queue_kb.as_deref(), Some("9007199254740993"));
         assert_eq!(native.is_local, Some(false));
-        assert_eq!(native.is_primary, Some(false));
+        assert_eq!(native.progress.is_primary, Some(false));
         assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
         assert_eq!(source.query_count(), if edition == 8 { 12 } else { 11 });
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
@@ -203,7 +203,7 @@ async fn changed_native_generations_or_roles_refuse_the_frame_without_a_fresh_fa
             host: "fixture.invalid".into(),
             port: 1433,
             owner: None,
-            topology: None,
+            replica_authority: None,
         };
         let error = reader.observe(&request()).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged, "{field}");
@@ -249,7 +249,7 @@ async fn caller_query_budget_stops_replication_without_post_read_native_work() {
             host: "fixture.invalid".into(),
             port: 1433,
             owner: None,
-            topology: None,
+            replica_authority: None,
         };
         let error = reader.observe(&request()).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::QueryLimit);
@@ -271,7 +271,8 @@ async fn cancelled_native_reads_never_publish_a_partial_frame_or_start_a_second_
             SourceShutdown::Quiescent
         };
         let shutdown = io.shutdown;
-        let mut reader = Reader { io, host: "fixture.invalid".into(), port: 1433, owner: None, topology: None };
+        let mut reader =
+            Reader { io, host: "fixture.invalid".into(), port: 1433, owner: None, replica_authority: None };
         let error = reader.observe(&request()).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), stop);
         assert_eq!(reader.io.calls.len(), 5);
@@ -290,8 +291,13 @@ async fn missing_native_owner_information_retains_positive_rows_only_with_partia
     let mut after = recheck(3, AFTER);
     after[1] = Err(ReadError::Source(Error::new(ErrorCode::PermissionDenied, "controlled epoch permission")));
     replies.extend(after);
-    let mut reader =
-        Reader { io: FakeRead::new(replies), host: "fixture.invalid".into(), port: 1433, owner: None, topology: None };
+    let mut reader = Reader {
+        io: FakeRead::new(replies),
+        host: "fixture.invalid".into(),
+        port: 1433,
+        owner: None,
+        replica_authority: None,
+    };
     let captured = reader.observe(&request()).await.unwrap();
     assert_eq!(captured.records.len(), 2);
     assert!(!captured.description.partition.is_qualified());
@@ -412,4 +418,122 @@ async fn selected_topology_intersects_stricter_total_query_caps_and_keeps_final_
         }
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }
+}
+
+#[tokio::test]
+async fn azure_local_state_and_topology_share_one_original_schema_final_witness_and_strict_total_budget() {
+    use crate::replication::{
+        authority::tests::metadata, azure_state::tests::row as local, hyperscale::tests::topology,
+    };
+    for total in [10, 11] {
+        let mut replies = authority(5, BEFORE);
+        replies.push(Ok(vec![pressure()]));
+        replies.push(Ok(vec![geo()]));
+        replies.push(Ok(vec![metadata("2020-01-01T06:01:59Z", true)]));
+        replies.push(Ok(vec![topology(1)]));
+        replies.push(Ok(vec![local()]));
+        replies.extend(recheck(5, AFTER));
+        replies.extend(recheck(5, FINAL));
+        replies.push(Ok(vec![metadata("2020-01-01T06:02:03Z", true)]));
+        let mut request = request();
+        request.budget.max_queries = total;
+        request.budget = bounded_budget(&request.budget);
+        let reader_budget = ReadSession::budget_after_setup(request.budget.clone()).unwrap();
+        let mut source = ReplicationSource::with_io(
+            FakeRead::new(replies).with_query_limit(reader_budget.max_queries),
+            &request,
+            "fixture.invalid".into(),
+            1433,
+        )
+        .unwrap();
+        let original = source.describe().await.unwrap();
+        let records = drain(&mut source).await;
+        assert_eq!(records.len(), 3);
+        let snapshot = ReplicationSnapshot::from_source(
+            &original,
+            records
+                .iter()
+                .map(|row| {
+                    let TelemetryRecord::Replication(row) = row else { panic!() };
+                    row.clone()
+                })
+                .collect(),
+        )
+        .unwrap();
+        assert!(snapshot.is_valid());
+        assert_eq!(snapshot.sources.len(), 3);
+        let state = records
+            .iter()
+            .find_map(|row| match row {
+                TelemetryRecord::Replication(ReplicationObservation {
+                    fact: ReplicationFact::AzureReplicaState(point),
+                    ..
+                }) => Some(point),
+                _ => None,
+            })
+            .unwrap();
+        assert!(state.group_id.is_none() && state.group_database_id.is_none());
+        assert_eq!(state.database_id, 7);
+        assert!(state.is_local);
+        if total == 10 {
+            assert_eq!(CollectionStop::from_error(&source.finish().await.err().unwrap()), CollectionStop::QueryLimit);
+            assert_eq!(source.query_count(), 9);
+        } else {
+            assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+            assert_eq!(source.query_count(), 10);
+        }
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+#[tokio::test]
+async fn completed_local_state_permission_failure_preserves_other_replication_families_and_original_final_authority() {
+    use crate::replication::{authority::tests::metadata, hyperscale::tests::topology};
+    let mut replies = authority(5, BEFORE);
+    replies.push(Ok(vec![pressure()]));
+    replies.push(Ok(vec![geo()]));
+    replies.push(Ok(vec![metadata("2020-01-01T06:01:59Z", true)]));
+    replies.push(Ok(vec![topology(1)]));
+    replies.push(Ok(vec![unavailable(229)]));
+    replies.extend(recheck(5, AFTER));
+    replies.extend(recheck(5, FINAL));
+    replies.push(Ok(vec![metadata("2020-01-01T06:02:03Z", true)]));
+    let mut source =
+        ReplicationSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+    let original = source.describe().await.unwrap();
+    let rows = drain(&mut source).await;
+    assert_eq!(rows.len(), 2);
+    let coverage = &original.observation.snapshot().unwrap().sources[2];
+    assert_eq!(coverage.source, MSSQL_AZURE_REPLICA_STATE_SOURCE);
+    assert_eq!(coverage.state, SourceState::Unavailable);
+    assert_eq!(coverage.error_code, Some(ErrorCode::PermissionDenied));
+    assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+    assert_eq!(source.query_count(), 10);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn a_later_local_state_clock_cannot_regress_behind_the_preceding_topology_or_trigger_final_repair_reads() {
+    use crate::replication::{
+        authority::tests::metadata, azure_state::tests::row as local, hyperscale::tests::topology,
+    };
+    let mut replies = authority(5, BEFORE);
+    replies.push(Ok(vec![pressure()]));
+    replies.push(Ok(vec![geo()]));
+    replies.push(Ok(vec![metadata("2020-01-01T06:01:59Z", true)]));
+    replies.push(Ok(vec![topology(1)]));
+    replies.push(Ok(vec![replace(&local(), &[("observed_at", Val::Text("2020-01-01T06:01:59.5Z".into()))])]));
+    let mut reader = Reader {
+        io: FakeRead::new(replies),
+        host: "fixture.invalid".into(),
+        port: 1433,
+        owner: None,
+        replica_authority: None,
+    };
+    assert_eq!(
+        CollectionStop::from_error(&reader.observe(&request()).await.err().unwrap()),
+        CollectionStop::SourceChanged
+    );
+    assert_eq!(reader.io.queries(), 7);
+    assert!(reader.owner.is_none());
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }

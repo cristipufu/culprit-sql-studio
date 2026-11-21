@@ -14,42 +14,9 @@ pub struct AvailabilityReplicaSample {
     pub replica: Option<Box<AvailabilityReplicaContext>>,
     pub native_name: Option<String>,
     pub is_local: Option<bool>,
-    pub is_primary: Option<bool>,
-    pub state: Option<u8>,
-    pub native_state: Option<String>,
-    pub mode: Option<u8>,
-    pub native_mode: Option<String>,
-    pub is_commit_participant: Option<bool>,
-    pub database_state: Option<u8>,
-    pub native_database_state: Option<String>,
-    pub is_suspended: Option<bool>,
-    pub suspend_reason: Option<u8>,
-    pub synchronization_health: Option<u8>,
-    pub native_synchronization_health: Option<String>,
-    pub native_suspend_reason: Option<String>,
-    pub log_send_queue_kb: Option<String>,
-    pub redo_queue_kb: Option<String>,
-    pub log_send_rate_kb_per_second: Option<String>,
-    pub redo_rate_kb_per_second: Option<String>,
-    pub secondary_lag_seconds: Option<String>,
-    pub filestream_send_rate_kb_per_second: Option<String>,
-    pub low_water_mark_for_ghosts: Option<String>,
-    /// Numeric(25,0) native log positions. Only last_redone_lsn/last_commit_lsn are actual LSNs;
-    /// the others are padded log-block identifiers. None supports byte subtraction.
-    pub recovery_lsn: Option<String>,
-    pub truncation_lsn: Option<String>,
-    pub last_sent_lsn: Option<String>,
-    pub last_received_lsn: Option<String>,
-    pub last_hardened_lsn: Option<String>,
-    pub last_redone_lsn: Option<String>,
-    pub end_of_log_lsn: Option<String>,
-    pub last_commit_lsn: Option<String>,
-    /// Native SQL Server datetime values have no recorded UTC offset.
-    pub last_sent_without_offset: Option<String>,
-    pub last_received_without_offset: Option<String>,
-    pub last_hardened_without_offset: Option<String>,
-    pub last_redone_without_offset: Option<String>,
-    pub last_commit_without_offset: Option<String>,
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub progress: MssqlReplicaDatabaseProgress,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -169,11 +136,15 @@ pub enum ReplicationFact {
     AvailabilityGroup(Box<AvailabilityReplicaSample>),
     GeoLink(Box<GeoReplicationSample>),
     HyperscaleReplica(Box<MssqlHyperscaleReplica>),
+    AzureReplicaState(Box<MssqlAzureReplicaState>),
 }
 impl ReplicationFact {
     pub fn key(&self) -> String {
         match self {
             Self::Native(row) => row.key.clone(),
+            Self::AzureReplicaState(row) => {
+                format!("azure-local:{}:{}", row.database_id, row.replica_id.to_ascii_lowercase())
+            }
             Self::AvailabilityGroup(row) => {
                 format!("ag:{}:{}:{}", row.group_id, row.group_database_id, row.replica_id)
             }
@@ -192,58 +163,14 @@ impl ReplicationFact {
         match self {
             Self::Native(row) => row.is_valid(),
             Self::HyperscaleReplica(row) => row.is_valid(),
+            Self::AzureReplicaState(row) => row.is_valid(),
             Self::AvailabilityGroup(row) => {
                 [&row.group_id, &row.group_database_id, &row.replica_id].into_iter().all(|id| native_guid(id))
                     && row.database_id != Some(0)
                     && row.group.as_deref().is_none_or(AvailabilityGroupContext::is_valid)
                     && row.replica.as_deref().is_none_or(AvailabilityReplicaContext::is_valid)
-                    && [
-                        &row.native_name,
-                        &row.native_state,
-                        &row.native_mode,
-                        &row.database_name,
-                        &row.native_database_state,
-                        &row.native_synchronization_health,
-                        &row.native_suspend_reason,
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .all(|value| native_name(value))
-                    && [
-                        &row.log_send_queue_kb,
-                        &row.redo_queue_kb,
-                        &row.log_send_rate_kb_per_second,
-                        &row.redo_rate_kb_per_second,
-                        &row.secondary_lag_seconds,
-                        &row.filestream_send_rate_kb_per_second,
-                        &row.low_water_mark_for_ghosts,
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .all(|value| valid_counter(value))
-                    && [
-                        &row.recovery_lsn,
-                        &row.truncation_lsn,
-                        &row.last_sent_lsn,
-                        &row.last_received_lsn,
-                        &row.last_hardened_lsn,
-                        &row.last_redone_lsn,
-                        &row.end_of_log_lsn,
-                        &row.last_commit_lsn,
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .all(|value| log_position(value))
-                    && [
-                        &row.last_sent_without_offset,
-                        &row.last_received_without_offset,
-                        &row.last_hardened_without_offset,
-                        &row.last_redone_without_offset,
-                        &row.last_commit_without_offset,
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .all(|value| local_time(value))
+                    && [&row.native_name, &row.database_name].into_iter().flatten().all(|value| native_name(value))
+                    && row.progress.is_valid()
             }
             Self::GeoLink(row) => {
                 native_guid(&row.link_id)
@@ -374,13 +301,13 @@ impl AvailabilityReplicaContext {
 pub(super) fn native_name(value: &str) -> bool {
     value.len() <= 2048 && !value.chars().any(char::is_control)
 }
-fn log_position(value: &str) -> bool {
+pub(super) fn log_position(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 25
         && value.bytes().all(|byte| byte.is_ascii_digit())
         && (value == "0" || !value.starts_with('0'))
 }
-fn local_time(value: &str) -> bool {
+pub(super) fn local_time(value: &str) -> bool {
     use chrono::{Datelike, Timelike};
     value.len() <= 27
         && chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f")
@@ -406,13 +333,23 @@ impl ReplicationObservation {
             && self.fact.is_valid()
             && (matches!(self.fact, ReplicationFact::HyperscaleReplica(_))
                 == (self.source == MSSQL_HYPERSCALE_REPLICAS_SOURCE))
+            && (matches!(self.fact, ReplicationFact::AzureReplicaState(_))
+                == (self.source == MSSQL_AZURE_REPLICA_STATE_SOURCE))
     }
     pub fn fits_source(&self, source: &CollectionDescription) -> bool {
         if !self.is_valid() {
             return false;
         }
-        let ReplicationFact::HyperscaleReplica(point) = &self.fact else { return true };
-        let Ok(Some(scope)) = mssql_replication_scope(source) else { return false };
-        NativeReadContext::from_snapshot(source).is_ok_and(|context| point.fits_read(scope, &context))
+        match &self.fact {
+            ReplicationFact::HyperscaleReplica(point) => {
+                let Ok(Some(scope)) = mssql_replication_scope(source) else { return false };
+                NativeReadContext::from_snapshot(source).is_ok_and(|context| point.fits_read(scope, &context))
+            }
+            ReplicationFact::AzureReplicaState(point) => {
+                let Ok(Some(scope)) = mssql_replication_scope(source) else { return false };
+                NativeReadContext::from_snapshot(source).is_ok_and(|context| point.fits_read(scope, &context))
+            }
+            _ => true,
+        }
     }
 }

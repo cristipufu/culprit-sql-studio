@@ -1,10 +1,13 @@
 //! Native field projection only; all state eligibility lives in the parent decision helpers.
 use super::*;
 
-pub(super) fn database_fields(sample: &AvailabilityReplicaSample) -> Vec<culprit_core::ReplicationField> {
+pub(super) fn database_fields(
+    sample: &MssqlReplicaDatabaseProgress,
+    is_local: Option<bool>,
+) -> Vec<culprit_core::ReplicationField> {
     let suspended = sample.is_suspended == Some(true);
     vec![
-        native("is_local", t!("view.replication.mssql.field.local"), sample.is_local.map(u8::from)),
+        native("is_local", t!("view.replication.mssql.field.local"), is_local.map(u8::from)),
         native("is_primary", t!("view.replication.mssql.field.primary"), sample.is_primary.map(u8::from)),
         native("state_code", t!("view.replication.mssql.field.state_code"), sample.state),
         native("state", t!("view.replication.mssql.field.state"), sample.native_state.as_deref()),
@@ -45,7 +48,7 @@ pub(super) fn database_fields(sample: &AvailabilityReplicaSample) -> Vec<culprit
     ]
 }
 
-pub(super) fn movement_fields(sample: &AvailabilityReplicaSample) -> Vec<culprit_core::ReplicationField> {
+pub(super) fn movement_fields(sample: &MssqlReplicaDatabaseProgress) -> Vec<culprit_core::ReplicationField> {
     vec![
         number("log_send_queue_kb", t!("view.replication.mssql.field.send_queue"), sample.log_send_queue_kb.as_deref()),
         number("redo_queue_kb", t!("view.replication.mssql.field.redo_queue"), sample.redo_queue_kb.as_deref()),
@@ -77,7 +80,7 @@ pub(super) fn movement_fields(sample: &AvailabilityReplicaSample) -> Vec<culprit
     ]
 }
 
-pub(super) fn position_fields(sample: &AvailabilityReplicaSample) -> Vec<culprit_core::ReplicationField> {
+pub(super) fn position_fields(sample: &MssqlReplicaDatabaseProgress) -> Vec<culprit_core::ReplicationField> {
     vec![
         native("recovery_lsn", t!("view.replication.mssql.field.recovery_position"), sample.recovery_lsn.as_deref()),
         native(
@@ -102,7 +105,7 @@ pub(super) fn position_fields(sample: &AvailabilityReplicaSample) -> Vec<culprit
     ]
 }
 
-pub(super) fn clock_fields(sample: &AvailabilityReplicaSample) -> Vec<culprit_core::ReplicationField> {
+pub(super) fn clock_fields(sample: &MssqlReplicaDatabaseProgress) -> Vec<culprit_core::ReplicationField> {
     vec![
         native(
             "last_sent_without_offset",

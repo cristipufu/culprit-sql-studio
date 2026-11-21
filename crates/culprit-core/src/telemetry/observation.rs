@@ -699,10 +699,12 @@ impl SourceObservation {
                 snapshot.is_valid()
                     && snapshot.dataset == SnapshotDataset::Replication
                     && scope.is_valid()
-                    && snapshot
-                        .sources
-                        .iter()
-                        .all(|source| source.source != MSSQL_HYPERSCALE_REPLICAS_SOURCE || !source.complete_scope)
+                    && snapshot.sources.iter().all(|source| {
+                        !matches!(
+                            source.source.as_str(),
+                            MSSQL_HYPERSCALE_REPLICAS_SOURCE | MSSQL_AZURE_REPLICA_STATE_SOURCE
+                        ) || !source.complete_scope
+                    })
             }
             Self::GroupReplication { snapshot, metadata } => {
                 group_replication_header_is_valid(snapshot) && metadata.is_valid()

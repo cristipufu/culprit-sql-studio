@@ -8,18 +8,18 @@ async fn database_group_and_replica_scopes_retain_exact_native_positions_clocks_
     let ReplicationFact::AvailabilityGroup(row) = &rows[0] else { panic!() };
     assert_eq!(row.database_id, Some(5));
     assert_eq!(row.database_name.as_deref(), Some("shop"));
-    assert_eq!(row.recovery_lsn.as_deref(), Some("9999999999999999999999999"));
-    assert_eq!(row.last_sent_lsn.as_deref(), Some("9007199254740993"));
-    assert_eq!(row.last_hardened_lsn.as_deref(), Some("0"));
-    assert!(row.truncation_lsn.is_none() && row.last_received_without_offset.is_none());
-    assert_eq!(row.last_sent_without_offset.as_deref(), Some("2020-01-01T01:00:00.0030000"));
-    assert_eq!(row.filestream_send_rate_kb_per_second.as_deref(), Some("0"));
-    assert_eq!(row.is_commit_participant, Some(false));
-    assert_eq!(row.database_state, Some(0));
+    assert_eq!(row.progress.recovery_lsn.as_deref(), Some("9999999999999999999999999"));
+    assert_eq!(row.progress.last_sent_lsn.as_deref(), Some("9007199254740993"));
+    assert_eq!(row.progress.last_hardened_lsn.as_deref(), Some("0"));
+    assert!(row.progress.truncation_lsn.is_none() && row.progress.last_received_without_offset.is_none());
+    assert_eq!(row.progress.last_sent_without_offset.as_deref(), Some("2020-01-01T01:00:00.0030000"));
+    assert_eq!(row.progress.filestream_send_rate_kb_per_second.as_deref(), Some("0"));
+    assert_eq!(row.progress.is_commit_participant, Some(false));
+    assert_eq!(row.progress.database_state, Some(0));
     let group = row.group.as_ref().unwrap();
     assert!(group.catalog_observed && group.state_observed);
     assert_eq!(group.synchronization_health, Some(1), "group rollup is not this database's synchronization health");
-    assert_eq!(row.synchronization_health, Some(0));
+    assert_eq!(row.progress.synchronization_health, Some(0));
     assert!(group.secondary_recovery_health.is_none(), "primary-side unknowns remain unknown");
     assert_eq!(group.configuration_sequence.as_deref(), Some("9007199254740993"));
     let replica = row.replica.as_ref().unwrap();
@@ -93,7 +93,7 @@ async fn optional_versioned_columns_are_decided_before_the_native_read_without_s
     let ReplicationFact::AvailabilityGroup(row) = &rows[0] else { panic!() };
     assert!(row.group.as_ref().unwrap().is_distributed.is_none());
     assert!(row.replica.as_ref().unwrap().seeding_mode.is_none());
-    assert!(row.last_sent_lsn.is_some(), "known older-layout fields remain available");
+    assert!(row.progress.last_sent_lsn.is_some(), "known older-layout fields remain available");
 }
 
 fn absent_context(row: &Rec, prefix: &str, except: &[&str]) -> Rec {
@@ -117,7 +117,7 @@ async fn hidden_group_and_replica_contexts_preserve_database_facts_without_compl
     let TelemetryRecord::Replication(row) = &records[0] else { panic!() };
     let ReplicationFact::AvailabilityGroup(row) = &row.fact else { panic!() };
     assert!(row.group.is_none() && row.replica.is_none());
-    assert_eq!(row.last_commit_lsn.as_deref(), Some("41"));
+    assert_eq!(row.progress.last_commit_lsn.as_deref(), Some("41"));
     assert_eq!(reader.calls.len(), 2);
 }
 
@@ -190,7 +190,7 @@ async fn scan_retains_the_same_raw_read_with_actual_family_visibility_but_no_bor
     assert!(raw.sources[0].complete_scope, "native query visibility is independent of process identity authority");
     assert_eq!(raw.observations.len(), 2);
     let ReplicationFact::AvailabilityGroup(remote) = &raw.observations[1].fact else { panic!() };
-    assert_eq!(remote.recovery_lsn.as_deref(), Some("9999999999999999999999999"));
+    assert_eq!(remote.progress.recovery_lsn.as_deref(), Some("9999999999999999999999999"));
     assert_eq!(pressure.replicas.len(), 1);
     assert_eq!(reader.calls.len(), 2);
     assert_eq!(reader.closed, 1);

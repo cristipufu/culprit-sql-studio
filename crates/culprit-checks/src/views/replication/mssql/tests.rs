@@ -13,13 +13,17 @@ fn database() -> AvailabilityReplicaSample {
         database_name: Some("shop".into()),
         native_name: Some("native-secondary".into()),
         is_local: Some(false),
-        is_primary: Some(false),
-        state: Some(2),
-        native_state: Some("SYNCHRONIZED".into()),
-        synchronization_health: Some(2),
-        mode: Some(1),
-        native_mode: Some("SYNCHRONOUS_COMMIT".into()),
-        is_suspended: Some(false),
+        progress: MssqlReplicaDatabaseProgress {
+            is_primary: Some(false),
+            state: Some(2),
+            native_state: Some("SYNCHRONIZED".into()),
+            synchronization_health: Some(2),
+            mode: Some(1),
+            native_mode: Some("SYNCHRONOUS_COMMIT".into()),
+            is_suspended: Some(false),
+            ..Default::default()
+        },
+
         ..Default::default()
     }
 }
@@ -109,13 +113,13 @@ fn values(entry: &ReplicationEntry) -> BTreeMap<&str, Option<&str>> {
 #[test]
 fn exact_native_positions_queues_and_unzoned_times_are_preserved_without_an_eta_or_query_owner() {
     let mut sample = database();
-    sample.recovery_lsn = Some("9999999999999999999999999".into());
-    sample.last_redone_lsn = Some("9007199254740993".into());
-    sample.last_commit_lsn = Some("9007199254740992".into());
-    sample.last_sent_without_offset = Some("2020-01-01T01:00:00.0030000".into());
-    sample.log_send_queue_kb = Some("9007199254740993".into());
-    sample.redo_queue_kb = Some("0".into());
-    sample.redo_rate_kb_per_second = Some("123456789".into());
+    sample.progress.recovery_lsn = Some("9999999999999999999999999".into());
+    sample.progress.last_redone_lsn = Some("9007199254740993".into());
+    sample.progress.last_commit_lsn = Some("9007199254740992".into());
+    sample.progress.last_sent_without_offset = Some("2020-01-01T01:00:00.0030000".into());
+    sample.progress.log_send_queue_kb = Some("9007199254740993".into());
+    sample.progress.redo_queue_kb = Some("0".into());
+    sample.progress.redo_rate_kb_per_second = Some("123456789".into());
     let result = explain_database(sample);
     let fields = values(&result);
     assert_eq!(fields["recovery_lsn"], Some("9999999999999999999999999"));
@@ -139,11 +143,11 @@ fn exact_native_positions_queues_and_unzoned_times_are_preserved_without_an_eta_
 #[test]
 fn a_suspended_native_zero_lag_point_is_not_recovery_and_reason_only_explains_actual_suspension() {
     let mut sample = database();
-    sample.suspend_reason = Some(0);
-    sample.native_suspend_reason = Some("SUSPEND_FROM_USER".into());
-    sample.secondary_lag_seconds = Some("0".into());
+    sample.progress.suspend_reason = Some(0);
+    sample.progress.native_suspend_reason = Some("SUSPEND_FROM_USER".into());
+    sample.progress.secondary_lag_seconds = Some("0".into());
     for suspended in [Some(true), Some(false), None] {
-        sample.is_suspended = suspended;
+        sample.progress.is_suspended = suspended;
         let result = explain_database(sample.clone());
         assert_eq!(result.conditions.contains(&ReplicationCondition::MovementSuspended), suspended == Some(true));
         assert_eq!(values(&result)["suspend_reason_code"], if suspended == Some(true) { Some("0") } else { None });
@@ -152,7 +156,7 @@ fn a_suspended_native_zero_lag_point_is_not_recovery_and_reason_only_explains_ac
             result.explanation.contains(&t!("view.replication.mssql.availability.suspended")),
             suspended == Some(true)
         );
-        assert_eq!(sample.suspend_reason, Some(0), "the original raw context is untouched");
+        assert_eq!(sample.progress.suspend_reason, Some(0), "the original raw context is untouched");
     }
 }
 
@@ -199,15 +203,15 @@ fn cross_database_group_health_and_missing_context_cannot_become_this_database_c
 fn healthy_unknown_and_not_synchronizing_codes_are_classified_without_native_text_rules() {
     let mut sample = database();
     for state in [None, Some(2), Some(93)] {
-        sample.state = state;
-        sample.native_state = Some("NOT SYNCHRONIZING".into());
+        sample.progress.state = state;
+        sample.progress.native_state = Some("NOT SYNCHRONIZING".into());
         assert!(
             explain_database(sample.clone()).conditions.is_empty(),
             "code {state:?} has no supported fault inference"
         );
     }
-    sample.state = Some(0);
-    sample.native_state = Some("future-native-display-name".into());
+    sample.progress.state = Some(0);
+    sample.progress.native_state = Some("future-native-display-name".into());
     assert_eq!(explain_database(sample).conditions, vec![ReplicationCondition::NotSynchronizing]);
 }
 

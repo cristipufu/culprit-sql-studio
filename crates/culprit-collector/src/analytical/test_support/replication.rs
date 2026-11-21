@@ -17,6 +17,10 @@ pub enum ReplicationCase {
     MssqlHyperscaleNulls,
     MssqlHyperscalePartial,
     MssqlHyperscaleUnavailable,
+    MssqlAzureLocalState,
+    MssqlAzureLocalNulls,
+    MssqlAzureLocalUnavailable,
+    MssqlAzureLocalAndTopology,
     Partial,
     Empty,
     Unavailable,
@@ -39,6 +43,10 @@ impl ReplicationCase {
         Self::MssqlHyperscaleNulls,
         Self::MssqlHyperscalePartial,
         Self::MssqlHyperscaleUnavailable,
+        Self::MssqlAzureLocalState,
+        Self::MssqlAzureLocalNulls,
+        Self::MssqlAzureLocalUnavailable,
+        Self::MssqlAzureLocalAndTopology,
         Self::Partial,
         Self::Empty,
         Self::Unavailable,
@@ -82,6 +90,20 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
             },
             vec![MSSQL_HYPERSCALE_REPLICAS_SOURCE],
         ),
+        MssqlAzureLocalState | MssqlAzureLocalNulls | MssqlAzureLocalUnavailable => (
+            Engine::Mssql,
+            if matches!(case, MssqlAzureLocalUnavailable) {
+                vec![]
+            } else {
+                vec![azure_local(matches!(case, MssqlAzureLocalNulls))]
+            },
+            vec![MSSQL_AZURE_REPLICA_STATE_SOURCE],
+        ),
+        MssqlAzureLocalAndTopology => {
+            let mut rows = hyperscale(false);
+            rows.push(azure_local(false));
+            (Engine::Mssql, rows, vec![MSSQL_HYPERSCALE_REPLICAS_SOURCE, MSSQL_AZURE_REPLICA_STATE_SOURCE])
+        }
         Empty | Unavailable | NotApplicable => {
             (Engine::Postgres, vec![], vec!["pg_stat_replication", "pg_replication_slots"])
         }
@@ -91,7 +113,7 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
         .map(|source| {
             let count = rows.iter().filter(|row| row.source == source).count() as u32;
             match case {
-                Unavailable | MssqlHyperscaleUnavailable => {
+                Unavailable | MssqlHyperscaleUnavailable | MssqlAzureLocalUnavailable => {
                     StateSourceCoverage::unavailable(source.into(), ErrorCode::PermissionDenied, None)
                 }
                 NotApplicable => StateSourceCoverage::not_applicable(source.into()),
@@ -108,7 +130,11 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
                     coverage.stopped = Some(CollectionStop::RowLimit);
                     coverage
                 }
-                MssqlHyperscale | MssqlHyperscaleNulls => StateSourceCoverage::observed(source.into(), count, false),
+                MssqlHyperscale
+                | MssqlHyperscaleNulls
+                | MssqlAzureLocalState
+                | MssqlAzureLocalNulls
+                | MssqlAzureLocalAndTopology => StateSourceCoverage::observed(source.into(), count, false),
                 UnqualifiedOwner => StateSourceCoverage::observed(source.into(), count, false),
                 MssqlAvailabilityGroup | MssqlGeoLink if count == 0 => {
                     StateSourceCoverage::not_applicable(source.into())
@@ -152,7 +178,17 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
             sources,
         }),
     };
-    if matches!(case, MssqlHyperscale | MssqlHyperscaleNulls | MssqlHyperscalePartial | MssqlHyperscaleUnavailable) {
+    if matches!(
+        case,
+        MssqlHyperscale
+            | MssqlHyperscaleNulls
+            | MssqlHyperscalePartial
+            | MssqlHyperscaleUnavailable
+            | MssqlAzureLocalState
+            | MssqlAzureLocalNulls
+            | MssqlAzureLocalUnavailable
+            | MssqlAzureLocalAndTopology
+    ) {
         let mut database = DatabaseIdentity::server(Engine::Mssql, "app", "replication.fixture.invalid", 1433, None);
         database.incarnation = Some("original-logical-database".into());
         source.target = database.into();
@@ -227,6 +263,41 @@ fn hyperscale(nulls: bool) -> Vec<ReplicationObservation> {
             }
         })
         .collect()
+}
+
+fn azure_local(nulls: bool) -> ReplicationObservation {
+    ReplicationObservation {
+        source: MSSQL_AZURE_REPLICA_STATE_SOURCE.into(),
+        fact: ReplicationFact::AzureReplicaState(Box::new(MssqlAzureReplicaState {
+            database_id: 7,
+            replica_id: HS_OBSERVER.into(),
+            is_local: true,
+            database_writable: true,
+            observed_at: "2020-01-01T12:00:00.5Z".into(),
+            group_id: None,
+            group_database_id: None,
+            progress: if nulls {
+                MssqlReplicaDatabaseProgress::default()
+            } else {
+                MssqlReplicaDatabaseProgress {
+                    is_primary: Some(true),
+                    state: Some(0),
+                    native_state: Some("NOT SYNCHRONIZING".into()),
+                    is_suspended: Some(true),
+                    suspend_reason: Some(0),
+                    native_suspend_reason: Some("SUSPEND_FROM_USER".into()),
+                    synchronization_health: Some(0),
+                    native_synchronization_health: Some("NOT_HEALTHY".into()),
+                    log_send_queue_kb: Some("9007199254740993".into()),
+                    redo_queue_kb: Some("0".into()),
+                    secondary_lag_seconds: None,
+                    recovery_lsn: Some("1234567890123456789012345".into()),
+                    last_commit_without_offset: Some("2020-01-01T11:59:00.0030000".into()),
+                    ..Default::default()
+                }
+            },
+        })),
+    }
 }
 
 fn native(
@@ -588,33 +659,37 @@ fn availability_group() -> Vec<ReplicationObservation> {
         replica: Some(Box::new(replica)),
         native_name: Some("secondary.fixture.invalid".into()),
         is_local: Some(false),
-        is_primary: Some(false),
-        state: Some(0),
-        native_state: Some("NOT SYNCHRONIZING".into()),
-        mode: Some(0),
-        native_mode: Some("ASYNCHRONOUS_COMMIT".into()),
-        is_suspended: Some(true),
-        suspend_reason: Some(0),
-        native_suspend_reason: Some("SUSPEND_FROM_USER".into()),
-        synchronization_health: Some(0),
-        native_synchronization_health: Some("NOT_HEALTHY".into()),
-        log_send_queue_kb: Some("9007199254740993".into()),
-        redo_queue_kb: Some("0".into()),
-        log_send_rate_kb_per_second: Some("0".into()),
-        redo_rate_kb_per_second: None,
-        recovery_lsn: Some("1234567890123456789012345".into()),
-        truncation_lsn: Some("1234567890123456789012300".into()),
-        last_sent_lsn: Some("1234567890123456789012340".into()),
-        last_received_lsn: Some("1234567890123456789012330".into()),
-        last_hardened_lsn: Some("1234567890123456789012320".into()),
-        last_redone_lsn: Some("1234567890123456789012310".into()),
-        end_of_log_lsn: Some("1234567890123456789012345".into()),
-        last_commit_lsn: Some("1234567890123456789012300".into()),
-        last_sent_without_offset: Some("2026-11-16T01:02:03.123".into()),
-        last_received_without_offset: Some("2026-11-16T01:02:03.127".into()),
-        last_hardened_without_offset: Some("2026-11-16T01:02:03.130".into()),
-        last_redone_without_offset: Some("2026-11-16T01:02:03.133".into()),
-        last_commit_without_offset: Some("2026-11-16T01:02:03.137".into()),
+        progress: MssqlReplicaDatabaseProgress {
+            is_primary: Some(false),
+            state: Some(0),
+            native_state: Some("NOT SYNCHRONIZING".into()),
+            mode: Some(0),
+            native_mode: Some("ASYNCHRONOUS_COMMIT".into()),
+            is_suspended: Some(true),
+            suspend_reason: Some(0),
+            native_suspend_reason: Some("SUSPEND_FROM_USER".into()),
+            synchronization_health: Some(0),
+            native_synchronization_health: Some("NOT_HEALTHY".into()),
+            log_send_queue_kb: Some("9007199254740993".into()),
+            redo_queue_kb: Some("0".into()),
+            log_send_rate_kb_per_second: Some("0".into()),
+            redo_rate_kb_per_second: None,
+            recovery_lsn: Some("1234567890123456789012345".into()),
+            truncation_lsn: Some("1234567890123456789012300".into()),
+            last_sent_lsn: Some("1234567890123456789012340".into()),
+            last_received_lsn: Some("1234567890123456789012330".into()),
+            last_hardened_lsn: Some("1234567890123456789012320".into()),
+            last_redone_lsn: Some("1234567890123456789012310".into()),
+            end_of_log_lsn: Some("1234567890123456789012345".into()),
+            last_commit_lsn: Some("1234567890123456789012300".into()),
+            last_sent_without_offset: Some("2026-11-16T01:02:03.123".into()),
+            last_received_without_offset: Some("2026-11-16T01:02:03.127".into()),
+            last_hardened_without_offset: Some("2026-11-16T01:02:03.130".into()),
+            last_redone_without_offset: Some("2026-11-16T01:02:03.133".into()),
+            last_commit_without_offset: Some("2026-11-16T01:02:03.137".into()),
+            ..Default::default()
+        },
+
         ..Default::default()
     };
     vec![ReplicationObservation {

@@ -49,7 +49,7 @@ fn registered_source_versions_include_native_acquisition_policy_revisions() {
             ("mssql.missing-indexes", 2),
             ("mssql.tuning", 3),
             ("mssql.wait-counters", 2),
-            ("mssql.replication", 3),
+            ("mssql.replication", 4),
             ("mssql.settings", 5),
             ("mssql.statement-grants", 2),
             ("mssql.index-operations", 2),

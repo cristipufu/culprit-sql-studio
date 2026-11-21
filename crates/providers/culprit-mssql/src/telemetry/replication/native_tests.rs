@@ -166,7 +166,7 @@ fn assert_populated_topology(capture: &capture::Capture) {
         assert_eq!(sample.group.as_ref().and_then(|group| group.name.as_deref()), Some(group));
         if sample.is_local == Some(true) {
             local += 1;
-            assert_eq!(sample.is_primary, Some(primary));
+            assert_eq!(sample.progress.is_primary, Some(primary));
         }
     }
     assert_eq!(local, 1, "one independently identified local member in each native observation");

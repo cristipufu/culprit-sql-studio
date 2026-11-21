@@ -8,7 +8,7 @@ use culprit_core::{Result, telemetry::*};
 use std::sync::Arc;
 
 // Existing worst-case MI: 3 initial + 2 AG + 1 geo + 3 frame recheck + 3 final = 12 reader dispatches.
-// Azure HS: 2 initial + 1 pressure + 1 geo + 1 layout + 1 topology + 1 frame + 1 final + 1 topology final = 9.
+// Azure HS: 2 initial + 1 pressure + 1 geo + 1 layout + 1 topology + 1 frame + 1 final + 1 topology final = 9 (+1 local-state data query when that native layout is available).
 const MAX_TOTAL_QUERIES: u32 = 13; // Reader envelope plus the existing one-session SET dispatch.
 
 pub(super) fn bounded_budget(caller: &CollectionBudget) -> CollectionBudget {
@@ -30,7 +30,7 @@ struct Reader<R: NativeRead> {
     host: String,
     port: u16,
     owner: Option<Context>,
-    topology: Option<crate::replication::hyperscale::Witness>,
+    replica_authority: Option<crate::replication::authority::Witness>,
 }
 
 impl ReplicationSource {
@@ -47,7 +47,7 @@ impl<R: NativeRead> ReplicationSource<R> {
         if request.selection != (CollectionSelection::Snapshot { dataset: SnapshotDataset::Replication }) {
             return Err(invalid_data());
         }
-        let reader = Reader { io, host, port, owner: None, topology: None };
+        let reader = Reader { io, host, port, owner: None, replica_authority: None };
         Ok(Self { inner: culprit_read::FrozenSource::new(reader, request)? })
     }
 }
@@ -69,10 +69,12 @@ impl<R: NativeRead> culprit_read::ObservationReader for Reader<R> {
         .await?;
         let scope = if before.activity.edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
             let remaining = observed.remaining(request.budget.max_snapshot_rows as usize);
-            let (part, witness) = crate::replication::hyperscale::read(&mut self.io, &before, remaining).await?;
-            observed.parts.push(part);
-            self.topology = witness;
-            crate::replication::hyperscale::scope(&before).ok()
+            let scope = crate::replication::authority::scope(&before).ok();
+            let (parts, witness) =
+                crate::replication::authority::selected(&mut self.io, &before, scope.as_ref(), remaining).await?;
+            observed.parts.extend(parts);
+            self.replica_authority = witness;
+            scope
         } else {
             None
         };
@@ -83,7 +85,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for Reader<R> {
             before.qualification_error.or(after.qualification_error),
         );
         if self
-            .topology
+            .replica_authority
             .as_ref()
             .is_some_and(|witness| ObservationBounds::new(&witness.observed_at, &context.observed_until).is_none())
         {
@@ -119,8 +121,8 @@ impl<R: NativeRead> culprit_read::ObservationReader for Reader<R> {
         let owner = self.owner.as_ref().ok_or_else(invalid_data)?;
         let after = owner.recheck(&mut self.io, &self.host, self.port).await?;
         match owner.completed(&after) {
-            Ok(_) => match &self.topology {
-                Some(witness) => witness.verify(&mut self.io, &after, &after.activity.at).await,
+            Ok(_) => match &self.replica_authority {
+                Some(witness) => witness.verify(&mut self.io, &after).await,
                 None => Ok(true),
             },
             Err(error) if CollectionStop::from_error(&error) == CollectionStop::SourceChanged => Ok(false),

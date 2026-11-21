@@ -8,6 +8,8 @@ use culprit_core::{
     telemetry::{AvailabilityReplicaSample, CollectionStop, GeoReplicationSample, ReplicationFact, canonical_time},
 };
 use std::collections::BTreeSet;
+pub(crate) mod authority;
+pub(crate) mod azure_state;
 mod fields;
 pub(crate) mod hyperscale;
 mod native;
@@ -46,6 +48,7 @@ pub(crate) enum Selection {
     AvailabilityGroup,
     GeoLinks,
     Hyperscale,
+    AzureLocalState,
 }
 
 #[derive(Default)]
@@ -157,7 +160,7 @@ async fn read<R: NativeRead>(
     let limit = limit.min(MAX_REPLICAS);
     let (sql, decode): (String, fn(&Rec) -> Result<ReplicationFact>) = match selection {
         Selection::GeoLinks => (GEO.into(), geo_link),
-        Selection::Hyperscale => return Err(invalid_data()), // Requires the independent held Context.
+        Selection::Hyperscale | Selection::AzureLocalState => return Err(invalid_data()), // Requires the independent held Context.
         Selection::AvailabilityGroup => {
             let layout = match native::read(reader, LAYOUT, 1).await? {
                 native::NativeRows::Available(rows) => rows,
@@ -227,24 +230,30 @@ fn counter(row: &Rec, name: &str) -> Result<Option<String>> {
 }
 pub(crate) fn application(fact: &ReplicationFact) -> Option<Replica> {
     match fact {
-        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) => None,
+        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) | ReplicationFact::AzureReplicaState(_) => {
+            None
+        }
         ReplicationFact::AvailabilityGroup(row) => {
-            let (local, primary) = (row.is_local?, row.is_primary?);
+            let (local, primary) = (row.is_local?, row.progress.is_primary?);
             if local && primary {
                 return None;
             }
-            let sync = match row.mode {
+            let sync = match row.progress.mode {
                 Some(0) => Some(culprit_core::t!("provider.mssql.replication.asynchronous_commit")),
                 Some(1) => Some(culprit_core::t!("provider.mssql.replication.synchronous_commit")),
-                _ => row.native_mode.clone(),
+                _ => row.progress.native_mode.clone(),
             };
             Some(Replica {
-                condition: if row.state == Some(0) { ReplicaCondition::Stopped } else { ReplicaCondition::Reported },
-                state: row.native_state.clone(),
+                condition: if row.progress.state == Some(0) {
+                    ReplicaCondition::Stopped
+                } else {
+                    ReplicaCondition::Reported
+                },
+                state: row.progress.native_state.clone(),
                 sync,
-                lag_seconds: number(&row.secondary_lag_seconds),
-                lag_bytes: bytes(&row.redo_queue_kb),
-                unsent_bytes: bytes(&row.log_send_queue_kb),
+                lag_seconds: number(&row.progress.secondary_lag_seconds),
+                lag_bytes: bytes(&row.progress.redo_queue_kb),
+                unsent_bytes: bytes(&row.progress.log_send_queue_kb),
                 ..Replica::new(
                     row.native_name.as_deref().unwrap_or(&row.replica_id),
                     if local { ReplicaRole::ThisServer } else { ReplicaRole::Replica },
@@ -278,8 +287,10 @@ fn bytes(value: &Option<String>) -> Option<f64> {
 }
 fn direction_known(fact: &ReplicationFact) -> bool {
     match fact {
-        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) => false,
-        ReplicationFact::AvailabilityGroup(row) => row.is_local.is_some() && row.is_primary.is_some(),
+        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) | ReplicationFact::AzureReplicaState(_) => {
+            false
+        }
+        ReplicationFact::AvailabilityGroup(row) => row.is_local.is_some() && row.progress.is_primary.is_some(),
         ReplicationFact::GeoLink(row) => matches!(row.role, Some(0 | 1)),
     }
 }
@@ -295,8 +306,10 @@ fn record_application_result(coverage: &mut Coverage, result: Result<Vec<Replica
 }
 fn record_local_role(settings: &mut Vec<culprit_core::Setting>, facts: &[ReplicationFact]) {
     let secondary = facts.iter().any(|fact| match fact {
-        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) => false,
-        ReplicationFact::AvailabilityGroup(row) => row.is_local == Some(true) && row.is_primary == Some(false),
+        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) | ReplicationFact::AzureReplicaState(_) => {
+            false
+        }
+        ReplicationFact::AvailabilityGroup(row) => row.is_local == Some(true) && row.progress.is_primary == Some(false),
         ReplicationFact::GeoLink(row) => row.role == Some(1),
     });
     if secondary && !settings.iter().any(|value| value.name == culprit_core::REPLICA_SETTING) {

@@ -4742,6 +4742,1280 @@
       }
     ]
   },
+  "mssql_azure_local": {
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "app",
+            "location": {
+              "kind": "server",
+              "host": "replication.fixture.invalid",
+              "port": 1433,
+              "instance": null
+            },
+            "incarnation": "original-logical-database"
+          }
+        },
+        "partition": {
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "original-logical-database",
+              "qualifiers": {
+                "kind": "azure-sql-logical-database"
+              }
+            },
+            "native": {
+              "id": "91487244-730d-4b83-8e49-d482241c7288",
+              "qualifiers": {
+                "kind": "azure-sql-hyperscale-replica"
+              }
+            }
+          },
+          "epoch": "original-native-process"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": true
+      }
+    },
+    "sources": [
+      {
+        "source": "azure-local-database-replica-state",
+        "state": "partial",
+        "reason": null
+      }
+    ],
+    "read_complete": true,
+    "native_rows": 1,
+    "observed_rows": 1,
+    "state_rows": 1,
+    "presented_rows": 1,
+    "entries_limited": false,
+    "title": "Native replication evidence",
+    "summary": "1 native replication point was retained; details are shown for 1.",
+    "limitations": [
+      "These are separate native observations, not an atomic topology snapshot or a completed recovery history.",
+      "A replication backend or channel identifies a participant. It does not establish which application query generated or delayed the changes.",
+      "Native positions, recent acknowledgement intervals, last-commit ages and active-period rates have different meanings. They are not catch-up estimates.",
+      "Visibility is limited to the selected native sources and endpoint. Missing rows do not prove every replica or consumer is healthy or absent.",
+      "These locally relevant values can be unavailable or stale and do not enumerate read-scale replicas. Reported rates use native active periods; lag does not measure read-scale delay, and log positions are not byte distances.",
+      "At least one native source is partial, unavailable or inapplicable. Recorded positive facts remain separate from unknown coverage."
+    ],
+    "entries": [
+      {
+        "reference": {
+          "source": "azure-local-database-replica-state",
+          "observation_key": "azure-local:7:91487244-730d-4b83-8e49-d482241c7288"
+        },
+        "scope": "database",
+        "conditions": [
+          "movement-suspended",
+          "not-synchronizing"
+        ],
+        "title": "Azure local database-replica state",
+        "explanation": "The database reported these state and progress fields for this original local replica. The primary bit is relative to its availability group, not its geo-replication or distributed group role.",
+        "fields": [
+          {
+            "key": "database_id",
+            "label": "Native database ID",
+            "value": "7"
+          },
+          {
+            "key": "replica_id",
+            "label": "Replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "group_id",
+            "label": "Availability group ID",
+            "value": null
+          },
+          {
+            "key": "group_database_id",
+            "label": "Database ID within group",
+            "value": null
+          },
+          {
+            "key": "observed_at",
+            "label": "Native observation time (UTC)",
+            "value": "2020-01-01T12:00:00.5Z"
+          }
+        ],
+        "groups": [
+          {
+            "title": "Database replica state",
+            "fields": [
+              {
+                "key": "is_local",
+                "label": "Local replica (native bit)",
+                "value": "1"
+              },
+              {
+                "key": "is_primary",
+                "label": "Primary replica (native bit)",
+                "value": "1"
+              },
+              {
+                "key": "state_code",
+                "label": "Synchronization state code",
+                "value": "0"
+              },
+              {
+                "key": "state",
+                "label": "Synchronization state",
+                "value": "NOT SYNCHRONIZING"
+              },
+              {
+                "key": "mode_code",
+                "label": "Availability mode code",
+                "value": null
+              },
+              {
+                "key": "mode",
+                "label": "Availability mode",
+                "value": null
+              },
+              {
+                "key": "is_commit_participant",
+                "label": "Commit participant (native bit)",
+                "value": null
+              },
+              {
+                "key": "database_state_code",
+                "label": "Database state code",
+                "value": null
+              },
+              {
+                "key": "database_state",
+                "label": "Database state",
+                "value": null
+              },
+              {
+                "key": "is_suspended",
+                "label": "Data movement suspended (native bit)",
+                "value": "1"
+              },
+              {
+                "key": "suspend_reason_code",
+                "label": "Suspension reason code (while suspended)",
+                "value": "0"
+              },
+              {
+                "key": "suspend_reason",
+                "label": "Suspension reason (while suspended)",
+                "value": "SUSPEND_FROM_USER"
+              },
+              {
+                "key": "synchronization_health_code",
+                "label": "Synchronization health code",
+                "value": "0"
+              },
+              {
+                "key": "synchronization_health",
+                "label": "Synchronization health",
+                "value": "NOT_HEALTHY"
+              }
+            ]
+          },
+          {
+            "title": "Native movement measurements (no drain-time estimate)",
+            "fields": [
+              {
+                "key": "log_send_queue_kb",
+                "label": "Unsent log queue (KB)",
+                "value": "9007199254740993"
+              },
+              {
+                "key": "redo_queue_kb",
+                "label": "Redo queue (KB)",
+                "value": "0"
+              },
+              {
+                "key": "log_send_rate_kb_per_second",
+                "label": "Log send rate (KB/s, last active period)",
+                "value": null
+              },
+              {
+                "key": "redo_rate_kb_per_second",
+                "label": "Redo rate (KB/s of active redo time)",
+                "value": null
+              },
+              {
+                "key": "filestream_send_rate_kb_per_second",
+                "label": "FILESTREAM send rate (KB/s)",
+                "value": null
+              },
+              {
+                "key": "secondary_lag_seconds",
+                "label": "Reported secondary lag (s)",
+                "value": null
+              },
+              {
+                "key": "low_water_mark_for_ghosts",
+                "label": "Native ghost-cleanup low-water mark",
+                "value": null
+              }
+            ]
+          },
+          {
+            "title": "Exact native log positions (not byte distances)",
+            "fields": [
+              {
+                "key": "recovery_lsn",
+                "label": "Recovery log-block identifier",
+                "value": "1234567890123456789012345"
+              },
+              {
+                "key": "truncation_lsn",
+                "label": "Truncation log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_sent_lsn",
+                "label": "Sent log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_received_lsn",
+                "label": "Received log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_hardened_lsn",
+                "label": "Hardened log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_redone_lsn",
+                "label": "Last redone LSN",
+                "value": null
+              },
+              {
+                "key": "end_of_log_lsn",
+                "label": "End-of-log block identifier",
+                "value": null
+              },
+              {
+                "key": "last_commit_lsn",
+                "label": "Last commit LSN",
+                "value": null
+              }
+            ]
+          },
+          {
+            "title": "Native progress times (UTC offset unknown)",
+            "fields": [
+              {
+                "key": "last_sent_without_offset",
+                "label": "Last log send time",
+                "value": null
+              },
+              {
+                "key": "last_received_without_offset",
+                "label": "Last log receive time",
+                "value": null
+              },
+              {
+                "key": "last_hardened_without_offset",
+                "label": "Last log hardening time",
+                "value": null
+              },
+              {
+                "key": "last_redone_without_offset",
+                "label": "Last log redo time",
+                "value": null
+              },
+              {
+                "key": "last_commit_without_offset",
+                "label": "Last commit time",
+                "value": "2020-01-01T11:59:00.0030000"
+              }
+            ]
+          }
+        ],
+        "session": null,
+        "unresolved_session_id": null,
+        "investigation": "If the recorded state remains suspended or not synchronizing, inspect the same local database and replica before changing data movement. Keep missing native values unknown.",
+        "verify": "Read the same local member again and compare its native state, queues and original identifiers. Confirm current behavior independently; a retained point cannot establish recovery."
+      }
+    ]
+  },
+  "mssql_azure_local_and_topology": {
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "app",
+            "location": {
+              "kind": "server",
+              "host": "replication.fixture.invalid",
+              "port": 1433,
+              "instance": null
+            },
+            "incarnation": "original-logical-database"
+          }
+        },
+        "partition": {
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "original-logical-database",
+              "qualifiers": {
+                "kind": "azure-sql-logical-database"
+              }
+            },
+            "native": {
+              "id": "91487244-730d-4b83-8e49-d482241c7288",
+              "qualifiers": {
+                "kind": "azure-sql-hyperscale-replica"
+              }
+            }
+          },
+          "epoch": "original-native-process"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": true
+      }
+    },
+    "sources": [
+      {
+        "source": "hyperscale-replica-topology",
+        "state": "partial",
+        "reason": null
+      },
+      {
+        "source": "azure-local-database-replica-state",
+        "state": "partial",
+        "reason": null
+      }
+    ],
+    "read_complete": true,
+    "native_rows": 5,
+    "observed_rows": 5,
+    "state_rows": 1,
+    "presented_rows": 5,
+    "entries_limited": false,
+    "title": "Native replication evidence",
+    "summary": "5 native replication points were retained; details are shown for 5.",
+    "limitations": [
+      "These are separate native observations, not an atomic topology snapshot or a completed recovery history.",
+      "A replication backend or channel identifies a participant. It does not establish which application query generated or delayed the changes.",
+      "Native positions, recent acknowledgement intervals, last-commit ages and active-period rates have different meanings. They are not catch-up estimates.",
+      "Visibility is limited to the selected native sources and endpoint. Missing rows do not prove every replica or consumer is healthy or absent.",
+      "On a primary replica, this function omits high availability replicas beneath geo-secondaries. Visibility may also be restricted; logical server names and parent edges do not establish compute ownership, delay or health.",
+      "These locally relevant values can be unavailable or stale and do not enumerate read-scale replicas. Reported rates use native active periods; lag does not measure read-scale delay, and log positions are not byte distances.",
+      "At least one native source is partial, unavailable or inapplicable. Recorded positive facts remain separate from unknown coverage."
+    ],
+    "entries": [
+      {
+        "reference": {
+          "source": "azure-local-database-replica-state",
+          "observation_key": "azure-local:7:91487244-730d-4b83-8e49-d482241c7288"
+        },
+        "scope": "database",
+        "conditions": [
+          "movement-suspended",
+          "not-synchronizing"
+        ],
+        "title": "Azure local database-replica state",
+        "explanation": "The database reported these state and progress fields for this original local replica. The primary bit is relative to its availability group, not its geo-replication or distributed group role.",
+        "fields": [
+          {
+            "key": "database_id",
+            "label": "Native database ID",
+            "value": "7"
+          },
+          {
+            "key": "replica_id",
+            "label": "Replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "group_id",
+            "label": "Availability group ID",
+            "value": null
+          },
+          {
+            "key": "group_database_id",
+            "label": "Database ID within group",
+            "value": null
+          },
+          {
+            "key": "observed_at",
+            "label": "Native observation time (UTC)",
+            "value": "2020-01-01T12:00:00.5Z"
+          }
+        ],
+        "groups": [
+          {
+            "title": "Database replica state",
+            "fields": [
+              {
+                "key": "is_local",
+                "label": "Local replica (native bit)",
+                "value": "1"
+              },
+              {
+                "key": "is_primary",
+                "label": "Primary replica (native bit)",
+                "value": "1"
+              },
+              {
+                "key": "state_code",
+                "label": "Synchronization state code",
+                "value": "0"
+              },
+              {
+                "key": "state",
+                "label": "Synchronization state",
+                "value": "NOT SYNCHRONIZING"
+              },
+              {
+                "key": "mode_code",
+                "label": "Availability mode code",
+                "value": null
+              },
+              {
+                "key": "mode",
+                "label": "Availability mode",
+                "value": null
+              },
+              {
+                "key": "is_commit_participant",
+                "label": "Commit participant (native bit)",
+                "value": null
+              },
+              {
+                "key": "database_state_code",
+                "label": "Database state code",
+                "value": null
+              },
+              {
+                "key": "database_state",
+                "label": "Database state",
+                "value": null
+              },
+              {
+                "key": "is_suspended",
+                "label": "Data movement suspended (native bit)",
+                "value": "1"
+              },
+              {
+                "key": "suspend_reason_code",
+                "label": "Suspension reason code (while suspended)",
+                "value": "0"
+              },
+              {
+                "key": "suspend_reason",
+                "label": "Suspension reason (while suspended)",
+                "value": "SUSPEND_FROM_USER"
+              },
+              {
+                "key": "synchronization_health_code",
+                "label": "Synchronization health code",
+                "value": "0"
+              },
+              {
+                "key": "synchronization_health",
+                "label": "Synchronization health",
+                "value": "NOT_HEALTHY"
+              }
+            ]
+          },
+          {
+            "title": "Native movement measurements (no drain-time estimate)",
+            "fields": [
+              {
+                "key": "log_send_queue_kb",
+                "label": "Unsent log queue (KB)",
+                "value": "9007199254740993"
+              },
+              {
+                "key": "redo_queue_kb",
+                "label": "Redo queue (KB)",
+                "value": "0"
+              },
+              {
+                "key": "log_send_rate_kb_per_second",
+                "label": "Log send rate (KB/s, last active period)",
+                "value": null
+              },
+              {
+                "key": "redo_rate_kb_per_second",
+                "label": "Redo rate (KB/s of active redo time)",
+                "value": null
+              },
+              {
+                "key": "filestream_send_rate_kb_per_second",
+                "label": "FILESTREAM send rate (KB/s)",
+                "value": null
+              },
+              {
+                "key": "secondary_lag_seconds",
+                "label": "Reported secondary lag (s)",
+                "value": null
+              },
+              {
+                "key": "low_water_mark_for_ghosts",
+                "label": "Native ghost-cleanup low-water mark",
+                "value": null
+              }
+            ]
+          },
+          {
+            "title": "Exact native log positions (not byte distances)",
+            "fields": [
+              {
+                "key": "recovery_lsn",
+                "label": "Recovery log-block identifier",
+                "value": "1234567890123456789012345"
+              },
+              {
+                "key": "truncation_lsn",
+                "label": "Truncation log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_sent_lsn",
+                "label": "Sent log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_received_lsn",
+                "label": "Received log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_hardened_lsn",
+                "label": "Hardened log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_redone_lsn",
+                "label": "Last redone LSN",
+                "value": null
+              },
+              {
+                "key": "end_of_log_lsn",
+                "label": "End-of-log block identifier",
+                "value": null
+              },
+              {
+                "key": "last_commit_lsn",
+                "label": "Last commit LSN",
+                "value": null
+              }
+            ]
+          },
+          {
+            "title": "Native progress times (UTC offset unknown)",
+            "fields": [
+              {
+                "key": "last_sent_without_offset",
+                "label": "Last log send time",
+                "value": null
+              },
+              {
+                "key": "last_received_without_offset",
+                "label": "Last log receive time",
+                "value": null
+              },
+              {
+                "key": "last_hardened_without_offset",
+                "label": "Last log hardening time",
+                "value": null
+              },
+              {
+                "key": "last_redone_without_offset",
+                "label": "Last log redo time",
+                "value": null
+              },
+              {
+                "key": "last_commit_without_offset",
+                "label": "Last commit time",
+                "value": "2020-01-01T11:59:00.0030000"
+              }
+            ]
+          }
+        ],
+        "session": null,
+        "unresolved_session_id": null,
+        "investigation": "If the recorded state remains suspended or not synchronizing, inspect the same local database and replica before changing data movement. Keep missing native values unknown.",
+        "verify": "Read the same local member again and compare its native state, queues and original identifiers. Confirm current behavior independently; a retained point cannot establish recovery."
+      },
+      {
+        "reference": {
+          "source": "hyperscale-replica-topology",
+          "observation_key": "hs:91487244-730d-4b83-8e49-d482241c7288:7:11111111-1111-1111-1111-000000000001"
+        },
+        "scope": "database",
+        "conditions": [],
+        "title": "Hyperscale replica topology",
+        "explanation": "These native rows describe the selected database’s visible replica relationships at capture time. Primary, high availability, geo-forwarder and named replica roles remain separate.",
+        "fields": [
+          {
+            "key": "replica_id",
+            "label": "Replica ID",
+            "value": "11111111-1111-1111-1111-000000000001"
+          },
+          {
+            "key": "replica_server_name",
+            "label": "Logical server name",
+            "value": "orders-logical-server"
+          },
+          {
+            "key": "replica_database_name",
+            "label": "Database",
+            "value": "app"
+          },
+          {
+            "key": "is_local",
+            "label": "Local replica (native bit)",
+            "value": "false"
+          },
+          {
+            "key": "role_code",
+            "label": "Replica role code",
+            "value": "1"
+          },
+          {
+            "key": "role",
+            "label": "Replica role",
+            "value": "HA SECONDARY"
+          },
+          {
+            "key": "local_database_id",
+            "label": "Replica’s database or pool-local database ID",
+            "value": "71"
+          },
+          {
+            "key": "parent_replica_id",
+            "label": "High availability parent replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "selected_database_id",
+            "label": "Selected database ID",
+            "value": "7"
+          },
+          {
+            "key": "observer_replica_id",
+            "label": "Original observer replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "observed_at",
+            "label": "Native observation time (UTC)",
+            "value": "2020-01-01T12:00:00.5Z"
+          }
+        ],
+        "groups": [],
+        "session": null,
+        "unresolved_session_id": null,
+        "investigation": "If a partner or role is unexpected, inspect that same database from the relevant replica with the required native metadata permissions.",
+        "verify": "Repeat the topology read on the same database and member, and inspect each geo-secondary’s visible subtree separately. Compare the original replica IDs and roles."
+      },
+      {
+        "reference": {
+          "source": "hyperscale-replica-topology",
+          "observation_key": "hs:91487244-730d-4b83-8e49-d482241c7288:7:11111111-1111-1111-1111-000000000002"
+        },
+        "scope": "database",
+        "conditions": [],
+        "title": "Hyperscale replica topology",
+        "explanation": "These native rows describe the selected database’s visible replica relationships at capture time. Primary, high availability, geo-forwarder and named replica roles remain separate.",
+        "fields": [
+          {
+            "key": "replica_id",
+            "label": "Replica ID",
+            "value": "11111111-1111-1111-1111-000000000002"
+          },
+          {
+            "key": "replica_server_name",
+            "label": "Logical server name",
+            "value": "orders-logical-server"
+          },
+          {
+            "key": "replica_database_name",
+            "label": "Database",
+            "value": "app"
+          },
+          {
+            "key": "is_local",
+            "label": "Local replica (native bit)",
+            "value": "false"
+          },
+          {
+            "key": "role_code",
+            "label": "Replica role code",
+            "value": "2"
+          },
+          {
+            "key": "role",
+            "label": "Replica role",
+            "value": "GEO FORWARDER"
+          },
+          {
+            "key": "local_database_id",
+            "label": "Replica’s database or pool-local database ID",
+            "value": "72"
+          },
+          {
+            "key": "parent_replica_id",
+            "label": "High availability parent replica ID",
+            "value": null
+          },
+          {
+            "key": "selected_database_id",
+            "label": "Selected database ID",
+            "value": "7"
+          },
+          {
+            "key": "observer_replica_id",
+            "label": "Original observer replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "observed_at",
+            "label": "Native observation time (UTC)",
+            "value": "2020-01-01T12:00:00.5Z"
+          }
+        ],
+        "groups": [],
+        "session": null,
+        "unresolved_session_id": null,
+        "investigation": "If a partner or role is unexpected, inspect that same database from the relevant replica with the required native metadata permissions.",
+        "verify": "Repeat the topology read on the same database and member, and inspect each geo-secondary’s visible subtree separately. Compare the original replica IDs and roles."
+      },
+      {
+        "reference": {
+          "source": "hyperscale-replica-topology",
+          "observation_key": "hs:91487244-730d-4b83-8e49-d482241c7288:7:11111111-1111-1111-1111-000000000003"
+        },
+        "scope": "database",
+        "conditions": [],
+        "title": "Hyperscale replica topology",
+        "explanation": "These native rows describe the selected database’s visible replica relationships at capture time. Primary, high availability, geo-forwarder and named replica roles remain separate.",
+        "fields": [
+          {
+            "key": "replica_id",
+            "label": "Replica ID",
+            "value": "11111111-1111-1111-1111-000000000003"
+          },
+          {
+            "key": "replica_server_name",
+            "label": "Logical server name",
+            "value": "orders-logical-server"
+          },
+          {
+            "key": "replica_database_name",
+            "label": "Database",
+            "value": "app"
+          },
+          {
+            "key": "is_local",
+            "label": "Local replica (native bit)",
+            "value": "false"
+          },
+          {
+            "key": "role_code",
+            "label": "Replica role code",
+            "value": "3"
+          },
+          {
+            "key": "role",
+            "label": "Replica role",
+            "value": "NAMED"
+          },
+          {
+            "key": "local_database_id",
+            "label": "Replica’s database or pool-local database ID",
+            "value": "73"
+          },
+          {
+            "key": "parent_replica_id",
+            "label": "High availability parent replica ID",
+            "value": null
+          },
+          {
+            "key": "selected_database_id",
+            "label": "Selected database ID",
+            "value": "7"
+          },
+          {
+            "key": "observer_replica_id",
+            "label": "Original observer replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "observed_at",
+            "label": "Native observation time (UTC)",
+            "value": "2020-01-01T12:00:00.5Z"
+          }
+        ],
+        "groups": [],
+        "session": null,
+        "unresolved_session_id": null,
+        "investigation": "If a partner or role is unexpected, inspect that same database from the relevant replica with the required native metadata permissions.",
+        "verify": "Repeat the topology read on the same database and member, and inspect each geo-secondary’s visible subtree separately. Compare the original replica IDs and roles."
+      },
+      {
+        "reference": {
+          "source": "hyperscale-replica-topology",
+          "observation_key": "hs:91487244-730d-4b83-8e49-d482241c7288:7:91487244-730d-4b83-8e49-d482241c7288"
+        },
+        "scope": "database",
+        "conditions": [],
+        "title": "Hyperscale replica topology",
+        "explanation": "These native rows describe the selected database’s visible replica relationships at capture time. Primary, high availability, geo-forwarder and named replica roles remain separate.",
+        "fields": [
+          {
+            "key": "replica_id",
+            "label": "Replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "replica_server_name",
+            "label": "Logical server name",
+            "value": "orders-logical-server"
+          },
+          {
+            "key": "replica_database_name",
+            "label": "Database",
+            "value": "app"
+          },
+          {
+            "key": "is_local",
+            "label": "Local replica (native bit)",
+            "value": "true"
+          },
+          {
+            "key": "role_code",
+            "label": "Replica role code",
+            "value": "0"
+          },
+          {
+            "key": "role",
+            "label": "Replica role",
+            "value": "PRIMARY"
+          },
+          {
+            "key": "local_database_id",
+            "label": "Replica’s database or pool-local database ID",
+            "value": "7"
+          },
+          {
+            "key": "parent_replica_id",
+            "label": "High availability parent replica ID",
+            "value": null
+          },
+          {
+            "key": "selected_database_id",
+            "label": "Selected database ID",
+            "value": "7"
+          },
+          {
+            "key": "observer_replica_id",
+            "label": "Original observer replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "observed_at",
+            "label": "Native observation time (UTC)",
+            "value": "2020-01-01T12:00:00.5Z"
+          }
+        ],
+        "groups": [],
+        "session": null,
+        "unresolved_session_id": null,
+        "investigation": "If a partner or role is unexpected, inspect that same database from the relevant replica with the required native metadata permissions.",
+        "verify": "Repeat the topology read on the same database and member, and inspect each geo-secondary’s visible subtree separately. Compare the original replica IDs and roles."
+      }
+    ]
+  },
+  "mssql_azure_local_nulls": {
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "app",
+            "location": {
+              "kind": "server",
+              "host": "replication.fixture.invalid",
+              "port": 1433,
+              "instance": null
+            },
+            "incarnation": "original-logical-database"
+          }
+        },
+        "partition": {
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "original-logical-database",
+              "qualifiers": {
+                "kind": "azure-sql-logical-database"
+              }
+            },
+            "native": {
+              "id": "91487244-730d-4b83-8e49-d482241c7288",
+              "qualifiers": {
+                "kind": "azure-sql-hyperscale-replica"
+              }
+            }
+          },
+          "epoch": "original-native-process"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": true
+      }
+    },
+    "sources": [
+      {
+        "source": "azure-local-database-replica-state",
+        "state": "partial",
+        "reason": null
+      }
+    ],
+    "read_complete": true,
+    "native_rows": 1,
+    "observed_rows": 1,
+    "state_rows": 0,
+    "presented_rows": 1,
+    "entries_limited": false,
+    "title": "Native replication evidence",
+    "summary": "1 native replication point was retained; details are shown for 1.",
+    "limitations": [
+      "These are separate native observations, not an atomic topology snapshot or a completed recovery history.",
+      "A replication backend or channel identifies a participant. It does not establish which application query generated or delayed the changes.",
+      "Native positions, recent acknowledgement intervals, last-commit ages and active-period rates have different meanings. They are not catch-up estimates.",
+      "Visibility is limited to the selected native sources and endpoint. Missing rows do not prove every replica or consumer is healthy or absent.",
+      "These locally relevant values can be unavailable or stale and do not enumerate read-scale replicas. Reported rates use native active periods; lag does not measure read-scale delay, and log positions are not byte distances.",
+      "At least one native source is partial, unavailable or inapplicable. Recorded positive facts remain separate from unknown coverage."
+    ],
+    "entries": [
+      {
+        "reference": {
+          "source": "azure-local-database-replica-state",
+          "observation_key": "azure-local:7:91487244-730d-4b83-8e49-d482241c7288"
+        },
+        "scope": "database",
+        "conditions": [],
+        "title": "Azure local database-replica state",
+        "explanation": "The database reported these state and progress fields for this original local replica. The primary bit is relative to its availability group, not its geo-replication or distributed group role.",
+        "fields": [
+          {
+            "key": "database_id",
+            "label": "Native database ID",
+            "value": "7"
+          },
+          {
+            "key": "replica_id",
+            "label": "Replica ID",
+            "value": "91487244-730d-4b83-8e49-d482241c7288"
+          },
+          {
+            "key": "group_id",
+            "label": "Availability group ID",
+            "value": null
+          },
+          {
+            "key": "group_database_id",
+            "label": "Database ID within group",
+            "value": null
+          },
+          {
+            "key": "observed_at",
+            "label": "Native observation time (UTC)",
+            "value": "2020-01-01T12:00:00.5Z"
+          }
+        ],
+        "groups": [
+          {
+            "title": "Database replica state",
+            "fields": [
+              {
+                "key": "is_local",
+                "label": "Local replica (native bit)",
+                "value": "1"
+              },
+              {
+                "key": "is_primary",
+                "label": "Primary replica (native bit)",
+                "value": null
+              },
+              {
+                "key": "state_code",
+                "label": "Synchronization state code",
+                "value": null
+              },
+              {
+                "key": "state",
+                "label": "Synchronization state",
+                "value": null
+              },
+              {
+                "key": "mode_code",
+                "label": "Availability mode code",
+                "value": null
+              },
+              {
+                "key": "mode",
+                "label": "Availability mode",
+                "value": null
+              },
+              {
+                "key": "is_commit_participant",
+                "label": "Commit participant (native bit)",
+                "value": null
+              },
+              {
+                "key": "database_state_code",
+                "label": "Database state code",
+                "value": null
+              },
+              {
+                "key": "database_state",
+                "label": "Database state",
+                "value": null
+              },
+              {
+                "key": "is_suspended",
+                "label": "Data movement suspended (native bit)",
+                "value": null
+              },
+              {
+                "key": "suspend_reason_code",
+                "label": "Suspension reason code (while suspended)",
+                "value": null
+              },
+              {
+                "key": "suspend_reason",
+                "label": "Suspension reason (while suspended)",
+                "value": null
+              },
+              {
+                "key": "synchronization_health_code",
+                "label": "Synchronization health code",
+                "value": null
+              },
+              {
+                "key": "synchronization_health",
+                "label": "Synchronization health",
+                "value": null
+              }
+            ]
+          },
+          {
+            "title": "Native movement measurements (no drain-time estimate)",
+            "fields": [
+              {
+                "key": "log_send_queue_kb",
+                "label": "Unsent log queue (KB)",
+                "value": null
+              },
+              {
+                "key": "redo_queue_kb",
+                "label": "Redo queue (KB)",
+                "value": null
+              },
+              {
+                "key": "log_send_rate_kb_per_second",
+                "label": "Log send rate (KB/s, last active period)",
+                "value": null
+              },
+              {
+                "key": "redo_rate_kb_per_second",
+                "label": "Redo rate (KB/s of active redo time)",
+                "value": null
+              },
+              {
+                "key": "filestream_send_rate_kb_per_second",
+                "label": "FILESTREAM send rate (KB/s)",
+                "value": null
+              },
+              {
+                "key": "secondary_lag_seconds",
+                "label": "Reported secondary lag (s)",
+                "value": null
+              },
+              {
+                "key": "low_water_mark_for_ghosts",
+                "label": "Native ghost-cleanup low-water mark",
+                "value": null
+              }
+            ]
+          },
+          {
+            "title": "Exact native log positions (not byte distances)",
+            "fields": [
+              {
+                "key": "recovery_lsn",
+                "label": "Recovery log-block identifier",
+                "value": null
+              },
+              {
+                "key": "truncation_lsn",
+                "label": "Truncation log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_sent_lsn",
+                "label": "Sent log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_received_lsn",
+                "label": "Received log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_hardened_lsn",
+                "label": "Hardened log-block identifier",
+                "value": null
+              },
+              {
+                "key": "last_redone_lsn",
+                "label": "Last redone LSN",
+                "value": null
+              },
+              {
+                "key": "end_of_log_lsn",
+                "label": "End-of-log block identifier",
+                "value": null
+              },
+              {
+                "key": "last_commit_lsn",
+                "label": "Last commit LSN",
+                "value": null
+              }
+            ]
+          },
+          {
+            "title": "Native progress times (UTC offset unknown)",
+            "fields": [
+              {
+                "key": "last_sent_without_offset",
+                "label": "Last log send time",
+                "value": null
+              },
+              {
+                "key": "last_received_without_offset",
+                "label": "Last log receive time",
+                "value": null
+              },
+              {
+                "key": "last_hardened_without_offset",
+                "label": "Last log hardening time",
+                "value": null
+              },
+              {
+                "key": "last_redone_without_offset",
+                "label": "Last log redo time",
+                "value": null
+              },
+              {
+                "key": "last_commit_without_offset",
+                "label": "Last commit time",
+                "value": null
+              }
+            ]
+          }
+        ],
+        "session": null,
+        "unresolved_session_id": null,
+        "investigation": "If the recorded state remains suspended or not synchronizing, inspect the same local database and replica before changing data movement. Keep missing native values unknown.",
+        "verify": "Read the same local member again and compare its native state, queues and original identifiers. Confirm current behavior independently; a retained point cannot establish recovery."
+      }
+    ]
+  },
+  "mssql_azure_local_unavailable": {
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "app",
+            "location": {
+              "kind": "server",
+              "host": "replication.fixture.invalid",
+              "port": 1433,
+              "instance": null
+            },
+            "incarnation": "original-logical-database"
+          }
+        },
+        "partition": {
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "original-logical-database",
+              "qualifiers": {
+                "kind": "azure-sql-logical-database"
+              }
+            },
+            "native": {
+              "id": "91487244-730d-4b83-8e49-d482241c7288",
+              "qualifiers": {
+                "kind": "azure-sql-hyperscale-replica"
+              }
+            }
+          },
+          "epoch": "original-native-process"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": true
+      }
+    },
+    "sources": [
+      {
+        "source": "azure-local-database-replica-state",
+        "state": "unavailable",
+        "reason": "The native source reported an error or a visibility restriction; this does not establish empty replication state."
+      }
+    ],
+    "read_complete": true,
+    "native_rows": 0,
+    "observed_rows": 0,
+    "state_rows": 0,
+    "presented_rows": 0,
+    "entries_limited": false,
+    "title": "Native replication evidence",
+    "summary": "0 native replication points were retained; details are shown for 0.",
+    "limitations": [
+      "These are separate native observations, not an atomic topology snapshot or a completed recovery history.",
+      "A replication backend or channel identifies a participant. It does not establish which application query generated or delayed the changes.",
+      "Native positions, recent acknowledgement intervals, last-commit ages and active-period rates have different meanings. They are not catch-up estimates.",
+      "Visibility is limited to the selected native sources and endpoint. Missing rows do not prove every replica or consumer is healthy or absent.",
+      "These locally relevant values can be unavailable or stale and do not enumerate read-scale replicas. Reported rates use native active periods; lag does not measure read-scale delay, and log positions are not byte distances.",
+      "At least one native source is partial, unavailable or inapplicable. Recorded positive facts remain separate from unknown coverage."
+    ],
+    "entries": []
+  },
   "mssql_geo_link": {
     "context": {
       "kind": "native",

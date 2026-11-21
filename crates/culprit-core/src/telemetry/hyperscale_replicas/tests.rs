@@ -2,7 +2,7 @@ use super::*;
 use crate::{DatabaseIdentity, Engine, SourceState};
 const LOCAL: &str = "91487244-730d-4b83-8e49-d482241c7288";
 const REMOTE: &str = "11111111-1111-1111-1111-111111111111";
-fn source() -> CollectionDescription {
+pub(crate) fn source() -> CollectionDescription {
     let mut database = DatabaseIdentity::server(Engine::Mssql, "app", "owned.invalid", 1433, None);
     database.incarnation = Some("logical-original".into());
     CollectionDescription {
