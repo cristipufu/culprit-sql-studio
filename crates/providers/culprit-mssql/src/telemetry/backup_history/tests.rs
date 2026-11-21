@@ -313,7 +313,7 @@ async fn caller_intersection_and_query_ceiling_never_expand_the_manual_unqualifi
     };
     assert_eq!(bounded_budget(&requested), requested);
     let upper = bounded_budget(&CollectionBudget::upper_limits());
-    assert_eq!(upper.max_queries, 12);
+    assert_eq!(upper.max_queries, 12 + ReadSession::SESSION_SETUP_QUERIES);
     assert_eq!(upper.max_snapshot_rows, 64);
     assert_eq!(upper.statement_timeout_ms, 1000);
     assert_eq!(upper.total_timeout_ms, 5000);

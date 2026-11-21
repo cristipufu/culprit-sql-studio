@@ -30,6 +30,7 @@ pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
         ..requested.clone()
     }
 }
+#[cfg(test)]
 fn reader_budget(requested: &CollectionBudget) -> Result<CollectionBudget> {
     ReadSession::budget_after_setup(bounded_budget(requested))
 }
@@ -45,7 +46,7 @@ struct TableMemoryReader<R: NativeRead> {
 }
 impl TableMemorySource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::from_reader(ReadSession::new(pool, reader_budget(&request.budget)?), request, host, port)
+        Self::from_reader(ReadSession::collection(pool, bounded_budget(&request.budget))?, request, host, port)
     }
 }
 impl<R: NativeRead> TableMemorySource<R> {

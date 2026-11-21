@@ -50,7 +50,7 @@ async fn holder_recipe_is_selector_required_investigation_only_lazy_and_respects
     assert_eq!(recipe.purpose, RecipePurpose::Investigation);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
     assert_eq!(recipe.subjects, [RecipeSubject::Database]);
-    assert_eq!(recipe.budget.max_queries, 28);
+    assert_eq!(recipe.budget.max_queries, 29, "twenty-eight reader queries and one possible session SET batch");
     assert_eq!(recipe.budget.statement_timeout_ms, 1000);
     assert_eq!(recipe.budget.total_timeout_ms, 5000);
     request.selection = CollectionSelection::Snapshot { dataset: SnapshotDataset::PageTaskHolders };

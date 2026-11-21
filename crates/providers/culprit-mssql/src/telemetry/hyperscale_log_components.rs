@@ -18,7 +18,7 @@ pub(super) struct Layout {
 pub(super) fn bounded_budget(caller: &CollectionBudget) -> CollectionBudget {
     caller.intersection(&CollectionBudget {
         max_snapshot_rows: MAX_HYPERSCALE_LOG_COMPONENT_ROWS,
-        max_queries: SOURCE_READ_QUERY_COUNT,
+        max_queries: SOURCE_READ_QUERY_COUNT + crate::read::ReadSession::SESSION_SETUP_QUERIES,
         page_rows: 64,
         max_pages: 32,
         page_bytes: 256 * 1024,

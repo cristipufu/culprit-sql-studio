@@ -208,3 +208,40 @@ async fn caller_query_limits_survive_both_phases_and_uncertain_close_is_never_di
     assert!(source.finish().await.is_err());
     assert_eq!(source.query_count(), 4);
 }
+
+#[tokio::test]
+async fn collection_cache_clamping_reserves_setup_once_and_keeps_the_real_final_proof_boundary() {
+    let original = focus().await;
+    for total in [6, 7, 9, 10, 11] {
+        let mut requested = request(original.clone());
+        requested.budget.max_queries = total;
+        let bounded = bounded_request(&requested).unwrap();
+        assert_eq!(bounded.budget.max_queries, total.min(10));
+        assert_eq!(bounded_request(&bounded).unwrap().budget, bounded.budget);
+        let native = ReadSession::budget_after_setup(bounded.budget.clone()).unwrap();
+        assert_eq!(native.max_queries, total.min(10) - ReadSession::SESSION_SETUP_QUERIES);
+        let reader = FakeRead::new(replies(native_rows(), crate::grants::tests::authority(AT)))
+            .with_query_limit(native.max_queries);
+        let mut source =
+            CacheEntryMemorySource::from_reader(reader, &requested, "fixture.invalid".into(), 1433).unwrap();
+        source.describe().await.unwrap();
+        let recorded = pages(&mut source).await;
+        assert_eq!(recorded.len(), 1);
+        let TelemetryRecord::Operational(row) = &recorded[0] else { panic!() };
+        let OperationalFact::MssqlCacheEntryMemory(entry) = &row.fact else { panic!() };
+        assert_eq!(entry.statements.len(), 2);
+        assert_eq!(entry.size_bytes, "32768");
+        let completion = source.finish().await;
+        if total == 6 {
+            assert_eq!(CollectionStop::from_error(&completion.unwrap_err()), CollectionStop::QueryLimit);
+            assert_eq!(source.query_count(), 5);
+            assert!(!source.finish().await.is_ok_and(|completion| completion.is_verified()));
+            assert_eq!(source.query_count(), 5, "missing original final authority cannot renew the allowance");
+        } else {
+            assert_eq!(completion.unwrap(), SourceCompletion::Verified);
+            assert_eq!(source.query_count(), 6, "the supported Azure owner has six actual reader operations");
+        }
+        assert!(source.query_count() + ReadSession::SESSION_SETUP_QUERIES <= bounded.budget.max_queries);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}

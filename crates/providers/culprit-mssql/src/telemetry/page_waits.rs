@@ -19,37 +19,43 @@ impl PageWaitSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let request = bounded_request(request)?;
         let options = ReadOptions { budget: request.budget.clone(), identity: IdentityDetail::Endpoint };
-        Self::from_reader(ActivityReader::open(pool, options, host, port)?, &request)
+        Self::from_reader(ActivityReader::open_collection(pool, options, host, port)?, &request)
     }
 }
 fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
     request.validate()?;
     let mut bounded = request.clone();
     bounded.budget = if matches!(request.selection, CollectionSelection::PageTaskHolders { .. }) {
-        crate::activity::page_targets::holders::bounded_budget(&request.budget)
+        holder_budget(&request.budget)
     } else if matches!(request.selection, CollectionSelection::PageWaitWriters { .. }) {
         writer_budget(&request.budget)
     } else if request.focus().is_some() {
         focused_budget(&request.budget)
     } else {
-        crate::page_waits::bounded_budget(&request.budget)
+        bounded_budget(&request.budget)
     };
     bounded.budget.validate()?;
     Ok(bounded)
 }
 
+pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    ReadSession::budget_including_setup(requested, crate::page_waits::bounded_budget(requested))
+}
+pub(super) fn holder_budget(requested: &CollectionBudget) -> CollectionBudget {
+    ReadSession::budget_including_setup(requested, crate::activity::page_targets::holders::bounded_budget(requested))
+}
 /// The ordinary eighteen-query page profile plus a finite roster, guarded payload and final page/source checks.
 /// This is a safety envelope, not a cost qualification or a change to default collection.
 pub(super) fn writer_budget(requested: &CollectionBudget) -> CollectionBudget {
     const MAX_WRITER_QUERIES: u32 = 28;
     CollectionBudget {
-        max_queries: requested.max_queries.min(MAX_WRITER_QUERIES),
+        max_queries: requested.max_queries.min(MAX_WRITER_QUERIES + ReadSession::SESSION_SETUP_QUERIES),
         max_plan_bytes: requested.max_plan_bytes.min(64 * 1024),
         ..focused_budget(requested)
     }
 }
 pub(super) fn focused_budget(requested: &CollectionBudget) -> CollectionBudget {
-    let mut budget = crate::page_waits::bounded_budget(requested);
+    let mut budget = bounded_budget(requested);
     budget.max_snapshot_rows = budget.max_snapshot_rows.min(1);
     budget.page_rows = budget.page_rows.min(1);
     budget

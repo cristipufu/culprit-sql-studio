@@ -17,7 +17,8 @@ const MAX_RECORDS: u32 = FAMILIES.len() as u32;
 const AUTHORITY_QUERIES: u32 = 3;
 const MAX_FAMILY_QUERIES: u32 = 1 + 1 + 3;
 const SNAPSHOT_CLOCK_QUERIES: u32 = 1;
-pub(super) const MAX_QUERIES: u32 = 2 * AUTHORITY_QUERIES + MAX_FAMILY_QUERIES + SNAPSHOT_CLOCK_QUERIES;
+const MAX_READER_QUERIES: u32 = 2 * AUTHORITY_QUERIES + MAX_FAMILY_QUERIES + SNAPSHOT_CLOCK_QUERIES;
+pub(super) const MAX_QUERIES: u32 = MAX_READER_QUERIES + ReadSession::SESSION_SETUP_QUERIES;
 const MAX_PAGE_BYTES: u32 = 32 * 1024;
 
 pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
@@ -45,7 +46,7 @@ struct CleanupReader<R: NativeRead> {
 }
 impl CleanupSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::with_io(ReadSession::new(pool, bounded_budget(&request.budget)), request, host, port)
+        Self::with_io(ReadSession::collection(pool, bounded_budget(&request.budget))?, request, host, port)
     }
 }
 impl<R: NativeRead> CleanupSource<R> {

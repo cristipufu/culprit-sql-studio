@@ -15,13 +15,16 @@ struct MemoryObservationReader<R: NativeRead> {
     reader: ActivityReader<R>,
     context: Option<crate::local_source::Context>,
 }
+pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    ReadSession::budget_including_setup(requested, crate::request_memory::bounded_budget(requested))
+}
 impl MemorySource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::from_reader(ActivityReader::open(pool, read_options(request), host, port)?, request)
+        Self::from_reader(ActivityReader::open_collection(pool, read_options(request), host, port)?, request)
     }
 }
 fn read_options(request: &CollectionRequest) -> ReadOptions {
-    ReadOptions { budget: crate::request_memory::bounded_budget(&request.budget), identity: IdentityDetail::Endpoint }
+    ReadOptions { budget: bounded_budget(&request.budget), identity: IdentityDetail::Endpoint }
 }
 impl<R: NativeRead> MemorySource<R> {
     pub(super) fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {

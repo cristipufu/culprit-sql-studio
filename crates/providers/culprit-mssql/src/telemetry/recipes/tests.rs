@@ -2,7 +2,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 #[test]
-fn changed_query_projections_revise_only_their_registered_source_versions() {
+fn registered_source_versions_include_native_acquisition_policy_revisions() {
     let recipes = declarations();
     let revised = recipes
         .iter()
@@ -15,31 +15,57 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
     assert_eq!(
         revised,
         BTreeSet::from([
-            ("mssql.query-history", 3),
-            ("mssql.resource-history", 2),
-            ("mssql.activity", 4),
-            ("mssql.page-wait-targets", 2),
-            ("mssql.page-wait-tasks", 2),
-            ("mssql.shared-tempdb-page-wait-targets", 3),
-            ("mssql.focused-page-wait", 2),
-            ("mssql.focused-page-task-holders", 2),
-            ("mssql.focused-page-wait-writers", 3),
-            ("mssql.focused-shared-tempdb-page-wait", 3),
-            ("mssql.focused-compiler-admission", 2),
-            ("mssql.focused-shared-compiler-admission", 2),
-            ("mssql.current-request-memory", 4),
-            ("mssql.focused-request-memory", 4),
-            ("mssql.task-space", 3),
-            ("mssql.operational", 7),
-            ("mssql.shared-operational", 7),
-            ("mssql.settings", 4),
-            ("mssql.tuning", 2),
-            ("mssql.tables", 4),
-            ("mssql.indexes", 2),
-            ("mssql.query-compilation", 3),
-            ("mssql.cached-runtime", 2),
-            ("mssql.cached-definitions", 5),
-            ("mssql.retained-plans", 6),
+            ("mssql.database-performance-counters", 2),
+            ("mssql.suspect-pages", 2),
+            ("mssql.agent-jobs", 2),
+            ("mssql.hyperscale-log-components", 2),
+            ("mssql.query-history", 4),
+            ("mssql.resource-history", 3),
+            ("mssql.pool-resource-history", 2),
+            ("mssql.deadlock-history", 2),
+            ("mssql.system-health-deadlocks", 2),
+            ("mssql.activity", 5),
+            ("mssql.page-wait-targets", 3),
+            ("mssql.page-wait-tasks", 3),
+            ("mssql.shared-tempdb-page-wait-targets", 4),
+            ("mssql.focused-page-wait", 3),
+            ("mssql.focused-page-task-holders", 3),
+            ("mssql.focused-page-wait-writers", 4),
+            ("mssql.focused-shared-tempdb-page-wait", 4),
+            ("mssql.focused-compiler-admission", 3),
+            ("mssql.focused-shared-compiler-admission", 3),
+            ("mssql.current-request-memory", 5),
+            ("mssql.focused-request-memory", 5),
+            ("mssql.cache-entry-memory", 2),
+            ("mssql.task-space", 4),
+            ("mssql.cleanup", 2),
+            ("mssql.columnstore-rowgroups", 2),
+            ("mssql.cdc", 2),
+            ("mssql.backup-history", 2),
+            ("mssql.operational", 8),
+            ("mssql.shared-operational", 8),
+            ("mssql.memory-failures", 2),
+            ("mssql.plan-cache-summary", 2),
+            ("mssql.missing-indexes", 2),
+            ("mssql.tuning", 3),
+            ("mssql.wait-counters", 2),
+            ("mssql.replication", 2),
+            ("mssql.settings", 5),
+            ("mssql.statement-grants", 2),
+            ("mssql.index-operations", 2),
+            ("mssql.tables", 5),
+            ("mssql.foreign-keys", 2),
+            ("mssql.columns", 2),
+            ("mssql.statistics", 2),
+            ("mssql.indexes", 3),
+            ("mssql.check-constraints", 2),
+            ("mssql.query-compilation", 4),
+            ("mssql.cached-runtime", 3),
+            ("mssql.objects", 2),
+            ("mssql.triggers", 2),
+            ("mssql.partitions", 2),
+            ("mssql.cached-definitions", 6),
+            ("mssql.retained-plans", 7),
         ])
     );
 }
@@ -190,6 +216,14 @@ async fn every_declared_recipe_uses_exactly_one_actual_constructor_without_nativ
             assert!(source.read_metrics().is_none_or(|metrics| metrics.active_tasks == 0));
             // Drop owns an unused native session; the constructor has not acquired a connection.
             drop(source);
+            let mut only_setup = request.clone();
+            only_setup.budget.max_queries = 1;
+            let pool = Arc::new(Pool::new(tiberius::Config::new(), None));
+            let Err(error) = open(pool.clone(), &only_setup, "fixture.invalid".into(), 1433) else {
+                panic!("{} accepted no allowance for a source query after owned setup", descriptor.id);
+            };
+            assert_eq!(CollectionStop::from_error(&error), CollectionStop::QueryLimit, "{}", descriptor.id);
+            assert_eq!(pool.source_shutdown(), SourceShutdown::Quiescent, "{}", descriptor.id);
         }
     }
 }
@@ -211,7 +245,11 @@ async fn a_focused_selector_can_never_fall_back_to_the_broad_page_population() {
     let budget = selected[0].descriptor().budget;
     assert_eq!(budget.max_snapshot_rows, 1);
     assert_eq!(budget.page_rows, 1);
-    assert_eq!(budget.max_queries, crate::page_waits::bounded_budget(&CollectionBudget::default()).max_queries);
+    assert_eq!(
+        budget.max_queries,
+        crate::page_waits::bounded_budget(&CollectionBudget::default()).max_queries
+            + crate::read::ReadSession::SESSION_SETUP_QUERIES,
+    );
 }
 
 #[test]
@@ -242,7 +280,7 @@ fn configured_system_health_remains_an_explicit_unqualified_shared_investigation
     assert_eq!(recipe.subjects, [RecipeSubject::Shared(SharedResourceKind::Instance)]);
     assert_eq!(recipe.purpose, RecipePurpose::Investigation);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
-    assert_eq!(recipe.budget.max_queries, 8);
+    assert_eq!(recipe.budget.max_queries, 9, "eight reader queries and one possible session SET batch");
     assert_eq!(recipe.budget.max_snapshot_rows, 50);
     assert_eq!(recipe.budget.statement_timeout_ms, 1000);
     assert_eq!(recipe.budget.total_timeout_ms, 5000);
@@ -266,11 +304,11 @@ fn an_ordinary_writer_snapshot_without_original_selectors_is_rejected_before_a_f
 #[test]
 fn specialized_descriptors_take_their_envelopes_from_native_profile_owners() {
     let page = declarations().into_iter().find(|descriptor| descriptor.id == "mssql.page-wait-targets").unwrap();
-    assert_eq!(page.budget, crate::page_waits::bounded_budget(&CollectionBudget::upper_limits()));
+    assert_eq!(page.budget, page_waits::bounded_budget(&CollectionBudget::upper_limits()));
     let activity = declarations().into_iter().find(|descriptor| descriptor.id == "mssql.activity").unwrap();
     assert_eq!(activity.budget, activity::bounded_budget(&CollectionBudget::upper_limits()));
     let oom = declarations().into_iter().find(|descriptor| descriptor.id == "mssql.memory-failures").unwrap();
-    assert_eq!(oom.budget.max_queries, 8, "six native phases and two named snapshot-clock calls");
+    assert_eq!(oom.budget.max_queries, 9, "six native phases, two snapshot clocks and one possible session SET");
 }
 
 #[tokio::test]
@@ -387,7 +425,7 @@ fn hyperscale_component_source_is_independent_and_does_not_grant_automatic_produ
     let recipe = declarations.iter().find(|recipe| recipe.id == "mssql.hyperscale-log-components").unwrap();
     assert_eq!(recipe.purpose, RecipePurpose::Investigation);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
-    assert_eq!(recipe.budget.max_queries, 10);
+    assert_eq!(recipe.budget.max_queries, 11, "ten reader queries and one possible session SET batch");
     assert_eq!(
         recipe.selector,
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::HyperscaleLogComponents))
@@ -398,7 +436,7 @@ fn hyperscale_component_source_is_independent_and_does_not_grant_automatic_produ
 fn cleanup_recipe_keeps_its_local_three_family_envelope_separate_from_azure_operational() {
     let recipes = declarations();
     let cleanup = recipes.iter().find(|recipe| recipe.id == "mssql.cleanup").unwrap();
-    assert_eq!(cleanup.version, 1);
+    assert_eq!(cleanup.version, 2);
     assert_eq!(cleanup.purpose, RecipePurpose::Investigation);
     assert_eq!(cleanup.cost, RecipeCostQualification::Unqualified);
     assert_eq!(cleanup.subjects, vec![RecipeSubject::Database]);
@@ -416,12 +454,12 @@ fn cleanup_recipe_keeps_its_local_three_family_envelope_separate_from_azure_oper
 fn cdc_recipe_is_manual_unqualified_and_keeps_its_own_paid_native_roster() {
     let recipes = declarations();
     let cdc = recipes.iter().find(|recipe| recipe.id == "mssql.cdc").unwrap();
-    assert_eq!(cdc.version, 1);
+    assert_eq!(cdc.version, 2);
     assert_eq!(cdc.purpose, RecipePurpose::Investigation);
     assert_eq!(cdc.cost, RecipeCostQualification::Unqualified);
     assert_eq!(cdc.subjects, vec![RecipeSubject::Database]);
     assert_eq!(cdc.selector, RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cdc)));
-    assert_eq!(cdc.budget.max_queries, 12);
+    assert_eq!(cdc.budget.max_queries, 13, "twelve reader queries and one possible session SET batch");
     assert_eq!(cdc.budget.max_snapshot_rows, 98);
     assert_eq!(cdc.budget.page_rows, 32);
     assert_eq!(cdc.budget.page_bytes, 64 * 1024);
@@ -434,7 +472,7 @@ fn cdc_recipe_is_manual_unqualified_and_keeps_its_own_paid_native_roster() {
 fn backup_history_is_an_explicit_manual_profile_with_no_baseline_or_cost_approval() {
     let recipes = declarations();
     let recipe = recipes.iter().find(|recipe| recipe.id == "mssql.backup-history").unwrap();
-    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.version, 2);
     assert_eq!(recipe.purpose, RecipePurpose::Investigation);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
     assert_eq!(recipe.subjects, vec![RecipeSubject::Database]);
@@ -442,7 +480,7 @@ fn backup_history_is_an_explicit_manual_profile_with_no_baseline_or_cost_approva
         recipe.selector,
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory))
     );
-    assert_eq!(recipe.budget.max_queries, 12);
+    assert_eq!(recipe.budget.max_queries, 13, "twelve reader queries and one possible session SET batch");
     assert_eq!(recipe.budget.max_snapshot_rows, 64);
     assert_eq!(recipe.budget.page_rows, 16);
     assert_eq!(recipe.budget.page_bytes, 256 * 1024);
@@ -454,12 +492,12 @@ fn backup_history_is_an_explicit_manual_profile_with_no_baseline_or_cost_approva
 #[test]
 fn selected_columnstore_rowgroups_recipe_requires_native_target_and_stays_manual_unqualified() {
     let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.columnstore-rowgroups").unwrap();
-    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.version, 2);
     assert_eq!(recipe.selector, RecipeSelector::ColumnstoreRowgroups);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
     assert_eq!(recipe.purpose, RecipePurpose::Investigation);
     assert_eq!(recipe.budget.max_snapshot_rows, 128);
-    assert_eq!(recipe.budget.max_queries, 11);
+    assert_eq!(recipe.budget.max_queries, 12, "eleven reader queries and one possible session SET batch");
     assert_eq!(recipe.budget.statement_timeout_ms, 1000);
     assert_eq!(recipe.budget.total_timeout_ms, 5000);
     let request = CollectionRequest {
@@ -490,7 +528,7 @@ fn settings_local_profile_advertises_only_the_existing_native_budget_without_cos
 #[test]
 fn selected_database_performance_counters_are_manual_unqualified_and_bounded_independently_of_shared_total() {
     let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.database-performance-counters").unwrap();
-    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.version, 2);
     assert_eq!(recipe.purpose, RecipePurpose::Investigation);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
     assert_eq!(recipe.subjects, [RecipeSubject::Database]);
@@ -512,7 +550,7 @@ fn selected_database_performance_counters_are_manual_unqualified_and_bounded_ind
 #[test]
 fn suspect_page_history_is_one_explicit_unqualified_local_point_without_operational_expansion() {
     let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.suspect-pages").unwrap();
-    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.version, 2);
     assert_eq!(recipe.purpose, RecipePurpose::Investigation);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
     assert_eq!(recipe.subjects, [RecipeSubject::Database]);

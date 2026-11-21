@@ -9,7 +9,8 @@ use culprit_core::{ErrorCode, Result, telemetry::*};
 use std::sync::Arc;
 
 const MAX_BASELINE_ROWS: u32 = 500;
-const MAX_BASELINE_QUERIES: u32 = 7;
+const MAX_BASELINE_READER_QUERIES: u32 = 7;
+const MAX_BASELINE_QUERIES: u32 = MAX_BASELINE_READER_QUERIES + crate::read::ReadSession::SESSION_SETUP_QUERIES;
 
 pub(super) fn bounded_budget(budget: &CollectionBudget) -> CollectionBudget {
     let mut bounded = budget.clone();
@@ -38,7 +39,10 @@ impl ActivitySource {
         let mut request = request.clone();
         request.budget = bounded_budget(&request.budget);
         let options = ReadOptions { budget: request.budget.clone(), identity: IdentityDetail::Endpoint };
-        let reader = NativeActivityReader { reader: ActivityReader::open(pool, options, host, port)?, verified: None };
+        let reader = NativeActivityReader {
+            reader: ActivityReader::open_collection(pool, options, host, port)?,
+            verified: None,
+        };
         Ok(Self { inner: culprit_read::FrozenSource::new(reader, &request)? })
     }
 }

@@ -139,7 +139,7 @@ struct SourceReadRequest {
 
 impl<D: SnapshotRecipe> StreamedSnapshot<D> {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16, recipe: D) -> Result<Self> {
-        Self::with_io(ReadSession::new(pool, request.budget.clone()), request, host, port, recipe)
+        Self::with_io(ReadSession::collection(pool, request.budget.clone())?, request, host, port, recipe)
     }
 }
 impl<D: SnapshotRecipe> StreamedSnapshot<D> {

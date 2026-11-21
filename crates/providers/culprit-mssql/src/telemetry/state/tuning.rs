@@ -3,7 +3,8 @@ use culprit_core::telemetry::CollectionBudget;
 
 // Boxed: profile1 + original/final authority3+3 + clocks2 + layout1 + four native families4
 // + five existing optional-read pressure admissions5. Azure retains its original15 dispatch path.
-pub(super) const MAX_QUERIES: u32 = 19;
+const MAX_READER_QUERIES: u32 = 19;
+pub(super) const MAX_QUERIES: u32 = MAX_READER_QUERIES + crate::read::ReadSession::SESSION_SETUP_QUERIES;
 pub(super) const MAX_ROWS: u32 = 128;
 const PAGE_ROWS: u32 = 32;
 const PAGE_BYTES: u32 = 64 * 1024;

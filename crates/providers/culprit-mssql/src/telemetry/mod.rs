@@ -125,7 +125,7 @@ struct PageQuery {
 
 impl Source {
     pub(crate) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::with_io(Session::new(pool, request.budget.clone()), request, host, port)
+        Self::with_io(Session::collection(pool, request.budget.clone())?, request, host, port)
     }
 }
 impl<R: crate::read::NativeRead> Source<R> {

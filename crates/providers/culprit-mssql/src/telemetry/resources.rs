@@ -121,7 +121,7 @@ pub(super) struct ResourceSource<R = Session, S: ResourceScope = DatabaseScope> 
 }
 impl ResourceSource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::with_io(Session::new(pool, request.budget.clone()), request, host, port)
+        Self::with_io(Session::collection(pool, request.budget.clone())?, request, host, port)
     }
 }
 impl<R: NativeRead> ResourceSource<R> {
@@ -153,7 +153,7 @@ impl<R: NativeRead, S: ResourceScope> ResourceSource<R, S> {
 }
 
 pub(super) fn pool_source(pool: Arc<Pool>, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
-    Ok(Box::new(ResourceSource::with_scope(Session::new(pool, request.budget.clone()), request, PoolScope)?))
+    Ok(Box::new(ResourceSource::with_scope(Session::collection(pool, request.budget.clone())?, request, PoolScope)?))
 }
 
 pub(crate) async fn discover_resources(
@@ -167,7 +167,7 @@ pub(crate) async fn discover_resources(
             culprit_core::t!("collection.unsupported"),
         ));
     }
-    let mut reader = Session::new(pool, request.budget.clone());
+    let mut reader = Session::collection(pool, request.budget.clone())?;
     let result = discover_with_io(&mut reader, request).await;
     reader.finish(result).await
 }

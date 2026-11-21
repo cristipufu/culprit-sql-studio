@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 // Boxed/MI: first observed-platform1 +shared authority3, metadata before/after/final3,
 // admission1 +history1 +final shared authority3. Azure uses its existing logical/physical owner instead.
-const MAX_QUERIES: u32 = 12;
+const MAX_READER_QUERIES: u32 = 12;
+const MAX_QUERIES: u32 = MAX_READER_QUERIES + crate::read::ReadSession::SESSION_SETUP_QUERIES;
 const MAX_PAGE_BYTES: u32 = 256 * 1024;
 const MAX_FRAME_BYTES: u32 = 512 * 1024;
 pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
@@ -37,7 +38,7 @@ struct BackupHistoryReader<R: NativeRead> {
 }
 impl BackupHistorySource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::with_io(ReadSession::new(pool, bounded_budget(&request.budget)), request, host, port)
+        Self::with_io(ReadSession::collection(pool, bounded_budget(&request.budget))?, request, host, port)
     }
 }
 impl<R: NativeRead> BackupHistorySource<R> {

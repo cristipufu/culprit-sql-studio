@@ -10,7 +10,7 @@ async fn production_memory_source_accepts_the_native_boxed_owner_and_finishes_it
         subject: CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::CurrentRequestMemory },
         budget: CollectionBudget {
-            max_queries: 9,
+            max_queries: 9 + crate::read::ReadSession::SESSION_SETUP_QUERIES,
             max_snapshot_rows: 64,
             page_rows: 64,
             statement_timeout_ms: 3_000,

@@ -57,7 +57,7 @@ pub(crate) async fn discover(
     request: &IntervalDiscoveryRequest,
 ) -> Result<IntervalDiscoveryPage> {
     request.validate()?;
-    let mut reader = ReadSession::new(pool, request.budget.clone());
+    let mut reader = ReadSession::collection(pool, request.budget.clone())?;
     let result = read(&mut reader, host, port, request).await;
     reader.finish(result).await
 }

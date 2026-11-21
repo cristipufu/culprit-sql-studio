@@ -325,9 +325,9 @@ async fn wrong_or_focused_selections_and_expanded_subjects_do_not_enter_the_task
     let bounded = bounded_request(&request()).unwrap().budget;
     assert_eq!(
         (bounded.max_snapshot_rows, bounded.statement_timeout_ms, bounded.total_timeout_ms, bounded.max_queries),
-        (200, 1000, 5000, 13)
+        (200, 1000, 5000, 13 + ReadSession::SESSION_SETUP_QUERIES)
     );
     let recipe = crate::telemetry::recipes().into_iter().find(|recipe| recipe.id == "mssql.task-space").unwrap();
-    assert_eq!(recipe.version, 3);
+    assert_eq!(recipe.version, 4);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
 }

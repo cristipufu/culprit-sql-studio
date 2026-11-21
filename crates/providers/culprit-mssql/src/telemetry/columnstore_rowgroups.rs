@@ -13,7 +13,8 @@ use culprit_core::{
 };
 use std::{collections::BTreeSet, sync::Arc};
 
-const MAX_QUERIES: u32 = 11;
+const MAX_READER_QUERIES: u32 = 11;
+const MAX_QUERIES: u32 = MAX_READER_QUERIES + crate::read::ReadSession::SESSION_SETUP_QUERIES;
 pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
     CollectionBudget {
         max_queries: requested.max_queries.min(MAX_QUERIES),
@@ -39,7 +40,7 @@ struct RowgroupReader<R: NativeRead> {
 }
 impl RowgroupSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::from_reader(ReadSession::new(pool, bounded_budget(&request.budget)), request, host, port)
+        Self::from_reader(ReadSession::collection(pool, bounded_budget(&request.budget))?, request, host, port)
     }
 }
 impl<R: NativeRead> RowgroupSource<R> {

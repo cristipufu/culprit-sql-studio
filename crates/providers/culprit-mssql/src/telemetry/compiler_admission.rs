@@ -15,7 +15,7 @@ pub(super) fn focused_budget(caller: &CollectionBudget) -> CollectionBudget {
         page_bytes: 256 * 1024,
         total_bytes: 1024 * 1024,
         max_sql_bytes: 16 * 1024,
-        max_queries: 12,
+        max_queries: 12 + ReadSession::SESSION_SETUP_QUERIES,
         statement_timeout_ms: 1_000,
         total_timeout_ms: 5_000,
         ..CollectionBudget::default()
@@ -32,7 +32,7 @@ struct CompilerObservationReader<R: NativeRead> {
 impl CompilerAdmissionSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let options = ReadOptions { budget: focused_budget(&request.budget), identity: IdentityDetail::Endpoint };
-        Self::from_reader(ActivityReader::open(pool, options, host, port)?, request)
+        Self::from_reader(ActivityReader::open_collection(pool, options, host, port)?, request)
     }
 }
 impl<R: NativeRead> CompilerAdmissionSource<R> {

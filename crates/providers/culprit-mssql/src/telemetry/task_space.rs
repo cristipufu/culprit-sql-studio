@@ -9,6 +9,9 @@ use crate::{
 use culprit_core::{Result, telemetry::*};
 use std::sync::Arc;
 
+pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    ReadSession::budget_including_setup(requested, crate::task_space::bounded_budget(requested))
+}
 pub(super) struct TaskSpaceSource<R: NativeRead = ReadSession> {
     inner: culprit_read::FrozenSource<TaskSpaceReader<R>>,
 }
@@ -20,7 +23,7 @@ struct TaskSpaceReader<R: NativeRead> {
 impl TaskSpaceSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let request = bounded_request(request)?;
-        Self::from_validated_io(ReadSession::new(pool, request.budget.clone()), request, host, port)
+        Self::from_validated_io(ReadSession::collection(pool, request.budget.clone())?, request, host, port)
     }
 }
 
@@ -31,7 +34,7 @@ fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
         return Err(invalid_data());
     }
     let mut request = request.clone();
-    request.budget = crate::task_space::bounded_budget(&request.budget);
+    request.budget = bounded_budget(&request.budget);
     request.budget.validate()?;
     Ok(request)
 }

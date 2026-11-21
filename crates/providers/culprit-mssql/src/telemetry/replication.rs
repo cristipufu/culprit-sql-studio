@@ -29,7 +29,7 @@ impl ReplicationSource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let mut request = request.clone();
         request.budget = bounded_budget(&request.budget);
-        Self::with_io(ReadSession::new(pool, request.budget.clone()), &request, host, port)
+        Self::with_io(ReadSession::collection(pool, request.budget.clone())?, &request, host, port)
     }
 }
 

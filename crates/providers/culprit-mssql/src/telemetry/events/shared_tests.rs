@@ -309,7 +309,7 @@ fn shared_profile_only_intersects_caller_limits_and_never_becomes_a_database_or_
         total_timeout_ms: 20,
     };
     assert_eq!(shared_budget(&strict), strict);
-    assert_eq!(shared_budget(&CollectionBudget::upper_limits()).max_queries, 8);
+    assert_eq!(shared_budget(&CollectionBudget::upper_limits()).max_queries, 8 + ReadSession::SESSION_SETUP_QUERIES,);
     let mut unsupported = request();
     let CollectionSubject::Shared { resource } = &mut unsupported.subject else { panic!() };
     resource.kind = SharedResourceKind::Pool;

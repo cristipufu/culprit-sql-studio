@@ -38,7 +38,10 @@ fn native_budget(request: &CollectionRequest) -> CollectionBudget {
     }
 }
 pub(super) fn memory_failure_budget(requested: &CollectionBudget) -> CollectionBudget {
-    crate::memory_failures::bounded_budget(requested, SNAPSHOT_CLOCK_QUERIES)
+    ReadSession::budget_including_setup(
+        requested,
+        crate::memory_failures::bounded_budget(requested, SNAPSHOT_CLOCK_QUERIES),
+    )
 }
 
 pub(super) async fn clock<R: NativeRead>(reader: &mut R) -> Result<(String, bool)> {
@@ -61,7 +64,7 @@ pub(super) struct StateSource<R = ReadSession> {
 }
 impl StateSource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::with_io(ReadSession::new(pool, native_budget(request)), request, host, port)
+        Self::with_io(ReadSession::collection(pool, native_budget(request))?, request, host, port)
     }
 }
 impl<R: NativeRead> StateSource<R> {

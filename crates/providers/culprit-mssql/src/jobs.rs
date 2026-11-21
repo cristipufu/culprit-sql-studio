@@ -34,6 +34,10 @@ pub(crate) fn bounded_budget(caller: &CollectionBudget) -> CollectionBudget {
         ..Default::default()
     })
 }
+pub(crate) fn collection_budget(caller: &CollectionBudget) -> CollectionBudget {
+    ReadSession::budget_including_setup(caller, bounded_budget(caller))
+}
+
 pub(crate) fn source(
     pool: Arc<Pool>,
     request: &CollectionRequest,
@@ -51,8 +55,8 @@ pub(crate) fn source(
         return Err(unsupported());
     }
     let mut bounded = request.clone();
-    bounded.budget = bounded_budget(&request.budget);
-    let reader = Reader { io: ReadSession::new(pool, bounded.budget.clone()), host, port, verified: None };
+    bounded.budget = collection_budget(&request.budget);
+    let reader = Reader { io: ReadSession::collection(pool, bounded.budget.clone())?, host, port, verified: None };
     Ok(Box::new(FrozenSource::new(reader, &bounded)?))
 }
 struct Reader<R = ReadSession> {

@@ -57,7 +57,7 @@ fn source_query_is_fixed_database_filtered_and_does_not_guess_documentation_alia
     assert!(!COMPONENTS.contains("SELECT *"));
     assert!(LAYOUT.contains("c.system_type_id=48"));
     let budget = bounded_budget(&CollectionBudget::upper_limits());
-    assert_eq!(budget.max_queries, SOURCE_READ_QUERY_COUNT);
+    assert_eq!(budget.max_queries, SOURCE_READ_QUERY_COUNT + crate::read::ReadSession::SESSION_SETUP_QUERIES);
     assert_eq!(STANDALONE_QUERY_COUNT, 8);
     assert_eq!(budget.max_snapshot_rows, 1024);
     let strict =

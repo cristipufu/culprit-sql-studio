@@ -42,7 +42,8 @@ impl Population {
 }
 const MAX_ROWS: u32 = 1 + MAX_MSSQL_CDC_SCAN_ROWS as u32 + MAX_MSSQL_CDC_ERROR_ROWS as u32;
 // Original/final boxed authority 3+3, status 1, two pressure admissions, two DMV reads and end clock 1.
-const MAX_QUERIES: u32 = 12;
+const MAX_READER_QUERIES: u32 = 12;
+const MAX_QUERIES: u32 = MAX_READER_QUERIES + crate::read::ReadSession::SESSION_SETUP_QUERIES;
 pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
     CollectionBudget {
         max_queries: requested.max_queries.min(MAX_QUERIES),
@@ -67,7 +68,7 @@ struct CdcReader<R: NativeRead> {
 }
 impl CdcSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::with_io(ReadSession::new(pool, bounded_budget(&request.budget)), request, host, port)
+        Self::with_io(ReadSession::collection(pool, bounded_budget(&request.budget))?, request, host, port)
     }
 }
 impl<R: NativeRead> CdcSource<R> {

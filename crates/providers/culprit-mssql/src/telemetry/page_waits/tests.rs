@@ -185,7 +185,7 @@ fn public_page_factory_clamps_both_native_and_frozen_budgets_before_any_native_w
             CollectionBudget::default()
         };
         let bounded = bounded_request(&request).unwrap();
-        assert_eq!(bounded.budget.max_queries, if strict { 4 } else { 18 });
+        assert_eq!(bounded.budget.max_queries, if strict { 4 } else { 19 });
         assert_eq!(bounded.budget.statement_timeout_ms, if strict { 125 } else { 1000 });
         assert_eq!(bounded.budget.total_timeout_ms, if strict { 500 } else { 5000 });
         assert_eq!(bounded.budget.max_sql_bytes, if strict { 2048 } else { 16 * 1024 });

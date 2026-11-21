@@ -118,7 +118,7 @@ async fn boxed_tuning_retains_local_database_authority_and_uses_the_existing_nat
     assert_eq!(forced.failures, "0");
     assert_eq!(forced.reset, culprit_core::ResetMarker::Unknown);
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
-    assert_eq!(source.query_count(), super::MAX_QUERIES);
+    assert_eq!(source.query_count(), super::MAX_READER_QUERIES);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert_eq!(source.io.inner.closed, 1);
     assert_eq!(source.io.inner.calls.iter().filter(|call| call.sql.contains("force_failure_count")).count(), 1);
@@ -320,7 +320,7 @@ async fn unknown_replica_attribution_remains_a_partial_positive_fact() {
 #[test]
 fn native_query_row_byte_and_deadline_limits_intersect_the_callers_independent_bounds() {
     let upper = super::bounded_budget(&CollectionBudget::upper_limits());
-    assert_eq!(upper.max_queries, 19);
+    assert_eq!(upper.max_queries, 19 + crate::read::ReadSession::SESSION_SETUP_QUERIES);
     assert_eq!(upper.max_snapshot_rows, 128);
     assert_eq!(upper.page_rows, 32);
     assert_eq!(upper.page_bytes, 64 * 1024);

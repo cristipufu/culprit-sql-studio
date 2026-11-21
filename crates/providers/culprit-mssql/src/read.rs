@@ -172,7 +172,7 @@ struct StreamingRead {
 }
 
 impl ReadSession {
-    const SESSION_SETUP_QUERIES: u32 = 1;
+    pub(crate) const SESSION_SETUP_QUERIES: u32 = 1;
 
     /// Reserve the owned session's SET batch from the same source allowance before native acquisition.
     pub(crate) fn budget_after_setup(mut budget: CollectionBudget) -> Result<CollectionBudget> {
@@ -183,6 +183,23 @@ impl ReadSession {
             .ok_or_else(|| CollectionStop::QueryLimit.error())?;
         budget.validate()?;
         Ok(budget)
+    }
+
+    /// Collection limits include the held session's possible initial SET batch. This reservation is not a
+    /// measured query or a new allowance on reuse; ordinary/manual readers retain their existing semantics.
+    pub(crate) fn collection(pool: Arc<Pool>, budget: CollectionBudget) -> Result<Self> {
+        budget.validate()?;
+        Ok(Self::new(pool, Self::budget_after_setup(budget)?))
+    }
+
+    /// Shared native leaf profiles count their reader work. Add the one setup slot only at collection's
+    /// boundary, then intersect the original caller again so a small caller cannot fund additional work.
+    pub(crate) fn budget_including_setup(
+        requested: &CollectionBudget,
+        mut reader_budget: CollectionBudget,
+    ) -> CollectionBudget {
+        reader_budget.max_queries = reader_budget.max_queries.saturating_add(Self::SESSION_SETUP_QUERIES);
+        reader_budget.intersection(requested)
     }
 
     pub(crate) fn application(pool: Arc<Pool>) -> Self {
@@ -728,6 +745,90 @@ mod tests {
         config.authentication(tiberius::AuthMethod::sql_server("fixture", "fixture-password"));
         StalledLogin { pool: Arc::new(Pool::new(config, None)), accepted: entered, release, server }
     }
+    #[test]
+    fn collection_requires_a_source_slot_after_setup_without_changing_ordinary_reader_semantics() {
+        let pool = Arc::new(Pool::new(tiberius::Config::new(), None));
+        let budget = CollectionBudget { max_queries: 1, ..Default::default() };
+        let Err(error) = ReadSession::collection(pool.clone(), budget) else { panic!("no source allowance") };
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::QueryLimit);
+        assert_eq!(pool.source_shutdown(), culprit_core::telemetry::SourceShutdown::Quiescent);
+        for maximum in [0, CollectionBudget::upper_limits().max_queries + 1] {
+            let budget = CollectionBudget { max_queries: maximum, ..Default::default() };
+            assert!(ReadSession::collection(pool.clone(), budget).is_err(), "invalid original totals cannot heal");
+        }
+        let budget = CollectionBudget { max_queries: 1, ..Default::default() };
+        let mut ordinary = ReadSession::new(pool, budget);
+        assert!(ordinary.admit().is_ok());
+        assert_eq!(ordinary.queries(), 1, "ordinary reader-only allowances remain explicit");
+    }
+
+    #[test]
+    fn collection_profile_totals_intersect_the_original_caller_and_reserve_setup_once() {
+        for maximum in [1, 2, 9, 10, 11] {
+            let caller = CollectionBudget { max_queries: maximum, ..Default::default() };
+            let native = crate::request_memory::bounded_budget(&caller);
+            let total = ReadSession::budget_including_setup(&caller, native);
+            assert_eq!(total.max_queries, maximum.min(10));
+            let rebound = ReadSession::budget_including_setup(&total, crate::request_memory::bounded_budget(&total));
+            assert_eq!(rebound, total, "repeated recipe/source clamping cannot renew the setup allowance");
+            if maximum > 1 {
+                let reader =
+                    ReadSession::collection(Arc::new(Pool::new(tiberius::Config::new(), None)), total).unwrap();
+                assert_eq!(reader.budget.max_queries, maximum.min(10) - ReadSession::SESSION_SETUP_QUERIES);
+                assert_eq!(reader.queries(), 0);
+                assert!(reader.read_metrics().is_none_or(|metrics| {
+                    metrics.templates.is_empty() && metrics.active_tasks == 0 && metrics.untracked_tasks == 0
+                }));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unused_collection_reservation_does_not_invent_native_setup_work_or_renew_on_close() {
+        let pool = Arc::new(Pool::new(tiberius::Config::new(), None));
+        let mut reader =
+            ReadSession::collection(pool, CollectionBudget { max_queries: 2, ..Default::default() }).unwrap();
+        assert_eq!(reader.queries(), 0);
+        assert!(reader.read_metrics().is_none_or(|metrics| {
+            metrics.templates.is_empty() && metrics.active_tasks == 0 && metrics.untracked_tasks == 0
+        }));
+        assert_eq!(reader.close().await, culprit_core::telemetry::SourceShutdown::Quiescent);
+        assert_eq!(reader.close().await, culprit_core::telemetry::SourceShutdown::Quiescent);
+        assert_eq!(reader.queries(), 0);
+        assert!(reader.read_metrics().is_none_or(|metrics| {
+            metrics.templates.is_empty() && metrics.active_tasks == 0 && metrics.untracked_tasks == 0
+        }));
+        assert_eq!(reader.budget.max_queries, 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_collection_acquisition_keeps_the_original_fence_across_replacement_construction() {
+        let mut fixture = stalled_login().await;
+        let mut original =
+            ReadSession::collection(fixture.pool.clone(), CollectionBudget { max_queries: 2, ..Default::default() })
+                .unwrap();
+        {
+            let query = original.query("SELECT 1", vec![], 1);
+            tokio::pin!(query);
+            tokio::select! {
+                _=tokio::time::sleep(Duration::from_secs(2))=>panic!("loopback login was not reached"),
+                _=&mut fixture.accepted=>{},
+                _=&mut query=>panic!("the stalled login cannot finish a source query"),
+            }
+        }
+        let shutdown = original.close().await;
+        let mut replacement = ReadSession::collection(fixture.pool, CollectionBudget::default()).unwrap();
+        let refused = replacement.query("SELECT 2", vec![], 1).await;
+        let replacement_count = replacement.queries();
+        let replacement_shutdown = replacement.close().await;
+        let _ = fixture.release.send(());
+        fixture.server.await.unwrap();
+        assert_eq!(shutdown, culprit_core::telemetry::SourceShutdown::Unconfirmed);
+        assert!(matches!(refused, Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed))));
+        assert_eq!(replacement_count, 0, "a new collection budget cannot heal original native debt");
+        assert_eq!(replacement_shutdown, culprit_core::telemetry::SourceShutdown::Unconfirmed);
+    }
+
     #[tokio::test]
     async fn timing_out_during_login_cannot_report_quiescence_or_admit_replacement_work() {
         let fixture = stalled_login().await;

@@ -232,6 +232,10 @@ pub(crate) struct ActivityReader<R = ReadSession> {
     request_page_server_read_capability: page_server_reads::Availability,
 }
 impl ActivityReader {
+    pub(crate) fn open_collection(pool: Arc<Pool>, options: ReadOptions, host: String, port: u16) -> Result<Self> {
+        let io = ReadSession::collection(pool, options.budget.clone())?;
+        Ok(Self::new(io, options, host, port))
+    }
     pub(crate) fn open(pool: Arc<Pool>, options: ReadOptions, host: String, port: u16) -> Result<Self> {
         options.budget.validate()?;
         let io = ReadSession::new(pool, options.budget.clone());

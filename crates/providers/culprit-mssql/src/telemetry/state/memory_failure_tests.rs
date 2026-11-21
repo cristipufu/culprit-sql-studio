@@ -33,30 +33,31 @@ fn source_with_request(after: Rec, failure: Option<ReadError>, request: &Collect
         failure.map_or_else(|| Ok(vec![row(), row()]), Err),
     ];
     replies.extend([Ok(vec![super::tests::clock(false, "2020-01-01T06:02:01Z")]), Ok(vec![after])]);
-    let io = FakeRead::new(replies).with_query_limit(native_budget(request).max_queries);
+    let reader_budget = ReadSession::budget_after_setup(native_budget(request)).unwrap();
+    let io = FakeRead::new(replies).with_query_limit(reader_budget.max_queries);
     StateSource::with_io(io, request, "member-alias.invalid".into(), 1433).unwrap()
 }
 
 #[tokio::test]
-async fn the_eight_query_collector_budget_keeps_both_clocks_and_cannot_widen_a_seven_query_caller() {
+async fn nine_total_queries_keep_setup_and_both_clocks_without_widening_a_stricter_caller() {
     let limits = native_budget(&request());
-    assert_eq!(limits.max_queries, 8);
+    assert_eq!(limits.max_queries, 9);
     assert_eq!(limits.max_snapshot_rows, 128);
     assert_eq!(limits.statement_timeout_ms, 3000);
     assert_eq!(limits.total_timeout_ms, 10_000);
-    for limit in [8, 7] {
+    for limit in [9, 8] {
         let mut requested = request();
         requested.budget.max_queries = limit;
         let mut source = source_with_request(identity_row(), None, &requested);
         source.describe().await.unwrap();
         let _ = source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap();
         let _ = source.read_page(TelemetryStream::OperationalSamples, Some("1")).await.unwrap();
-        if limit == 8 {
+        if limit == 9 {
             assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
         } else {
             assert_eq!(CollectionStop::from_error(&source.finish().await.unwrap_err()), CollectionStop::QueryLimit);
         }
-        assert_eq!(source.query_count(), limit);
+        assert_eq!(source.query_count(), limit - 1, "the reader cannot spend its reserved session setup slot");
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }
 }

@@ -10,7 +10,8 @@ use culprit_core::{Result, telemetry::*};
 use std::sync::Arc;
 const ENVELOPE_ALLOWANCE: usize = 4096;
 const SHARED_EVENT_ROWS: u32 = 50;
-const SHARED_QUERIES: u32 = 8;
+const SHARED_READER_QUERIES: u32 = 8;
+const SHARED_QUERIES: u32 = SHARED_READER_QUERIES + crate::read::ReadSession::SESSION_SETUP_QUERIES;
 const SHARED_TOTAL_BYTES: u32 = 16 * 1024 * 1024;
 const SHARED_STATEMENT_TIMEOUT_MS: u32 = 1_000;
 const SHARED_TOTAL_TIMEOUT_MS: u32 = 5_000;
@@ -64,7 +65,7 @@ fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
 impl EventSource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let request = bounded_request(request)?;
-        Self::with_io(ReadSession::new(pool, request.budget.clone()), &request, host, port)
+        Self::with_io(ReadSession::collection(pool, request.budget.clone())?, &request, host, port)
     }
 }
 impl<R: NativeRead> EventSource<R> {
