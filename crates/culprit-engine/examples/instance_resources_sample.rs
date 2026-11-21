@@ -60,6 +60,10 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
         ("schedulers_owner_unknown", SchedulerCase::UnqualifiedOwner),
         ("schedulers_denied", SchedulerCase::Denied),
         ("schedulers_limited", SchedulerCase::Limited),
+        ("schedulers_sql2019", SchedulerCase::Sql2019Layout),
+        ("schedulers_sql2022", SchedulerCase::Sql2022Layout),
+        ("schedulers_modern_nulls", SchedulerCase::ModernNulls),
+        ("schedulers_spinlock_raw_positive", SchedulerCase::SpinlockRawPositive),
     ] {
         let (source, rows) = instance_resource_scheduler_evidence(case);
         let rows = rows

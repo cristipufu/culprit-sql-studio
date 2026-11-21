@@ -3,8 +3,13 @@ import type { CounterNature } from "./CounterNature";
 import type { CounterUnit } from "./CounterUnit";
 import type { ResetMarker } from "./ResetMarker";
 import type { SchedulerFieldAvailability } from "./SchedulerFieldAvailability";
+import type { SchedulerUnqualifiedValue } from "./SchedulerUnqualifiedValue";
 
-export type SchedulerField = { native_name: string, label: string, value: string | null, availability: SchedulerFieldAvailability, explanation: string | null, 
+export type SchedulerField = { native_name: string, label: string, 
+/**
+ * Only an admitted native property or measurement. An unqualified diagnostic value is kept separately.
+ */
+value: string | null, unqualified: SchedulerUnqualifiedValue | null, availability: SchedulerFieldAvailability, explanation: string | null, 
 /**
  * Properties have no invented numeric unit or counter semantics.
  */

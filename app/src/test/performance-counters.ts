@@ -40,3 +40,47 @@ export function performanceCounterHealthReport(view: PerformanceCounterReport | 
     performance_counters: view ? [view] : [],
   });
 }
+
+/** Canonical presentation fixture only; pairing/native semantics are exercised by the shared Rust corpus. */
+export function commonPerformanceCounterReport(missingBase = false): PerformanceCounterReport {
+  const report = performanceCounterReport(3);
+  report.read_complete = true;
+  report.entries = report.entries.map((entry, index) => {
+    const id = ["tempdb_free", "page_reads", "errors"][index]!;
+    const gauge = index === 0;
+    return {
+      ...entry,
+      field: `common_${id}`,
+      family: index === 0 ? "temporary-tables" : index === 1 ? "buffer-cache" : "errors",
+      family_label: t(`view.performance_counters.family.${index === 0 ? "temporary_tables" : index === 1 ? "buffer_cache" : "errors"}`),
+      native_object: `SQLServer:${index === 0 ? "Transactions" : index === 1 ? "Buffer Manager" : "SQL Errors"}`,
+      native_name: ["Free Space in tempdb (KB)", "Page reads/sec", "Errors/sec"][index]!,
+      native_instance: index === 2 ? "Info Errors" : null,
+      nature: gauge ? "gauge" : "cumulative",
+      native_type: gauge ? "65792" : "272696576",
+      unit: gauge ? { kind: "kibibytes" } : index === 1 ? { kind: "pages", bytes_per_page: 8192 } : { kind: "count" },
+      raw_value: "9007199254740993",
+      metric: partial<Metric>({ label: t(`view.performance_counters.field.common_${id}`), key: `common_${id}`,
+        text: index === 0 ? EXACT_PERFORMANCE_COUNTER : index === 1 ? "9007199254740993 pages" : "9007199254740993" }),
+      explanation: t(`view.performance_counters.explain.${index === 0 ? "common_tempdb" : index === 1 ? "common_pages" : "errors"}`),
+    } satisfies PerformanceCounterEntry;
+  });
+  report.ratios = {
+    source_state: "partial", source_reason: null, read_complete: true, declared_ratios: 1, presented_ratios: 1,
+    entries_limited: false, title: t("view.counter_ratios.title"), summary: t("view.counter_ratios.summary.partial"),
+    limitations: [t("view.counter_ratios.limit.aggregate")],
+    entries: [{
+      observation_key: "common-buffer-ratio", kind: "buffer-cache-hit", scope: "server",
+      observed_at: "2020-01-01T12:00:00.500000000Z", native_object: "SQLServer:Buffer Manager", native_instance: null,
+      issues: missingBase ? ["missing-base"] : [],
+      title: t("view.performance_counters.buffer_cache_ratio.title"),
+      explanation: t("view.performance_counters.buffer_cache_ratio.explanation"),
+      metrics: [
+        partial<Metric>({ label: t("view.counter_ratios.metric.numerator"), key: "view.counter_ratios.metric.numerator", text: "3" }),
+        partial<Metric>({ label: t("view.counter_ratios.metric.base"), key: "view.counter_ratios.metric.base", text: missingBase ? t("view.counter_ratios.unknown") : "4" }),
+        ...(!missingBase ? [partial<Metric>({ label: t("view.counter_ratios.metric.percent"), key: "view.counter_ratios.metric.percent", text: t("view.counter_ratios.percent", { value: "75.00" }) })] : []),
+      ],
+    }],
+  };
+  return report;
+}

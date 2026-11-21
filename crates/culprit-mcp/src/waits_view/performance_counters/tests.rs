@@ -146,3 +146,55 @@ fn selected_report_read_bounds_survive_compact_projection_without_native_owner_p
     assert_eq!(value["read_bounds"]["observed_until"], "2020-01-01T12:00:01Z");
     assert!(!serde_json::to_string(&value).unwrap().contains("private-native"));
 }
+
+#[test]
+fn compact_common_counters_include_the_canonical_fraction_without_raw_native_labels_or_receipts() {
+    use culprit_collector::analytical::test_support::{
+        CommonPerformanceCounterCase as Case, common_performance_counter_evidence,
+    };
+    for case in Case::ALL {
+        let (source, records) = common_performance_counter_evidence(case);
+        let coverage = &source.observation.snapshot().unwrap().sources[0];
+        let rows = records
+            .iter()
+            .filter_map(|record| {
+                let TelemetryRecord::Operational(row) = record else { panic!() };
+                (row.source == culprit_core::source_id::PERFORMANCE_COUNTERS).then_some(row)
+            })
+            .collect::<Vec<_>>();
+        let report = culprit_checks::performance_counters::explain_source(&source, coverage, &rows, true).unwrap();
+        let original = serde_json::to_value(&report).unwrap();
+        let result = value(&report);
+        assert_eq!(result["source_state"], serde_json::to_value(coverage.state).unwrap());
+        assert_eq!(result["population"], "shared-server");
+        assert_eq!(result["returned_counter_rows"], report.entries.len().min(ENTRY_LIMIT));
+        assert!(result["entries"].as_array().unwrap().len() <= ENTRY_LIMIT);
+        assert!(result["database"].is_null() && result["native_database_id"].is_null());
+        if case == Case::Denied {
+            assert!(result["ratios"].is_null());
+            assert!(result["entries"].as_array().unwrap().is_empty());
+        } else {
+            let fraction = result["ratios"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["kind"] == "buffer-cache-hit")
+                .unwrap();
+            assert_eq!(fraction["scope"], "server");
+            let metrics = fraction["metrics"].as_array().unwrap();
+            let percent = metrics.iter().find(|metric| metric["key"] == "view.counter_ratios.metric.percent");
+            assert_eq!(
+                percent.is_some(),
+                !matches!(case, Case::MeasuredZero | Case::MissingBase | Case::MissingCommon)
+            );
+            assert_eq!(fraction["observed_at"], "2020-01-01T12:00:00.500000000Z");
+        }
+        let text = serde_json::to_string(&result).unwrap();
+        for private in
+            ["SQLServer:", "native_type", "native_object", "resource_governor_instance_epoch", "native-instance-a"]
+        {
+            assert!(!text.contains(private), "{case:?}: {private}");
+        }
+        assert_eq!(serde_json::to_value(&report).unwrap(), original);
+    }
+}

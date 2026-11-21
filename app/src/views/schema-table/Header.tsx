@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { TableSignalFacts } from "../../components/BeyondTime";
 import { FullText } from "./FullText";
 import { StorageConfiguration } from "./StorageConfiguration";
+import { TemporalConfiguration } from "./TemporalConfiguration";
 import { CdcEnrollment } from "./CdcEnrollment";
 import type { Report } from "../../gen/Report";
 import type { TableStat } from "../../gen/TableStat";
@@ -128,6 +129,7 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
       </div>
       <HypertableChunks key={tableKey(table)} table={table} />
       <StorageConfiguration key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_storage_configuration])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} />
+      <TemporalConfiguration key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_temporal_configuration])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} report={report.table_temporal} />
       <CdcEnrollment key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_tracked_by_cdc])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} />
       {fullText && fullTextEntry && <FullText key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_full_text])} report={fullText} entry={fullTextEntry} />}
       {findings.length > 0 && (

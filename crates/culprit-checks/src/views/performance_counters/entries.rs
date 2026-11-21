@@ -49,7 +49,7 @@ pub(super) fn append(
             explanation: if row.nature == CounterNature::Unknown {
                 t!("view.performance_counters.limit.native_type")
             } else {
-                explanation(field.family)
+                explanation(field)
             },
         });
     }
@@ -110,7 +110,8 @@ pub(super) fn missing(
         return Vec::new();
     }
     let mut missing = Vec::new();
-    for field in profile.fields {
+    let common_requested = samples.iter().any(|sample| profile.common_requested(sample));
+    for field in profile.fields.iter().chain(profile.common_fields.iter().filter(|_| common_requested)) {
         if population == PerformanceCounterPopulation::SelectedDatabase
             && !profile.database_field_ids.contains(&field.id)
         {
@@ -177,10 +178,16 @@ fn family_label(family: PerformanceCounterFamily) -> String {
         PerformanceCounterFamily::LocalSsdCache => t!("view.performance_counters.family.local_ssd_cache"),
         PerformanceCounterFamily::WorkloadGroup => t!("view.performance_counters.family.workload_group"),
         PerformanceCounterFamily::ResourcePool => t!("view.performance_counters.family.resource_pool"),
+        PerformanceCounterFamily::Transactions => t!("view.performance_counters.family.transactions"),
+        PerformanceCounterFamily::Concurrency => t!("view.performance_counters.family.concurrency"),
+        PerformanceCounterFamily::Errors => t!("view.performance_counters.family.errors"),
     }
 }
-fn explanation(family: PerformanceCounterFamily) -> String {
-    match family {
+fn explanation(field: &PerformanceCounterSpec) -> String {
+    if let Some(key) = field.explanation_key {
+        return i18n::t(key, &[]);
+    }
+    match field.family {
         PerformanceCounterFamily::Compilation => t!("view.performance_counters.explain.compilation"),
         PerformanceCounterFamily::Connections => t!("view.performance_counters.explain.connections"),
         PerformanceCounterFamily::BufferCache => t!("view.performance_counters.explain.buffer_cache"),
@@ -191,5 +198,8 @@ fn explanation(family: PerformanceCounterFamily) -> String {
         PerformanceCounterFamily::LocalSsdCache => t!("view.performance_counters.explain.local_ssd_cache"),
         PerformanceCounterFamily::WorkloadGroup => t!("view.performance_counters.explain.workload_group"),
         PerformanceCounterFamily::ResourcePool => t!("view.performance_counters.explain.resource_pool"),
+        PerformanceCounterFamily::Transactions => t!("view.performance_counters.explain.transactions"),
+        PerformanceCounterFamily::Concurrency => t!("view.performance_counters.explain.concurrency"),
+        PerformanceCounterFamily::Errors => t!("view.performance_counters.explain.errors"),
     }
 }

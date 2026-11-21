@@ -28,7 +28,7 @@ fn explain(
     read_complete: bool,
 ) -> Result<TableFullTextReport> {
     let source = read_outcome(coverage, observations.len(), read_complete)?;
-    culprit_checks::table_full_text::explain(culprit_checks::table_full_text::TableFullTextEvidence {
+    culprit_checks::table_full_text::explain(culprit_checks::table_catalog::TableCatalogEvidence {
         description,
         observations,
         source: &source,

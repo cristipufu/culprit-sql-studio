@@ -67,3 +67,33 @@ async fn table_action_cannot_read_past_its_original_byte_budget_or_borrow_an_ope
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn temporal_configuration_action_uses_original_table_body_and_never_another_dataset() {
+    use culprit_collector::analytical::test_support::{TableTemporalCase, table_temporal_evidence};
+    for case in TableTemporalCase::ALL {
+        let (source, records) = table_temporal_evidence(case);
+        let mut fixture = LocalCaptureFixture::snapshot(source.clone(), records.clone()).await;
+        drop(fixture.outbox.take());
+        let reader =
+            OutboxCaptureReader::directory(fixture.directory.clone(), CompletedCaptureBudget::default()).unwrap();
+        let guard = OperationGuard::new(reader.timeout()).unwrap();
+        let result = reader
+            .analyze(LocalCaptureRequest {
+                connection: "local-evidence",
+                observation_id: &fixture.manifest.capture.observation_id,
+                analysis: LocalCaptureAnalysisKind::TableTemporal,
+                operation: guard.handle(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.kind(), LocalCaptureAnalysisKind::TableTemporal);
+        let LocalCapturedAnalysis::Snapshot(result) = result else { panic!() };
+        assert_eq!(result.original().read().description, source);
+        assert_eq!(result.original().bytes_read(), fixture.original_bytes());
+        assert!(result.original().read().is_valid());
+        let LocalSnapshotReport::TableTemporal(report) = result.report() else { panic!() };
+        assert_eq!(report.native_rows, Some(records.len() as u32));
+        assert_eq!(fixture.manifest.source_queries, 0);
+    }
+}

@@ -46,7 +46,7 @@ impl Fixture<'_> {
     }
     pub(in crate::tables::native_tests) async fn stop_original_population(&mut self) {
         assert_eq!(self.population_work, PopulationWork::MayBeRunning);
-        assert!(!self.population_capture_unsettled);
+        assert!(!self.source_capture_unsettled);
         let table = self.indexed_table();
         self.control("culprit-full-text-runtime-stop", async |commands, _| {
             commands.batch(&format!("ALTER FULLTEXT INDEX ON dbo.[{table}] STOP POPULATION")).await;

@@ -18,6 +18,16 @@ async fn native_scheduler_columns_preserve_states_nullable_flags_and_exact_share
     let mut keys = BTreeSet::new();
     for sample in samples {
         assert!(sample.is_valid());
+        let original = MssqlSchedulerPoint::from_sample(&sample).unwrap();
+        for field in MSSQL_SCHEDULER_FIELDS.iter().filter(|field| field.introduced_in.is_some()) {
+            if let MssqlSchedulerValue::Unqualified { native_value, required_global_trace_flag } =
+                original.field(field).unwrap()
+            {
+                assert_eq!(required_global_trace_flag, 8134);
+                assert_eq!(sample.properties[field.name], native_value);
+                assert!(!sample.counters.iter().any(|counter| counter.key == field.name));
+            }
+        }
         assert_eq!(sample.scope, MeasurementScope::Server);
         assert!(keys.insert(sample.key().unwrap()));
         assert!(sample.properties.contains_key("status"));

@@ -154,3 +154,27 @@ fn scheduler_text_bounds_and_escapes_each_native_field_without_hiding_later_queu
     assert!(!text.contains(&t!("view.schedulers.entry", id = "3")));
     assert!(text.len() < 32_768);
 }
+
+#[test]
+fn modern_scheduler_cli_never_words_raw_spinlock_zero_or_positive_as_measured_activity() {
+    use culprit_collector::analytical::test_support::{SchedulerCase, instance_resource_scheduler_evidence};
+    for case in [SchedulerCase::Exact, SchedulerCase::SpinlockRawPositive] {
+        let (source, rows) = instance_resource_scheduler_evidence(case);
+        let rows = rows
+            .into_iter()
+            .map(|row| {
+                let TelemetryRecord::Operational(row) = row else { panic!() };
+                row
+            })
+            .collect::<Vec<_>>();
+        let report = culprit_checks::instance_resources::explain_source(&source, &rows, true).unwrap();
+        let text = instance_resources(&report);
+        assert!(text.contains(&t!(
+            "view.schedulers.value.unqualified",
+            value = if case == SchedulerCase::Exact { "0" } else { "7" }
+        )));
+        assert!(text.contains(&t!("view.schedulers.counter.instrumentation", flag = "8134")));
+        assert!(text.contains(&t!("view.schedulers.field.queued_disk_io_count")));
+        assert!(text.contains(&t!("view.schedulers.field.total_completed_tasks")));
+    }
+}

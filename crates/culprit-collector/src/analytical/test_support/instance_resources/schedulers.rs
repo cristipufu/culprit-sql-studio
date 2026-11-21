@@ -13,9 +13,13 @@ pub enum SchedulerCase {
     UnqualifiedOwner,
     Denied,
     Limited,
+    Sql2019Layout,
+    Sql2022Layout,
+    ModernNulls,
+    SpinlockRawPositive,
 }
 impl SchedulerCase {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 12] = [
         Self::Exact,
         Self::MeasuredZero,
         Self::NativeNull,
@@ -24,6 +28,10 @@ impl SchedulerCase {
         Self::UnqualifiedOwner,
         Self::Denied,
         Self::Limited,
+        Self::Sql2019Layout,
+        Self::Sql2022Layout,
+        Self::ModernNulls,
+        Self::SpinlockRawPositive,
     ];
 }
 
@@ -88,6 +96,9 @@ fn scheduler(id: u32, case: SchedulerCase) -> NativeCounterSet {
                     .properties
                     .insert(field.name.into(), if id == 0 { "VISIBLE ONLINE" } else { "HIDDEN ONLINE" }.into());
             }
+            MssqlSchedulerFieldKind::UnqualifiedCounter { .. } => {
+                sample.properties.insert(field.name.into(), "0".into());
+            }
             MssqlSchedulerFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
                 key: field.name.into(),
                 value: MeasurementValue::Integer(
@@ -123,6 +134,43 @@ fn scheduler(id: u32, case: SchedulerCase) -> NativeCounterSet {
         sample
             .properties
             .insert("unavailable_columns".into(), "[\"ideal_workers_limit\",\"total_cpu_usage_ms\"]".into());
+    }
+    let unavailable = match case {
+        SchedulerCase::Sql2019Layout => Some(15),
+        SchedulerCase::Sql2022Layout => Some(16),
+        _ => None,
+    };
+    if let Some(major) = unavailable {
+        let names = MSSQL_SCHEDULER_FIELDS
+            .iter()
+            .filter(|field| field.introduced_in.is_some_and(|since| since > major))
+            .map(|field| field.name)
+            .collect::<Vec<_>>();
+        for name in &names {
+            sample.properties.remove(*name);
+            sample.counters.retain(|counter| counter.key != *name);
+        }
+        sample.properties.insert("unavailable_columns".into(), serde_json::to_string(&names).unwrap());
+    }
+    if case == SchedulerCase::ModernNulls {
+        let names = MSSQL_SCHEDULER_FIELDS
+            .iter()
+            .filter(|field| field.introduced_in.is_some())
+            .map(|field| field.name)
+            .collect::<Vec<_>>();
+        for name in &names {
+            sample.properties.remove(*name);
+            sample.counters.retain(|counter| counter.key != *name);
+        }
+        sample.properties.insert("native_null_columns".into(), serde_json::to_string(&names).unwrap());
+    }
+    if case == SchedulerCase::SpinlockRawPositive {
+        for field in MSSQL_SCHEDULER_FIELDS
+            .iter()
+            .filter(|field| matches!(field.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }))
+        {
+            sample.properties.insert(field.name.into(), "7".into());
+        }
     }
     assert!(MssqlSchedulerPoint::from_sample(&sample).is_ok());
     sample

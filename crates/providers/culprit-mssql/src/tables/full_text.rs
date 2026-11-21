@@ -17,15 +17,15 @@ const UNAVAILABLE_COLUMNS: &str = r#"CAST(NULL AS int) AS full_text_object_id,CA
 
 /// Both branches come from the SAME table projection. Only the selected branch compiles/executes.
 /// Fixed catalog-layout and permission checks do not dispatch a second read or retry an unavailable source.
-pub(super) fn query(table_query: impl Fn(&str, &str) -> String) -> String {
-    let joined = crate::catalog_visibility::sql_literal(&crate::statement_origin::monitoring_batch(&table_query(
+pub(super) fn query(table_query: impl Fn(&str, &str) -> super::temporal::QueryParts) -> String {
+    let joined = super::temporal::expression(table_query(
         COLUMNS,
         &format!("LEFT JOIN {CATALOG} ft ON ft.object_id=t.object_id"),
-    )));
-    let unavailable = crate::catalog_visibility::sql_literal(&crate::statement_origin::monitoring_batch(&table_query(
-        UNAVAILABLE_COLUMNS,
-        "",
-    )));
+    ));
+    let unavailable = super::temporal::expression(table_query(UNAVAILABLE_COLUMNS, ""));
+    let temporal = super::temporal::declarations();
+    let parameters = super::temporal::parameters();
+    let arguments = super::temporal::arguments();
     format!(
         r#"DECLARE /* culprit */ @culprit_full_text_metadata int=HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION');
 DECLARE /* culprit */ @culprit_full_text_select int=HAS_PERMS_BY_NAME(N'{CATALOG}',N'OBJECT',N'SELECT');
@@ -38,11 +38,15 @@ DECLARE /* culprit */ @culprit_full_text_availability int=CASE
     OR (name IN(N'is_enabled',N'has_crawl_completed') AND system_type_id=TYPE_ID(N'bit'))
     OR (name=N'change_tracking_state' AND system_type_id=TYPE_ID(N'char') AND max_length=1)))=6 THEN 0
  ELSE 1 END;
+{temporal}
+DECLARE /* culprit */ @culprit_table_sql nvarchar(max);
 IF @culprit_full_text_availability=0
- EXEC /* culprit */ sys.sp_executesql {joined},N'@P1 int',@P1=@P1;
+ SET /* culprit */ @culprit_table_sql={joined};
 ELSE
- EXEC /* culprit */ sys.sp_executesql {unavailable},N'@P1 int,@culprit_full_text_availability int',
-  @P1=@P1,@culprit_full_text_availability=@culprit_full_text_availability;"#
+ SET /* culprit */ @culprit_table_sql={unavailable};
+EXEC /* culprit */ sys.sp_executesql @culprit_table_sql,
+ N'@P1 int,@culprit_full_text_availability int{parameters}',
+ @P1=@P1,@culprit_full_text_availability=@culprit_full_text_availability{arguments};"#
     )
 }
 

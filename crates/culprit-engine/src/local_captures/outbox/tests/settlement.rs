@@ -70,6 +70,24 @@ async fn fixture(analysis: LocalCaptureAnalysisKind) -> LocalCaptureFixture {
             let (source, rows) = memory_clerk_evidence(MemoryClerkCase::SharedInstance);
             LocalCaptureFixture::snapshot(source, rows).await
         }
+        LocalCaptureAnalysisKind::ManagedInstanceResources => {
+            let (source, rows) = culprit_collector::analytical::test_support::managed_instance_resource_case(
+                culprit_collector::analytical::test_support::ManagedInstanceResourceCase::Complete,
+            );
+            LocalCaptureFixture::with_shutdown(source, rows, SourceShutdown::Quiescent).await
+        }
+        LocalCaptureAnalysisKind::PoolSettings => {
+            let (source, rows) = culprit_collector::analytical::test_support::pool_settings_evidence(
+                culprit_collector::analytical::test_support::PoolSettingsCase::Exact,
+            );
+            LocalCaptureFixture::snapshot(source, rows).await
+        }
+        LocalCaptureAnalysisKind::Replication => {
+            let (source, rows) = culprit_collector::analytical::test_support::replication_evidence(
+                culprit_collector::analytical::test_support::ReplicationCase::MssqlHyperscale,
+            );
+            LocalCaptureFixture::snapshot(source, rows).await
+        }
         other => {
             let (source, rows) = super::snapshots::originals(other);
             LocalCaptureFixture::snapshot(source, rows).await
@@ -179,7 +197,7 @@ async fn assert_settlement(analysis: LocalCaptureAnalysisKind, exit: Exit) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn directory_gate_spans_projection_postcheck_worker_and_async_owner_settlement_for_every_analysis() {
-    for analysis in LocalCaptureAnalysisKind::ALL {
+    for &analysis in LocalCaptureAnalysisKind::ALL {
         for exit in [Exit::Success, Exit::ProjectionError, Exit::PostcheckCancellation, Exit::Panic, Exit::CallerDrop] {
             assert_settlement(analysis, exit).await;
         }

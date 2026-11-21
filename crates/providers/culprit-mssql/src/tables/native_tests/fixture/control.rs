@@ -11,8 +11,12 @@ const MAX_CONTROL_SQL: u32 = 24;
 pub(super) struct Commands<'a> {
     client: &'a mut MsClient,
     attempted: &'a mut u32,
+    temporal: &'a mut super::temporal::Objects,
 }
 impl Commands<'_> {
+    pub(super) fn claim_temporal(&mut self) {
+        self.temporal.claim();
+    }
     fn charge(&mut self) {
         assert!(*self.attempted < MAX_CONTROL_SQL, "owned full-text command dispatch cap");
         *self.attempted += 1;
@@ -50,7 +54,11 @@ impl Fixture<'_> {
         self.control_sql_attempts += 1; // Same-client nonce verification is paid before dispatch.
         let operation = AssertUnwindSafe(tokio::time::timeout(COMMAND_TIMEOUT, async {
             verify_owned_source(&mut actor).await.unwrap();
-            let mut commands = Commands { client: &mut actor, attempted: &mut self.control_sql_attempts };
+            let mut commands = Commands {
+                client: &mut actor,
+                attempted: &mut self.control_sql_attempts,
+                temporal: &mut self.temporal,
+            };
             work(&mut commands, &mut self.owns_objects).await
         }))
         .catch_unwind()

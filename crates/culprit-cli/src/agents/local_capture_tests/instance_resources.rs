@@ -89,8 +89,19 @@ async fn individual_scheduler_originals_reach_compact_mcp_with_native_null_units
         assert_eq!(schedulers["read_complete"], true);
         assert!(schedulers["entries"].as_array().unwrap().len() <= 5);
         for entry in schedulers["entries"].as_array().unwrap() {
-            assert_eq!(entry["fields"].as_array().unwrap().len(), 21);
+            assert_eq!(
+                entry["fields"].as_array().unwrap().len(),
+                culprit_core::telemetry::MSSQL_SCHEDULER_FIELDS.len() - 1
+            );
             assert!(entry["fields"].as_array().unwrap().iter().any(|field| field["native_name"] == "work_queue_count"));
+        }
+        if matches!(case, SchedulerCase::Exact | SchedulerCase::SpinlockRawPositive) {
+            let fields = schedulers["entries"][0]["fields"].as_array().unwrap();
+            let spin = fields.iter().find(|field| field["native_name"] == "spinlock_wait_count").unwrap();
+            assert_eq!(spin["availability"], "instrumentation-unqualified");
+            assert!(spin["value"].is_null());
+            assert_eq!(spin["unqualified"]["native_value"], if case == SchedulerCase::Exact { "0" } else { "7" });
+            assert_eq!(spin["unqualified"]["required_global_trace_flag"], 8134);
         }
         if case == SchedulerCase::NativeNull {
             assert!(schedulers.to_string().contains("native-null"));

@@ -84,6 +84,7 @@ pub(crate) async fn tables(conn: &mut impl crate::read::QueryRead, db: &str) -> 
                 mssql_full_text: None,
                 mssql_storage_configuration: None,
                 mssql_tracked_by_cdc: None,
+                mssql_temporal_configuration: None,
                 in_row_bytes: None,
                 lob_bytes: None,
                 overflow_bytes: None,

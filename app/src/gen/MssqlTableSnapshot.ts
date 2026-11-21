@@ -3,12 +3,13 @@ import type { MssqlObjectIdentity } from "./MssqlObjectIdentity";
 import type { MssqlTableFullText } from "./MssqlTableFullText";
 import type { MssqlTableSizeSource } from "./MssqlTableSizeSource";
 import type { MssqlTableStorageConfiguration } from "./MssqlTableStorageConfiguration";
+import type { MssqlTableTemporalConfiguration } from "./MssqlTableTemporalConfiguration";
 
 export type MssqlTableSnapshot = { identity: MssqlObjectIdentity, schema: string, name: string, modified_without_offset: string, 
 /**
  * SQL Server's approximate row count, not COUNT(*) and not a cumulative counter.
  */
-estimated_rows: string | null, reserved_bytes: string | null, data_bytes: string | null, index_bytes: string | null, in_row_bytes: string | null, lob_bytes: string | null, row_overflow_bytes: string | null, has_primary_key: boolean | null, is_heap: boolean | null, size_source: MssqlTableSizeSource, full_text: MssqlTableFullText, storage_configuration: MssqlTableStorageConfiguration, 
+estimated_rows: string | null, reserved_bytes: string | null, data_bytes: string | null, index_bytes: string | null, in_row_bytes: string | null, lob_bytes: string | null, row_overflow_bytes: string | null, has_primary_key: boolean | null, is_heap: boolean | null, size_source: MssqlTableSizeSource, full_text: MssqlTableFullText, storage_configuration: MssqlTableStorageConfiguration, temporal_configuration: MssqlTableTemporalConfiguration, 
 /**
  * Current native table enrollment only, not CDC processing progress or retained change history.
  */

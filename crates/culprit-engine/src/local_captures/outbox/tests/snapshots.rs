@@ -34,7 +34,7 @@ fn reader(fixture: &LocalCaptureFixture, budget: CompletedCaptureBudget) -> Outb
 
 #[tokio::test]
 async fn every_new_snapshot_report_retains_one_exact_original_without_source_work_or_scope_relabeling() {
-    for kind in LocalCaptureAnalysisKind::ALL.into_iter().filter(|kind| {
+    for kind in LocalCaptureAnalysisKind::ALL.iter().copied().filter(|kind| {
         !matches!(
             kind,
             LocalCaptureAnalysisKind::ManagedInstanceResources

@@ -667,6 +667,10 @@ pub fn table(report: &Report, wanted: &str) -> Result<Value> {
     if let Some(enrollment) = table_catalog::change_data_capture(s, t) {
         out["change_data_capture"] = enrollment;
     }
+    if let Some(temporal) = culprit_engine::explain_table_temporal(s, t)? {
+        out["temporal_configuration"] = json!({"fields":temporal.entries[0].fields,"qualification":temporal.qualification,
+            "source_state":temporal.source_state,"source_reason":temporal.source_reason,"limitations":temporal.limitations});
+    }
     if let Some(full_text) = culprit_engine::explain_table_full_text(s, t)? {
         let entry = &full_text.entries[0];
         out["full_text"] = json!({"summary":entry.summary,"metrics":entry.metrics,"qualification":entry.qualification,"verify":entry.verify,
@@ -957,3 +961,5 @@ mod tests {
 
 #[cfg(test)]
 mod table_full_text_tests;
+#[cfg(test)]
+mod table_temporal_tests;

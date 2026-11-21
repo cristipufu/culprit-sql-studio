@@ -19,6 +19,8 @@ pub use columnstore_rowgroups::{ColumnstoreRowgroupCase, columnstore_rowgroup_ev
 pub use full_text_populations::{FullTextPopulationCase, full_text_population_evidence};
 mod table_memory;
 pub use table_memory::{TableMemoryCase, table_memory_evidence};
+mod table_temporal;
+pub use table_temporal::{TableTemporalCase, table_temporal_evidence};
 mod table_storage;
 pub use table_storage::{TableStorageCase, table_storage_evidence};
 mod table_cdc;
@@ -36,7 +38,8 @@ pub use tempdb_metadata_memory::{
 mod counter_ratios;
 mod performance_counters;
 pub use performance_counters::{
-    DatabasePerformanceCounterCase, PerformanceCounterCase, ResourceGovernorCounterCase,
+    CommonPerformanceCounterCase, DatabasePerformanceCounterCase, PerformanceCounterCase, ResourceGovernorCounterCase,
+    assert_common_performance_counter_capture, common_performance_counter_evidence,
     database_performance_counter_evidence, performance_counter_evidence, resource_governor_counter_evidence,
 };
 mod resource_io;

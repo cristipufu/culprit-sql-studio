@@ -43,6 +43,7 @@ pub(super) fn captured(
     rows: &[Rec],
     counters: Vec<NativeCounterSample>,
     ratio_gaps: Vec<CounterRatioGap>,
+    population: Population<'_>,
 ) -> Result<PerformanceRead> {
     let metadata = ReadMetadata::decode(rows.first().ok_or_else(invalid_data)?);
     if rows.iter().skip(1).any(|row| ReadMetadata::decode(row) != metadata) {
@@ -55,7 +56,7 @@ pub(super) fn captured(
         .map(|row| (&row.key, &row.native_object, &row.native_name, &row.native_instance))
         .chain(ratio_gaps.iter().map(|row| (&row.key, &row.native_object, &row.native_name, &row.native_instance)))
     {
-        let Some(spec) = specs().iter().find(|spec| spec.matches(object, name, instance.as_deref())) else {
+        let Some(spec) = population.field(object, name, instance.as_deref()) else {
             return Err(invalid_data());
         };
         if let Some(kind) = spec.ratio {
@@ -94,6 +95,17 @@ pub(super) fn captured(
             observed_at: metadata.at.clone(),
         });
     }
+    if matches!(population, Population::InstanceInvestigation)
+        && !populations.keys().any(|(kind, _, _)| *kind == CounterRatioKind::BufferCacheHit)
+    {
+        ratios.push(NativeCounterRatio {
+            kind: CounterRatioKind::BufferCacheHit,
+            numerator: None,
+            base: None,
+            support: CounterRatioSupport::Supported,
+            observed_at: metadata.at.clone(),
+        });
+    }
     let profile = culprit_core::Engine::Mssql.spec().performance_counters().ok_or_else(invalid_data)?;
     let sample = NativeCounterSet {
         identity: NativeIdentity::new(profile.native_object).qualified("native_object", profile.native_object),
@@ -103,10 +115,7 @@ pub(super) fn captured(
         ratio_gaps,
         properties: {
             let mut properties = BTreeMap::from([
-                (
-                    culprit_core::telemetry::PERFORMANCE_COUNTER_PROFILE_PROPERTY.into(),
-                    culprit_core::telemetry::PERFORMANCE_COUNTER_PROFILE.into(),
-                ),
+                (culprit_core::telemetry::PERFORMANCE_COUNTER_PROFILE_PROPERTY.into(), population.selection().into()),
                 (culprit_core::telemetry::PERFORMANCE_COUNTER_ROWS_PROPERTY.into(), rows.len().to_string()),
             ]);
             if let Some(at) = &metadata.at {

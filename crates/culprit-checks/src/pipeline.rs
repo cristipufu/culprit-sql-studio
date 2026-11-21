@@ -46,6 +46,7 @@ mod storage;
 mod suspect_pages;
 mod table_full_text;
 mod table_memory;
+mod table_temporal;
 mod tempdb_metadata_memory;
 mod wait_counters;
 
@@ -307,6 +308,7 @@ impl Pipeline {
         let pool_settings = pool_settings::explain(&snapshot);
         let suspect_pages = suspect_pages::explain(&mut snapshot);
         let table_full_text = table_full_text::explain(&mut snapshot);
+        let table_temporal = table_temporal::explain(&mut snapshot);
         let storage = storage::explain(&mut snapshot);
         let instance_resources = instance_resources::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
@@ -409,6 +411,7 @@ impl Pipeline {
         }
         Report {
             table_full_text,
+            table_temporal,
             storage,
             instance_resources,
             snapshot,

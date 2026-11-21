@@ -12,6 +12,7 @@ pub(super) static FIELDS: &[PerformanceCounterSpec] = &[
         label_key: key!("view.performance_counters.field.rg_group_active"),
         ratio: None,
         application: false,
+        explanation_key: None,
     },
     PerformanceCounterSpec {
         id: "rg_group_queued",
@@ -24,6 +25,7 @@ pub(super) static FIELDS: &[PerformanceCounterSpec] = &[
         label_key: key!("view.performance_counters.field.rg_group_queued"),
         ratio: None,
         application: false,
+        explanation_key: None,
     },
     PerformanceCounterSpec {
         id: "rg_group_blocked",
@@ -36,6 +38,7 @@ pub(super) static FIELDS: &[PerformanceCounterSpec] = &[
         label_key: key!("view.performance_counters.field.rg_group_blocked"),
         ratio: None,
         application: false,
+        explanation_key: None,
     },
     PerformanceCounterSpec {
         id: "rg_group_completed",
@@ -48,6 +51,7 @@ pub(super) static FIELDS: &[PerformanceCounterSpec] = &[
         label_key: key!("view.performance_counters.field.rg_group_completed"),
         ratio: None,
         application: false,
+        explanation_key: None,
     },
     PerformanceCounterSpec {
         id: "rg_pool_active_grants",
@@ -60,6 +64,7 @@ pub(super) static FIELDS: &[PerformanceCounterSpec] = &[
         label_key: key!("view.performance_counters.field.rg_pool_active_grants"),
         ratio: None,
         application: false,
+        explanation_key: None,
     },
     PerformanceCounterSpec {
         id: "rg_pool_pending_grants",
@@ -72,6 +77,7 @@ pub(super) static FIELDS: &[PerformanceCounterSpec] = &[
         label_key: key!("view.performance_counters.field.rg_pool_pending_grants"),
         ratio: None,
         application: false,
+        explanation_key: None,
     },
     PerformanceCounterSpec {
         id: "rg_pool_grant_timeouts",
@@ -84,5 +90,6 @@ pub(super) static FIELDS: &[PerformanceCounterSpec] = &[
         label_key: key!("view.performance_counters.field.rg_pool_grant_timeouts"),
         ratio: None,
         application: false,
+        explanation_key: None,
     },
 ];

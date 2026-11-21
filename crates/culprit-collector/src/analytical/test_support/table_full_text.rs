@@ -55,6 +55,20 @@ pub fn table_full_text_evidence(case: TableFullTextCase) -> (CollectionDescripti
         ),
     };
     let table = MssqlTableSnapshot {
+        temporal_configuration: MssqlTableTemporalConfiguration {
+            temporal_type_availability: MssqlCatalogAvailability::Available,
+            temporal_type: Some(0),
+            temporal_type_desc_availability: MssqlCatalogAvailability::Available,
+            temporal_type_desc: Some("NON_TEMPORAL_TABLE".into()),
+            history_table_id_availability: MssqlCatalogAvailability::Available,
+            history_table_id: None,
+            history_retention_period_availability: MssqlCatalogAvailability::Available,
+            history_retention_period: None,
+            history_retention_period_unit_availability: MssqlCatalogAvailability::Available,
+            history_retention_period_unit: None,
+            history_retention_period_unit_desc_availability: MssqlCatalogAvailability::Available,
+            history_retention_period_unit_desc: None,
+        },
         identity: MssqlObjectIdentity {
             database_id: 7,
             object_id: 100,

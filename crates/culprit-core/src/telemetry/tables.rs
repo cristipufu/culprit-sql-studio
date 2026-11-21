@@ -4,6 +4,8 @@ mod full_text;
 pub use full_text::*;
 mod storage_configuration;
 pub use storage_configuration::*;
+mod temporal_configuration;
+pub use temporal_configuration::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -34,6 +36,7 @@ pub struct MssqlTableSnapshot {
     pub size_source: MssqlTableSizeSource,
     pub full_text: MssqlTableFullText,
     pub storage_configuration: MssqlTableStorageConfiguration,
+    pub temporal_configuration: MssqlTableTemporalConfiguration,
     /// Current native table enrollment only, not CDC processing progress or retained change history.
     #[serde(deserialize_with = "required_nullable")]
     pub tracked_by_cdc: Option<bool>,
@@ -57,6 +60,8 @@ impl MssqlTableSnapshot {
         self.identity.is_valid()
             && self.full_text.is_valid()
             && self.storage_configuration.is_valid()
+            && self.temporal_configuration.is_valid()
+            && self.temporal_configuration.history_table_id != Some(self.identity.object_id)
             && (self.storage_configuration.memory_optimized != Some(true)
                 || self.estimated_rows.is_none() && sizes.iter().all(|value| value.is_none()))
             && [&self.schema, &self.name].into_iter().all(|name| !name.is_empty() && name.len() <= 2048)

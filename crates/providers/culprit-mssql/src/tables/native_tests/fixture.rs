@@ -8,6 +8,7 @@ use tiberius::Config;
 
 mod control;
 mod runtime;
+pub(super) mod temporal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PopulationWork {
@@ -36,7 +37,7 @@ pub(super) struct Fixture<'a> {
     owned: &'a OwnedSourceFixture,
     prefix: String,
     owns_objects: bool,
-    population_capture_unsettled: bool,
+    source_capture_unsettled: bool,
     population_capture_attempts: u32,
     population_captures_completed: u32,
     control_available: bool,
@@ -44,6 +45,7 @@ pub(super) struct Fixture<'a> {
     control_sql_attempts: u32,
     population_work: PopulationWork,
     ids: Option<NativeIds>,
+    temporal: temporal::Objects,
 }
 impl<'a> Fixture<'a> {
     pub(super) fn new(owned: &'a OwnedSourceFixture) -> Self {
@@ -54,7 +56,7 @@ impl<'a> Fixture<'a> {
             owned,
             prefix,
             owns_objects: false,
-            population_capture_unsettled: false,
+            source_capture_unsettled: false,
             population_capture_attempts: 0,
             population_captures_completed: 0,
             control_available: true,
@@ -62,6 +64,7 @@ impl<'a> Fixture<'a> {
             control_sql_attempts: 0,
             population_work: PopulationWork::NotStarted,
             ids: None,
+            temporal: temporal::Objects::default(),
         }
     }
     fn name(&self, suffix: &str) -> String {
@@ -71,7 +74,9 @@ impl<'a> Fixture<'a> {
         self.name("indexed")
     }
     pub(super) fn owns(&self, schema: &str, table: &str) -> bool {
-        schema == "dbo" && [self.name("plain"), self.indexed_table()].iter().any(|name| name == table)
+        schema == "dbo"
+            && ([self.name("plain"), self.indexed_table()].iter().any(|name| name == table)
+                || self.temporal.claimed && self.temporal_names().iter().any(|name| name == table))
     }
     pub(super) fn config(&self) -> Config {
         config(self.owned.port, &self.owned.database, self.owned.password(), "culprit-full-text-source")
@@ -130,7 +135,7 @@ impl<'a> Fixture<'a> {
         Ok(())
     }
     pub(super) async fn cleanup(&mut self) -> Result<()> {
-        if self.population_capture_unsettled || !self.control_available {
+        if self.source_capture_unsettled || !self.control_available {
             return Err(crate::read::invalid_data());
         }
         if !self.owns_objects {
@@ -146,8 +151,9 @@ impl<'a> Fixture<'a> {
         let table = self.indexed_table();
         let catalog = self.name("catalog");
         let user = self.name("viewer");
+        let temporal_cleanup = self.temporal_cleanup_sql();
         self.control("culprit-full-text-cleanup", async |commands, owns_objects| {
-            commands.batch(&format!("IF OBJECT_ID(N'dbo.{table}',N'U') IS NOT NULL DROP TABLE dbo.[{table}]; IF OBJECT_ID(N'dbo.{plain}',N'U') IS NOT NULL DROP TABLE dbo.[{plain}]; IF EXISTS(SELECT 1 FROM sys.fulltext_catalogs WHERE name=N'{catalog}') DROP FULLTEXT CATALOG [{catalog}]; IF USER_ID(N'{user}') IS NOT NULL DROP USER [{user}];")).await;
+            commands.batch(&format!("{temporal_cleanup}IF OBJECT_ID(N'dbo.{table}',N'U') IS NOT NULL DROP TABLE dbo.[{table}]; IF OBJECT_ID(N'dbo.{plain}',N'U') IS NOT NULL DROP TABLE dbo.[{plain}]; IF EXISTS(SELECT 1 FROM sys.fulltext_catalogs WHERE name=N'{catalog}') DROP FULLTEXT CATALOG [{catalog}]; IF USER_ID(N'{user}') IS NOT NULL DROP USER [{user}];")).await;
             *owns_objects = false;
         }).await;
         Ok(())
@@ -155,12 +161,12 @@ impl<'a> Fixture<'a> {
     pub(super) fn begin_population_capture(&mut self) {
         assert_eq!(self.population_capture_attempts, 0, "one original source capture, never a retry");
         self.population_capture_attempts += 1;
-        self.population_capture_unsettled = true;
+        self.source_capture_unsettled = true;
     }
     pub(super) fn population_capture_settled(&mut self) {
-        assert!(self.population_capture_unsettled);
+        assert!(self.source_capture_unsettled);
         self.population_captures_completed += 1;
-        self.population_capture_unsettled = false;
+        self.source_capture_unsettled = false;
     }
     pub(super) fn population_target(&self) -> MssqlFullTextPopulationTarget {
         let ids = self.ids.as_ref().unwrap();
@@ -182,6 +188,10 @@ impl<'a> Fixture<'a> {
         )
     }
     pub(super) fn assert_identity(&self, table: &MssqlTableSnapshot) {
+        if self.temporal_names().iter().any(|name| name == &table.name) {
+            self.assert_temporal_identity(table);
+            return;
+        }
         let ids = self.ids.as_ref().unwrap();
         assert_eq!(table.identity.database_id, ids.database);
         assert_eq!(table.identity.object_id, if table.name == self.indexed_table() { ids.indexed } else { ids.plain });

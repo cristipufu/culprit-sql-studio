@@ -17,7 +17,7 @@ use culprit_collector::{
     outbox::CompletedCaptureBudget,
 };
 use culprit_core::{AuthKind, Engine, SourceState, telemetry::*};
-use culprit_engine::{NewConnection, OutboxCaptureReader, ProviderRegistration};
+use culprit_engine::{LocalCaptureAnalysisKind, NewConnection, OutboxCaptureReader, ProviderRegistration};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
@@ -315,3 +315,37 @@ mod galera;
 mod pool_settings;
 
 mod managed_instance_resources;
+
+#[tokio::test]
+async fn temporal_table_configuration_uses_original_local_action_and_canonical_fields_without_a_provider() {
+    use culprit_collector::analytical::test_support::{TableTemporalCase, table_temporal_evidence};
+    for case in TableTemporalCase::ALL {
+        let (source, records) = table_temporal_evidence(case);
+        let mut fixture = LocalCaptureFixture::snapshot(source.clone(), records.clone()).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::TableTemporal).await;
+        assert!(!error, "{case:?}: {value}");
+        assert_eq!(value["historical_context"], true);
+        let report = &value["table_temporal"];
+        assert_eq!(report["native_rows"], records.len());
+        assert_eq!(report["observed_rows"], records.len());
+        assert_eq!(report["qualification"], culprit_core::t!("view.table_temporal.qualification"));
+        if let Some(entry) = report["entries"].as_array().unwrap().first() {
+            assert_eq!(entry["fields"].as_array().unwrap().len(), 6);
+        }
+        for private in [
+            "manifest_sha256",
+            "source_sha256",
+            "observation_key",
+            "native-machine",
+            "native-member",
+            "original.invalid",
+        ] {
+            assert!(!value.to_string().contains(private), "{private}");
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}

@@ -29,6 +29,14 @@ pub(crate) fn row() -> Rec {
         ("total_cpu_usage_ms", Val::Int(512)),
         ("total_scheduler_delay_ms", Val::Int(2)),
         ("ideal_workers_limit", Val::Int(14)),
+        ("queued_disk_io_count", Val::Int(1)),
+        ("total_enqueued_tasks", Val::Int(11)),
+        ("total_signal_time", Val::Int(6)),
+        ("total_waits_completed", Val::Int(3)),
+        ("total_completed_tasks", Val::Int(3)),
+        ("spinlock_wait_time_ms", Val::Int(0)),
+        ("spinlock_max_wait_time_ms", Val::Int(0)),
+        ("spinlock_wait_count", Val::Int(0)),
     ])
 }
 fn counter<'a>(sample: &'a NativeCounterSet, name: &str) -> &'a NativeCounterSample {
@@ -232,8 +240,74 @@ async fn canonical_scheduler_contract_accepts_actual_decoder_fields_nulls_and_un
                 MssqlSchedulerValue::ColumnUnavailable => assert!(missing.contains(&field.name)),
                 MssqlSchedulerValue::NativeNull => assert_eq!(field.name, "failed_to_create_worker"),
                 MssqlSchedulerValue::Observed(_) => assert!(!missing.contains(&field.name)),
+                MssqlSchedulerValue::Unqualified { native_value, required_global_trace_flag } => {
+                    assert!(matches!(field.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }));
+                    assert_eq!(native_value, "0");
+                    assert_eq!(required_global_trace_flag, 8134);
+                }
             }
         }
         assert_eq!(reader.calls.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn sql2019_2022_and_2025_layouts_share_two_bounded_reads_and_no_instrumentation_command() {
+    for major in [15, 16, 17] {
+        let missing = MSSQL_SCHEDULER_FIELDS
+            .iter()
+            .filter(|field| field.introduced_in.is_some_and(|since| since > major))
+            .map(|field| field.name)
+            .collect::<Vec<_>>();
+        let mut raw = row();
+        let replacements = missing.iter().map(|name| (*name, Val::Null)).collect::<Vec<_>>();
+        raw = replace(&raw, &replacements);
+        let mut reader = FakeRead::new(vec![Ok(metadata_without(&missing)), Ok(vec![raw])]);
+        let samples = read(&mut reader, 10).await.unwrap();
+        let point = MssqlSchedulerPoint::from_sample(&samples[0]).unwrap();
+        for field in MSSQL_SCHEDULER_FIELDS.iter().filter(|field| field.introduced_in.is_some()) {
+            if missing.contains(&field.name) {
+                assert!(matches!(point.field(field).unwrap(), MssqlSchedulerValue::ColumnUnavailable));
+            } else if matches!(field.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }) {
+                assert!(matches!(
+                    point.field(field).unwrap(),
+                    MssqlSchedulerValue::Unqualified { native_value: "0", required_global_trace_flag: 8134 }
+                ));
+                assert!(!samples[0].counters.iter().any(|counter| counter.key == field.name));
+            } else {
+                assert!(matches!(point.field(field).unwrap(), MssqlSchedulerValue::Observed(_)));
+            }
+        }
+        assert_eq!(reader.calls.len(), 2);
+        assert_eq!(reader.calls[0].limit, 31, "the exact 30-field descriptor plus lookahead");
+        assert!(reader.calls.iter().all(|call| !call.sql.contains("DBCC")
+            && !call.sql.contains("TRACEON")
+            && !call.sql.contains("TRACESTATUS")));
+    }
+}
+
+#[tokio::test]
+async fn modern_native_nulls_and_nonfinite_or_negative_values_never_become_observed_zero() {
+    let fields = MSSQL_SCHEDULER_FIELDS
+        .iter()
+        .filter(|field| field.introduced_in.is_some())
+        .map(|field| field.name)
+        .collect::<Vec<_>>();
+    let raw = replace(&row(), &fields.iter().map(|name| (*name, Val::Null)).collect::<Vec<_>>());
+    let mut reader = FakeRead::new(vec![Ok(fields::all_columns()), Ok(vec![raw])]);
+    let samples = read(&mut reader, 10).await.unwrap();
+    let point = MssqlSchedulerPoint::from_sample(&samples[0]).unwrap();
+    for name in &fields {
+        assert!(matches!(
+            point.field(MSSQL_SCHEDULER_FIELDS.iter().find(|field| field.name == *name).unwrap()).unwrap(),
+            MssqlSchedulerValue::NativeNull
+        ));
+    }
+    for name in fields {
+        for invalid in [Val::Int(-1), Val::Float(f64::NAN), Val::Float(f64::INFINITY)] {
+            let mut reader =
+                FakeRead::new(vec![Ok(fields::all_columns()), Ok(vec![replace(&row(), &[(name, invalid)])])]);
+            assert!(read(&mut reader, 10).await.is_err(), "{name}");
+        }
     }
 }

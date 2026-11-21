@@ -241,3 +241,67 @@ fn withdrawn_selected_population_has_explicit_scope_and_unknown_original_counts(
     assert!(!text.contains("SQLServer:Databases"));
     assert!(!text.contains("9007199254740993"));
 }
+
+fn common_report(
+    case: culprit_collector::analytical::test_support::CommonPerformanceCounterCase,
+) -> PerformanceCounterReport {
+    let (source, records) = culprit_collector::analytical::test_support::common_performance_counter_evidence(case);
+    let coverage = &source.observation.snapshot().unwrap().sources[0];
+    let rows = records
+        .iter()
+        .filter_map(|record| {
+            let TelemetryRecord::Operational(row) = record else { panic!() };
+            (row.source == culprit_core::source_id::PERFORMANCE_COUNTERS).then_some(row)
+        })
+        .collect::<Vec<_>>();
+    culprit_checks::performance_counters::explain_source(&source, coverage, &rows, true).unwrap()
+}
+
+#[test]
+fn common_counter_text_uses_the_canonical_fraction_and_keeps_partial_missing_and_unknown_inputs() {
+    use culprit_collector::analytical::test_support::CommonPerformanceCounterCase as Case;
+    for case in Case::ALL {
+        let report = common_report(case);
+        let original = serde_json::to_value(&report).unwrap();
+        let text = performance_counters(&report);
+        assert_eq!(serde_json::to_value(&report).unwrap(), original);
+        assert!(text.contains(&report.summary));
+        for entry in report.entries.iter().take(super::super::super::BRIEF_FINDING_LIMIT) {
+            assert!(text.contains(&entry.metric.label));
+            assert!(text.contains(entry.metric.text.as_deref().unwrap()));
+        }
+        for limitation in &report.limitations {
+            assert!(text.contains(limitation));
+        }
+        if case == Case::Denied {
+            assert!(!text.contains("75.00"));
+            continue;
+        }
+        assert!(text.contains(&t!("view.performance_counters.buffer_cache_ratio.title")));
+        let has_fraction = !matches!(case, Case::MeasuredZero | Case::MissingBase | Case::MissingCommon);
+        assert_eq!(text.contains("75.00"), has_fraction, "{case:?}");
+        assert!(!text.contains("resource_governor_instance_epoch"));
+        assert!(text.len() < 32 * 1024);
+    }
+}
+
+#[test]
+fn common_fraction_native_labels_use_the_existing_bounded_terminal_escape_without_changing_json() {
+    use culprit_collector::analytical::test_support::CommonPerformanceCounterCase as Case;
+    let mut report = common_report(Case::Observed);
+    let fraction = report
+        .ratios
+        .as_mut()
+        .unwrap()
+        .entries
+        .iter_mut()
+        .find(|entry| entry.kind == CounterRatioKind::BufferCacheHit)
+        .unwrap();
+    fraction.native_object = Some("SQLServer:Buffer Manager\n\u{1b}[31m表🦀".into());
+    let original = serde_json::to_value(&report).unwrap();
+    let text = performance_counters(&report);
+    assert!(!text.contains('\u{1b}'));
+    assert!(!text.contains("Buffer Manager\n"));
+    assert!(text.contains("表🦀"));
+    assert_eq!(serde_json::to_value(&report).unwrap(), original);
+}

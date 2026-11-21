@@ -11,17 +11,44 @@ pub enum MssqlSchedulerFieldKind {
     IntegerProperty,
     TextProperty,
     BooleanProperty,
-    Counter { unit: CounterUnit, nature: CounterNature },
+    Counter {
+        unit: CounterUnit,
+        nature: CounterNature,
+    },
+    /// Read-only native data whose collection prerequisite was not observed. Never a scalar measurement.
+    UnqualifiedCounter {
+        unit: CounterUnit,
+        nature: CounterNature,
+        required_global_trace_flag: u32,
+    },
 }
 #[derive(Clone, Copy)]
 pub struct MssqlSchedulerField {
     pub name: &'static str,
     pub kind: MssqlSchedulerFieldKind,
     pub required_column: bool,
+    /// Documentation only: acquisition uses actual original catalog-column visibility, never version guessing.
+    pub introduced_in: Option<u32>,
 }
 impl MssqlSchedulerField {
     const fn counter(name: &'static str, unit: CounterUnit, nature: CounterNature) -> Self {
-        Self { name, kind: MssqlSchedulerFieldKind::Counter { unit, nature }, required_column: false }
+        Self {
+            name,
+            kind: MssqlSchedulerFieldKind::Counter { unit, nature },
+            required_column: false,
+            introduced_in: None,
+        }
+    }
+    const fn counter_since(name: &'static str, unit: CounterUnit, nature: CounterNature, major: u32) -> Self {
+        Self { introduced_in: Some(major), ..Self::counter(name, unit, nature) }
+    }
+    const fn spinlock(name: &'static str, unit: CounterUnit, nature: CounterNature) -> Self {
+        Self {
+            name,
+            kind: MssqlSchedulerFieldKind::UnqualifiedCounter { unit, nature, required_global_trace_flag: 8134 },
+            required_column: false,
+            introduced_in: Some(17),
+        }
     }
 }
 use CounterNature::{Cumulative, Gauge, Unknown};
@@ -31,13 +58,18 @@ use MssqlSchedulerFieldKind::{BooleanProperty, Identity, IntegerProperty, TextPr
 // Unknown internal progress/load semantics remain unknown. Neither unsupported quantum_length_us nor
 // total_cpu_idle_capped_ms is acquired. Native catalog availability governs optional fields.
 pub const MSSQL_SCHEDULER_FIELDS: &[MssqlSchedulerField] = &[
-    MssqlSchedulerField { name: "scheduler_id", kind: Identity, required_column: true },
-    MssqlSchedulerField { name: "parent_node_id", kind: IntegerProperty, required_column: true },
-    MssqlSchedulerField { name: "cpu_id", kind: IntegerProperty, required_column: true },
-    MssqlSchedulerField { name: "status", kind: TextProperty, required_column: true },
-    MssqlSchedulerField { name: "is_online", kind: BooleanProperty, required_column: true },
-    MssqlSchedulerField { name: "is_idle", kind: BooleanProperty, required_column: true },
-    MssqlSchedulerField { name: "failed_to_create_worker", kind: BooleanProperty, required_column: false },
+    MssqlSchedulerField { name: "scheduler_id", kind: Identity, required_column: true, introduced_in: None },
+    MssqlSchedulerField { name: "parent_node_id", kind: IntegerProperty, required_column: true, introduced_in: None },
+    MssqlSchedulerField { name: "cpu_id", kind: IntegerProperty, required_column: true, introduced_in: None },
+    MssqlSchedulerField { name: "status", kind: TextProperty, required_column: true, introduced_in: None },
+    MssqlSchedulerField { name: "is_online", kind: BooleanProperty, required_column: true, introduced_in: None },
+    MssqlSchedulerField { name: "is_idle", kind: BooleanProperty, required_column: true, introduced_in: None },
+    MssqlSchedulerField {
+        name: "failed_to_create_worker",
+        kind: BooleanProperty,
+        required_column: false,
+        introduced_in: None,
+    },
     MssqlSchedulerField::counter("current_tasks_count", Count, Gauge),
     MssqlSchedulerField::counter("runnable_tasks_count", Count, Gauge),
     MssqlSchedulerField::counter("current_workers_count", Count, Gauge),
@@ -53,11 +85,25 @@ pub const MSSQL_SCHEDULER_FIELDS: &[MssqlSchedulerField] = &[
     MssqlSchedulerField::counter("total_cpu_usage_ms", Milliseconds, Cumulative),
     MssqlSchedulerField::counter("total_scheduler_delay_ms", Milliseconds, Cumulative),
     MssqlSchedulerField::counter("ideal_workers_limit", Count, Gauge),
+    // SQL Server 2022+, selected only when the original native metadata exposes these columns.
+    MssqlSchedulerField::counter_since("queued_disk_io_count", Count, Gauge, 16),
+    MssqlSchedulerField::counter_since("total_enqueued_tasks", Count, Cumulative, 16),
+    // SQL Server 2025+. These include internal SQLOS work, not query execution counts or CPU demand.
+    MssqlSchedulerField::counter_since("total_signal_time", Milliseconds, Cumulative, 17),
+    MssqlSchedulerField::counter_since("total_waits_completed", Count, Cumulative, 17),
+    MssqlSchedulerField::counter_since("total_completed_tasks", Count, Cumulative, 17),
+    // https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-schedulers-transact-sql
+    // Collection requires global TF 8134. This reader neither observes its state nor enables it; raw native
+    // scalars live in diagnostic properties, outside NativeCounterSample, including when their value is zero.
+    MssqlSchedulerField::spinlock("spinlock_wait_time_ms", Milliseconds, Cumulative),
+    MssqlSchedulerField::spinlock("spinlock_max_wait_time_ms", Milliseconds, Gauge),
+    MssqlSchedulerField::spinlock("spinlock_wait_count", Count, Cumulative),
 ];
 
 /// Original field absence is explicit; native NULL and an unavailable catalog column are different facts.
 pub enum MssqlSchedulerValue<'a> {
     Observed(&'a str),
+    Unqualified { native_value: &'a str, required_global_trace_flag: u32 },
     NativeNull,
     ColumnUnavailable,
 }
@@ -94,7 +140,14 @@ impl<'a> MssqlSchedulerPoint<'a> {
             || sample.properties.keys().any(|name| {
                 !matches!(name.as_str(), "unavailable_columns" | "native_null_columns")
                     && !MSSQL_SCHEDULER_FIELDS.iter().any(|field| {
-                        field.name == name && matches!(field.kind, IntegerProperty | TextProperty | BooleanProperty)
+                        field.name == name
+                            && matches!(
+                                field.kind,
+                                IntegerProperty
+                                    | TextProperty
+                                    | BooleanProperty
+                                    | MssqlSchedulerFieldKind::UnqualifiedCounter { .. }
+                            )
                     })
             })
             || sample.counters.iter().any(|counter| {
@@ -123,7 +176,13 @@ impl<'a> MssqlSchedulerPoint<'a> {
             Ok(MssqlSchedulerValue::NativeNull)
         } else {
             // from_sample established exactly one original representation for every field.
-            self.observed(field).map(MssqlSchedulerValue::Observed).ok_or_else(invalid)
+            let value = self.observed(field).ok_or_else(invalid)?;
+            Ok(match field.kind {
+                MssqlSchedulerFieldKind::UnqualifiedCounter { required_global_trace_flag, .. } => {
+                    MssqlSchedulerValue::Unqualified { native_value: value, required_global_trace_flag }
+                }
+                _ => MssqlSchedulerValue::Observed(value),
+            })
         }
     }
     fn observed(&self, field: &MssqlSchedulerField) -> Option<&'a str> {
@@ -161,6 +220,7 @@ impl<'a> MssqlSchedulerPoint<'a> {
             Identity | IntegerProperty => signed_native(value),
             TextProperty => !value.is_empty() && !value.chars().any(char::is_control),
             BooleanProperty => matches!(value, "0" | "1"),
+            MssqlSchedulerFieldKind::UnqualifiedCounter { .. } => native_count(value),
             MssqlSchedulerFieldKind::Counter { unit, nature } => {
                 let counter =
                     self.sample.counters.iter().find(|counter| counter.key == field.name).ok_or_else(invalid)?;
@@ -171,7 +231,7 @@ impl<'a> MssqlSchedulerPoint<'a> {
                     && counter.unit == unit
                     && counter.nature == nature
                     && counter.reset == crate::ResetMarker::Unknown
-                    && value.parse::<i64>().is_ok_and(|number| number >= 0 && number.to_string() == value)
+                    && native_count(value)
             }
         };
         valid.then_some(()).ok_or_else(invalid)
@@ -191,6 +251,9 @@ fn missing_columns(sample: &NativeCounterSet, key: &str) -> Result<BTreeSet<&'st
         }
     }
     Ok(columns)
+}
+fn native_count(value: &str) -> bool {
+    value.parse::<i64>().is_ok_and(|number| number >= 0 && number.to_string() == value)
 }
 fn signed_native(value: &str) -> bool {
     value.parse::<i64>().is_ok_and(|number| number.to_string() == value)

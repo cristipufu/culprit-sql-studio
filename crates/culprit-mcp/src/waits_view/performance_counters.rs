@@ -28,6 +28,7 @@ pub(crate) fn value(counters: &PerformanceCounterReport) -> Value {
         "read_complete":counters.read_complete,"native_observations":counters.native_observations,"observed_observations":counters.observed_observations,
         "native_counter_rows":counters.native_counter_rows,"observed_counter_rows":counters.observed_counter_rows,
         "presented_counter_rows":counters.presented_counter_rows,"returned_counter_rows":counters.entries.len().min(ENTRY_LIMIT),"omitted_counter_rows":counters.entries.len().saturating_sub(ENTRY_LIMIT),"entries_limited":counters.entries_limited || counters.entries.len()>ENTRY_LIMIT,
+        "ratios":counters.ratios.as_deref().map(super::counter_ratios::value),
         "fields_withheld":counters.fields_withheld,"missing_fields":counters.missing_fields,
         "entries":counters.entries.iter().take(ENTRY_LIMIT).map(|entry|json!({
             "reference":culprit_core::telemetry::digest(format!("{}:{}",entry.observation_key,entry.counter_key).as_bytes()),

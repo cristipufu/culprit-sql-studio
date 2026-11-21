@@ -1474,7 +1474,7 @@
         "table": "order_items"
       }
     ],
-    "format": 41,
+    "format": 42,
     "histograms": null,
     "id": "20261011T160540.394Z",
     "identity": {
@@ -2789,6 +2789,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,
         "name": "customers",
         "overflow_bytes": null,
@@ -2821,6 +2822,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,
         "name": "products",
         "overflow_bytes": null,
@@ -2853,6 +2855,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,
         "name": "orders",
         "overflow_bytes": null,
@@ -2885,6 +2888,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,
         "name": "order_items",
         "overflow_bytes": null,

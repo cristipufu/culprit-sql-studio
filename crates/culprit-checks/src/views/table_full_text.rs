@@ -4,13 +4,6 @@ use culprit_core::{
     format, source_id, t, telemetry::*,
 };
 
-pub struct TableFullTextEvidence<'a> {
-    pub description: &'a CollectionDescription,
-    pub observations: &'a [&'a OperationalObservation],
-    pub source: &'a SourceOutcome,
-    pub read_complete: bool,
-}
-
 pub fn explain_snapshot(snapshot: &Snapshot) -> Result<Option<TableFullTextReport>> {
     let source = snapshot.sources.iter().find(|source| source.source == source_id::TABLES);
     let entries = snapshot
@@ -43,34 +36,15 @@ fn qualified_table(
     entry(&table.schema, &table.name, None, state).map(Some)
 }
 
-pub fn explain(evidence: TableFullTextEvidence<'_>) -> Result<TableFullTextReport> {
+pub fn explain(evidence: super::table_catalog::TableCatalogEvidence<'_>) -> Result<TableFullTextReport> {
+    let context = evidence.validate()?;
     let native = evidence.description.observation.snapshot().ok_or_else(invalid)?;
-    let context = NativeReadContext::from_snapshot(evidence.description)?;
     let [coverage] = native.sources.as_slice() else { return Err(invalid()) };
-    if native.dataset != SnapshotDataset::Tables
-        || context.target.engine() != Engine::Mssql
-        || context.target.database().is_none()
-        || !matches!(context.partition, SourcePartition::Target)
-        || coverage.source != source_id::TABLES
-        || evidence.source.source != coverage.source
-        || evidence.observations.len() > coverage.records as usize
-        || evidence.read_complete && evidence.observations.len() != coverage.records as usize
-        || !super::source_coverage::consistent_source(
-            Some(evidence.source),
-            evidence.observations.iter().map(|row| row.source.as_str()),
-        )
-    {
-        return Err(invalid());
-    }
-    let mut keys = std::collections::BTreeSet::new();
     let entries = evidence
         .observations
         .iter()
         .map(|row| {
             let OperationalFact::MssqlTable(table) = &row.fact else { return Err(invalid()) };
-            if !row.is_valid() || !keys.insert(&row.key) {
-                return Err(invalid());
-            }
             entry(&table.schema, &table.name, Some(row.key.clone()), &table.full_text)
         })
         .collect::<Result<Vec<_>>>()?;

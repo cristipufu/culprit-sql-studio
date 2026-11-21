@@ -304,3 +304,55 @@ async fn cancelled_local_verification_or_foreign_capture_receipt_cannot_open_the
         assert!(workspace.report_history("shop").unwrap().is_empty());
     }
 }
+
+#[tokio::test]
+async fn saved_common_inputs_replay_independently_of_selected_database_counters_and_withdraw_on_sharing() {
+    use culprit_collector::analytical::test_support::{
+        CommonPerformanceCounterCase, common_performance_counter_evidence,
+    };
+    let (source, rows) = database_performance_counter_evidence(Case::Exact);
+    let captured = Captured::from_source("shop", source, rows).await;
+    let mut batch = with_shared_counters();
+    let (_, rows) = common_performance_counter_evidence(CommonPerformanceCounterCase::Observed);
+    let sets = rows
+        .into_iter()
+        .filter_map(|row| match row {
+            TelemetryRecord::Operational(OperationalObservation {
+                source,
+                fact: OperationalFact::CounterSet(set),
+                ..
+            }) if source == culprit_core::source_id::PERFORMANCE_COUNTERS => Some(*set),
+            _ => None,
+        })
+        .collect();
+    batch.requested.pressure.as_mut().unwrap().resource_counters = Some(sets);
+    batch
+        .requested
+        .sources
+        .iter_mut()
+        .find(|source| source.source == culprit_core::source_id::PERFORMANCE_COUNTERS)
+        .unwrap()
+        .state = SourceState::Partial;
+    let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
+    let analysis = analyze(&workspace, &captured).await;
+    let report =
+        workspace.scan_with_captured_database_performance_counters("shop", &options(), None, analysis).await.unwrap();
+    let shared = &report.performance_counters[0];
+    assert_eq!(shared.source_state, Some(SourceState::Partial));
+    assert!(shared.context.is_none(), "scan points cannot borrow the selected capture's original clock or owner");
+    assert!(
+        shared.entries.iter().any(|entry| entry.field == "common_tempdb_free" && entry.raw_value == "9007199254740993")
+    );
+    let expected = serde_json::to_value(&report.performance_counters).unwrap();
+    let id = report.snapshot.id.clone();
+    drop(captured);
+    let restored = workspace.report_at("shop", &id).unwrap();
+    assert_eq!(serde_json::to_value(&restored.performance_counters).unwrap(), expected);
+    assert_eq!(state.factories.load(Ordering::SeqCst), 1, "offline replay does not open a provider");
+    let shared_snapshot = culprit_core::redact::redact_snapshot(&restored.snapshot);
+    let replay = culprit_checks::analyze(shared_snapshot);
+    assert!(replay.performance_counters[0].fields_withheld);
+    assert!(replay.performance_counters[0].entries.is_empty());
+    assert_eq!(selected(&replay).source_state, Some(SourceState::Unavailable));
+    assert!(selected(&replay).entries.is_empty());
+}

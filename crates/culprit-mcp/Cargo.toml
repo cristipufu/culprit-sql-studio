@@ -24,3 +24,4 @@ tokio.workspace = true
 async-trait.workspace = true
 culprit-checks.workspace = true
 culprit-collector = { workspace = true, features = ["test-support"] }
+culprit-engine = { workspace = true, features = ["collector"] }

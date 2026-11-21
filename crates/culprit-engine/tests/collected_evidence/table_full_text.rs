@@ -122,3 +122,51 @@ async fn original_table_storage_configuration_replays_exactly_without_current_me
         }
     }
 }
+
+#[tokio::test]
+async fn original_temporal_configuration_keeps_exact_native_fields_and_source_coverage_without_live_reads() {
+    use culprit_collector::analytical::test_support::{TableTemporalCase, table_temporal_evidence};
+    for case in TableTemporalCase::ALL {
+        let (source, records) = table_temporal_evidence(case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(FAMILY).await;
+        assert_table_metadata_capture(&capture, &source, &records);
+        let analysis = collected_resources::table_temporal(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.report.native_rows, Some(records.len() as u32));
+        assert_eq!(analysis.report.observed_rows, records.len() as u32);
+        assert_eq!(fixture.recovery_object_reads(), opened);
+        for (entry, record) in analysis.report.entries.iter().zip(&records) {
+            let TelemetryRecord::Operational(row) = record else { panic!() };
+            let OperationalFact::MssqlTable(table) = &row.fact else { panic!() };
+            assert_eq!(entry.observation_key.as_deref(), Some(row.key.as_str()));
+            assert_eq!(entry.fields[0].availability, table.temporal_configuration.temporal_type_availability);
+            assert_eq!(entry.fields.len(), 6);
+        }
+        if case == TableTemporalCase::SourceDenied {
+            assert_eq!(analysis.report.source_state, Some(SourceState::Unavailable));
+            assert!(analysis.report.entries.is_empty());
+        }
+        if case == TableTemporalCase::Partial {
+            assert_eq!(analysis.report.source_state, Some(SourceState::Partial));
+        }
+        let wrong = fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+        assert!(collected_resources::table_temporal(&wrong).is_err());
+    }
+}
+#[tokio::test]
+async fn missing_original_table_body_is_not_an_empty_or_ordinary_temporal_configuration() {
+    use culprit_collector::analytical::test_support::{TableTemporalCase, table_temporal_evidence};
+    let (source, records) = table_temporal_evidence(TableTemporalCase::SystemVersioned);
+    let fixture = Fixture::new(source, records).await;
+    fixture.remove_first_row(TelemetryStream::OperationalSamples);
+    let capture = fixture.read_families(FAMILY).await;
+    let analysis = collected_resources::table_temporal(&capture).unwrap();
+    assert_eq!(analysis.report.native_rows, Some(1));
+    assert_eq!(analysis.report.observed_rows, 0);
+    assert_eq!(analysis.report.read_complete, Some(false));
+    assert!(analysis.report.entries.is_empty());
+    assert!(analysis.report.limitations.contains(&culprit_core::t!("view.table_temporal.limit.read")));
+    assert_eq!(capture.metrics().recovery_objects, 0);
+}

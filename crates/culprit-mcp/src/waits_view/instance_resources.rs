@@ -1,7 +1,7 @@
 use culprit_core::{Report, telemetry::INSTANCE_RESOURCES_SOURCE};
 use serde_json::{Value, json};
 const ENTRY_LIMIT: usize = 5;
-const SCHEDULER_FIELD_LIMIT: usize = 21;
+const SCHEDULER_FIELD_LIMIT: usize = culprit_core::telemetry::MSSQL_SCHEDULER_FIELDS.len() - 1;
 const NATIVE_TEXT_LIMIT: usize = 512;
 const LIMITATION_LIMIT: usize = 8;
 
@@ -57,7 +57,7 @@ fn scheduler_value(report: &culprit_core::SchedulerReport) -> Value {
             "observation_key":bounded(&entry.observation_key), "scheduler_id":bounded(&entry.scheduler_id), "title":bounded(&entry.title),
             "fields":entry.fields.iter().take(SCHEDULER_FIELD_LIMIT).map(|field| json!({
                 "native_name":bounded(&field.native_name), "label":bounded(&field.label), "value":field.value.as_deref().map(bounded),
-                "availability":field.availability, "unit":field.unit, "nature":field.nature, "reset":field.reset,
+                "unqualified":field.unqualified.as_ref().map(|raw|json!({"native_value":bounded(&raw.native_value),"required_global_trace_flag":raw.required_global_trace_flag})), "availability":field.availability, "unit":field.unit, "nature":field.nature, "reset":field.reset,
                 "explanation":field.explanation.as_deref().map(bounded),
             })).collect::<Vec<_>>(),
             "fields_available":entry.fields.len(), "fields_presented":entry.fields.len().min(SCHEDULER_FIELD_LIMIT),

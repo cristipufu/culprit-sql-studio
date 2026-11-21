@@ -1,7 +1,7 @@
 //! Per-scheduler context is independent of the aggregate resource point and identifies no database cause.
 use culprit_core::{
-    Engine, ResetMarker, Result, SchedulerEntry, SchedulerField, SchedulerFieldAvailability, SchedulerReport, Snapshot,
-    SourceState, format, t, telemetry::*,
+    Engine, ResetMarker, Result, SchedulerEntry, SchedulerField, SchedulerFieldAvailability, SchedulerReport,
+    SchedulerUnqualifiedValue, Snapshot, SourceState, format, t, telemetry::*,
 };
 use std::collections::BTreeSet;
 
@@ -139,13 +139,21 @@ fn entry(point: &MssqlSchedulerPoint<'_>) -> Result<SchedulerEntry> {
     let mut fields = Vec::with_capacity(MSSQL_SCHEDULER_FIELDS.len() - 1);
     for field in MSSQL_SCHEDULER_FIELDS.iter().filter(|field| !matches!(field.kind, MssqlSchedulerFieldKind::Identity))
     {
-        let (value, availability) = match point.field(field)? {
-            MssqlSchedulerValue::Observed(value) => (Some(value.into()), SchedulerFieldAvailability::Observed),
-            MssqlSchedulerValue::NativeNull => (None, SchedulerFieldAvailability::NativeNull),
-            MssqlSchedulerValue::ColumnUnavailable => (None, SchedulerFieldAvailability::ColumnUnavailable),
+        let (value, unqualified, availability) = match point.field(field)? {
+            MssqlSchedulerValue::Observed(value) => (Some(value.into()), None, SchedulerFieldAvailability::Observed),
+            MssqlSchedulerValue::Unqualified { native_value, required_global_trace_flag } => (
+                None,
+                Some(SchedulerUnqualifiedValue { native_value: native_value.into(), required_global_trace_flag }),
+                SchedulerFieldAvailability::InstrumentationUnqualified,
+            ),
+            MssqlSchedulerValue::NativeNull => (None, None, SchedulerFieldAvailability::NativeNull),
+            MssqlSchedulerValue::ColumnUnavailable => (None, None, SchedulerFieldAvailability::ColumnUnavailable),
         };
         let (unit, nature, reset) = match field.kind {
-            MssqlSchedulerFieldKind::Counter { unit, nature } => (Some(unit), Some(nature), Some(ResetMarker::Unknown)),
+            MssqlSchedulerFieldKind::Counter { unit, nature }
+            | MssqlSchedulerFieldKind::UnqualifiedCounter { unit, nature, .. } => {
+                (Some(unit), Some(nature), Some(ResetMarker::Unknown))
+            }
             _ => (None, None, None),
         };
         fields.push(SchedulerField {
@@ -153,10 +161,13 @@ fn entry(point: &MssqlSchedulerPoint<'_>) -> Result<SchedulerEntry> {
             label: label(field.name)?,
             value,
             availability,
-            explanation: match (unit, nature) {
-                (Some(CounterUnit::Unknown), _) => Some(t!("view.schedulers.counter.unknown")),
-                (_, Some(CounterNature::Cumulative)) => Some(t!("view.schedulers.counter.cumulative")),
-                _ => None,
+            unqualified,
+            explanation: match field.kind {
+                MssqlSchedulerFieldKind::UnqualifiedCounter { required_global_trace_flag, .. } => Some(t!(
+                    "view.schedulers.counter.instrumentation",
+                    flag = format::digits(required_global_trace_flag.to_string())
+                )),
+                _ => explanation(field.name, unit, nature),
             },
             unit,
             nature,
@@ -169,6 +180,20 @@ fn entry(point: &MssqlSchedulerPoint<'_>) -> Result<SchedulerEntry> {
         title: t!("view.schedulers.entry", id = format::digits(point.scheduler_id().into())),
         fields,
     })
+}
+fn explanation(name: &str, unit: Option<CounterUnit>, nature: Option<CounterNature>) -> Option<String> {
+    match name {
+        "queued_disk_io_count" => Some(t!("view.schedulers.counter.queued_io")),
+        "total_enqueued_tasks" => Some(t!("view.schedulers.counter.enqueued")),
+        "total_signal_time" => Some(t!("view.schedulers.counter.signal")),
+        "total_waits_completed" => Some(t!("view.schedulers.counter.waits_completed")),
+        "total_completed_tasks" => Some(t!("view.schedulers.counter.removed")),
+        _ => match (unit, nature) {
+            (Some(CounterUnit::Unknown), _) => Some(t!("view.schedulers.counter.unknown")),
+            (_, Some(CounterNature::Cumulative)) => Some(t!("view.schedulers.counter.cumulative")),
+            _ => None,
+        },
+    }
 }
 fn label(name: &str) -> Result<String> {
     Ok(match name {
@@ -193,6 +218,14 @@ fn label(name: &str) -> Result<String> {
         "total_cpu_usage_ms" => t!("view.schedulers.field.total_cpu_usage_ms"),
         "total_scheduler_delay_ms" => t!("view.schedulers.field.total_scheduler_delay_ms"),
         "ideal_workers_limit" => t!("view.schedulers.field.ideal_workers_limit"),
+        "queued_disk_io_count" => t!("view.schedulers.field.queued_disk_io_count"),
+        "total_enqueued_tasks" => t!("view.schedulers.field.total_enqueued_tasks"),
+        "total_signal_time" => t!("view.schedulers.field.total_signal_time"),
+        "total_waits_completed" => t!("view.schedulers.field.total_waits_completed"),
+        "total_completed_tasks" => t!("view.schedulers.field.total_completed_tasks"),
+        "spinlock_wait_time_ms" => t!("view.schedulers.field.spinlock_wait_time_ms"),
+        "spinlock_max_wait_time_ms" => t!("view.schedulers.field.spinlock_max_wait_time_ms"),
+        "spinlock_wait_count" => t!("view.schedulers.field.spinlock_wait_count"),
         _ => return Err(invalid()),
     })
 }

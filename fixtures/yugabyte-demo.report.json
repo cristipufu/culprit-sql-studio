@@ -972,7 +972,7 @@
         "table": "orders"
       }
     ],
-    "format": 41,
+    "format": 42,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -5252,6 +5252,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,
         "name": "customers",
         "overflow_bytes": null,
@@ -5299,6 +5300,7 @@
         "modifications_since_analyze": null,
         "mssql_full_text": null,
         "mssql_storage_configuration": null,
+        "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,
         "name": "orders",
         "overflow_bytes": null,

@@ -11,7 +11,7 @@ import { StorageConfiguration } from "../views/schema-table/StorageConfiguration
 import { t } from "./i18n";
 
 function table(memory: boolean | null, code: number | null, description: string | null): TableStat {
-  return partial<TableStat>({ mssql_storage_configuration: {
+  return partial<TableStat>({ mssql_temporal_configuration: null, mssql_storage_configuration: {
     memory_optimized: memory, durability: code, durability_desc: description,
   } });
 }

@@ -105,6 +105,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     let mut counter_sources = BTreeSet::new();
     let mut instance_points = 0;
     let mut process_cpu_points = 0;
+    let mut common_counter_points = 0;
     let mut native_governor_kinds = BTreeSet::new();
     let mut tempdb_log_points = 0;
     let mut tempdb_data_points = 0;
@@ -144,6 +145,37 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
                                 set.counters.iter().all(|counter| counter.reset == culprit_core::ResetMarker::Unknown)
                             );
                             native_governor_kinds.insert(metadata.kind);
+                        }
+                        if source == crate::sources::PERFORMANCE_COUNTERS.name && !resource_governor_counter_set(&set) {
+                            let profile = culprit_core::Engine::Mssql.spec().performance_counters().unwrap();
+                            profile.validate(&set).unwrap();
+                            assert!(profile.common_requested(&set), "the real investigation reader must select Common");
+                            for name in [
+                                "Free Space in tempdb (KB)",
+                                "Page reads/sec",
+                                "Buffer cache hit ratio",
+                                "Buffer cache hit ratio base",
+                            ] {
+                                let counter = set
+                                    .counters
+                                    .iter()
+                                    .find(|counter| counter.native_name == name)
+                                    .unwrap_or_else(|| panic!("native Common input missing: {name}"));
+                                assert_ne!(counter.nature, CounterNature::Unknown, "native type must qualify {name}");
+                                assert_ne!(counter.unit, CounterUnit::Unknown, "native units must qualify {name}");
+                            }
+                            let ratio =
+                                set.ratios.iter().find(|ratio| ratio.kind == CounterRatioKind::BufferCacheHit).unwrap();
+                            assert!(
+                                ratio.numerator.is_some() && ratio.base.is_some(),
+                                "actual same-read base must be captured"
+                            );
+                            if ratio.issues(&set).is_empty() {
+                                assert!(ratio.percent(&set).is_some());
+                            } else {
+                                assert!(ratio.percent(&set).is_none());
+                            }
+                            common_counter_points += 1;
                         }
                         if source == crate::sources::PROCESSOR_TOPOLOGY.name {
                             let cpu = MssqlProcessCpuPoint::from_original(&set, &context).unwrap();
@@ -207,6 +239,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     }
     assert_eq!(records, snapshot.records as usize);
     assert_eq!(instance_points, 1, "the seventh family retains its raw instance point without admission");
+    assert_eq!(common_counter_points, 1, "one native Common aggregate; no rate, owner or cost qualification");
     assert_eq!(process_cpu_points, 1, "one actual same-query process CPU point; no utilization or cost qualification");
     assert_eq!(tempdb_log_points, 1, "native tempdb log visibility must be proved, never skipped");
     assert_eq!(tempdb_data_points, 1, "data and log retain independent source populations");

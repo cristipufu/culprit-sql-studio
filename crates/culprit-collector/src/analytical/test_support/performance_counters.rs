@@ -1,8 +1,12 @@
 //! Native-shaped fixed counters use the existing authentic Operational capture and shared Details codec.
 use super::*;
 use culprit_core::{Engine, MeasurementScope, ResetMarker};
+mod common;
 mod database;
 mod resource_governor;
+pub use common::{
+    CommonPerformanceCounterCase, assert_common_performance_counter_capture, common_performance_counter_evidence,
+};
 pub use database::{DatabasePerformanceCounterCase, database_performance_counter_evidence};
 pub use resource_governor::{ResourceGovernorCounterCase, resource_governor_counter_evidence};
 

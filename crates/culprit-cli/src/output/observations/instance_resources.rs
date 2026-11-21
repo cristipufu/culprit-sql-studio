@@ -1,7 +1,7 @@
 use super::{OBSERVATION_DETAIL_CHARS, SourceQualification, Summary, native_work_summary, render_summary, statement};
 use culprit_core::{InstanceResourceReport, SchedulerFieldAvailability, SchedulerReport, format, t};
 
-const MAX_SCHEDULER_FIELDS: usize = 21;
+const MAX_SCHEDULER_FIELDS: usize = culprit_core::telemetry::MSSQL_SCHEDULER_FIELDS.len() - 1;
 const MAX_SCHEDULER_LIMITATIONS: usize = 8;
 
 pub(crate) fn instance_resources(report: &InstanceResourceReport) -> String {
@@ -95,12 +95,19 @@ fn scheduler_text(report: &SchedulerReport) -> String {
                             .unwrap_or_else(|| t!("view.database_properties.unknown")),
                         SchedulerFieldAvailability::NativeNull => t!("view.schedulers.value.null"),
                         SchedulerFieldAvailability::ColumnUnavailable => t!("view.schedulers.value.unavailable"),
+                        SchedulerFieldAvailability::InstrumentationUnqualified => field
+                            .unqualified
+                            .as_ref()
+                            .map(|raw| {
+                                t!("view.schedulers.value.unqualified", value = statement::preview(&raw.native_value))
+                            })
+                            .unwrap_or_else(|| t!("view.schedulers.value.unavailable")),
                     };
                     let mut line =
                         t!("view.counter_ratios.cli.metric", label = statement::preview(&field.label), value = value);
                     if let Some(explanation) = &field.explanation {
                         line.push(' ');
-                        line.push_str(&statement::preview(explanation));
+                        line.push_str(&statement::preview_bounded(explanation, OBSERVATION_DETAIL_CHARS));
                     }
                     line
                 })

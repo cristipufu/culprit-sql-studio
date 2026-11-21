@@ -61,7 +61,7 @@ pub(crate) async fn read<R: NativeRead>(
             standard.push(row.clone());
         }
     }
-    let mut read = decode(&standard, limit, Population::Shared)?;
+    let mut read = decode(&standard, limit, Population::InstanceInvestigation)?;
     let mut sets = BTreeMap::<(MssqlResourceGovernorCounterKind, String), NativeCounterSet>::new();
     let epoch = owner.capture_epoch()?;
     for row in &governed {

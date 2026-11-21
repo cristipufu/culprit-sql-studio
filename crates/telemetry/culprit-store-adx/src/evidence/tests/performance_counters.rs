@@ -225,3 +225,59 @@ async fn original_governor_sets_roundtrip_native_ids_nullable_context_and_exact_
         assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
     }
 }
+
+#[tokio::test]
+async fn original_common_inputs_and_real_buffer_base_roundtrip_without_recovery_or_reinterpretation() {
+    use test_support::{CommonPerformanceCounterCase as Case, common_performance_counter_evidence};
+    for case in Case::ALL {
+        let (source, records) = common_performance_counter_evidence(case);
+        let fixture = collected_original(source.clone(), records.clone()).await;
+        fixture.replies(vec![fixture.rows.clone()]);
+        let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        let capture = fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
+            .await
+            .unwrap();
+        test_support::assert_common_performance_counter_capture(&capture, &source, &records, case);
+        assert_eq!(capture.metrics().recovery_objects, 0);
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+    }
+}
+
+#[tokio::test]
+async fn changed_common_base_cannot_reinterpret_an_authenticated_original_fraction() {
+    let (source, records) =
+        test_support::common_performance_counter_evidence(test_support::CommonPerformanceCounterCase::Observed);
+    let fixture = collected_original(source, records).await;
+    let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+    let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+    let mut rows = fixture.rows.clone();
+    let mut changed = false;
+    for row in &mut rows {
+        let mut details: Value = serde_json::from_str(row[column].as_str().unwrap()).unwrap();
+        let Some(counters) = details.get_mut("counters").and_then(Value::as_array_mut) else { continue };
+        let Some(base) = counters.iter_mut().find(|counter| counter["native_name"] == "Buffer cache hit ratio base")
+        else {
+            continue;
+        };
+        base["value"]["value"] = json!("5");
+        row[column] = json!(serde_json::to_string(&details).unwrap());
+        changed = true;
+    }
+    assert!(changed, "tamper the actual native base, not an unrelated row");
+    fixture.replies(vec![rows]);
+    let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+    let error = fixture
+        .reader()
+        .read_capture(
+            &fixture.range,
+            &[EvidenceFamily::OperationalSamples],
+            EvidenceReadBudget::default(),
+            Some(fixture.recovery.as_ref()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+}

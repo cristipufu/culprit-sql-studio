@@ -9,6 +9,7 @@ fn report() -> InstanceResourceReport {
         native_name: "work_queue_count".into(),
         label: "native field".into(),
         value: Some("9007199254740993".into()),
+        unqualified: None,
         availability: SchedulerFieldAvailability::Observed,
         explanation: None,
         unit: Some(CounterUnit::Count),
@@ -65,6 +66,7 @@ fn compact_scheduler_values_preserve_exact_inputs_typed_unknowns_and_original_co
         native_name: "failed_to_create_worker".into(),
         label: "native flag".into(),
         value: None,
+        unqualified: None,
         availability: SchedulerFieldAvailability::NativeNull,
         explanation: None,
         unit: None,
@@ -75,6 +77,7 @@ fn compact_scheduler_values_preserve_exact_inputs_typed_unknowns_and_original_co
         native_name: "ideal_workers_limit".into(),
         label: "native limit".into(),
         value: None,
+        unqualified: None,
         availability: SchedulerFieldAvailability::ColumnUnavailable,
         explanation: None,
         unit: Some(CounterUnit::Count),
@@ -113,8 +116,26 @@ fn compact_scheduler_formatter_bounds_extra_fields_and_native_strings_independen
     let schedulers = &value["schedulers"];
     assert_eq!(schedulers["title"].as_str().unwrap().chars().count(), 512);
     let entry = &schedulers["entries"][0];
-    assert_eq!(entry["fields_presented"], 21);
-    assert_eq!(entry["fields_omitted"], 79);
+    assert_eq!(entry["fields_presented"], 29);
+    assert_eq!(entry["fields_omitted"], 71);
     assert_eq!(entry["fields"][0]["value"].as_str().unwrap().chars().count(), 512);
     assert_eq!(entry["fields"][0]["label"].as_str().unwrap().chars().count(), 512);
+}
+
+#[test]
+fn compact_spinlock_diagnostics_keep_the_raw_value_but_withhold_the_measurement_slot() {
+    let mut report = report();
+    let mut field = report.schedulers.as_ref().unwrap().entries[0].fields[0].clone();
+    field.native_name = "spinlock_wait_count".into();
+    field.value = None;
+    field.availability = SchedulerFieldAvailability::InstrumentationUnqualified;
+    field.unqualified =
+        Some(culprit_core::SchedulerUnqualifiedValue { native_value: "0".into(), required_global_trace_flag: 8134 });
+    report.schedulers.as_mut().unwrap().entries[0].fields.push(field);
+    let value = value(&report);
+    let field = &value["schedulers"]["entries"][0]["fields"][1];
+    assert!(field["value"].is_null());
+    assert_eq!(field["availability"], "instrumentation-unqualified");
+    assert_eq!(field["unqualified"]["native_value"], "0");
+    assert_eq!(field["unqualified"]["required_global_trace_flag"], 8134);
 }

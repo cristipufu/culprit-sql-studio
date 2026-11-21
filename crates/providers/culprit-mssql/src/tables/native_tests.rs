@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, panic::AssertUnwindSafe, sync::Arc};
 
 mod fixture;
 mod populations;
+mod temporal;
 use fixture::Fixture;
 
 type Tables = BTreeMap<String, MssqlTableFullText>;
@@ -149,68 +150,73 @@ async fn read_tables(fixture: &Fixture<'_>, mode: ReadMode, denied: bool) -> Tab
     tables
 }
 
-async fn stream_tables(
+async fn stream_table_rows(
     reader: &mut ReadSession,
-    fixture: &Fixture<'_>,
-    denied: bool,
-) -> Result<Vec<(String, MssqlTableFullText)>> {
-    // Available reads use the shipped streamed partition-statistics layout; denied metadata uses the existing catalog fallback.
-    let layout = Layout::new(!denied);
+    layout: &Layout,
+) -> Result<Vec<(crate::value::Rec, MssqlTableSnapshot)>> {
     reader
         .begin_stream(
-            &select_sql(&layout),
+            &select_sql(layout),
             vec![Parameter::Integer((MAX_APPLICATION_TABLES + 1) as i64)],
             MAX_APPLICATION_TABLES + 1,
         )
         .await
         .map_err(ReadError::into_error)?;
     let mut retained = Vec::new();
-    let mut rows = 0usize;
+    let mut count = 0usize;
     loop {
         let batch = reader.next_batch().await.map_err(ReadError::into_error)?;
-        rows += batch.rows.len();
-        assert!(
-            rows <= MAX_APPLICATION_TABLES,
-            "native overflow is a failed source, not a truncated successful prefix"
-        );
+        count += batch.rows.len();
+        assert!(count <= MAX_APPLICATION_TABLES, "native overflow is a refused source, not a successful prefix");
         for row in batch.rows {
-            let table = decode(&row, &layout)?;
-            if !fixture.owns(&table.schema, &table.name) {
-                continue;
-            }
-            fixture.assert_identity(&table);
-            assert_rowstore_configuration(&table.storage_configuration);
-            assert_eq!(table.tracked_by_cdc, Some(false));
-            if denied {
-                for name in [
-                    "full_text_object_id",
-                    "full_text_unique_index_id",
-                    "full_text_catalog_id",
-                    "full_text_enabled",
-                    "full_text_change_tracking",
-                    "full_text_last_crawl_completed",
-                ] {
-                    assert_eq!(
-                        row.columns().find(|(column, _)| *column == name).map(|(_, value)| value),
-                        Some(&Val::Null),
-                        "{name}"
-                    );
-                }
-            }
-            let record = TelemetryRecord::Operational(OperationalObservation {
-                source: crate::sources::TABLES.name.into(),
-                key: table.identity.key()?,
-                fact: OperationalFact::MssqlTable(Box::new(table.clone())),
-            });
-            assert_eq!(
-                serde_json::from_slice::<TelemetryRecord>(&serde_json::to_vec(&record).unwrap()).unwrap(),
-                record
-            );
-            retained.push((table.name, table.full_text));
+            let table = decode(&row, layout)?;
+            retained.push((row, table));
         }
         if batch.complete {
             break;
         }
+    }
+    Ok(retained)
+}
+
+async fn stream_tables(
+    reader: &mut ReadSession,
+    fixture: &Fixture<'_>,
+    denied: bool,
+) -> Result<Vec<(String, MssqlTableFullText)>> {
+    // The source SQL/decoder and stream drain owner are shared with the temporal acceptance.
+    let layout = Layout::new(!denied);
+    let mut retained = Vec::new();
+    for (row, table) in stream_table_rows(reader, &layout).await? {
+        if !fixture.owns(&table.schema, &table.name) {
+            continue;
+        }
+        fixture.assert_identity(&table);
+        assert_rowstore_configuration(&table.storage_configuration);
+        assert_eq!(table.tracked_by_cdc, Some(false));
+        if denied {
+            for name in [
+                "full_text_object_id",
+                "full_text_unique_index_id",
+                "full_text_catalog_id",
+                "full_text_enabled",
+                "full_text_change_tracking",
+                "full_text_last_crawl_completed",
+            ] {
+                assert_eq!(
+                    row.columns().find(|(column, _)| *column == name).map(|(_, value)| value),
+                    Some(&Val::Null),
+                    "{name}"
+                );
+            }
+        }
+        let record = TelemetryRecord::Operational(OperationalObservation {
+            source: crate::sources::TABLES.name.into(),
+            key: table.identity.key()?,
+            fact: OperationalFact::MssqlTable(Box::new(table.clone())),
+        });
+        assert_eq!(serde_json::from_slice::<TelemetryRecord>(&serde_json::to_vec(&record).unwrap()).unwrap(), record);
+        retained.push((table.name, table.full_text));
     }
     Ok(retained)
 }

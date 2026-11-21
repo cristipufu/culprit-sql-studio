@@ -9,6 +9,13 @@ pub struct CollectedBackupHistoryAnalysis {
 
 #[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export)]
+pub struct CollectedTableTemporalAnalysis {
+    pub context: crate::collected_analysis::CollectedEvidenceContext,
+    pub report: Box<crate::TableTemporalReport>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CollectedTableFullTextAnalysis {
     pub context: crate::collected_analysis::CollectedEvidenceContext,
     pub report: Box<crate::TableFullTextReport>,

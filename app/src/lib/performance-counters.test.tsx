@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HealthTab } from "../components/Health";
 import { PerformanceCounters } from "../components/PerformanceCounters";
-import { performanceCounterHealthReport, performanceCounterReport, EXACT_PERFORMANCE_COUNTER } from "../test/performance-counters";
+import { commonPerformanceCounterReport, performanceCounterHealthReport, performanceCounterReport, EXACT_PERFORMANCE_COUNTER } from "../test/performance-counters";
 import spanish from "../../../locales/es.json" with { type: "json" };
 import french from "../../../locales/fr.json" with { type: "json" };
 import german from "../../../locales/de.json" with { type: "json" };
@@ -153,4 +153,37 @@ test("an empty counter collection does not itself suppress the Health empty stat
   const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server" />);
   expect(html).toContain(t("ui.health.empty"));
   expect(html).not.toContain(t("view.performance_counters.title"));
+});
+
+test("Common gauges, totals and the backend fraction stay folded and exact without a health grade or database owner", () => {
+  const report = commonPerformanceCounterReport();
+  report.entries[2]!.metric.label = "<img src=x onerror=alert(1)>表🦀";
+  const original = JSON.stringify(report);
+  const html = renderToStaticMarkup(<PerformanceCounters report={report} />);
+  expect(html).toContain(EXACT_PERFORMANCE_COUNTER);
+  expect(html).toContain("9007199254740993 pages");
+  expect(html).toContain(t("view.counter_ratios.percent", { value: "75.00" }));
+  expect(html).toContain(t("view.performance_counters.buffer_cache_ratio.explanation"));
+  expect(html).toContain(t("view.performance_counters.explain.common_tempdb"));
+  expect(html).toContain(t("view.performance_counters.scope"));
+  expect(html).toContain("Info Errors");
+  expect(html).toContain("&lt;img");
+  expect(html).toContain("表🦀");
+  expect(html).not.toContain("<img");
+  expect(html).not.toContain("<details open");
+  expect(html).not.toContain("sig-dot");
+  expect(report.database).toBeNull();
+  expect(report.native_database_id).toBeNull();
+  expect(JSON.stringify(report)).toBe(original);
+});
+
+test("Common missing base renders the canonical unknown input without reconstructing or defaulting a percentage", () => {
+  const report = commonPerformanceCounterReport(true);
+  const html = renderToStaticMarkup(<PerformanceCounters report={report} />);
+  expect(html).toContain(t("view.performance_counters.buffer_cache_ratio.title"));
+  expect(html).toContain(t("view.counter_ratios.unknown"));
+  expect(html).not.toContain(t("view.counter_ratios.percent", { value: "75.00" }));
+  expect(html).toContain(EXACT_PERFORMANCE_COUNTER);
+  expect(report.ratios!.entries[0]!.issues).toEqual(["missing-base"]);
+  expect(report.ratios!.entries[0]!.metrics).toHaveLength(2);
 });

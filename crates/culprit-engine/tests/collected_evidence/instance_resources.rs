@@ -215,3 +215,46 @@ async fn successful_scheduler_originals_survive_an_independently_unavailable_ins
     assert_eq!(schedulers.observed_rows, 2);
     assert_eq!(schedulers.entries[0].scheduler_id, "0");
 }
+
+#[tokio::test]
+async fn modern_scheduler_originals_keep_layout_absence_nulls_and_unqualified_spinlock_zero_or_positive_separate() {
+    use test_support::{SchedulerCase, instance_resource_scheduler_evidence};
+    for case in [
+        SchedulerCase::Exact,
+        SchedulerCase::Sql2019Layout,
+        SchedulerCase::Sql2022Layout,
+        SchedulerCase::ModernNulls,
+        SchedulerCase::SpinlockRawPositive,
+    ] {
+        let (source, rows) = instance_resource_scheduler_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        test_support::assert_operational_capture(&capture, &source, &rows);
+        let analysis = culprit_engine::collected_resources::instance_resources(&capture).unwrap();
+        let report = analysis.report.schedulers.as_ref().unwrap();
+        let fields = &report.entries[0].fields;
+        assert_eq!(fields.len(), 29);
+        for spec in MSSQL_SCHEDULER_FIELDS.iter().filter(|field| field.introduced_in.is_some()) {
+            let field = fields.iter().find(|field| field.native_name == spec.name).unwrap();
+            if case == SchedulerCase::ModernNulls {
+                assert_eq!(field.availability, culprit_core::SchedulerFieldAvailability::NativeNull);
+            } else if case == SchedulerCase::Sql2019Layout
+                || case == SchedulerCase::Sql2022Layout && spec.introduced_in == Some(17)
+            {
+                assert_eq!(field.availability, culprit_core::SchedulerFieldAvailability::ColumnUnavailable);
+            } else if matches!(spec.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }) {
+                assert_eq!(field.availability, culprit_core::SchedulerFieldAvailability::InstrumentationUnqualified);
+                assert!(field.value.is_none());
+                let raw = field.unqualified.as_ref().unwrap();
+                assert_eq!(raw.native_value, if case == SchedulerCase::SpinlockRawPositive { "7" } else { "0" });
+                assert_eq!(raw.required_global_trace_flag, 8134);
+            } else {
+                assert_eq!(field.availability, culprit_core::SchedulerFieldAvailability::Observed);
+                assert!(field.value.is_some() && field.unqualified.is_none());
+                assert_eq!(field.reset, Some(culprit_core::ResetMarker::Unknown));
+            }
+        }
+        assert_eq!(fixture.recovery_object_reads(), opened);
+    }
+}

@@ -20,6 +20,9 @@ fn sample(id: u32) -> NativeCounterSet {
             MssqlSchedulerFieldKind::TextProperty => {
                 sample.properties.insert(field.name.into(), "HIDDEN ONLINE".into());
             }
+            MssqlSchedulerFieldKind::UnqualifiedCounter { .. } => {
+                sample.properties.insert(field.name.into(), "0".into());
+            }
             MssqlSchedulerFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
                 key: field.name.into(),
                 value: MeasurementValue::Integer(
@@ -216,4 +219,31 @@ fn ordinary_snapshot_rows_have_no_invented_native_read_interval_and_sharing_with
     let json = serde_json::to_string(&shared).unwrap();
     assert!(!json.contains("HIDDEN ONLINE"));
     assert!(!json.contains("sys.dm_os_schedulers"));
+}
+
+#[test]
+fn modern_counters_keep_native_populations_while_unqualified_zero_and_positive_spinlock_values_are_withheld() {
+    for value in ["0", "7"] {
+        let mut sample = sample(0);
+        for field in MSSQL_SCHEDULER_FIELDS
+            .iter()
+            .filter(|field| matches!(field.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }))
+        {
+            sample.properties.insert(field.name.into(), value.into());
+        }
+        let report = explain(&source(1), &[observation(sample)], true).unwrap();
+        for name in ["spinlock_wait_time_ms", "spinlock_max_wait_time_ms", "spinlock_wait_count"] {
+            let field = field(&report, name);
+            assert_eq!(field.availability, SchedulerFieldAvailability::InstrumentationUnqualified);
+            assert!(field.value.is_none());
+            let raw = field.unqualified.as_ref().unwrap();
+            assert_eq!(raw.native_value, value);
+            assert_eq!(raw.required_global_trace_flag, 8134);
+            assert!(field.explanation.as_ref().unwrap().contains("8134"));
+        }
+        assert_eq!(field(&report, "queued_disk_io_count").nature, Some(CounterNature::Gauge));
+        assert_eq!(field(&report, "total_signal_time").unit, Some(CounterUnit::Milliseconds));
+        assert_eq!(field(&report, "total_signal_time").reset, Some(ResetMarker::Unknown));
+        assert_eq!(field(&report, "total_completed_tasks").explanation, Some(t!("view.schedulers.counter.removed")));
+    }
 }

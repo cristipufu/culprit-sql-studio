@@ -42,6 +42,13 @@ fn append_native_value(field: &Field, row: &Rec, sample: &mut NativeCounterSet) 
                 u8::from(optional_boolean(row, field.name)?.ok_or_else(invalid_data)?).to_string(),
             );
         }
+        Kind::UnqualifiedCounter { .. } => {
+            // Preserve the original scalar without admitting it to generic counter arithmetic. We have no
+            // original TF 8134 state witness and must not interpret disabled/unknown instrumentation zeros.
+            sample
+                .properties
+                .insert(field.name.into(), optional_integer(row, field.name)?.ok_or_else(invalid_data)?.to_string());
+        }
         Kind::Counter { unit, nature } => {
             let count = optional_integer(row, field.name)?.ok_or_else(invalid_data)?;
             sample.counters.push(NativeCounterSample {

@@ -56,6 +56,12 @@ test("individual scheduler rows use the folded paged observation surface on a na
   await expect(region.locator("article")).toHaveCount(10);
   await expect(region.getByRole("heading", { name: "Scheduler 0", exact: true })).toBeVisible();
   await expect(region.getByText("work_queue_count", { exact: true }).first()).toBeVisible();
+  await expect(region.getByText("queued_disk_io_count", { exact: true }).first()).toBeVisible();
+  await expect(region.getByText("spinlock_wait_count", { exact: true }).first()).toBeVisible();
+  await expect(region.getByText(
+    english["view.schedulers.counter.instrumentation"].replace("{flag}", "8134"),
+    { exact: true },
+  ).first()).toBeVisible();
   await expect(region.getByText("9007199254740993", { exact: true }).first()).toBeVisible();
   await region.getByRole("button", { name: english["ui.termination_history.next"], exact: true }).click();
   await expect(region.getByRole("heading", { name: "Scheduler 10", exact: true })).toBeVisible();

@@ -40,3 +40,5 @@ fn native_types_authorize_semantics_and_not_the_counter_suffix() {
     assert_eq!(gauge.meaning(65_792), (CounterNature::Gauge, CounterUnit::Count));
     assert_eq!(gauge.meaning(272_696_576), (CounterNature::Unknown, CounterUnit::Unknown));
 }
+
+mod common;

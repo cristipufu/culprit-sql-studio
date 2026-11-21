@@ -314,7 +314,7 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
-        .version(10),
+        .version(11),
     state!("mssql.memory-failures", MemoryFailures)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance), RecipeSubject::Shared(SharedResourceKind::Pool)])
         .bounded(state::memory_failure_budget)
@@ -344,7 +344,7 @@ const REGISTRATIONS: &[Registration] = &[
     .bounded(state::pool_settings_budget),
     streamed!("mssql.statement-grants", StatementGrants, grants::Grants).version(2),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations).version(2),
-    streamed!("mssql.tables", Tables, tables::Tables).version(5),
+    streamed!("mssql.tables", Tables, tables::Tables).version(6),
     streamed!("mssql.foreign-keys", ForeignKeys, foreign_keys::ForeignKeys).version(2),
     streamed!("mssql.columns", Columns, columns::Columns).version(2),
     streamed!("mssql.statistics", Statistics, statistics::Statistics).version(2),

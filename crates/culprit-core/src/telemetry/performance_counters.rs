@@ -19,6 +19,8 @@ pub enum RecordedPerformanceCounters {
     Unavailable { reason: crate::i18n::Message },
 }
 
+pub const MSSQL_COMMON_COUNTER_PROFILE: &str = "sqlserver-common-performance-counters-v1";
+
 pub const PERFORMANCE_COUNTER_PROFILE: &str = "sqlserver-performance-counters-v2";
 pub const PERFORMANCE_COUNTER_PROFILE_PROPERTY: &str = "performance_profile";
 pub const PERFORMANCE_COUNTER_CLOCK_PROPERTY: &str = "counter_observed_at";
@@ -56,6 +58,9 @@ pub enum PerformanceCounterFamily {
     LocalSsdCache,
     WorkloadGroup,
     ResourcePool,
+    Transactions,
+    Concurrency,
+    Errors,
 }
 
 pub struct PerformanceCounterSpec {
@@ -70,6 +75,8 @@ pub struct PerformanceCounterSpec {
     pub ratio: Option<CounterRatioKind>,
     /// The existing six application projections remain independent of newly retained informational counters.
     pub application: bool,
+    /// An explicit native population may need narrower wording than its display family.
+    pub explanation_key: Option<&'static str>,
 }
 impl PerformanceCounterSpec {
     pub fn matches(&self, object: &str, name: &str, instance: Option<&str>) -> bool {
@@ -89,6 +96,8 @@ pub struct PerformanceCounterProfile {
     pub fields: &'static [PerformanceCounterSpec],
     /// Explicit instance investigations only; ordinary/default selection remains `fields`.
     pub investigation_fields: &'static [PerformanceCounterSpec],
+    /// Additional documented Common inputs, retained only by explicit instance investigations.
+    pub common_fields: &'static [PerformanceCounterSpec],
     /// Explicit native descriptors eligible for the separately bound selected-database population.
     pub database_field_ids: &'static [&'static str],
 }
@@ -119,6 +128,7 @@ impl PerformanceCounterProfile {
             .iter()
             .find(|field| field.matches(object, name, instance))
             .or_else(|| self.investigation_field(object, name, instance))
+            .or_else(|| self.common_field(object, name, instance))
     }
     pub fn investigation_field(
         &self,
@@ -131,6 +141,17 @@ impl PerformanceCounterProfile {
                 && field.instances.accepts(instance)
                 && field.object_family.is_some_and(|family| object.ends_with(&format!(":{family}")))
         })
+    }
+    pub fn common_field(&self, object: &str, name: &str, instance: Option<&str>) -> Option<&PerformanceCounterSpec> {
+        self.common_fields.iter().find(|field| {
+            field.native_name == name
+                && field.instances.accepts(instance)
+                && field.object_family.is_some_and(|family| object.ends_with(&format!(":{family}")))
+        })
+    }
+    pub fn common_requested(&self, sample: &NativeCounterSet) -> bool {
+        sample.properties.get(PERFORMANCE_COUNTER_PROFILE_PROPERTY).map(String::as_str)
+            == Some(MSSQL_COMMON_COUNTER_PROFILE)
     }
     pub fn database_fields(&self) -> impl Iterator<Item = &PerformanceCounterSpec> {
         self.fields.iter().filter(|field| self.database_field_ids.contains(&field.id))
@@ -157,7 +178,10 @@ impl PerformanceCounterProfile {
                 None
             }
         } else {
-            self.fields.iter().find(|field| field.matches(object, name, instance))
+            self.fields
+                .iter()
+                .find(|field| field.matches(object, name, instance))
+                .or_else(|| self.common_requested(sample).then(|| self.common_field(object, name, instance)).flatten())
         }
     }
 
@@ -175,7 +199,13 @@ impl PerformanceCounterProfile {
             MssqlResourceGovernorCounterSet::from_sample(sample)?;
         }
         resource_governor_requested_rows(sample)?;
-        let selection = if governed { MSSQL_RESOURCE_GOVERNOR_COUNTER_PROFILE } else { self.selection };
+        let selection = if governed {
+            MSSQL_RESOURCE_GOVERNOR_COUNTER_PROFILE
+        } else if self.common_requested(sample) {
+            MSSQL_COMMON_COUNTER_PROFILE
+        } else {
+            self.selection
+        };
         if sample.properties.get(PERFORMANCE_COUNTER_PROFILE_PROPERTY).is_some_and(|value| value != selection)
             || sample.counters.len() + sample.ratio_gaps.len() > MAX_NATIVE_COUNTERS
             || sample.counters.iter().any(|counter| counter.reset != crate::ResetMarker::Unknown)
@@ -214,7 +244,7 @@ impl PerformanceCounterProfile {
         for gap in &sample.ratio_gaps {
             if !native_rows.insert((&gap.native_object, &gap.native_name, &gap.native_instance))
                 || self
-                    .field(&gap.native_object, &gap.native_name, gap.native_instance.as_deref())
+                    .field_in_sample(sample, &gap.native_object, &gap.native_name, gap.native_instance.as_deref())
                     .is_none_or(|field| field.ratio.is_none())
             {
                 return Err(CollectionStop::InvalidPage.error());
@@ -225,6 +255,9 @@ impl PerformanceCounterProfile {
                 && ratio.observed_at.as_deref().map(canonical_time).transpose()?.as_deref()
                     != self.observed_at(sample)?
             {
+                return Err(CollectionStop::InvalidPage.error());
+            }
+            if ratio.kind == CounterRatioKind::BufferCacheHit && !self.common_requested(sample) {
                 return Err(CollectionStop::InvalidPage.error());
             }
             if ratio.kind == CounterRatioKind::PlanCacheHit && ratio.numerator.is_none() && ratio.base.is_none() {
@@ -248,7 +281,7 @@ impl PerformanceCounterProfile {
                     })
                     .ok_or_else(|| CollectionStop::InvalidPage.error())?;
                 if self
-                    .field(descriptor.0, descriptor.1, descriptor.2)
+                    .field_in_sample(sample, descriptor.0, descriptor.1, descriptor.2)
                     .is_none_or(|field| field.ratio != Some(ratio.kind) || field.nature != role)
                 {
                     return Err(CollectionStop::InvalidPage.error());
@@ -282,6 +315,7 @@ impl PerformanceCounterProfile {
             value == self.selection
                 || value == DATABASE_PERFORMANCE_COUNTER_PROFILE
                 || value == MSSQL_RESOURCE_GOVERNOR_COUNTER_PROFILE
+                || value == MSSQL_COMMON_COUNTER_PROFILE
         })
     }
 }

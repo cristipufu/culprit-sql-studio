@@ -34,8 +34,8 @@ pub use views::{
     jobs, maintenance, maintenance_blocking, maintenance_progress, memory_clerks, memory_failures, native_failures,
     page_server_reads, page_waits, performance_counters, query_store_definitions, replication, request_memory,
     runtime_distributions, session_census, session_memory, source_overhead, statement_grants, statement_work, storage,
-    suspect_pages, table_full_text, table_memory, task_space, tempdb_metadata_memory, temporary_work, wait_counters,
-    waits,
+    suspect_pages, table_catalog, table_full_text, table_memory, table_temporal, task_space, tempdb_metadata_memory,
+    temporary_work, wait_counters, waits,
 };
 
 use std::sync::Arc;

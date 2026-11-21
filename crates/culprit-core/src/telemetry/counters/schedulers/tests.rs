@@ -19,6 +19,9 @@ fn sample() -> NativeCounterSet {
             TextProperty => {
                 sample.properties.insert(field.name.into(), "VISIBLE ONLINE".into());
             }
+            MssqlSchedulerFieldKind::UnqualifiedCounter { .. } => {
+                sample.properties.insert(field.name.into(), "0".into());
+            }
             MssqlSchedulerFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
                 key: field.name.into(),
                 value: MeasurementValue::Integer("9007199254740993".into()),
@@ -167,6 +170,79 @@ fn missing_conflicting_duplicate_or_unknown_field_representations_refuse_the_poi
                 sample.identity.qualifiers.insert("database".into(), "private DB canary".into());
             }
             "noncanonical-id" => sample.identity.id = "00".into(),
+            _ => unreachable!(),
+        }
+        assert!(MssqlSchedulerPoint::from_sample(&sample).is_err(), "{mutation}");
+    }
+}
+
+#[test]
+fn modern_native_semantics_are_typed_without_turning_spinlock_raw_values_into_measurements() {
+    let sample = sample();
+    let point = MssqlSchedulerPoint::from_sample(&sample).unwrap();
+    assert_eq!(MSSQL_SCHEDULER_FIELDS.len(), 30);
+    for name in [
+        "queued_disk_io_count",
+        "total_enqueued_tasks",
+        "total_signal_time",
+        "total_waits_completed",
+        "total_completed_tasks",
+    ] {
+        assert!(matches!(point.field(field(name)).unwrap(), MssqlSchedulerValue::Observed("9007199254740993")));
+    }
+    for name in ["spinlock_wait_time_ms", "spinlock_max_wait_time_ms", "spinlock_wait_count"] {
+        assert!(matches!(
+            point.field(field(name)).unwrap(),
+            MssqlSchedulerValue::Unqualified { native_value: "0", required_global_trace_flag: 8134 }
+        ));
+        assert!(!sample.counters.iter().any(|counter| counter.key == name));
+    }
+}
+
+#[test]
+fn catalog_absence_native_null_and_raw_unknown_instrumentation_are_independent_states() {
+    let mut sample = sample();
+    sample.properties.remove("spinlock_wait_time_ms");
+    sample.properties.insert("native_null_columns".into(), "[\"spinlock_wait_time_ms\"]".into());
+    sample.properties.remove("spinlock_max_wait_time_ms");
+    sample.properties.insert("unavailable_columns".into(), "[\"spinlock_max_wait_time_ms\"]".into());
+    let point = MssqlSchedulerPoint::from_sample(&sample).unwrap();
+    assert!(matches!(point.field(field("spinlock_wait_time_ms")).unwrap(), MssqlSchedulerValue::NativeNull));
+    assert!(matches!(point.field(field("spinlock_max_wait_time_ms")).unwrap(), MssqlSchedulerValue::ColumnUnavailable));
+    assert!(matches!(
+        point.field(field("spinlock_wait_count")).unwrap(),
+        MssqlSchedulerValue::Unqualified { native_value: "0", .. }
+    ));
+}
+
+#[test]
+fn diagnostic_properties_cannot_self_assert_enabled_instrumentation_or_become_a_scalar_counter() {
+    for mutation in ["enabled-property", "counter", "negative", "noncanonical", "conflicting-null"] {
+        let mut sample = sample();
+        match mutation {
+            "enabled-property" => {
+                sample.properties.insert("trace_flag_8134_enabled".into(), "1".into());
+            }
+            "counter" => {
+                sample.properties.remove("spinlock_wait_count");
+                sample.counters.push(NativeCounterSample::gauge(
+                    "spinlock_wait_count",
+                    0,
+                    CounterUnit::Count,
+                    crate::MeasurementScope::Server,
+                    MSSQL_SCHEDULER_OBJECT,
+                    "spinlock_wait_count",
+                ));
+            }
+            "negative" => {
+                sample.properties.insert("spinlock_wait_count".into(), "-1".into());
+            }
+            "noncanonical" => {
+                sample.properties.insert("spinlock_wait_count".into(), "00".into());
+            }
+            "conflicting-null" => {
+                sample.properties.insert("native_null_columns".into(), "[\"spinlock_wait_count\"]".into());
+            }
             _ => unreachable!(),
         }
         assert!(MssqlSchedulerPoint::from_sample(&sample).is_err(), "{mutation}");

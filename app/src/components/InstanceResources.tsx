@@ -8,7 +8,8 @@ import { NativeValue } from "./NativeObservationFields";
 import { ObservationList } from "./ObservationList";
 
 const MAX_SCHEDULER_ENTRIES = 256;
-const MAX_SCHEDULER_FIELDS = 21;
+// The one native descriptor contains 30 fields, including the separately rendered scheduler ID.
+const MAX_SCHEDULER_FIELDS = 29;
 
 /** Shared Rust facts own units, native populations and qualifications; this disclosure calculates no pressure. */
 export function InstanceResources({ report }: { report: InstanceResourceReport }) {
@@ -95,5 +96,6 @@ function schedulerValue(field: SchedulerField) {
     case "observed": return field.value == null ? t("ui.memory_failures.not_reported") : field.unit ? digits(field.value) : field.value;
     case "native-null": return t("view.schedulers.value.null");
     case "column-unavailable": return t("view.schedulers.value.unavailable");
+    case "instrumentation-unqualified": return field.unqualified ? t("view.schedulers.value.unqualified", { value: digits(field.unqualified.native_value) }) : t("view.schedulers.value.unavailable");
   }
 }

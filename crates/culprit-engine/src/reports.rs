@@ -51,6 +51,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         table_full_text: &'a Option<Box<culprit_core::TableFullTextReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        table_temporal: &'a Option<Box<culprit_core::TableTemporalReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         page_server_reads: &'a Option<Box<culprit_core::page_server_read_report::PageServerReadReport>>,
@@ -131,6 +133,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         managed_instance_resources,
         suspect_pages,
         table_full_text,
+        table_temporal,
         maintenance_progress,
         replication,
         statement_work,
@@ -175,6 +178,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         managed_instance_resources,
         suspect_pages,
         table_full_text,
+        table_temporal,
         maintenance_progress,
         replication,
         statement_work,

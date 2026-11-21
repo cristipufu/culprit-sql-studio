@@ -1,4 +1,5 @@
 //! This text projection shares the native ratio decision and exact display values with the app and SDK.
+use super::statement::preview;
 use super::{SourceQualification, Summary, render_summary};
 use culprit_core::{CounterRatioReport, t};
 
@@ -20,9 +21,12 @@ pub(crate) fn counter_ratios(report: &CounterRatioReport) -> String {
                     text.push('\n');
                     text.push_str(&t!(
                         "view.counter_ratios.cli.population",
-                        object = object,
-                        instance =
-                            entry.native_instance.clone().unwrap_or_else(|| t!("view.counter_ratios.uninstanced"))
+                        object = preview(object),
+                        instance = entry
+                            .native_instance
+                            .as_deref()
+                            .map(preview)
+                            .unwrap_or_else(|| t!("view.counter_ratios.uninstanced"))
                     ));
                 }
                 for metric in &entry.metrics {

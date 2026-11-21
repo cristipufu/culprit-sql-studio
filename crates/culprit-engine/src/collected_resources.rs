@@ -42,6 +42,8 @@ mod instance_resources;
 pub use instance_resources::instance_resources;
 pub(crate) mod table_full_text;
 pub use table_full_text::table_full_text;
+pub(crate) mod table_temporal;
+pub use table_temporal::table_temporal;
 mod database_properties;
 mod suspect_pages;
 pub use suspect_pages::suspect_pages;

@@ -15,6 +15,7 @@ mod columnstore_rowgroups;
 mod full_text_populations;
 mod table_full_text;
 mod table_memory;
+mod table_temporal;
 mod tempdb_metadata_memory;
 
 const ENTRY_LIMIT: usize = 5;
@@ -59,6 +60,7 @@ fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
         LocalSnapshotReport::DatabaseProperties(report) => database_properties(report),
         LocalSnapshotReport::SuspectPages(report) => crate::waits_view::suspect_pages::value(report),
         LocalSnapshotReport::TableFullText(report) => table_full_text::value(report),
+        LocalSnapshotReport::TableTemporal(report) => table_temporal::value(report),
         LocalSnapshotReport::Compilation(report) => compilation(analysis, report),
         LocalSnapshotReport::ConfiguredLogRates(report) => configured_log_rates(report),
         LocalSnapshotReport::ConnectionOutcomes(report) => connection_outcomes(analysis, report),

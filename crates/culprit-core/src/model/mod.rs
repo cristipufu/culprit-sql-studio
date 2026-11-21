@@ -22,7 +22,7 @@ pub use workload::{
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
 /// or mean something else.
-pub const SNAPSHOT_FORMAT: u32 = 41;
+pub const SNAPSHOT_FORMAT: u32 = 42;
 
 /// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
 mod current_format {
@@ -434,6 +434,8 @@ pub struct TableStat {
     pub mssql_storage_configuration: Option<crate::telemetry::MssqlTableStorageConfiguration>,
     /// SQL Server's table enrollment at this catalog observation; NULL remains unknown.
     pub mssql_tracked_by_cdc: Option<bool>,
+    /// Same-row SQL Server temporal/history configuration, not observed cleanup or history completeness.
+    pub mssql_temporal_configuration: Option<crate::telemetry::MssqlTableTemporalConfiguration>,
     /// Bytes of the table's own rows (its heap or clustered index) kept in the rows' pages. With `lob_bytes` and
     /// `overflow_bytes`, how its data splits between the rows and the large values kept apart from them. `None` where
     /// the engine doesn't say.

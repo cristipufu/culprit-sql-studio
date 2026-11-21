@@ -112,7 +112,7 @@ async fn denied_hidden_or_unknown_layout_keeps_original_membership_and_explicit_
         } else {
             Ok(vec![])
         };
-        rows.remove(5);
+        let _ = rows.remove(5);
         let mut source = source_from_replies(rows, &request(9));
         let original = source.describe().await.unwrap();
         let membership = mssql_pool_settings_membership(&original).unwrap().unwrap();
@@ -293,7 +293,7 @@ async fn unavailable_single_database_settings_keep_original_context_without_inve
         } else {
             Ok(vec![])
         };
-        rows.remove(5);
+        let _ = rows.remove(5);
         let mut source = source_from_replies(rows, &database_request(9));
         let original = source.describe().await.unwrap();
         let membership = mssql_pool_settings_membership(&original).unwrap().unwrap();

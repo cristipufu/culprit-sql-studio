@@ -106,3 +106,22 @@ test("Health withholds a healthy empty state when an original scheduler source h
   expect(html).toContain(t("view.instance_resources.invalid"));
   expect(html).not.toContain(t("ui.health.empty"));
 });
+
+
+test("modern scheduler fields keep SQL layout absence and native NULL separate from unqualified spinlock diagnostics", () => {
+  for (const [name, raw] of [["schedulers_exact", "0"], ["schedulers_spinlock_raw_positive", "7"]] as const) {
+    const { report } = instanceResourceCase(name);
+    const field = report.schedulers!.entries[0]!.fields.find((field) => field.native_name === "spinlock_wait_count")!;
+    expect(field.value).toBeNull();
+    expect(field.availability).toBe("instrumentation-unqualified");
+    expect(field.unqualified?.native_value).toBe(raw);
+    const html = renderToStaticMarkup(<InstanceResources report={report} />);
+    expect(html).toContain(t("view.schedulers.value.unqualified", { value: raw }));
+    expect(html).toContain(t("view.schedulers.counter.instrumentation", { flag: "8134" }));
+  }
+  const sql2019 = renderToStaticMarkup(<InstanceResources report={instanceResourceCase("schedulers_sql2019").report} />);
+  expect(sql2019).toContain(t("view.schedulers.value.unavailable"));
+  const nativeNull = renderToStaticMarkup(<InstanceResources report={instanceResourceCase("schedulers_modern_nulls").report} />);
+  expect(nativeNull).toContain(t("view.schedulers.value.null"));
+  expect(nativeNull).not.toContain(t("view.schedulers.value.unqualified", { value: "0" }));
+});

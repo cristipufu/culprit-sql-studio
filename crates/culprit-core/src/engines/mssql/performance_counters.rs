@@ -1,5 +1,6 @@
 //! The finite SQL Server performance-counter contract is shared by selection, decode and explanation.
 use crate::{key, telemetry::*};
+mod common;
 mod resource_governor;
 
 const CACHE_INSTANCES: &[&str] = &[
@@ -17,6 +18,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
     selection: PERFORMANCE_COUNTER_PROFILE,
     database_field_ids: &["log_bytes_flushed", "log_flushes", "log_flush_wait"],
     investigation_fields: resource_governor::FIELDS,
+    common_fields: common::FIELDS,
     fields: &[
         PerformanceCounterSpec {
             id: "batches",
@@ -29,6 +31,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.batches"),
             ratio: None,
             application: true,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "compilations",
@@ -41,6 +44,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.compilations"),
             ratio: None,
             application: true,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "recompilations",
@@ -53,6 +57,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.recompilations"),
             ratio: None,
             application: true,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "page_life",
@@ -65,6 +70,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.page_life"),
             ratio: None,
             application: true,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "logins",
@@ -77,6 +83,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.logins"),
             ratio: None,
             application: true,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "connection_resets",
@@ -89,6 +96,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.connection_resets"),
             ratio: None,
             application: true,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "rbpex_hits",
@@ -101,6 +109,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.rbpex_hits"),
             ratio: Some(CounterRatioKind::LocalSsdCacheHit),
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "rbpex_base",
@@ -113,6 +122,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.rbpex_base"),
             ratio: Some(CounterRatioKind::LocalSsdCacheHit),
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "granted_workspace",
@@ -125,6 +135,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.granted_workspace"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "maximum_workspace",
@@ -137,6 +148,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.maximum_workspace"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "grants_outstanding",
@@ -149,6 +161,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.grants_outstanding"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "grants_pending",
@@ -161,6 +174,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.grants_pending"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "optimizer_memory",
@@ -173,6 +187,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.optimizer_memory"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "reserved_memory",
@@ -185,6 +200,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.reserved_memory"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "sql_cache_memory",
@@ -197,6 +213,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.sql_cache_memory"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "stolen_memory",
@@ -209,6 +226,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.stolen_memory"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "target_memory",
@@ -221,6 +239,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.target_memory"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "total_memory",
@@ -233,6 +252,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.total_memory"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "auto_parameterization_attempts",
@@ -245,6 +265,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.auto_parameterization_attempts"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "failed_parameterizations",
@@ -257,6 +278,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.failed_parameterizations"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "safe_parameterizations",
@@ -269,6 +291,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.safe_parameterizations"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "unsafe_parameterizations",
@@ -281,6 +304,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.unsafe_parameterizations"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "attentions",
@@ -293,6 +317,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.attentions"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "active_temp_tables",
@@ -305,6 +330,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.active_temp_tables"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "temp_tables_created",
@@ -317,6 +343,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.temp_tables_created"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "temp_tables_pending_destruction",
@@ -329,6 +356,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.temp_tables_pending_destruction"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "cached_objects",
@@ -341,6 +369,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.cached_objects"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "cached_objects_in_use",
@@ -353,6 +382,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.cached_objects_in_use"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "cache_pages",
@@ -365,6 +395,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.cache_pages"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "plan_cache_hits",
@@ -377,6 +408,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.plan_cache_hits"),
             ratio: Some(CounterRatioKind::PlanCacheHit),
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "plan_cache_base",
@@ -389,6 +421,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.plan_cache_base"),
             ratio: Some(CounterRatioKind::PlanCacheHit),
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "log_bytes_flushed",
@@ -401,6 +434,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.log_bytes_flushed"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "log_flushes",
@@ -413,6 +447,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.log_flushes"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
         PerformanceCounterSpec {
             id: "log_flush_wait",
@@ -425,6 +460,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
             label_key: key!("view.performance_counters.field.log_flush_wait"),
             ratio: None,
             application: false,
+            explanation_key: None,
         },
     ],
 };

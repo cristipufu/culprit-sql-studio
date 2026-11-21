@@ -22,24 +22,36 @@ const COUNTER_COLUMNS: &str = "RTRIM(object_name) AS native_object, RTRIM(counte
 #[derive(Clone, Copy)]
 enum Population<'a> {
     Shared,
+    InstanceInvestigation,
     Database(&'a crate::local_source::Context),
 }
 impl Population<'_> {
     fn scope(self) -> MeasurementScope {
         match self {
-            Self::Shared => MeasurementScope::Server,
+            Self::Shared | Self::InstanceInvestigation => MeasurementScope::Server,
             Self::Database(_) => MeasurementScope::Database,
         }
     }
     fn field(self, object: &str, name: &str, instance: Option<&str>) -> Option<&'static PerformanceCounterSpec> {
         match self {
             Self::Shared => specs().iter().find(|spec| spec.matches(object, name, instance)),
+            Self::InstanceInvestigation => {
+                specs().iter().find(|spec| spec.matches(object, name, instance)).or_else(|| {
+                    culprit_core::Engine::Mssql.spec().performance_counters()?.common_field(object, name, instance)
+                })
+            }
             Self::Database(owner) => {
                 if instance != Some(owner.activity.database.database.as_str()) {
                     return None;
                 }
                 culprit_core::Engine::Mssql.spec().performance_counters()?.database_field(object, name)
             }
+        }
+    }
+    fn selection(self) -> &'static str {
+        match self {
+            Self::InstanceInvestigation => culprit_core::telemetry::MSSQL_COMMON_COUNTER_PROFILE,
+            Self::Shared | Self::Database(_) => culprit_core::telemetry::PERFORMANCE_COUNTER_PROFILE,
         }
     }
 }
@@ -57,7 +69,13 @@ fn query(governed: bool) -> String {
         .performance_counters()
         .map(|profile| profile.investigation_fields)
         .unwrap_or_default();
-    let selected = specs().iter().chain(investigation.iter().filter(|_| governed));
+    let common = culprit_core::Engine::Mssql
+        .spec()
+        .performance_counters()
+        .map(|profile| profile.common_fields)
+        .unwrap_or_default();
+    let selected =
+        specs().iter().chain(common.iter().filter(|_| governed)).chain(investigation.iter().filter(|_| governed));
     let filter = selected
         .map(|spec| {
             let family =
@@ -116,7 +134,9 @@ fn decode(rows: &[crate::value::Rec], limit: usize, population: Population<'_>) 
         }
     }
     match population {
-        Population::Shared => ratios::captured(rows, counters, rejected),
+        Population::Shared | Population::InstanceInvestigation => {
+            ratios::captured(rows, counters, rejected, population)
+        }
         Population::Database(owner) => database::captured(rows, counters, owner),
     }
 }

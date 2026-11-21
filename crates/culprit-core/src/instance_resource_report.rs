@@ -61,6 +61,7 @@ pub enum SchedulerFieldAvailability {
     Observed,
     NativeNull,
     ColumnUnavailable,
+    InstrumentationUnqualified,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -68,13 +69,23 @@ pub enum SchedulerFieldAvailability {
 pub struct SchedulerField {
     pub native_name: String,
     pub label: String,
+    /// Only an admitted native property or measurement. An unqualified diagnostic value is kept separately.
     pub value: Option<String>,
+    pub unqualified: Option<SchedulerUnqualifiedValue>,
     pub availability: SchedulerFieldAvailability,
     pub explanation: Option<String>,
     /// Properties have no invented numeric unit or counter semantics.
     pub unit: Option<CounterUnit>,
     pub nature: Option<CounterNature>,
     pub reset: Option<crate::ResetMarker>,
+}
+
+/// Column presence does not establish that optional native instrumentation was enabled. This is raw evidence.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct SchedulerUnqualifiedValue {
+    pub native_value: String,
+    pub required_global_trace_flag: u32,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]

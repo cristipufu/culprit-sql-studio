@@ -9,6 +9,7 @@ use crate::{
 use culprit_core::{Result, TableStat, telemetry::*};
 
 mod full_text;
+mod temporal;
 
 const MAX_APPLICATION_TABLES: usize = 10_000;
 pub(crate) struct Layout {
@@ -24,7 +25,7 @@ pub(crate) fn select_sql(layout: &Layout) -> String {
     full_text::query(|columns, join| table_query(layout, columns, join))
 }
 
-fn table_query(layout: &Layout, full_text_columns: &str, full_text_join: &str) -> String {
+fn table_query(layout: &Layout, full_text_columns: &str, full_text_join: &str) -> temporal::QueryParts {
     let relation = crate::partition_storage::relation(layout.with_partition_statistics);
     let page_bytes = crate::partition_storage::PAGE_BYTES;
     let measurable = if layout.with_partition_statistics {
@@ -32,8 +33,9 @@ fn table_query(layout: &Layout, full_text_columns: &str, full_text_join: &str) -
     } else {
         "t.is_memory_optimized=0 AND NOT EXISTS(SELECT 1 FROM sys.indexes ci WHERE ci.object_id=t.object_id AND ci.type IN (5,6))"
     };
-    format!(
-        r#"
+    temporal::QueryParts {
+        before_temporal: format!(
+            r#"
 WITH partitions AS ({relation}), totals AS (
  SELECT object_id,
   SUM(CASE WHEN index_id IN (0,1) THEN row_count ELSE 0 END) AS row_count,
@@ -57,6 +59,10 @@ SELECT TOP (@P1) DB_ID() AS database_id,t.object_id,s.name AS schema_name,t.name
  CASE WHEN {measurable} THEN CONVERT(varchar(40),p.lob_bytes) END AS lob_bytes,
  CASE WHEN {measurable} THEN CONVERT(varchar(40),p.overflow_bytes) END AS overflow_bytes,
  CASE WHEN {measurable} THEN 1 ELSE 0 END AS sizes_available,
+"#
+        ),
+        after_temporal: format!(
+            r#",
  {full_text_columns},
  CAST(OBJECTPROPERTY(t.object_id,'TableHasPrimaryKey') AS int) AS has_primary_key,
  CASE WHEN HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION')=1
@@ -67,7 +73,8 @@ LEFT JOIN totals p ON p.object_id=t.object_id
 WHERE t.is_ms_shipped=0
 ORDER BY t.object_id OPTION(MAXDOP 1)
 "#
-    )
+        ),
+    }
 }
 
 pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlTableSnapshot> {
@@ -90,6 +97,7 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlTableSnapshot> {
         identity,
         full_text,
         storage_configuration: storage_configuration(row)?,
+        temporal_configuration: temporal::decode(row)?,
         tracked_by_cdc: optional_boolean(row, "is_tracked_by_cdc")?,
         schema: text(row, "schema_name")?,
         name: text(row, "table_name")?,
@@ -179,6 +187,7 @@ fn project(value: MssqlTableSnapshot) -> Result<TableStat> {
         mssql_full_text: Some(value.full_text),
         mssql_storage_configuration: Some(value.storage_configuration),
         mssql_tracked_by_cdc: value.tracked_by_cdc,
+        mssql_temporal_configuration: Some(value.temporal_configuration),
         partition_of: None,
         counters_since: None,
     })

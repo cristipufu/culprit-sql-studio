@@ -32,8 +32,10 @@ mod configured_log_rate_report;
 mod instance_resource_report;
 pub use instance_resource_report::{
     InstanceResourceField, InstanceResourceGroup, InstanceResourceReport, ProcessCpuReport, SchedulerEntry,
-    SchedulerField, SchedulerFieldAvailability, SchedulerReport,
+    SchedulerField, SchedulerFieldAvailability, SchedulerReport, SchedulerUnqualifiedValue,
 };
+mod table_temporal_report;
+pub use table_temporal_report::{TableTemporalEntry, TableTemporalField, TableTemporalReport};
 mod table_full_text_report;
 pub use table_full_text_report::{TableFullTextEntry, TableFullTextReport};
 mod suspect_page_history_report;

@@ -121,6 +121,7 @@ fn entry(sample: &NativeCounterSet, ratio: &NativeCounterRatio) -> Result<Counte
     let mut words = vec![match ratio.kind {
         CounterRatioKind::LocalSsdCacheHit => t!("view.counter_ratios.local_ssd.explanation"),
         CounterRatioKind::PlanCacheHit => t!("view.performance_counters.plan_cache_ratio.explanation"),
+        CounterRatioKind::BufferCacheHit => t!("view.performance_counters.buffer_cache_ratio.explanation"),
     }];
     words.extend(issues.iter().map(|issue| issue_words(*issue)));
     Ok(CounterRatioEntry {
@@ -134,6 +135,7 @@ fn entry(sample: &NativeCounterSet, ratio: &NativeCounterRatio) -> Result<Counte
         title: match ratio.kind {
             CounterRatioKind::LocalSsdCacheHit => t!("view.counter_ratios.local_ssd.title"),
             CounterRatioKind::PlanCacheHit => t!("view.performance_counters.plan_cache_ratio.title"),
+            CounterRatioKind::BufferCacheHit => t!("view.performance_counters.buffer_cache_ratio.title"),
         },
         explanation: words.join(" "),
         metrics,

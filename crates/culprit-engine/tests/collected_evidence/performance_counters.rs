@@ -302,3 +302,91 @@ async fn a_missing_selected_database_counter_body_keeps_authenticated_database_w
     assert_eq!(analysis.report.source_state, Some(SourceState::Partial));
     assert!(analysis.report.entries.is_empty());
 }
+
+#[tokio::test]
+async fn original_common_counter_inputs_share_canonical_semantics_without_rates_health_or_hydration() {
+    use test_support::{CommonPerformanceCounterCase as Case, common_performance_counter_evidence};
+    for case in Case::ALL {
+        let (source, rows) = common_performance_counter_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        test_support::assert_common_performance_counter_capture(&capture, &source, &rows, case);
+        let analysis = collected_resources::performance_counters(&capture).unwrap();
+        let report = &analysis.report;
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(report.population, culprit_core::PerformanceCounterPopulation::SharedServer);
+        assert!(report.database.is_none() && report.native_database_id.is_none());
+        assert_eq!(report.read_complete, Some(true));
+        assert_eq!(report.source_state, Some(source.observation.snapshot().unwrap().sources[0].state));
+        if case == Case::Denied {
+            assert!(report.entries.is_empty() && report.ratios.is_none());
+            assert_eq!(report.native_counter_rows, None);
+        } else {
+            let fraction = report
+                .ratios
+                .as_ref()
+                .unwrap()
+                .entries
+                .iter()
+                .find(|ratio| ratio.kind == CounterRatioKind::BufferCacheHit)
+                .unwrap();
+            assert!(
+                fraction
+                    .explanation
+                    .contains(&culprit_core::t!("view.performance_counters.buffer_cache_ratio.explanation"))
+            );
+            let percent = fraction.metrics.iter().find(|metric| metric.key == "view.counter_ratios.metric.percent");
+            assert_eq!(
+                percent.is_some(),
+                !matches!(case, Case::MeasuredZero | Case::MissingBase | Case::MissingCommon)
+            );
+            if case == Case::MissingCommon {
+                assert!(fraction.native_object.is_none());
+                assert!(!report.entries.iter().any(|entry| entry.field.starts_with("common_")));
+                assert!(
+                    report
+                        .missing_fields
+                        .iter()
+                        .any(|field| field.key == "view.performance_counters.field.common_tempdb_free")
+                );
+            } else {
+                let free = report.entries.iter().find(|entry| entry.field == "common_tempdb_free").unwrap();
+                assert_eq!(free.native_object, "SQLServer:Transactions");
+                assert_eq!(free.native_instance, None);
+                assert_eq!(free.raw_value, if case == Case::MeasuredZero { "0" } else { "9007199254740993" });
+                assert_eq!(free.explanation, culprit_core::t!("view.performance_counters.explain.common_tempdb"));
+                let page = report.entries.iter().find(|entry| entry.field == "common_page_reads").unwrap();
+                assert_eq!(
+                    page.availability == culprit_core::PerformanceCounterAvailability::UnknownNativeType,
+                    case == Case::UnknownNativeType
+                );
+                if case != Case::UnknownNativeType {
+                    assert_eq!(page.nature, CounterNature::Cumulative);
+                    assert_eq!(page.unit, CounterUnit::Pages { bytes_per_page: 8192 });
+                }
+            }
+        }
+        assert_eq!(capture.metrics().recovery_objects, 0);
+        assert_eq!(fixture.recovery_object_reads(), opened);
+    }
+}
+
+#[tokio::test]
+async fn a_missing_common_original_body_withholds_its_fraction_but_keeps_original_counts_and_other_sources() {
+    let (source, rows) =
+        test_support::common_performance_counter_evidence(test_support::CommonPerformanceCounterCase::Observed);
+    let fixture = Fixture::new(source.clone(), rows).await;
+    fixture.remove_first_row(TelemetryStream::OperationalSamples);
+    let opened = fixture.recovery_object_reads();
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let report = collected_resources::performance_counters(&capture).unwrap().report;
+    assert_eq!(report.native_observations, Some(1));
+    assert_eq!(report.observed_observations, 0);
+    assert_eq!(report.native_counter_rows, None);
+    assert_eq!(report.source_state, Some(SourceState::Partial));
+    assert_eq!(report.read_complete, Some(false));
+    assert!(report.ratios.is_none() && report.entries.is_empty());
+    assert_eq!(capture.records().len(), 1, "independent original source remains");
+    assert_eq!(fixture.recovery_object_reads(), opened);
+}
