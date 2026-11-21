@@ -122,6 +122,36 @@ impl OutboxCaptureReader {
         let boundary = self.projection_boundary.clone();
         let lookup = CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
         match request.analysis.read_plan() {
+            LocalCaptureReadPlan::IncidentHistory => {
+                delivery
+                    .with_completed_diagnostics(lookup, self.budget, request.operation, permit, move |capture| {
+                        if capture.records().len() != capture.row_ordinals().len() {
+                            return Err(invalid());
+                        }
+                        let rows = capture
+                            .records()
+                            .iter()
+                            .zip(capture.row_ordinals())
+                            .map(|(row, ordinal)| (row, *ordinal))
+                            .collect::<Vec<_>>();
+                        let report =
+                            crate::incident_history::from_original(capture.source(), capture.original(), &rows, true)?;
+                        #[cfg(test)]
+                        if let Some(boundary) = boundary {
+                            boundary()?;
+                        }
+                        Ok(LocalCapturedAnalysis::IncidentHistory(Box::new(LocalIncidentHistory {
+                            connection: capture.connection().into(),
+                            original: capture.original().clone(),
+                            report: Box::new(report),
+                            collected_from: capture.collected_from().into(),
+                            collected_until: capture.collected_until().into(),
+                            bytes_read: capture.bytes_read(),
+                        })))
+                    })
+                    .await
+            }
+
             LocalCaptureReadPlan::SourceOverhead => {
                 delivery
                     .with_inspected_manifest(

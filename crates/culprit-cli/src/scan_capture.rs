@@ -202,7 +202,8 @@ fn captured_action<'a>(
             captured,
             observation,
         )),
-        LocalCapturedAnalysis::WaitCounters(_)
+        LocalCapturedAnalysis::IncidentHistory(_)
+        | LocalCapturedAnalysis::WaitCounters(_)
         | LocalCapturedAnalysis::Replication(_)
         | LocalCapturedAnalysis::PageServerReads(_)
         | LocalCapturedAnalysis::QueryWaitFragments(_)

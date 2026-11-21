@@ -2,6 +2,8 @@
 mod archive;
 mod completed_blocking;
 pub use completed_blocking::{CompletedActivity, CompletedBlocking};
+mod completed_diagnostics;
+pub use completed_diagnostics::CompletedDiagnostics;
 mod completed_capture;
 mod completed_qualification;
 pub use completed_capture::{CompletedCaptureBudget, CompletedCaptureLookup};

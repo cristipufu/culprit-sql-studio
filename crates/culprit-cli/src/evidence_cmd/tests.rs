@@ -838,3 +838,5 @@ fn paired_page_tasks_use_the_explicit_activity_range_and_the_existing_shared_arc
     source.observation = SourceObservation::Snapshot(source.observation.snapshot().unwrap().clone());
     assert!(culprit_core::PageWaitActivityEvidence::declared_parent(&source).is_none());
 }
+
+mod incident_history;

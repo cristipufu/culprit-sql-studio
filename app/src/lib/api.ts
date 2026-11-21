@@ -1,3 +1,4 @@
+import type { IncidentHistoryReport } from "../gen/IncidentHistoryReport";
 import type { ProviderAcquisitionReport } from "../gen/ProviderAcquisitionReport";
 import type { ObservedProbeAttempt } from "../gen/ObservedProbeAttempt";
 import type { ObservedScanAttempt } from "../gen/ObservedScanAttempt";
@@ -157,6 +158,8 @@ export interface Api {
   setQueryLog(name: string, path: string | null): Promise<ConnectionInfo>;
   /** Pick that log in the system's file dialog (desktop only); null when the person cancelled. */
   chooseQueryLog(name: string): Promise<ConnectionInfo | null>;
+  /** Explicit local OperationalSamples JSONL, structurally checked and never source-authenticated. */
+  openIncidentHistory(signal?: AbortSignal): Promise<IncidentHistoryReport | null>;
   /** Pick a SQLite file in the system's file dialog (desktop only): its path, for the new-connection input. */
   chooseDatabaseFile(): Promise<string | null>;
   chooseSshIdentity(): Promise<string | null>;
@@ -190,6 +193,7 @@ async function desktopApi(): Promise<Api> {
   const discover = discoveryRequests(invoke);
   const connectionTests = ownedRequests(invoke, "begin_connection_test", "cancel_connection_test");
   const preview = ownedRequests(invoke, "begin_preview", "cancel_preview");
+  const history = ownedRequests(invoke, "begin_incident_history", "cancel_incident_history");
   // Before anything is read: the backend words what it reads in the app's language.
   await invoke("set_language", { code: language() });
   return {
@@ -272,6 +276,7 @@ async function desktopApi(): Promise<Api> {
     setAgentAccess: (name, access) => invoke("set_agent_access", { name, access }),
     setQueryLog: (name, path) => invoke("set_query_log", { name, path }),
     chooseQueryLog: (name) => invoke("choose_query_log", { name }),
+    openIncidentHistory: (signal) => history("open_incident_history", {}, signal),
     chooseDatabaseFile: () => invoke("choose_database_file"),
     chooseSshIdentity: () => invoke("choose_ssh_identity"),
     chooseCaCertificate: () => invoke("choose_ca_certificate"),

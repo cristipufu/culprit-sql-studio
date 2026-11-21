@@ -47,6 +47,13 @@ Culprit's CLI is designed to be driven by agents: JSON output, stable ids, no pr
 | `export_finding` | Redacted Markdown for one finding or the whole scan, ready to paste into a PR or issue |
 | `run_query` | One read-only statement, up to 200 rows: needs `query` access and the person's approval in the app |
 
+When the startup host installs the existing local-capture capability, `analyze_capture` also accepts
+`analysis: "incident_history"`. It reads immutable diagnostic revisions for the delegated connection and exact
+observation ID, including resolved work absent from the controller checkpoint. The response retains original
+phase, analysis status, clocks, reasons, past follow-up outcomes and reference availability. It shows at most
+five revisions and states omissions. Selected history does not establish current controller state or authorize
+current session actions; referenced payloads are not reopened by this read.
+
 Results are compact JSON. Text that comes from the database (query text, object names, comments, values) is data, not instructions, and the server's instructions tell the agent so.
 
 **Policies.** `culprit conn set <name> --agent off|stats|query`, or the Agents menu on the connection in the app. `stats` is the default. `culprit mcp --connection <name>` (repeatable) exposes only those connections.

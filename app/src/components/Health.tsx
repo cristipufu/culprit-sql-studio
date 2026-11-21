@@ -1,3 +1,4 @@
+import { IncidentHistoryImport } from "./IncidentHistory";
 import { ProviderAcquisition } from "./ProviderAcquisition";
 import { SourceAcquisitions } from "./SourceAcquisitions";
 import { ChangeCaptureHistory, changeCaptureHistoryState, CDC_HISTORY_SOURCES, CHANGE_FEED_HISTORY_SOURCES } from "./ChangeCaptureHistory";
@@ -228,11 +229,14 @@ export function HealthTab({
   const hasReadIssue = [cdcHistory.issue, changeFeedHistory.issue, memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, suspectIssue, databasePropertiesIssue, memoryClerkIssue, tempdbMetadataIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
-      <div className="waits-empty">
-        <h3>{t("ui.health.empty")}</h3>
-        <p>
-          {t(evidencePresentation(engine ?? report.snapshot.server.engine).health_empty)}
-        </p>
+      <div className="health-tab">
+        <div className="waits-empty">
+          <h3>{t("ui.health.empty")}</h3>
+          <p>
+            {t(evidencePresentation(engine ?? report.snapshot.server.engine).health_empty)}
+          </p>
+        </div>
+        <IncidentHistoryImport key={`incident-history:${report.snapshot.connection}`} />
       </div>
     );
   }
@@ -351,6 +355,7 @@ export function HealthTab({
       {!cleanup && cleanupIssues.length > 0 && <ObservationSourceIssue sources={cleanupIssues} title={t("view.cleanup.title")} />}
       {cleanupUnexplained && cleanupIssues.length === 0 && <ObservationExplanationIssue title={t("view.cleanup.title")} reason={t("view.cleanup.invalid")} />}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
+      <IncidentHistoryImport key={`incident-history:${report.snapshot.connection}`} />
     </div>
   );
 }

@@ -1106,3 +1106,6 @@ pub use index_configuration::{IndexConfigurationCase, index_configuration_eviden
 
 mod indexed_views;
 pub use indexed_views::{IndexedViewsCase, indexed_views_evidence};
+
+mod incident_history;
+pub use incident_history::{IncidentHistoryCase, assert_incident_history_capture, incident_history_evidence};

@@ -18,6 +18,7 @@ use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
+mod incident_history;
 mod requests;
 mod screenshot;
 
@@ -891,11 +892,13 @@ pub fn run_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .manage(SignIn::default())
         .manage(PendingUpdate::default())
         .manage(DiscoveryRequests::default())
+        .manage(incident_history::HistoryImports::default())
         .manage(PreviewRequests::default())
         .manage(ConnectionTests::default())
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 window.state::<DiscoveryRequests>().0.close(window.label());
+                window.state::<incident_history::HistoryImports>().0.close(window.label());
                 window.state::<PreviewRequests>().0.close(window.label());
                 window.state::<ConnectionTests>().0.close(window.label());
             }
@@ -919,6 +922,7 @@ pub fn run_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .on_page_load(move |webview, payload| {
             if payload.event() != PageLoadEvent::Finished {
                 webview.state::<DiscoveryRequests>().0.close(webview.label());
+                webview.state::<incident_history::HistoryImports>().0.close(webview.label());
                 webview.state::<PreviewRequests>().0.close(webview.label());
                 webview.state::<ConnectionTests>().0.close(webview.label());
                 return;
@@ -985,6 +989,9 @@ pub fn run_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
             waits,
             wait_sample,
             run_sql,
+            incident_history::begin_incident_history,
+            incident_history::cancel_incident_history,
+            incident_history::open_incident_history,
             begin_preview,
             cancel_preview,
             preview_table,

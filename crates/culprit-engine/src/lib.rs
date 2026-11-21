@@ -35,6 +35,7 @@ mod fleet;
 pub mod history;
 mod http;
 pub mod import;
+pub mod incident_history;
 mod local_capture_actions;
 mod local_captures;
 #[cfg(feature = "collector")]
@@ -971,5 +972,6 @@ pub fn explain_heap_configuration(
     culprit_checks::index_configuration::explain_heap(snapshot, table)
 }
 
+pub use local_captures::LocalIncidentHistory;
 mod provider_reads;
 pub use provider_reads::{explain_provider_acquisition, project_probe_attempt, project_scan_attempt};

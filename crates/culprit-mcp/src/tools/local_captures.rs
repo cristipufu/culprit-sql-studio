@@ -10,6 +10,7 @@ use culprit_engine::{LocalCaptureAnalysisKind, LocalCaptureRequest, LocalCapture
 mod blocking;
 mod context;
 mod hyperscale_log_components;
+mod incident_history;
 mod memory_clerks;
 mod pool_settings;
 mod replication;
@@ -68,6 +69,7 @@ impl CulpritMcp {
         // A delegation revoked while a queued read ran cannot publish its result.
         self.allowed(&args.connection)?;
         let value = match analysis {
+            LocalCapturedAnalysis::IncidentHistory(analysis) => incident_history::captured(&analysis)?,
             LocalCapturedAnalysis::SourceOverhead(analysis) => json!({
                 "source_overhead": crate::waits_view::source_acquisitions::value(analysis.report()),
                 "seal": analysis.original().map(|original| original.seal),

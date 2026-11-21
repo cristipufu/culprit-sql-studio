@@ -1,0 +1,2728 @@
+{
+  "exact": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "13 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 14,
+        "revision_id": "b8a02ecf03c67a4e5fe3bdbd53395fddb1f33725a3347352382e64f52a849c9c",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "1",
+        "previous_revision": null,
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "pending",
+        "title": "Long-running request observation · revision 1",
+        "phase": "Observed active in this revision. Analysis was pending.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": null,
+        "reasons": [],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "c1f563a03ec1bce60034197c9bb60712cca1d68342e4cabbe0c6428a407c8efb",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "2",
+        "previous_revision": "1",
+        "predecessor_selected": true,
+        "lifecycle": "uncertain",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 2",
+        "phase": "Native continuity or recovery is uncertain. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "b197d504bcbf200d8c3d5549488a59e52608e678ffaafe7bbc181d37e66bad8e",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "3",
+        "previous_revision": "2",
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 3",
+        "phase": "Observed active in this revision. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "4d1e1f84bc3ff5f9796c37d85f9bced894031c54a276b8779e4191c53830d522",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "4",
+        "previous_revision": "3",
+        "predecessor_selected": true,
+        "lifecycle": "uncertain",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 4",
+        "phase": "Native continuity or recovery is uncertain. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "ec996ebb522fc5983a93019af812d5236a6c12813f3c138fd1cc8d9511aa380b",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "5",
+        "previous_revision": "4",
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 5",
+        "phase": "Observed active in this revision. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "381bb4998397af1fdc2c41a0fe5f344ab4392b2d5408ad6de956703778e46472",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "6",
+        "previous_revision": "5",
+        "predecessor_selected": true,
+        "lifecycle": "uncertain",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 6",
+        "phase": "Native continuity or recovery is uncertain. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "d19b0077a2851c2cf8501192ce48f12006a7c3cf72cfb9f247119b832586791a",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "7",
+        "previous_revision": "6",
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 7",
+        "phase": "Observed active in this revision. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "0fad8298d6ac7d630cf73112fdd8a59c126b787d26ad5cc8053af442d1362e0f",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "8",
+        "previous_revision": "7",
+        "predecessor_selected": true,
+        "lifecycle": "uncertain",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 8",
+        "phase": "Native continuity or recovery is uncertain. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "d74354b9223d8007550ec1d6eac35ca7a5b5d27f7af358db09560f84205799a5",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "9",
+        "previous_revision": "8",
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 9",
+        "phase": "Observed active in this revision. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "379220acab87f2014c9ac2868440875ad69f969f35438be41b212dda2bf99f6b",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "10",
+        "previous_revision": "9",
+        "predecessor_selected": true,
+        "lifecycle": "uncertain",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 10",
+        "phase": "Native continuity or recovery is uncertain. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "0fa3961251ceaee677e9cfaa87da72fb4d8e6603da5f3023cbeb1838a2fa9898",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "11",
+        "previous_revision": "10",
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 11",
+        "phase": "Observed active in this revision. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "de71ba0cb14aa4a810a074f3e11486abbdc00d01839aecca2a5717a12e09054a",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "12",
+        "previous_revision": "11",
+        "predecessor_selected": true,
+        "lifecycle": "uncertain",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 12",
+        "phase": "Native continuity or recovery is uncertain. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "24c2cf74152d2c29ad4cffab8e64ae59e00268d5f02511d33cf93227039f45f8",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "13",
+        "previous_revision": "12",
+        "predecessor_selected": true,
+        "lifecycle": "resolved",
+        "analysis": "unresolved",
+        "title": "Long-running request observation · revision 13",
+        "phase": "Qualified recovery was recorded. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Qualified recovery reference",
+            "capture": {
+              "capture": {
+                "observation_id": "controlled-recovery",
+                "revision": {
+                  "outbox_id": "owner",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "1926c1ec5bfa8e09b80ffa89812db127bf7fd66b666f2018cbaf1b96d82b9f43",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "evidence-unavailable"
+        },
+        "reasons": [
+          "Required original evidence was unavailable."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  },
+  "ongoing": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "1 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 14,
+        "revision_id": "b8a02ecf03c67a4e5fe3bdbd53395fddb1f33725a3347352382e64f52a849c9c",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "1",
+        "previous_revision": null,
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "pending",
+        "title": "Long-running request observation · revision 1",
+        "phase": "Observed active in this revision. Analysis was pending.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": null,
+        "reasons": [],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  },
+  "prefix": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "1 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 14,
+        "revision_id": "646ffb351d69d93192d385b0fbde05cba48b63db90194c86a003cad0b3c46605",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "3",
+        "previous_revision": "2",
+        "predecessor_selected": false,
+        "lifecycle": "resolved",
+        "analysis": "unresolved",
+        "title": "Long-running request observation · revision 3",
+        "phase": "Qualified recovery was recorded. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Qualified recovery reference",
+            "capture": {
+              "capture": {
+                "observation_id": "controlled-recovery",
+                "revision": {
+                  "outbox_id": "owner",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "1926c1ec5bfa8e09b80ffa89812db127bf7fd66b666f2018cbaf1b96d82b9f43",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "evidence-unavailable"
+        },
+        "reasons": [
+          "Required original evidence was unavailable.",
+          "The immediately preceding revision was not selected; the earlier transition chain remains incomplete."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  },
+  "resolved": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "3 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 14,
+        "revision_id": "b8a02ecf03c67a4e5fe3bdbd53395fddb1f33725a3347352382e64f52a849c9c",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "1",
+        "previous_revision": null,
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "pending",
+        "title": "Long-running request observation · revision 1",
+        "phase": "Observed active in this revision. Analysis was pending.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": null,
+        "reasons": [],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "c1f563a03ec1bce60034197c9bb60712cca1d68342e4cabbe0c6428a407c8efb",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "2",
+        "previous_revision": "1",
+        "predecessor_selected": true,
+        "lifecycle": "uncertain",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 2",
+        "phase": "Native continuity or recovery is uncertain. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "646ffb351d69d93192d385b0fbde05cba48b63db90194c86a003cad0b3c46605",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "3",
+        "previous_revision": "2",
+        "predecessor_selected": true,
+        "lifecycle": "resolved",
+        "analysis": "unresolved",
+        "title": "Long-running request observation · revision 3",
+        "phase": "Qualified recovery was recorded. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Qualified recovery reference",
+            "capture": {
+              "capture": {
+                "observation_id": "controlled-recovery",
+                "revision": {
+                  "outbox_id": "owner",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "1926c1ec5bfa8e09b80ffa89812db127bf7fd66b666f2018cbaf1b96d82b9f43",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "evidence-unavailable"
+        },
+        "reasons": [
+          "Required original evidence was unavailable."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  },
+  "uncertain": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "2 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 14,
+        "revision_id": "b8a02ecf03c67a4e5fe3bdbd53395fddb1f33725a3347352382e64f52a849c9c",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "1",
+        "previous_revision": null,
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "pending",
+        "title": "Long-running request observation · revision 1",
+        "phase": "Observed active in this revision. Analysis was pending.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": null,
+        "reasons": [],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      },
+      {
+        "controller_version": 14,
+        "revision_id": "c1f563a03ec1bce60034197c9bb60712cca1d68342e4cabbe0c6428a407c8efb",
+        "episode_id": "0f55f09ff7206dff7296e60bc03827f24255ed1c57945faac7b4d8bade7b8a19",
+        "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
+        "target_scope": "database",
+        "scope_id": "5821fa5490bcbd81d94e38d560ab29c4f5e2987ebcee5a00b54ec422ded6a9a9",
+        "source": "sessions",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "2",
+        "previous_revision": "1",
+        "predecessor_selected": true,
+        "lifecycle": "uncertain",
+        "analysis": "deferred",
+        "title": "Long-running request observation · revision 2",
+        "phase": "Native continuity or recovery is uncertain. Analysis was deferred.",
+        "first_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "last_seen_at": "2020-01-01T12:00:00.000100000Z",
+        "recorded_at": "2020-01-01T12:00:01.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "native-observation",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "85daf950479f186a39b5fffcf3a76d653a566c3475b1c35dd193265ac11cc3eb",
+              "source_scope_id": "aa37c9f0fe38cbc1011a8cfefed11802a8fd1d1338d24c33977bce88d11b8566",
+              "stream": "activity-observations",
+              "native_key": {
+                "kind": "activity",
+                "data": {
+                  "session": {
+                    "id": "61",
+                    "generation": "native-login-generation"
+                  },
+                  "request": {
+                    "id": "0",
+                    "generation": "native-request-generation"
+                  },
+                  "transaction": null
+                }
+              },
+              "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
+              "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
+              "payload_sha256": "70bda4c0dddfb69c128f56f2055055b6bc5cc289a948cb9c3b69d694d04160ef",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "cost-unqualified"
+        },
+        "reasons": [
+          "The source profile had no accepted cost qualification."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  }
+}

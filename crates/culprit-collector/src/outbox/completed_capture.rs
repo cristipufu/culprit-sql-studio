@@ -88,6 +88,7 @@ pub(super) enum ReadRequest {
     SnapshotLookup { connection: String, observation_id: String, datasets: Vec<SnapshotDataset> },
     QueryHistory { connection: String, observation_id: String, selection: super::QueryHistoryReadKind },
     ManagedInstanceResources { connection: String, observation_id: String, attempt: Option<DiagnosticAttemptReceipt> },
+    DiagnosticsLookup { connection: String, observation_id: String },
     ActivityLookup { connection: String, observation_id: String },
     ActivityReference { connection: String, reference: DiagnosticCaptureRef },
 }
@@ -99,6 +100,7 @@ impl ReadRequest {
             | Self::SnapshotLookup { observation_id, .. }
             | Self::QueryHistory { observation_id, .. }
             | Self::ManagedInstanceResources { observation_id, .. }
+            | Self::DiagnosticsLookup { observation_id, .. }
             | Self::ActivityLookup { observation_id, .. } => observation_id,
             Self::ActivityReference { reference, .. } => &reference.capture.observation_id,
         }
@@ -107,6 +109,7 @@ impl ReadRequest {
     fn retains(&self, stream: TelemetryStream) -> bool {
         match self {
             Self::SourceOverhead { .. } => false,
+            Self::DiagnosticsLookup { .. } => stream == TelemetryStream::OperationalSamples,
             Self::Qualification { .. } => true,
             Self::Snapshot { dataset, .. } => stream == dataset.stream(),
             Self::SnapshotLookup { datasets, .. } => datasets.iter().any(|dataset| stream == dataset.stream()),
@@ -195,6 +198,21 @@ impl CompletedCaptureRead {
             attempt: Some(attempt),
         };
         Ok(Self::new(request, ReadControl::Collection { cancellation, deadline }, budget))
+    }
+    pub fn diagnostics_lookup(
+        lookup: CompletedCaptureLookup<'_>,
+        budget: CompletedCaptureBudget,
+        operation: OperationHandle,
+    ) -> Result<Self> {
+        Self::lookup(
+            ReadRequest::DiagnosticsLookup {
+                connection: lookup.connection.into(),
+                observation_id: lookup.observation_id.into(),
+            },
+            lookup,
+            budget,
+            operation,
+        )
     }
     pub fn activity_lookup(
         lookup: CompletedCaptureLookup<'_>,
@@ -387,6 +405,10 @@ impl artifacts::VerificationObserver for CompletedCaptureRead {
                 .iter()
                 .filter(|file| self.request.retains(file.stream))
                 .try_fold(0u32, |sum, file| sum.checked_add(file.rows).ok_or_else(capacity))?,
+            ReadRequest::DiagnosticsLookup { .. } => match &source.observation {
+                SourceObservation::Diagnostics(header) if header.is_valid() => header.records,
+                _ => return Err(unsupported()),
+            },
             ReadRequest::ActivityLookup { .. } | ReadRequest::ActivityReference { .. } => {
                 source.observation.activity().filter(|frame| frame.is_valid()).ok_or_else(unsupported)?.observations
             }
@@ -479,6 +501,7 @@ impl Files {
             | ReadRequest::SnapshotLookup { connection, .. }
             | ReadRequest::QueryHistory { connection, .. }
             | ReadRequest::ManagedInstanceResources { connection, .. }
+            | ReadRequest::DiagnosticsLookup { connection, .. }
             | ReadRequest::ActivityLookup { connection, .. }
             | ReadRequest::ActivityReference { connection, .. }
                 if capture.connection != *connection =>

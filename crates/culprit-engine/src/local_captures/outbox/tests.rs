@@ -225,3 +225,5 @@ mod pool_settings;
 mod managed_instance_resources;
 
 mod wait_counters;
+
+mod incident_history;

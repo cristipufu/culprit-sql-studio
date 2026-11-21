@@ -107,6 +107,28 @@ catalog read-only flag and unknown fields remain separate. Query Store enablemen
 no property alone establishes a problem or authorizes a configuration change. Sharing deliberately withholds this
 carrier and records an explicit evidence gap.
 
+Recorded diagnostic history is a separate read-only workflow. Use
+`culprit collect evidence analyze --config FILE --range SHA256 --analysis incident-history`
+to interpret the selected authenticated `OperationalSamples` revisions. The optional local MCP capability accepts
+`analyze_capture` with `analysis: "incident_history"` and the original observation ID. Both use the existing
+capture verifier and retain active, uncertain and resolved revisions, including work that has retired from the
+controller checkpoint. Missing selected bodies remain partial; a reference does not establish that its payload
+is still available.
+
+Health also offers **Open diagnostic JSONL…** for an explicitly chosen `OperationalSamples` JSONL file listed
+in a diagnostic capture's manifest. This is a local, source-free import with structural validation only; the
+manifest, source and completeness of the historical selection are unverified. It does not load collector,
+warehouse or recovery runtime adapters into the desktop. The file reader limits the artifact to 8 MiB,
+each line to 256 KiB and the input to 4,096 records; the report accepts at most 256 distinct revisions and
+pages ten at a time. Its five-second operation cutoff includes queued file work; a started file worker retains
+its existing blocking-pool permit until it returns. No database is contacted.
+
+Every history surface preserves original observation and collector-analysis times separately. Recorded
+follow-up admissions, attempts and native settlement are past facts, not permission for current session actions.
+Only the chosen revisions are shown: unselected or later revisions may change the lifecycle or analysis, and
+source-observation groups are not unique event/execution counts. Imported history stays separate from current
+Health grades and database actions; it is never used to restore controller state.
+
 `CompletedCaptureBudget` applies to both local snapshot and query-history reads: 10,000 retained rows, 8 MiB of
 all verified artifact/manifest bytes and five seconds by default, including queueing. Limits refuse rather than
 truncate; unselected artifact bytes still count. Cancellation joins any started worker before releasing ownership.

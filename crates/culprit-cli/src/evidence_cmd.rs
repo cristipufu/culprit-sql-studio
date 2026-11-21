@@ -204,6 +204,7 @@ impl From<Family> for EvidenceFamily {
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Analysis {
+    IncidentHistory,
     Queries,
     SourceOverhead,
     Blocking,
@@ -281,7 +282,8 @@ impl Analysis {
                 EvidenceFamily::QueryRuntime,
                 EvidenceFamily::QueryWaits,
             ],
-            Self::Jobs
+            Self::IncidentHistory
+            | Self::Jobs
             | Self::MemoryFailures
             | Self::NativeFailures
             | Self::RequestMemory
@@ -372,6 +374,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             read_summary(capture.range_id(), capture.records().len(), capture.gaps().len())
         })?,
         Some(Analysis::SourceOverhead) => return Err(DeliveryProblem::InvalidContract.error()),
+        Some(Analysis::IncidentHistory) => {
+            let analysis = culprit_engine::collected_resources::incident_history(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::incident_history(&analysis.report))?;
+        }
         Some(Analysis::Queries) => {
             let catalog = capture.source().query_history().and_then(|history| history.population_catalog.as_ref());
             let population = resolve_population(catalog, plan.population.as_ref())?;

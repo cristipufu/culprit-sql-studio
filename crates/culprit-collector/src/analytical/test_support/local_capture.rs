@@ -361,3 +361,5 @@ impl TelemetrySource for OriginalSource {
         self.shutdown
     }
 }
+
+mod diagnostics;

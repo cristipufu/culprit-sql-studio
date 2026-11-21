@@ -44,6 +44,7 @@ pub mod session_census;
 pub mod session_memory;
 pub mod table_memory;
 use crate::support::source_coverage;
+pub mod incident_history;
 pub mod source_overhead;
 pub mod sql_lint;
 pub mod statement_grants;

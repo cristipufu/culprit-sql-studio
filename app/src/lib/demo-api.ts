@@ -704,6 +704,13 @@ export async function demoApi(): Promise<Api> {
       connections = connections.map((c) => (c.name === name ? updated : c));
       return updated;
     },
+    openIncidentHistory: async (signal) => {
+      if (!import.meta.env.DEV) return unsupported();
+      if (signal?.aborted) throw new DOMException("Request canceled", "AbortError");
+      const sample = await import("../../../fixtures/incident-history.sample.json");
+      if (signal?.aborted) throw new DOMException("Request canceled", "AbortError");
+      return structuredClone(fromRust<import("../gen/IncidentHistoryReport").IncidentHistoryReport>(sample.default.exact));
+    },
     chooseQueryLog: () => unsupported(),
     chooseDatabaseFile: () => unsupported(),
     chooseCaCertificate: () => desktopOnly(t("ui.connection_security.choose_ca")),

@@ -359,3 +359,5 @@ mod runtime_fragments;
 
 mod indexed_views;
 mod pool_wait_counters;
+
+mod incident_history;

@@ -63,6 +63,7 @@ def main():
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "session_census_sample")
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "instance_resources_sample")
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "change_capture_sample")
+    run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "incident_history_sample")
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "memory_participants_sample")
 
 

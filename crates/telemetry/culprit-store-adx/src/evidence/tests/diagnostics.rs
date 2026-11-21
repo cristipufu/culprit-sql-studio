@@ -85,3 +85,19 @@ async fn shared_investigation_provenance_stays_private_and_requires_explicit_nat
     assert!(revision.episode.scope.target.database().is_some());
     assert!(matches!(event.intent.subject(), CollectionSubject::Shared { .. }));
 }
+
+#[tokio::test]
+async fn selected_incident_revisions_survive_recovery_even_when_resolved_episodes_leave_working_set() {
+    for case in test_support::IncidentHistoryCase::ALL {
+        let (source, rows) = test_support::incident_history_evidence(*case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        assert!(!serde_json::to_string(&fixture.rows).unwrap().contains("private-diagnostic"));
+        fixture.replies(vec![fixture.rows.clone()]);
+        let captured = fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
+            .await
+            .unwrap();
+        test_support::assert_incident_history_capture(&captured, &source, &rows);
+    }
+}

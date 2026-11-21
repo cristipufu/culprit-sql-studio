@@ -165,4 +165,5 @@ pub use views::index_configuration;
 
 pub use views::indexed_views;
 
+pub use views::incident_history;
 pub use views::provider_acquisition;

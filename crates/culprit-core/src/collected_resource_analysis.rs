@@ -366,3 +366,10 @@ pub struct CollectedIndexedViewsAnalysis {
     pub context: crate::collected_analysis::CollectedEvidenceContext,
     pub report: Box<crate::IndexedViewsReport>,
 }
+
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct CollectedIncidentHistoryAnalysis {
+    pub context: crate::collected_analysis::CollectedEvidenceContext,
+    pub report: Box<crate::IncidentHistoryReport>,
+}

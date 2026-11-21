@@ -137,7 +137,8 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::Storage => {
             Ok(LocalSnapshotReport::Storage(Box::new(culprit_checks::storage::explain_captured(read)?)))
         }
-        LocalCaptureAnalysisKind::SourceOverhead
+        LocalCaptureAnalysisKind::IncidentHistory
+        | LocalCaptureAnalysisKind::SourceOverhead
         | LocalCaptureAnalysisKind::WaitCounters
         | LocalCaptureAnalysisKind::ManagedInstanceResources
         | LocalCaptureAnalysisKind::PoolSettings

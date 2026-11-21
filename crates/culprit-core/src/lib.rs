@@ -100,6 +100,7 @@ pub use session_census_report::{
     SessionCensusClientGroup, SessionCensusClientGroups, SessionCensusEntry, SessionCensusField, SessionCensusReport,
     SessionClientDatabase, SessionClientGroupKey,
 };
+pub mod incident_history_report;
 pub mod page_server_read_report;
 pub mod page_wait_report;
 pub mod plan;
@@ -130,6 +131,7 @@ pub mod runtime_population;
 pub mod serialization;
 pub mod signals;
 mod source_acquisition;
+pub use incident_history_report::*;
 pub mod source_overhead_report;
 pub use source_acquisition::*;
 pub mod sql;
