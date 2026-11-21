@@ -73,7 +73,13 @@ async fn original_overhead_is_authenticated_without_rows_audit_proofs_or_payload
 async fn missing_and_recorded_empty_metrics_preserve_the_independent_original_query_total() {
     for metrics in [
         None,
-        Some(ReadWorkMetrics { native_session_work: None, active_tasks: 0, untracked_tasks: 0, templates: vec![] }),
+        Some(ReadWorkMetrics {
+            connection_work: None,
+            native_session_work: None,
+            active_tasks: 0,
+            untracked_tasks: 0,
+            templates: vec![],
+        }),
     ] {
         let fixture = fixture(metrics.clone()).await;
         let cancellation = CollectionCancellation::default();
@@ -117,7 +123,7 @@ async fn altered_total_or_template_metrics_and_changed_original_manifest_are_int
             "SourceQueries" => fixture.store.replace_publication(field, serde_json::json!(101)),
             "ReadMetrics" => fixture
                 .store
-                .replace_publication(field, serde_json::json!({"active_tasks":0,"untracked_tasks":0,"templates":[]})),
+                .replace_publication(field, serde_json::json!({"connection_work":null,"active_tasks":0,"untracked_tasks":0,"templates":[],"native_session_work":null})),
             "manifest" => fixture.objects.corrupt_manifest(),
             _ => unreachable!(),
         }
@@ -289,4 +295,22 @@ async fn warehouse_native_summary_changes_cannot_replace_the_original_private_se
         Some(ErrorDetail::Delivery(DeliveryProblem::Capacity))
     );
     assert_eq!(fixture.store.requests.load(Ordering::SeqCst), requests);
+}
+
+#[tokio::test]
+async fn authenticated_acquisition_observation_replays_separately_from_native_identity_and_query_population() {
+    let original = test_support::connection_source_overhead_read_metrics();
+    let fixture = fixture(Some(original.clone())).await;
+    let cancellation = CollectionCancellation::default();
+    let mut session = fixture.service.session(fixture.request.budget, &cancellation).unwrap();
+    let captured = metadata(&mut session, &fixture).await;
+    let analysis = crate::collected_resources::source_overhead(&captured).unwrap();
+    assert_eq!(analysis.report.evidence.read_metrics.as_ref().unwrap().connection_work, original.connection_work);
+    assert!(analysis.report.evidence.read_metrics.as_ref().unwrap().native_session_work.is_none());
+    let connection = analysis.report.connection_work.unwrap();
+    assert!(connection.limitations.contains(&t!("view.source_overhead.connection.limit.scope")));
+    assert_eq!(connection.observations.len(), 6);
+    assert!(connection.observations.iter().any(|line| line.contains("18456")));
+    assert_eq!(analysis.metrics.queries, 1);
+    assert_eq!(payload_reads(&fixture), 0);
 }

@@ -10,6 +10,8 @@ mod completed_snapshot;
 pub use completed_snapshot::CompletedSnapshot;
 mod artifacts;
 mod attempts;
+mod metadata;
+pub use metadata::InspectedCaptureManifest;
 mod eviction;
 mod investigations;
 mod journal;
@@ -152,9 +154,10 @@ impl Files {
                         report.committed += 1;
                         continue;
                     }
-                    Err(error) if is_incomplete(&directory, &capture) => {
-                        let _ = error;
-                    }
+                    Err(_)
+                        if attempts::read_manifest(&self.root, &self.journal, &capture).is_ok_and(|recorded| {
+                            recorded.is_some_and(|original| original.manifest.status != CollectionStatus::Complete)
+                        }) => {}
                     Err(_) => {
                         self.journal.fail(
                             &capture,
@@ -360,12 +363,28 @@ impl Files {
     fn finish(&mut self, reservation: Reservation) -> Result<()> {
         let Reservation { entry, directory, .. } = reservation;
         let capture = self.journal.capture(&entry.identity.observation_id)?;
-        if !directory.exists() || is_incomplete(&directory, &capture) {
-            return self.journal.fail(
+        if capture.identity != entry.identity || capture.state != OutboxCaptureState::Capturing {
+            return Err(DeliveryProblem::Conflict.error());
+        }
+        let recorded = attempts::read_manifest(&self.root, &self.journal, &capture);
+        if !directory.exists()
+            || recorded.as_ref().is_ok_and(|recorded| {
+                recorded.as_ref().is_some_and(|recorded| recorded.manifest.status != CollectionStatus::Complete)
+            })
+        {
+            // ObservationFiles::finish consumes the writer and durably publishes its terminal manifest.
+            // A seal attests these bytes only; failure/native cancellation debt never becomes Ready/quiescent.
+            let terminal_sha = recorded
+                .ok()
+                .flatten()
+                .filter(|recorded| recorded.manifest.finished_at.is_some())
+                .map(|recorded| recorded.sha256);
+            return self.journal.fail_with_manifest(
                 &capture,
                 OutboxCaptureState::Incomplete,
                 None,
                 capture.charge_artifacts(measure(&directory)?)?,
+                terminal_sha.as_deref(),
             );
         }
         match artifacts::validate(&directory, &capture, None) {
@@ -393,13 +412,6 @@ impl Files {
     }
 }
 
-fn is_incomplete(directory: &Path, capture: &journal::Capture) -> bool {
-    artifacts::manifest(directory).is_ok_and(|(manifest, _)| {
-        manifest.capture == capture.identity
-            && manifest.request == capture.request
-            && !matches!(manifest.status, CollectionStatus::Complete)
-    })
-}
 fn measure(directory: &Path) -> Result<u64> {
     if !directory.exists() {
         return Ok(0);

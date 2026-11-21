@@ -43,7 +43,7 @@ pub use local_captures::{
     LocalActivityRead, LocalBlockingAnalysis, LocalCaptureAnalysisKind, LocalCaptureReader, LocalCaptureRequest,
     LocalCaptureTask, LocalCapturedAnalysis, LocalHyperscaleLogComponents, LocalMemoryClerks, LocalOperationalCapture,
     LocalPageServerReads, LocalPoolSettings, LocalQueryWaitFragments, LocalReplication, LocalRuntimeFragments,
-    LocalSessionCensus, LocalSnapshotAnalysis, LocalSnapshotReport,
+    LocalSessionCensus, LocalSnapshotAnalysis, LocalSnapshotReport, LocalSourceOverhead,
 };
 pub mod marks;
 #[cfg(feature = "postgres")]
@@ -81,7 +81,9 @@ use culprit_core::{
 pub use agent::{AgentAccess, ApprovalOutcome, ApprovalRequest, AuditEntry, AuditOutcome};
 /// The extensions a SQLite database file usually has (the app's file picker filters on them).
 pub use connection::DATABASE_FILE_EXTENSIONS;
-pub use culprit_checks::{agent_brief, index_advice, plan_type_schema, query_runtime_fragments, query_wait_fragments};
+pub use culprit_checks::{
+    agent_brief, index_advice, plan_type_schema, query_runtime_fragments, query_wait_fragments, source_overhead,
+};
 pub use culprit_core::SshConfig;
 pub use discover::{Cloud, DiscoveredDatabase, DiscoveryResult};
 pub use import::{ImportCandidate, ImportSource};

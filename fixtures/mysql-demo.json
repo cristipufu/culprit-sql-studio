@@ -15,7 +15,8 @@
     "cdc_history": [],
     "change_feed_history": [],
     "index_configuration": [],
-    "numa_nodes": []
+    "numa_nodes": [],
+    "source_acquisitions": []
   },
   "sources": [
     {
@@ -54,7 +55,7 @@
       "reason": null
     }
   ],
-  "format": 46,
+  "format": 47,
   "id": "20261011T120900.394Z",
   "connection": "mysql-demo",
   "environment": "local",

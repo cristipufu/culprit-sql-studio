@@ -109,6 +109,7 @@ mod tests {
             client_elapsed_ms: 0.5,
         };
         let metrics = ReadWorkMetrics {
+            connection_work: None,
             active_tasks: 0,
             untracked_tasks: 0,
             templates: vec![metric.clone()],

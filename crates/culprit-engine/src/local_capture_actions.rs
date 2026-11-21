@@ -4,6 +4,23 @@ use culprit_core::{Report, Result, SnapshotOptions, telemetry::DeliveryProblem};
 use std::path::Path;
 
 impl Workspace {
+    /// Attach sealed sanitized history after normal scan settlement. No current database/member is borrowed.
+    pub async fn scan_with_captured_source_overhead(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalSourceOverhead,
+    ) -> Result<Report> {
+        if captured.connection() != name {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::source_acquisition(captured.into_saved()?)?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
     pub async fn scan_with_captured_numa_nodes(
         &self,
         name: &str,

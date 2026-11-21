@@ -14,7 +14,8 @@
     "cdc_history": [],
     "change_feed_history": [],
     "index_configuration": [],
-    "numa_nodes": []
+    "numa_nodes": [],
+    "source_acquisitions": []
   },
   "sources": [
     {
@@ -43,7 +44,7 @@
       "reason": null
     }
   ],
-  "format": 46,
+  "format": 47,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",

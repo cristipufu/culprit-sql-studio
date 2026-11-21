@@ -139,6 +139,7 @@ pub(crate) trait QualificationSession: NativeStreamRead + Sized {
 impl ReadSession {
     fn qualification(pool: Arc<Pool>, admission: Arc<Admission>) -> Self {
         let mut owner = Self::new(pool, admission.budget.clone());
+        owner.connection_work = Some(Default::default());
         owner.deadline = admission.deadline;
         owner.session_setup = Some(SetupWork::new(admission.clone()));
         owner.admission = Some(admission);
@@ -177,24 +178,13 @@ impl QualificationSession for ReadSession {
         self.admission.as_ref().ok_or_else(invalid_data)?.remaining()
     }
     fn into_source_phase(mut self) -> Self {
-        // The caller retains the immutable accounting before this consumed transition. No owner field is reset:
-        // the same client/generation/fence moves into a distinct phase under the unchanged parent deadline.
-        Self {
-            pool: self.pool.clone(),
-            client: self.client.take(),
-            budget: self.budget.clone(),
-            deadline: self.deadline,
-            queries: 0,
-            active: None,
-            acquiring: false,
-            cancellation_confirmed: self.cancellation_confirmed,
-            metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
-            streaming: None,
-            connection_generation: self.connection_generation,
-            native_work: session_work::SessionWork::default(),
-            admission: self.admission.clone(),
-            session_setup: None,
-        }
+        // Preparation accounting is sealed before this consumed transition. Only phase-local counters reset;
+        // the client, acquisition history, pending first-query token and parent deadline keep their owner.
+        self.queries = 0;
+        self.metrics = crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql);
+        self.native_work = session_work::SessionWork::default();
+        self.session_setup = None;
+        self
     }
     fn session_work(&mut self) -> &mut session_work::SessionWork {
         &mut self.native_work
@@ -345,7 +335,13 @@ fn auxiliary_metrics(mut metrics: ReadWorkMetrics) -> Option<ReadWorkMetrics> {
     metrics.is_valid().then_some(metrics)
 }
 fn empty_metrics() -> ReadWorkMetrics {
-    ReadWorkMetrics { active_tasks: 0, untracked_tasks: 0, templates: vec![], native_session_work: None }
+    ReadWorkMetrics {
+        connection_work: None,
+        active_tasks: 0,
+        untracked_tasks: 0,
+        templates: vec![],
+        native_session_work: None,
+    }
 }
 #[async_trait::async_trait]
 impl<R: QualificationSession> NativeRead for QualificationRead<R> {

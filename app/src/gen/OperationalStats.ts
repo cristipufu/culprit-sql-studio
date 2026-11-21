@@ -22,6 +22,7 @@ import type { RecordedOperationalRead } from "./RecordedOperationalRead";
 import type { RecordedPerformanceCounters } from "./RecordedPerformanceCounters";
 import type { RecordedPoolSettingsRead } from "./RecordedPoolSettingsRead";
 import type { RecordedQueryHistoryRead } from "./RecordedQueryHistoryRead";
+import type { RecordedSourceAcquisition } from "./RecordedSourceAcquisition";
 import type { SequenceCapacity } from "./SequenceCapacity";
 import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
@@ -32,7 +33,11 @@ import type { SuspectPageHistoryRead } from "./SuspectPageHistoryRead";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 
-export type OperationalStats = { runtime_fragments?: RecordedQueryHistoryRead, 
+export type OperationalStats = { 
+/**
+ * Independently sealed, sanitized acquisition history; never current native workload evidence.
+ */
+source_acquisitions: Array<RecordedSourceAcquisition>, runtime_fragments?: RecordedQueryHistoryRead, 
 /**
  * One explicitly selected original wait-history capture; never joined to current scan workload by names.
  */

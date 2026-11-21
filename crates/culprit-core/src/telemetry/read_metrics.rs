@@ -19,6 +19,7 @@ impl ReadStopCount {
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
+#[serde(deny_unknown_fields)]
 pub struct ReadQueryMetrics {
     pub template_id: String,
     pub statement: DefinitionPayload,
@@ -55,6 +56,9 @@ impl ReadQueryMetrics {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct ReadWorkMetrics {
+    /// Capture-route self-observation only; no current database identity or full connectivity population.
+    #[serde(deserialize_with = "required_connection_work")]
+    pub connection_work: Option<Box<ReadConnectionWork>>,
     pub active_tasks: u32,
     pub untracked_tasks: u32,
     pub templates: Vec<ReadQueryMetrics>,
@@ -64,17 +68,27 @@ pub struct ReadWorkMetrics {
 
 /// Public allowlist shared by analytical publication and source-overhead reports. Native authority and SQL
 /// previews never cross this boundary; exact client counters and an opaque native-proof reference do.
-#[derive(Serialize, TS, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct ReadWorkSummary {
+    #[serde(deserialize_with = "required_summary_field")]
+    pub connection_work: Option<Box<ReadConnectionWork>>,
     pub active_tasks: u32,
     pub untracked_tasks: u32,
     pub templates: Vec<ReadQueryMetrics>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub native_session_work: Option<Box<NativeSessionReadSummary>>,
+}
+fn required_connection_work<'de, D: serde::Deserializer<'de>>(
+    reader: D,
+) -> std::result::Result<Option<Box<ReadConnectionWork>>, D::Error> {
+    Option::<Box<ReadConnectionWork>>::deserialize(reader)
 }
 impl ReadWorkMetrics {
     pub fn has_unconfirmed_work(&self) -> bool {
-        self.active_tasks > 0
+        self.connection_work.as_ref().is_some_and(|work| work.has_unconfirmed_work())
+            || self.active_tasks > 0
             || self.templates.iter().any(|metric| metric.unconfirmed_cancellations > 0)
             || self.native_session_work.as_ref().is_some_and(|work| work.has_unconfirmed_work())
     }
@@ -94,6 +108,7 @@ impl ReadWorkMetrics {
             })
             .collect();
         Ok(ReadWorkSummary {
+            connection_work: self.connection_work.clone(),
             active_tasks: self.active_tasks,
             untracked_tasks: self.untracked_tasks,
             templates,
@@ -105,41 +120,61 @@ impl ReadWorkMetrics {
         })
     }
     pub fn is_valid(&self) -> bool {
-        let mut ids = std::collections::BTreeSet::new();
-        let mut preview_bytes = 0usize;
-        let count = |value: &str| {
-            !value.is_empty()
-                && value.len() <= 20
-                && value.bytes().all(|byte| byte.is_ascii_digit())
-                && value.parse::<u64>().is_ok()
-        };
-        self.templates.len() <= MAX_READ_TEMPLATES
+        self.connection_work.as_ref().is_none_or(|work| work.is_valid())
             && self.native_session_work.as_ref().is_none_or(|work| work.is_valid())
-            && self.templates.iter().all(|metric| {
-                let text_bounded = match &metric.statement {
-                    DefinitionPayload::Available { text, .. } => text.len() <= MAX_READ_TEMPLATE_TEXT_BYTES,
-                    DefinitionPayload::Unavailable { .. } => true,
-                };
-                let preview_bounded = serde_json::to_vec(&metric.statement).is_ok_and(|bytes| {
-                    preview_bytes = preview_bytes.saturating_add(bytes.len());
-                    preview_bytes <= MAX_READ_TEMPLATE_PREVIEW_BYTES
-                });
-                valid_digest(&metric.template_id)
-                    && ids.insert(&metric.template_id)
-                    && text_bounded
-                    && preview_bounded
-                    && metric.statement.is_valid()
-                    && metric.client_elapsed_ms.is_finite()
-                    && metric.client_elapsed_ms >= 0.0
-                    && metric.failures <= metric.completed_tasks
-                    && metric.timeouts <= metric.failures
-                    && metric.cancellations <= metric.failures
-                    && metric.unconfirmed_cancellations <= metric.failures
-                    && metric.valid_stop_causes()
-                    && count(&metric.rows_decoded)
-                    && count(&metric.charged_value_bytes)
-            })
+            && valid_templates(&self.templates)
     }
+}
+
+impl ReadWorkSummary {
+    /// Display-only curated data. This cannot be converted back into native cost/owner proof.
+    pub fn is_valid(&self) -> bool {
+        self.connection_work.as_ref().is_none_or(|work| work.is_valid())
+            && self.native_session_work.as_ref().is_none_or(|work| work.is_valid())
+            && valid_templates(&self.templates)
+            && self.templates.iter().all(|metric| matches!(metric.statement, DefinitionPayload::Unavailable { .. }))
+    }
+}
+fn valid_templates(templates: &[ReadQueryMetrics]) -> bool {
+    let mut ids = std::collections::BTreeSet::new();
+    let mut preview_bytes = 0usize;
+    let count = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 20
+            && value.bytes().all(|byte| byte.is_ascii_digit())
+            && value.parse::<u64>().is_ok()
+    };
+    templates.len() <= MAX_READ_TEMPLATES
+        && templates.iter().all(|metric| {
+            let text_bounded = match &metric.statement {
+                DefinitionPayload::Available { text, .. } => text.len() <= MAX_READ_TEMPLATE_TEXT_BYTES,
+                DefinitionPayload::Unavailable { .. } => true,
+            };
+            let preview_bounded = serde_json::to_vec(&metric.statement).is_ok_and(|bytes| {
+                preview_bytes = preview_bytes.saturating_add(bytes.len());
+                preview_bytes <= MAX_READ_TEMPLATE_PREVIEW_BYTES
+            });
+            valid_digest(&metric.template_id)
+                && ids.insert(&metric.template_id)
+                && text_bounded
+                && preview_bounded
+                && metric.statement.is_valid()
+                && metric.client_elapsed_ms.is_finite()
+                && metric.client_elapsed_ms >= 0.0
+                && metric.failures <= metric.completed_tasks
+                && metric.timeouts <= metric.failures
+                && metric.cancellations <= metric.failures
+                && metric.unconfirmed_cancellations <= metric.failures
+                && metric.valid_stop_causes()
+                && count(&metric.rows_decoded)
+                && count(&metric.charged_value_bytes)
+        })
+}
+
+fn required_summary_field<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    reader: D,
+) -> std::result::Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(reader)
 }
 
 #[cfg(test)]

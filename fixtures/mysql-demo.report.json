@@ -1905,7 +1905,7 @@
         "table": "orders"
       }
     ],
-    "format": 46,
+    "format": 47,
     "histograms": [
       {
         "buckets": 4.0,
@@ -2344,7 +2344,8 @@
       "spaces": [],
       "sqlite": null,
       "table_memory": [],
-      "numa_nodes": []
+      "numa_nodes": [],
+      "source_acquisitions": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -8250,5 +8251,6 @@
       "separator": " "
     },
     "top_share": 0.8436961809545049
-  }
+  },
+  "source_acquisitions": []
 }

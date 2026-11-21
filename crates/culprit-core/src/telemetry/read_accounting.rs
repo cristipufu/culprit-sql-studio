@@ -138,6 +138,7 @@ impl ReadMetricsRecorder {
             })
             .collect();
         Some(ReadWorkMetrics {
+            connection_work: None,
             native_session_work: None,
             active_tasks: state.active,
             untracked_tasks: state.untracked,

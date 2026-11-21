@@ -1413,7 +1413,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 46,
+    "format": 47,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {
@@ -1977,7 +1977,8 @@
       "spaces": [],
       "sqlite": null,
       "table_memory": [],
-      "numa_nodes": []
+      "numa_nodes": [],
+      "source_acquisitions": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -5541,5 +5542,6 @@
     "runs_said": [],
     "takeaway": null,
     "top_share": null
-  }
+  },
+  "source_acquisitions": []
 }

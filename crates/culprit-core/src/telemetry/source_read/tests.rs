@@ -432,6 +432,7 @@ fn recipe(original: &Original) -> (RecipeDescriptor, crate::ComponentVersion) {
         // verifier is still mandatory; these pure fixture relations never qualify a production source.
         evidence: original.episode.report.as_ref().unwrap().evidence().clone(),
         read_metrics: ReadWorkMetrics {
+            connection_work: None,
             native_session_work: None,
             active_tasks: 0,
             untracked_tasks: 0,

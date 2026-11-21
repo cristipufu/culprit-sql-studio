@@ -25,15 +25,7 @@ impl ValidatedCapture {
     }
 }
 
-pub(super) fn manifest(directory: &Path) -> Result<(CollectionManifest, Vec<u8>)> {
-    manifest_if_present(directory)?.ok_or_else(integrity)
-}
-
-pub(super) fn manifest_if_present(directory: &Path) -> Result<Option<(CollectionManifest, Vec<u8>)>> {
-    manifest_observed(directory, &mut NoObservation)
-}
-
-fn manifest_observed(
+pub(super) fn manifest_observed(
     directory: &Path,
     observer: &mut dyn VerificationObserver,
 ) -> Result<Option<(CollectionManifest, Vec<u8>)>> {

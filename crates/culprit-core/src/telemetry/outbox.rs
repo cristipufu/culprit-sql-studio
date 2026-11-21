@@ -20,6 +20,11 @@ pub struct CaptureIdentity {
     pub observation_id: String,
     pub revision: Option<CaptureRevision>,
 }
+impl CaptureIdentity {
+    pub fn is_valid(&self) -> bool {
+        super::diagnostics::valid_capture(self)
+    }
+}
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]

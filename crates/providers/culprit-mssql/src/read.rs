@@ -1,3 +1,4 @@
+pub(crate) mod connection_work;
 #[cfg(test)]
 mod fixture_dispatch_tests;
 #[cfg(test)]
@@ -162,6 +163,8 @@ pub(crate) struct ReadSession {
     metrics: crate::read_metrics::Metrics,
     streaming: Option<StreamingRead>,
     connection_generation: u64,
+    connection_work: Option<culprit_core::telemetry::ReadConnectionRecorder>,
+    first_query_attempt: Option<culprit_core::telemetry::ReadConnectionAttemptRecorder>,
     native_work: session_work::SessionWork,
     admission: Option<Arc<qualification::Admission>>,
     session_setup: Option<qualification::SetupWork>,
@@ -189,7 +192,9 @@ impl ReadSession {
     /// measured query or a new allowance on reuse; ordinary/manual readers retain their existing semantics.
     pub(crate) fn collection(pool: Arc<Pool>, budget: CollectionBudget) -> Result<Self> {
         budget.validate()?;
-        Ok(Self::new(pool, Self::budget_after_setup(budget)?))
+        let mut owner = Self::new(pool, Self::budget_after_setup(budget)?);
+        owner.connection_work = Some(Default::default());
+        Ok(owner)
     }
 
     /// Shared native leaf profiles count their reader work. Add the one setup slot only at collection's
@@ -222,6 +227,8 @@ impl ReadSession {
             metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
             streaming: None,
             connection_generation: 0,
+            connection_work: None,
+            first_query_attempt: None,
             native_work: session_work::SessionWork::default(),
             admission: None,
             session_setup: None,
@@ -231,6 +238,7 @@ impl ReadSession {
     pub(crate) fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
         let mut metrics = self.metrics.snapshot()?;
         metrics.native_session_work = self.native_work.snapshot();
+        metrics.connection_work = self.connection_work.as_ref().and_then(|work| work.snapshot()).map(Box::new);
         Some(metrics)
     }
     pub(crate) fn queries(&self) -> u32 {
@@ -326,6 +334,12 @@ impl ReadSession {
         query.admission = self.admission.clone();
         let transport = self.pool.transport_owner();
         let template = self.metrics.begin(sql);
+        let connection_phase = self.first_query_attempt.take().map(|attempt| {
+            attempt.phase(
+                culprit_core::telemetry::ReadConnectionStage::FirstQuery,
+                Some(culprit_core::telemetry::digest(sql.as_bytes())),
+            )
+        });
         self.active = Some(tokio::spawn(read_owned(
             client,
             query,
@@ -334,6 +348,7 @@ impl ReadSession {
             transport,
             self.metrics.clone(),
             template,
+            connection_phase,
         )));
         Ok(owner)
     }
@@ -381,18 +396,20 @@ impl ReadSession {
             self.acquiring = false;
             return Err(ReadError::Stopped(CollectionStop::SourceChanged));
         }
-        let acquisition = async {
-            match &self.session_setup {
-                Some(setup) => self.pool.get_with_accounting(Some(setup)).await,
-                None => self.pool.get().await,
-            }
-        };
+        let attempt = self.connection_work.as_ref().map(|work| work.begin());
+        let phase =
+            attempt.as_ref().map(|attempt| attempt.phase(culprit_core::telemetry::ReadConnectionStage::Acquire, None));
+        let acquisition = self.pool.get_observed(self.session_setup.as_ref(), attempt.as_ref());
         let result = tokio::time::timeout(timeout, acquisition).await;
         self.acquiring = false;
-        match result {
+        let result = match result {
             Ok(Ok(client)) => {
                 self.connection_generation = generation;
                 self.native_work.generation(generation);
+                if let Some(attempt) = &attempt {
+                    attempt.acquired(generation);
+                }
+                self.first_query_attempt = attempt;
                 Ok(client)
             }
             Ok(Err(error)) => Err(ReadError::Source(error)),
@@ -401,7 +418,11 @@ impl ReadSession {
                 self.pool.mark_uncertain();
                 Err(ReadError::Stopped(CollectionStop::TimedOut))
             }
+        };
+        if let Some(phase) = phase {
+            phase.finish(connection_work::outcome(&result));
         }
+        result
     }
 
     fn remaining_statement_time(&self) -> ReadResult<Duration> {
@@ -540,6 +561,7 @@ async fn read_owned(
     transport: Option<Arc<dyn culprit_core::ConnectionTransport>>,
     metrics: crate::read_metrics::Metrics,
     template: Option<String>,
+    connection_phase: Option<culprit_core::telemetry::ReadConnectionPhaseGuard>,
 ) -> ReadResult<(MsClient, Vec<Rec>)> {
     // An SSH route must outlive the caller until Attention acknowledgement or disconnect.
     let _transport = transport;
@@ -581,6 +603,9 @@ async fn read_owned(
     accounting.failed = result.is_err();
     accounting.unconfirmed = matches!(&result, Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed)));
     metrics.finish(template.as_deref(), started.elapsed(), &progress, &accounting);
+    if let Some(phase) = connection_phase {
+        phase.finish(connection_work::outcome(&result));
+    }
     result
 }
 
@@ -927,7 +952,7 @@ mod tests {
             );
             assert_eq!(reader.close().await, culprit_core::telemetry::SourceShutdown::Unconfirmed);
         }
-        assert!(pool.get().await.is_err());
+        assert!(pool.get_observed(None, None).await.is_err());
         assert_eq!(pool.source_shutdown(), culprit_core::telemetry::SourceShutdown::Unconfirmed);
     }
 

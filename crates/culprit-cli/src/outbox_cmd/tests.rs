@@ -53,6 +53,7 @@ fn local_overhead_uses_the_shared_safe_json_and_human_formatter_without_exportin
         finished_at: Some("2020-01-01T00:00:01Z".into()),
         source_queries: Some(1),
         read_metrics: Some(ReadWorkMetrics {
+            connection_work: None,
             native_session_work: None,
             active_tasks: 1,
             untracked_tasks: 1,

@@ -653,7 +653,7 @@
     "escalations_before": null,
     "evictions_before": null,
     "foreign_keys": [],
-    "format": 46,
+    "format": 47,
     "histograms": null,
     "id": "20261023T213241Z",
     "identity": {
@@ -869,7 +869,8 @@
       "spaces": [],
       "sqlite": null,
       "table_memory": [],
-      "numa_nodes": []
+      "numa_nodes": [],
+      "source_acquisitions": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -6645,5 +6646,6 @@
       "separator": " "
     },
     "top_share": 0.9867093326578282
-  }
+  },
+  "source_acquisitions": []
 }

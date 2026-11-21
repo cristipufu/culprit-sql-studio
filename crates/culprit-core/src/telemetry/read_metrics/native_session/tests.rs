@@ -97,6 +97,7 @@ fn public_summary_retains_an_opaque_original_proof_receipt_and_no_private_identi
     assert_eq!(reference, digest(&serde_json::to_vec(&native).unwrap()));
     let text = "authorization=private-source-template-canary";
     let metrics = ReadWorkMetrics {
+        connection_work: None,
         active_tasks: 0,
         untracked_tasks: 0,
         templates: vec![ReadQueryMetrics {
@@ -295,4 +296,33 @@ fn a_session_proof_requires_its_connected_database_context_independent_of_any_sh
     );
     assert!(!native.is_valid());
     assert!(native.summary(None).is_err());
+}
+
+#[test]
+fn curated_native_summary_replays_only_its_closed_numeric_shape_and_cannot_restore_a_private_native_owner() {
+    let raw = work();
+    let summary = raw.summary(Some(&source(&raw))).unwrap();
+    assert!(summary.is_valid());
+    let value = serde_json::to_value(&summary).unwrap();
+    let replay: NativeSessionReadSummary = serde_json::from_value(value.clone()).unwrap();
+    assert!(replay.is_valid());
+    assert_eq!(summary, replay);
+    for mutation in ["reference", "state", "raw-owner", "interval-clock", "ordinal", "wide-counter", "missing"] {
+        let mut value = value.clone();
+        match mutation {
+            "reference" => value["reference"] = serde_json::json!("not-a-digest"),
+            "state" => value["state"] = serde_json::json!("observing"),
+            "raw-owner" => value["interval"]["context"] = serde_json::json!({"host":"private"}),
+            "interval-clock" => value["interval"]["observed_until"] = serde_json::json!("invalid"),
+            "ordinal" => value["interval"]["last_query_ordinal"] = serde_json::json!(0),
+            "wide-counter" => value["interval"]["cpu_ms"] = serde_json::json!("2147483648"),
+            _ => {
+                value["interval"].as_object_mut().unwrap().remove("reads");
+            }
+        }
+        assert!(
+            serde_json::from_value::<NativeSessionReadSummary>(value).map_or(true, |value| !value.is_valid()),
+            "{mutation}"
+        );
+    }
 }

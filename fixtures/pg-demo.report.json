@@ -2372,7 +2372,7 @@
         "table": "order_items"
       }
     ],
-    "format": 46,
+    "format": 47,
     "histograms": null,
     "id": "20261011T115421.485Z",
     "identity": {
@@ -2836,7 +2836,8 @@
       "spaces": [],
       "sqlite": null,
       "table_memory": [],
-      "numa_nodes": []
+      "numa_nodes": [],
+      "source_acquisitions": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -9987,5 +9988,6 @@
       "separator": " "
     },
     "top_share": 0.6739716209849599
-  }
+  },
+  "source_acquisitions": []
 }

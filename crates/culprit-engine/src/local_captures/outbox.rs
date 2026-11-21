@@ -13,6 +13,7 @@ use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 mod blocking;
 mod reports;
+mod source_overhead;
 
 enum LocalOutbox {
     Directory(PathBuf),
@@ -69,6 +70,21 @@ impl OutboxCaptureReader {
             .map_err(|_| DeliveryProblem::Storage.error())?;
         check(&request.operation)?;
         let permit = Arc::new(permit);
+        if matches!(request.analysis.read_plan(), LocalCaptureReadPlan::SourceOverhead)
+            && let LocalOutbox::Directory(directory) = &self.source
+        {
+            let lookup =
+                CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
+            return Outbox::with_inspected_manifest(
+                directory,
+                lookup,
+                self.budget,
+                request.operation,
+                permit,
+                self.metadata_projection(request.connection.into()),
+            )
+            .await;
+        }
         match &self.source {
             LocalOutbox::Delivery(delivery) => self.project(delivery, request, permit.clone()).await,
             LocalOutbox::Directory(directory) => {
@@ -106,6 +122,17 @@ impl OutboxCaptureReader {
         let boundary = self.projection_boundary.clone();
         let lookup = CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
         match request.analysis.read_plan() {
+            LocalCaptureReadPlan::SourceOverhead => {
+                delivery
+                    .with_inspected_manifest(
+                        lookup,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        self.metadata_projection(request.connection.into()),
+                    )
+                    .await
+            }
             LocalCaptureReadPlan::ManagedInstanceResources => {
                 delivery
                     .with_completed_managed_instance_resources(

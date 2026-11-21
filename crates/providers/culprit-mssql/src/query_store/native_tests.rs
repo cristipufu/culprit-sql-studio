@@ -429,7 +429,7 @@ async fn owned_read_metrics_cover_bound_commands_and_timeout_without_persisting_
     let password = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PASSWORD").unwrap();
     // master has no Query Store requirement: client work remains observable when native history is unavailable.
     let pool = Arc::new(Pool::new(config(port, "master", &password, "culprit"), None));
-    let warmed = pool.get().await.unwrap();
+    let warmed = pool.get_observed(None, None).await.unwrap();
     pool.put(warmed);
     // Positive commands use the production collection budget. The delayed command, rather than host speed,
     // establishes the intentional timeout; a 200 ms deadline also races normal startup/compilation work.
@@ -473,7 +473,7 @@ async fn interrupted_owned_read_cannot_be_replaced_before_the_old_task_is_settle
     let port = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PORT").unwrap().parse::<u16>().unwrap();
     let password = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PASSWORD").unwrap();
     let pool = Arc::new(Pool::new(config(port, "master", &password, "culprit"), None));
-    let warmed = pool.get().await.unwrap();
+    let warmed = pool.get_observed(None, None).await.unwrap();
     pool.put(warmed);
     let mut reader = ReadSession::new(pool, CollectionBudget::default());
     {

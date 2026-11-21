@@ -39,18 +39,29 @@ pub(super) fn inspect_manifest(root: &Path, observation_id: &str) -> Result<Opti
     read_manifest(root, &journal, &capture).map(|recorded| recorded.map(|recorded| recorded.manifest))
 }
 
-struct RecordedManifest {
-    manifest: CollectionManifest,
-    sha256: String,
-    intent_key: Option<String>,
+pub(super) struct RecordedManifest {
+    pub manifest: CollectionManifest,
+    pub sha256: String,
+    pub intent_key: Option<String>,
+    pub sealed: bool,
 }
 
 /// One bounded canonical manifest/receipt check serves both owner receipts and read-only local inspection.
-fn read_manifest(
+pub(super) fn read_manifest(
     root: &Path,
     journal: &journal::Journal,
     capture: &journal::Capture,
 ) -> Result<Option<RecordedManifest>> {
+    read_manifest_observed(root, journal, capture, &mut artifacts::NoObservation)
+}
+
+pub(super) fn read_manifest_observed(
+    root: &Path,
+    journal: &journal::Journal,
+    capture: &journal::Capture,
+    observer: &mut dyn artifacts::VerificationObserver,
+) -> Result<Option<RecordedManifest>> {
+    observer.check()?;
     capture.request.validate().map_err(|_| integrity())?;
     let sealed_sha: Option<String> = journal
         .conn
@@ -70,7 +81,7 @@ fn read_manifest(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(storage(error)),
     }
-    let Some((manifest, bytes)) = artifacts::manifest_if_present(&directory)? else {
+    let Some((manifest, bytes)) = artifacts::manifest_observed(&directory, observer)? else {
         if sealed_sha.is_some() {
             return Err(integrity());
         }
@@ -94,7 +105,7 @@ fn read_manifest(
     if sealed_sha.as_ref().is_some_and(|sealed| sealed != &sha) {
         return Err(integrity());
     }
-    Ok(Some(RecordedManifest { manifest, sha256: sha, intent_key }))
+    Ok(Some(RecordedManifest { manifest, sha256: sha, intent_key, sealed: sealed_sha.is_some() }))
 }
 
 fn validate_initial_manifest_absence(directory: &std::path::Path) -> Result<()> {

@@ -1,3 +1,4 @@
+import { SourceAcquisitions } from "./SourceAcquisitions";
 import { ChangeCaptureHistory, changeCaptureHistoryState, CDC_HISTORY_SOURCES, CHANGE_FEED_HISTORY_SOURCES } from "./ChangeCaptureHistory";
 import { ManagedInstanceResources } from "./ManagedInstanceResources";
 import { evidencePresentation } from "../lib/engines";
@@ -186,6 +187,7 @@ export function HealthTab({
   const changeFeedHistory = changeCaptureHistoryState(report.change_feed, report.snapshot.operations.change_feed_history.length, CHANGE_FEED_HISTORY_SOURCES, report.snapshot.sources ?? []);
   const numaNodes = report.numa_nodes ?? [];
   const numaRecorded = report.snapshot.operations.numa_nodes.length > 0 || (report.snapshot.sources ?? []).some((source) => source.source === "cpu-node-state" || source.source === "memory-node-state");
+  const sourceAcquisitions = report.source_acquisitions;
   const tableMemory = report.table_memory ?? [];
   const indexConfiguration = report.index_configuration;
   const queryWaitFragments = report.query_wait_fragments;
@@ -219,7 +221,7 @@ export function HealthTab({
   const cleanupSources = new Set(["persistent version store", "open transactions", ...cleanupReads.map((read) => read.source), ...(retention?.sources.map((source) => source.source) ?? [])]);
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
-  const hasDetailedEvidence = [numaNodes.length > 0, numaRecorded, cdcHistory.present, changeFeedHistory.present, memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
+  const hasDetailedEvidence = [sourceAcquisitions.length > 0, numaNodes.length > 0, numaRecorded, cdcHistory.present, changeFeedHistory.present, memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
     sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, runtimeFragments, queryWaitFragments, indexConfiguration.length > 0, tableMemory.length > 0, groupReplication.length > 0, galera.length > 0, fullTextPopulations.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, suspectPages, suspectRecorded, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, managedInstanceResources, managedInstanceResourcesRead, poolSettings, poolSettingsRead, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
   const hasReadIssue = [cdcHistory.issue, changeFeedHistory.issue, memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, suspectIssue, databasePropertiesIssue, memoryClerkIssue, tempdbMetadataIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
@@ -262,6 +264,7 @@ export function HealthTab({
       {engine && <StorageLatency files={pressure?.files ?? []} engine={engine} report={report} />}
       <Replication replicas={pressure?.replicas ?? []} report={report} />
       <OperationalHealth report={report} />
+      <SourceAcquisitions reports={sourceAcquisitions} />
       {memoryFailures && memoryReport && <RetainedMemoryFailures key={memoryFailures.observed_until} evidence={memoryFailures} report={memoryReport} />}
       {!(memoryFailures && memoryReport) && memoryIssue && <MemoryFailureSourceIssue source={memoryIssue} />}
       {nativeFailures && nativeReport && <RetainedNativeFailures key={nativeFailures.observed_until} evidence={nativeFailures} report={nativeReport} />}

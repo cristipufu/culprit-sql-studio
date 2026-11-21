@@ -133,6 +133,7 @@ pub fn investigation_fixture() -> InvestigationFixture {
         )
         .unwrap(),
         read_metrics: ReadWorkMetrics {
+            connection_work: None,
             native_session_work: None,
             active_tasks: 0,
             untracked_tasks: 0,

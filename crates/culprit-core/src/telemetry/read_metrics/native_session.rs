@@ -41,7 +41,7 @@ pub enum NativeReadWorkState {
 }
 
 /// Dataset ownership and the independently observed source-session owner are separate facts.
-#[derive(Serialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum NativeReadOwnerBinding {
@@ -284,32 +284,43 @@ impl NativeSessionReadWork {
     }
 }
 
-#[derive(Serialize, TS, Clone, Debug, PartialEq, Eq)]
-#[serde(tag = "profile", rename_all = "kebab-case")]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "profile", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum NativeSessionReadSummary {
     MssqlSession {
         reference: String,
         settlement: NativeReadSettlement,
+        #[serde(deserialize_with = "required_summary_field")]
         issue: Option<NativeReadWorkIssue>,
         binding: NativeReadOwnerBinding,
         state: NativeReadWorkState,
+        #[serde(deserialize_with = "required_summary_field")]
         interval: Option<Box<MssqlSessionIntervalSummary>>,
     },
 }
 
-#[derive(Serialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
+#[serde(deny_unknown_fields)]
 pub struct MssqlSessionIntervalSummary {
     pub observed_from: String,
+    #[serde(deserialize_with = "required_summary_field")]
     pub observed_until: Option<String>,
     pub first_query_ordinal: u32,
+    #[serde(deserialize_with = "required_summary_field")]
     pub last_query_ordinal: Option<u32>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub cpu_ms: Option<String>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub reads: Option<String>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub logical_reads: Option<String>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub dirty_marks: Option<String>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub memory_pages_initial: Option<String>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub memory_pages_latest: Option<String>,
 }
 
@@ -333,6 +344,66 @@ fn positive_generation(value: &str) -> bool {
 fn difference(before: &Option<String>, after: Option<&String>) -> Option<String> {
     let (before, after) = before.as_ref().zip(after)?;
     count(after)?.checked_sub(count(before)?).map(|value| value.to_string())
+}
+
+impl NativeSessionReadSummary {
+    /// Structural replay validation only. An opaque reference never restores native identity or grants.
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::MssqlSession { reference, settlement, issue, binding, state, interval } => {
+                let expected = if issue.is_some()
+                    || *settlement == NativeReadSettlement::Unconfirmed
+                    || *binding == NativeReadOwnerBinding::Contradictory
+                {
+                    NativeReadWorkState::Unavailable
+                } else if *settlement == NativeReadSettlement::Quiescent {
+                    NativeReadWorkState::Settled
+                } else {
+                    NativeReadWorkState::Observing
+                };
+                valid_digest(reference)
+                    && *state == expected
+                    && match interval {
+                        None => issue.is_some() && *binding == NativeReadOwnerBinding::Unverified,
+                        Some(interval) => interval.is_valid(*state),
+                    }
+            }
+        }
+    }
+}
+impl MssqlSessionIntervalSummary {
+    fn is_valid(&self, state: NativeReadWorkState) -> bool {
+        let until = self.observed_until.as_deref().unwrap_or(&self.observed_from);
+        let clocks = self.observed_from.len() <= 64
+            && until.len() <= 64
+            && ObservationBounds::new(&self.observed_from, until).is_some();
+        let endpoints = match (&self.observed_until, self.last_query_ordinal) {
+            (Some(_), Some(last)) => last > self.first_query_ordinal,
+            (None, None) => true,
+            _ => false,
+        };
+        let values = [
+            &self.cpu_ms,
+            &self.reads,
+            &self.logical_reads,
+            &self.dirty_marks,
+            &self.memory_pages_initial,
+            &self.memory_pages_latest,
+        ];
+        clocks
+            && endpoints
+            && [&self.cpu_ms, &self.memory_pages_initial, &self.memory_pages_latest]
+                .into_iter()
+                .all(|value| bounded_count(value, i32::MAX as u64))
+            && [&self.reads, &self.logical_reads, &self.dirty_marks]
+                .into_iter()
+                .all(|value| bounded_count(value, i64::MAX as u64))
+            && if state == NativeReadWorkState::Settled {
+                self.last_query_ordinal.is_some() && values.into_iter().any(|value| value.is_some())
+            } else {
+                values.into_iter().all(|value| value.is_none())
+            }
+    }
 }
 
 #[cfg(test)]

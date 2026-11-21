@@ -44,6 +44,14 @@ pub(crate) fn source_overhead(report: &SourceOverheadReport) -> String {
             ));
         }
     }
+    if let Some(connection) = &report.connection_work {
+        text.push_str("\n\n");
+        text.push_str(&connection.summary);
+        for line in connection.observations.iter().chain(&connection.limitations) {
+            text.push('\n');
+            text.push_str(line);
+        }
+    }
     if let Some(native) = &report.native_interval {
         text.push_str("\n\n");
         text.push_str(&native.summary);
@@ -70,6 +78,27 @@ pub(crate) fn collected_source_overhead(analysis: &CollectedSourceOverheadAnalys
         objects = format::digits(analysis.metrics.recovery_objects.to_string()),
         recovery_bytes = format::digits(analysis.metrics.recovery_bytes.to_string())
     ));
+    text
+}
+
+/// Saved history uses the existing bounded template formatter; unavailable originals never get fake clocks.
+pub(crate) fn historical_source_overhead(reports: &[culprit_core::HistoricalSourceOverhead]) -> String {
+    let mut text = t!("view.source_overhead.saved_summary");
+    for report in reports.iter().take(super::super::BRIEF_FINDING_LIMIT) {
+        text.push_str("\n\n");
+        match report {
+            culprit_core::HistoricalSourceOverhead::Available { report, .. } => text.push_str(&source_overhead(report)),
+            culprit_core::HistoricalSourceOverhead::Unavailable { reason } => text.push_str(reason),
+        }
+    }
+    if reports.len() > super::super::BRIEF_FINDING_LIMIT {
+        text.push('\n');
+        text.push_str(&t!(
+            "view.source_overhead.history_overflow",
+            shown = format::digits(super::super::BRIEF_FINDING_LIMIT.to_string()),
+            recorded = format::digits(reports.len().to_string())
+        ));
+    }
     text
 }
 

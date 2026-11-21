@@ -294,6 +294,7 @@ impl Pipeline {
         let task_space = explained_task_space(&mut snapshot);
         let query_compilation = explained_compilation(&mut snapshot);
         let compiler_admission = compiler_admission::explain(&mut snapshot);
+        let source_acquisitions = crate::source_overhead::explain_snapshot(&snapshot);
         let performance_counters = performance_counters::explain(&mut snapshot);
         let counter_ratios = counter_ratios::explain(&mut snapshot);
         let wait_counters = wait_counters::explain(&mut snapshot);
@@ -444,6 +445,7 @@ impl Pipeline {
             query_compilation,
             compiler_admission,
             counter_ratios,
+            source_acquisitions,
             performance_counters,
             wait_counters,
             maintenance_progress,

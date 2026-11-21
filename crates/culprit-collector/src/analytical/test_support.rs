@@ -69,8 +69,8 @@ mod diagnostics;
 pub use diagnostics::{assert_diagnostic_capture, diagnostic_evidence_cases};
 mod source_overhead;
 pub use source_overhead::{
-    SOURCE_OVERHEAD_QUERY_COUNT, assert_native_source_overhead_summary, native_source_overhead_read_metrics,
-    source_overhead_read_metrics,
+    SOURCE_OVERHEAD_QUERY_COUNT, assert_native_source_overhead_summary, connection_source_overhead_read_metrics,
+    native_source_overhead_read_metrics, source_overhead_read_metrics,
 };
 mod source_partitions;
 pub use source_partitions::{
@@ -93,7 +93,7 @@ pub use queries::{
 mod informational;
 pub use informational::{assert_informational_capture, informational_query_evidence};
 mod local_capture;
-pub use local_capture::{LocalCaptureFixture, LocalSnapshotCase, local_snapshot_evidence_cases};
+pub use local_capture::{LocalCaptureFixture, LocalSnapshotCase, SourceAcquisitionCase, local_snapshot_evidence_cases};
 mod query_populations;
 pub use query_populations::{
     assert_query_population_capture, query_population_evidence, query_population_evidence_cases,

@@ -219,6 +219,117 @@ fn body(metrics: &ReadWorkMetrics) -> &MssqlSessionReadWork {
     work
 }
 
+fn unconnected_qualification_session() -> ReadSession {
+    let pool = Arc::new(Pool::new(tiberius::Config::new(), None));
+    let admission = Arc::new(Admission::new(CollectionBudget::default()).unwrap());
+    ReadSession::qualification(pool, admission)
+}
+
+#[test]
+fn consumed_transfer_preserves_lifetime_connection_history_and_sealed_preparation_accounting() {
+    let mut owner = unconnected_qualification_session();
+    let pool = owner.pool.clone();
+    let admission = owner.admission.as_ref().unwrap().clone();
+    let deadline = owner.deadline;
+    let budget = owner.budget.clone();
+    let recorder = owner.connection_work.as_ref().unwrap().clone();
+    let attempt = recorder.begin();
+    let acquire = attempt.phase(ReadConnectionStage::Acquire, None);
+    attempt.connection_use(ReadConnectionUse::FreshConnection);
+    owner.connection_generation = 7;
+    attempt.acquired(owner.connection_generation);
+    owner.session_setup.as_ref().unwrap().begin("SET LOCK_TIMEOUT 2000 /* culprit */").unwrap().finish(true);
+    acquire.finish(ReadConnectionOutcome::Completed);
+
+    let preparation_sql = [
+        "SELECT /* culprit */ @@SPID AS session_id",
+        "SELECT /* culprit */ SERVERPROPERTY('EngineEdition') AS edition",
+        "SELECT /* culprit */ SYSUTCDATETIME() AS observed_at",
+    ];
+    for (index, sql) in preparation_sql.iter().enumerate() {
+        admission.start().unwrap();
+        owner.queries += 1;
+        let template = owner.metrics.begin(sql);
+        let first_query =
+            (index == 0).then(|| attempt.phase(ReadConnectionStage::FirstQuery, Some(digest(sql.as_bytes()))));
+        owner.metrics.finish(
+            template.as_deref(),
+            Duration::ZERO,
+            &ReadProgress::default(),
+            &ReadTaskOutcome::default(),
+        );
+        if let Some(first_query) = first_query {
+            first_query.finish(ReadConnectionOutcome::Completed);
+        }
+    }
+    let preparation = owner.accounting().unwrap();
+    assert_eq!(preparation.queries, 3);
+    assert_eq!(preparation.metrics.templates.len(), 3);
+    assert!(preparation.metrics.templates.iter().all(|template| template.completed_tasks == 1));
+    assert_eq!(preparation.session_setup.templates.len(), 1);
+    assert_eq!(admission.state.lock().unwrap().queries, 4);
+    assert!(owner.first_query_attempt.is_none());
+    assert!(owner.client.is_none(), "this component control creates no native session or readiness proof");
+
+    let source = owner.into_source_phase();
+    assert!(Arc::ptr_eq(&source.pool, &pool));
+    assert!(Arc::ptr_eq(source.admission.as_ref().unwrap(), &admission));
+    assert_eq!(source.deadline, deadline);
+    assert_eq!(source.budget, budget);
+    assert_eq!(source.connection_generation, 7);
+    assert!(source.cancellation_confirmed);
+    assert_eq!(source.queries(), 0);
+    assert!(source.session_setup.is_none());
+    assert!(source.first_query_attempt.is_none(), "the first preparation query remains the original FirstQuery");
+    let source_metrics = source.read_metrics().unwrap();
+    assert!(source_metrics.templates.is_empty());
+    assert_eq!((source_metrics.active_tasks, source_metrics.untracked_tasks), (0, 0));
+    assert!(source_metrics.native_session_work.is_none(), "transfer does not manufacture a native boundary");
+    assert_eq!(source_metrics.connection_work, preparation.metrics.connection_work);
+    let sealed = preparation.clone();
+
+    // An external handle still observes the same lifetime recorder. Its uncertainty cannot be erased by transfer.
+    drop(recorder.begin().phase(ReadConnectionStage::Acquire, None));
+    let updated = source.read_metrics().unwrap();
+    assert_eq!(updated.connection_work.as_ref().unwrap().attempted, 2);
+    assert!(updated.has_unconfirmed_work());
+    assert_eq!(preparation, sealed, "the sealed preparation snapshot does not alias the live recorder");
+    assert_eq!(preparation.metrics.connection_work.as_ref().unwrap().attempted, 1);
+    assert!(!preparation.metrics.has_unconfirmed_work());
+    assert_eq!(admission.state.lock().unwrap().queries, 4, "the consumed transfer dispatches and charges nothing");
+}
+
+#[test]
+fn consumed_transfer_preserves_the_pending_first_query_token_on_the_same_attempt() {
+    let mut owner = unconnected_qualification_session();
+    let recorder = owner.connection_work.as_ref().unwrap().clone();
+    let attempt = recorder.begin();
+    let acquire = attempt.phase(ReadConnectionStage::Acquire, None);
+    attempt.connection_use(ReadConnectionUse::AuthenticatedReuse);
+    owner.connection_generation = 3;
+    attempt.acquired(owner.connection_generation);
+    acquire.finish(ReadConnectionOutcome::Completed);
+    owner.first_query_attempt = Some(attempt);
+    let before = recorder.snapshot().unwrap();
+
+    // This tests only consumed state transfer, without claiming this unconnected owner is ready for qualification.
+    let mut source = owner.into_source_phase();
+    let pending = source.first_query_attempt.take().expect("the held attempt survives its owner transfer");
+    let template = digest(b"SELECT /* culprit */ pending_first_query");
+    pending.phase(ReadConnectionStage::FirstQuery, Some(template.clone())).finish(ReadConnectionOutcome::Completed);
+    assert!(source.first_query_attempt.is_none());
+    let work = source.read_metrics().unwrap().connection_work.unwrap();
+    assert!(work.is_valid());
+    assert_eq!(work, Box::new(recorder.snapshot().unwrap()));
+    assert_eq!(work.attempted, 1);
+    assert_eq!(work.attempts[0].reader_generation.as_deref(), Some("3"));
+    assert_eq!(work.attempts[0].phases.len(), 2);
+    assert_eq!(work.attempts[0].phases[1].stage, ReadConnectionStage::FirstQuery);
+    assert_eq!(work.attempts[0].phases[1].template_id.as_deref(), Some(template.as_str()));
+    assert_eq!(before.attempts[0].phases.len(), 1);
+    assert_eq!(source.queries(), 0, "observing a token does not fabricate a dispatched query");
+}
+
 #[tokio::test]
 async fn before_first_dispatch_and_final_before_release_use_one_original_session_and_paid_phases() {
     let mut reader = protocol_reader();

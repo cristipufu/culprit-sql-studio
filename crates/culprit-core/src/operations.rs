@@ -32,6 +32,8 @@ pub enum IndexUsageScope {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default)]
 #[ts(export)]
 pub struct OperationalStats {
+    /// Independently sealed, sanitized acquisition history; never current native workload evidence.
+    pub source_acquisitions: Vec<crate::RecordedSourceAcquisition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub runtime_fragments: Option<Box<crate::telemetry::RecordedQueryHistoryRead>>,
@@ -215,6 +217,7 @@ impl OperationalStats {
             cluster: &'a Option<ClusterHealth>,
         }
         let Self {
+            source_acquisitions: _,
             runtime_fragments: _,
             query_wait_fragments: _,
             statement_work: _,

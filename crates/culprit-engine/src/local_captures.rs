@@ -19,6 +19,8 @@ mod replication;
 pub use replication::LocalReplication;
 mod pool_settings;
 pub use pool_settings::LocalPoolSettings;
+mod source_overhead;
+pub use source_overhead::LocalSourceOverhead;
 mod session_census;
 pub use session_census::LocalSessionCensus;
 
@@ -27,6 +29,7 @@ pub use session_census::LocalSessionCensus;
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum LocalCaptureAnalysisKind {
+    SourceOverhead,
     PageServerReads,
     QueryWaitFragments,
     RuntimeFragments,
@@ -67,6 +70,7 @@ pub enum LocalCaptureAnalysisKind {
 }
 impl LocalCaptureAnalysisKind {
     pub const ALL: &'static [Self] = &[
+        Self::SourceOverhead,
         Self::PageServerReads,
         Self::QueryWaitFragments,
         Self::RuntimeFragments,
@@ -111,6 +115,7 @@ impl LocalCaptureAnalysisKind {
         use LocalCaptureReadPlan::{Activity, Blocking, QueryHistory, Snapshot};
         use culprit_core::telemetry::SnapshotDataset as Dataset;
         match self {
+            Self::SourceOverhead => LocalCaptureReadPlan::SourceOverhead,
             Self::PageServerReads | Self::RuntimeFragments => {
                 QueryHistory(culprit_collector::outbox::QueryHistoryReadKind::Runtime)
             }
@@ -158,6 +163,7 @@ impl LocalCaptureAnalysisKind {
 
 #[cfg(feature = "collector")]
 enum LocalCaptureReadPlan {
+    SourceOverhead,
     ManagedInstanceResources,
     Replication,
     PoolSettings,
@@ -180,6 +186,7 @@ pub type LocalCaptureTask<'a> = Pin<Box<dyn Future<Output = Result<LocalCaptured
 
 #[derive(Debug)]
 pub enum LocalCapturedAnalysis {
+    SourceOverhead(Box<LocalSourceOverhead>),
     ManagedInstanceResources(Box<LocalManagedInstanceResources>),
     PageServerReads(LocalPageServerReads),
     QueryWaitFragments(Box<LocalQueryWaitFragments>),
@@ -195,6 +202,7 @@ pub enum LocalCapturedAnalysis {
 impl LocalCapturedAnalysis {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
         match self {
+            Self::SourceOverhead(_) => LocalCaptureAnalysisKind::SourceOverhead,
             Self::PageServerReads(_) => LocalCaptureAnalysisKind::PageServerReads,
             Self::QueryWaitFragments(_) => LocalCaptureAnalysisKind::QueryWaitFragments,
             Self::RuntimeFragments(_) => LocalCaptureAnalysisKind::RuntimeFragments,

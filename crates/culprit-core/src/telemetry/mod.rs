@@ -1242,3 +1242,8 @@ pub use group_replication::*;
 
 mod galera;
 pub use galera::*;
+
+mod read_connections;
+pub use read_connections::*;
+mod read_connection_accounting;
+pub use read_connection_accounting::{ReadConnectionAttemptRecorder, ReadConnectionPhaseGuard, ReadConnectionRecorder};

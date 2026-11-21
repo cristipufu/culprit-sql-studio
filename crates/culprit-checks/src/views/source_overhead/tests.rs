@@ -32,6 +32,7 @@ fn evidence() -> SourceOverheadEvidence {
         finished_at: Some("2026-11-17T12:00:05.000000009Z".into()),
         source_queries: Some(91),
         read_metrics: Some(ReadWorkMetrics {
+            connection_work: None,
             native_session_work: None,
             active_tasks: 0,
             untracked_tasks: 40,
@@ -64,8 +65,13 @@ fn no_metrics_is_distinct_from_a_recorded_empty_template_set() {
     let missing = explain(&input).unwrap();
     assert_eq!(missing.summary, t!("view.source_overhead.summary.not_recorded"));
     assert!(missing.evidence.read_metrics.is_none());
-    input.read_metrics =
-        Some(ReadWorkMetrics { native_session_work: None, active_tasks: 0, untracked_tasks: 0, templates: vec![] });
+    input.read_metrics = Some(ReadWorkMetrics {
+        connection_work: None,
+        native_session_work: None,
+        active_tasks: 0,
+        untracked_tasks: 0,
+        templates: vec![],
+    });
     let empty = explain(&input).unwrap();
     assert!(empty.template_order.is_empty());
     assert_eq!(empty.evidence.source_queries, Some(91));
@@ -354,4 +360,101 @@ fn native_provisional_shutdown_and_poison_states_withhold_all_numeric_deltas() {
             assert!(native.limitations.contains(&t!("view.source_overhead.native.limit.unconfirmed")));
         }
     }
+}
+
+#[test]
+fn failed_route_acquisition_requires_original_client_bounds_and_cannot_borrow_native_identity() {
+    let metrics = culprit_core::telemetry::ReadWorkMetrics {
+        connection_work: None,
+        active_tasks: 0,
+        untracked_tasks: 0,
+        templates: vec![],
+        native_session_work: None,
+    };
+    let mut input = evidence();
+    input.source = None;
+    input.engine = None;
+    input.read_metrics = Some(metrics);
+    let recorder = culprit_core::telemetry::ReadConnectionRecorder::default();
+    let attempt = recorder.begin();
+    let phase = attempt.phase(culprit_core::telemetry::ReadConnectionStage::Acquire, None);
+    phase.finish(culprit_core::telemetry::ReadConnectionOutcome::Failed {
+        code: culprit_core::ErrorCode::AuthFailed,
+        native_code: Some(18456),
+    });
+    input.started_at = "2000-01-01T00:00:00Z".into();
+    input.finished_at = Some("2100-01-01T00:00:00Z".into());
+    input.read_metrics.as_mut().unwrap().connection_work = recorder.snapshot().map(Box::new);
+    let report = explain(&input).unwrap();
+    let view = report.connection_work.unwrap();
+    assert!(view.observations.iter().any(|line| line.contains("18456")));
+    assert!(view.limitations.contains(&t!("view.source_overhead.connection.limit.scope")));
+    assert!(report.evidence.engine.is_none());
+    assert!(report.evidence.read_metrics.as_ref().unwrap().native_session_work.is_none());
+    let mut changed = input.clone();
+    changed.finished_at = Some("2001-01-01T00:00:00Z".into());
+    assert!(explain(&changed).is_err());
+}
+
+#[test]
+fn pending_original_acquisition_is_explicitly_unconfirmed_and_never_a_login_success() {
+    use culprit_core::telemetry::*;
+    let recorder = ReadConnectionRecorder::default();
+    let attempt = recorder.begin();
+    let phase = attempt.phase(ReadConnectionStage::Acquire, None);
+    let mut input = evidence();
+    input.source = None;
+    input.engine = None;
+    input.started_at = "2000-01-01T00:00:00Z".into();
+    input.finished_at = Some("2100-01-01T00:00:00Z".into());
+    input.status = CollectionStatus::Incomplete(CollectionStop::Cancelled);
+    let metrics = input.read_metrics.as_mut().unwrap();
+    metrics.connection_work = recorder.snapshot().map(Box::new);
+    let report = explain(&input).unwrap();
+    let connection = report.connection_work.unwrap();
+    assert!(connection.limitations.contains(&t!("view.source_overhead.connection.limit.unconfirmed")));
+    assert!(connection.limitations.contains(&t!(
+        "view.source_overhead.connection.limit.partial",
+        attempts = "0",
+        phases = "0"
+    )));
+    let original = report.evidence.read_metrics.unwrap().connection_work.unwrap();
+    assert_eq!(original.active_phases, 1);
+    assert_eq!(original.attempts[0].connection_use, ReadConnectionUse::Unknown);
+    assert_eq!(original.attempts[0].phases[0].outcome, ReadConnectionOutcome::Pending);
+    drop(phase);
+    assert_eq!(original.active_phases, 1, "the sealed point is immutable after original owner settlement");
+}
+#[test]
+fn reversed_client_clock_keeps_monotonic_duration_without_manufacturing_native_bounds() {
+    use culprit_core::telemetry::*;
+    let recorder = ReadConnectionRecorder::default();
+    let attempt = recorder.begin();
+    attempt
+        .phase(ReadConnectionStage::Acquire, None)
+        .finish(ReadConnectionOutcome::Failed { code: culprit_core::ErrorCode::Timeout, native_code: None });
+    let mut work = recorder.snapshot().unwrap();
+    let phase = &mut work.attempts[0].phases[0];
+    phase.client_started_at = "2020-01-01T12:00:01Z".into();
+    phase.client_finished_at = Some("2020-01-01T12:00:00Z".into());
+    phase.client_elapsed_ms = Some(5.0);
+    assert!(work.is_valid());
+    let mut input = evidence();
+    input.started_at = "2020-01-01T12:00:00Z".into();
+    input.finished_at = Some("2020-01-01T12:00:01Z".into());
+    input.read_metrics.as_mut().unwrap().connection_work = Some(Box::new(work));
+    let report = explain(&input).unwrap();
+    assert!(report.native_interval.is_none());
+    assert_eq!(
+        report.evidence.read_metrics.as_ref().unwrap().connection_work.as_ref().unwrap().attempts[0].phases[0]
+            .client_elapsed_ms,
+        Some(5.0)
+    );
+    assert!(
+        report
+            .connection_work
+            .unwrap()
+            .limitations
+            .contains(&t!("view.source_overhead.connection.limit.clock_changed"))
+    );
 }

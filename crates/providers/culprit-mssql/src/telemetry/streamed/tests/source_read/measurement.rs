@@ -25,6 +25,7 @@ impl NativeRead for RecordedStream {
     }
     fn read_metrics(&self) -> Option<ReadWorkMetrics> {
         Some(ReadWorkMetrics {
+            connection_work: None,
             active_tasks: 0,
             untracked_tasks: 0,
             templates: vec![],

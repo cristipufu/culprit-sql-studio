@@ -294,6 +294,7 @@ impl TelemetrySource for TestSource {
     fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
         if matches!(self.0.scenario, Scenario::MalformedMetrics) {
             return Some(culprit_core::telemetry::ReadWorkMetrics {
+                connection_work: None,
                 native_session_work: None,
                 active_tasks: 0,
                 untracked_tasks: 0,
@@ -315,6 +316,7 @@ impl TelemetrySource for TestSource {
             });
         }
         matches!(self.0.scenario, Scenario::MetricsStillRunning).then_some(culprit_core::telemetry::ReadWorkMetrics {
+            connection_work: None,
             native_session_work: None,
             active_tasks: 1,
             untracked_tasks: 0,

@@ -27,6 +27,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         numa_nodes: &'a Option<Vec<culprit_core::InstanceResourceReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         counter_ratios: &'a Option<Box<culprit_core::CounterRatioReport>>,
+        source_acquisitions: &'a [culprit_core::HistoricalSourceOverhead],
         performance_counters: &'a [culprit_core::PerformanceCounterReport],
         index_configuration: &'a [culprit_core::IndexConfigurationReport],
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,6 +135,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         query_compilation,
         compiler_admission,
         counter_ratios,
+        source_acquisitions,
         performance_counters,
         index_configuration,
         wait_counters,
@@ -185,6 +187,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         query_compilation,
         compiler_admission,
         counter_ratios,
+        source_acquisitions,
         performance_counters,
         index_configuration,
         wait_counters,

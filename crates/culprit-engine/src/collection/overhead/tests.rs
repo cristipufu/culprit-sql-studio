@@ -13,13 +13,18 @@ const PRIVATE_PREVIEW: &str =
 struct FailingSource {
     unconfirmed: bool,
     calls: Arc<AtomicU32>,
+    connections: ReadConnectionRecorder,
 }
 
 #[async_trait::async_trait]
 impl SourceFactory for FailingSource {
     async fn open(&self, _: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(Box::new(Self { unconfirmed: self.unconfirmed, calls: self.calls.clone() }))
+        Ok(Box::new(Self {
+            unconfirmed: self.unconfirmed,
+            calls: self.calls.clone(),
+            connections: self.connections.clone(),
+        }))
     }
 }
 
@@ -27,6 +32,10 @@ impl SourceFactory for FailingSource {
 impl TelemetrySource for FailingSource {
     async fn describe(&mut self) -> Result<CollectionDescription> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        let attempt = self.connections.begin();
+        attempt
+            .phase(ReadConnectionStage::Acquire, None)
+            .finish(ReadConnectionOutcome::Failed { code: ErrorCode::PermissionDenied, native_code: None });
         Err(Error::new(ErrorCode::PermissionDenied, "controlled native describe failure"))
     }
     fn query_count(&self) -> u32 {
@@ -34,6 +43,7 @@ impl TelemetrySource for FailingSource {
     }
     fn read_metrics(&self) -> Option<ReadWorkMetrics> {
         Some(ReadWorkMetrics {
+            connection_work: self.connections.snapshot().map(Box::new),
             native_session_work: None,
             active_tasks: u32::from(self.unconfirmed),
             untracked_tasks: 1,
@@ -85,7 +95,7 @@ async fn failed_describe_and_unsettled_attempts_are_visible_without_credentials_
         let calls = Arc::new(AtomicU32::new(0));
         let result = collect(
             &SourceGate::default(),
-            &FailingSource { unconfirmed, calls: calls.clone() },
+            &FailingSource { unconfirmed, calls: calls.clone(), connections: Default::default() },
             request,
             &directory,
             capture.clone(),
@@ -105,6 +115,18 @@ async fn failed_describe_and_unsettled_attempts_are_visible_without_credentials_
         assert_eq!(before, 3, "one open, original failed description and same owner close, with no retry");
         assert_eq!(report.evidence.capture, capture);
         assert_eq!(report.evidence.engine, None);
+        assert!(
+            report
+                .connection_work
+                .as_ref()
+                .unwrap()
+                .limitations
+                .contains(&t!("view.source_overhead.connection.limit.scope"))
+        );
+        assert_eq!(
+            report.evidence.read_metrics.as_ref().unwrap().connection_work.as_ref().unwrap().attempts[0].connection_use,
+            ReadConnectionUse::Unknown
+        );
         assert_eq!(report.evidence.source_queries, Some(1));
         assert!(matches!(report.evidence.status, CollectionStatus::Incomplete(_)));
         let metrics = report.evidence.read_metrics.as_ref().unwrap();

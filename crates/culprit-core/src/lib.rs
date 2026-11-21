@@ -124,7 +124,9 @@ pub mod runtime_distribution_report;
 pub mod runtime_population;
 pub mod serialization;
 pub mod signals;
+mod source_acquisition;
 pub mod source_overhead_report;
+pub use source_acquisition::*;
 pub mod sql;
 pub mod statement_grant_report;
 pub mod statement_work_report;
@@ -257,8 +259,8 @@ pub use signals::{
     Replica, ReplicaCondition, ReplicaRole, SizeBaseline, TableStorage, escalations_by_table,
 };
 pub use source_overhead_report::{
-    CollectedSourceOverheadAnalysis, SourceNativeIntervalExplanation, SourceOverheadCaptureSummary,
-    SourceOverheadEvidence, SourceOverheadReport,
+    CollectedSourceOverheadAnalysis, SourceConnectionExplanation, SourceNativeIntervalExplanation,
+    SourceOverheadCaptureSummary, SourceOverheadEvidence, SourceOverheadReport,
 };
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use statement_grant_report::{StatementGrantExplanation, StatementGrantRead, StatementGrantReport};

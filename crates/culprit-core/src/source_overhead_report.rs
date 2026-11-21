@@ -6,7 +6,7 @@ use crate::{
         CaptureIdentity, CollectionDescription, CollectionManifest, CollectionStatus, ReadWorkMetrics, ReadWorkSummary,
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// The caller authenticates this metadata. Collector acquisition clocks never describe the native history window.
@@ -39,15 +39,20 @@ impl SourceOverheadEvidence {
     }
 }
 
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
+#[serde(deny_unknown_fields)]
 pub struct SourceOverheadCaptureSummary {
     pub capture: CaptureIdentity,
+    #[serde(deserialize_with = "required_summary_field")]
     pub engine: Option<Engine>,
     pub status: CollectionStatus,
     pub started_at: String,
+    #[serde(deserialize_with = "required_summary_field")]
     pub finished_at: Option<String>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub source_queries: Option<u32>,
+    #[serde(deserialize_with = "required_summary_field")]
     pub read_metrics: Option<ReadWorkSummary>,
 }
 impl SourceOverheadEvidence {
@@ -68,7 +73,7 @@ impl SourceOverheadEvidence {
     }
 }
 
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SourceNativeIntervalExplanation {
     pub summary: String,
@@ -76,9 +81,18 @@ pub struct SourceNativeIntervalExplanation {
     pub limitations: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SourceConnectionExplanation {
+    pub summary: String,
+    pub observations: Vec<String>,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SourceOverheadReport {
+    pub connection_work: Option<SourceConnectionExplanation>,
     /// Numerical measurements occur once. SQL previews are withheld; authentication does not establish safe text.
     pub evidence: SourceOverheadCaptureSummary,
     /// Indices into evidence.read_metrics.templates, ordered by descending client elapsed time, then template SHA.
@@ -99,4 +113,30 @@ pub struct CollectedSourceOverheadAnalysis {
     pub read_gaps: Vec<EvidenceGap>,
     pub metrics: CollectedEvidenceMetrics,
     pub report: SourceOverheadReport,
+}
+
+impl SourceOverheadCaptureSummary {
+    pub fn is_valid(&self) -> bool {
+        let until = self.finished_at.as_deref().unwrap_or(&self.started_at);
+        let Some(bounds) = crate::telemetry::ObservationBounds::new(&self.started_at, until) else { return false };
+        self.started_at.len() <= 64
+            && until.len() <= 64
+            && (self.status != CollectionStatus::Complete || self.finished_at.is_some())
+            && (self.source_queries.is_none() || self.finished_at.is_some())
+            && self.read_metrics.as_ref().is_none_or(|metrics| {
+                metrics.is_valid()
+                    && metrics.connection_work.as_ref().is_none_or(|work| {
+                        work.attempts.iter().flat_map(|attempt| &attempt.phases).all(|phase| {
+                            bounds.contains(&phase.client_started_at)
+                                && phase.client_finished_at.as_ref().is_none_or(|at| bounds.contains(at))
+                        })
+                    })
+            })
+    }
+}
+
+fn required_summary_field<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    reader: D,
+) -> std::result::Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(reader)
 }

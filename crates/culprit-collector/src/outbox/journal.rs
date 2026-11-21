@@ -8,7 +8,7 @@ use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use std::{collections::BTreeSet, path::Path};
 
-const JOURNAL_VERSION: i64 = 25;
+const JOURNAL_VERSION: i64 = 26;
 const APPLICATION_ID: i64 = 0x43554c54;
 const JOURNAL_PAGES: i64 = 4096;
 
@@ -372,16 +372,49 @@ impl Journal {
         reason: Option<OutboxProblem>,
         bytes: u64,
     ) -> Result<()> {
+        self.fail_with_manifest(capture, state, reason, bytes, None)
+    }
+    pub(super) fn fail_with_manifest(
+        &mut self,
+        capture: &Capture,
+        state: OutboxCaptureState,
+        reason: Option<OutboxProblem>,
+        bytes: u64,
+        terminal_manifest_sha: Option<&str>,
+    ) -> Result<()> {
+        if let Some(sha) = terminal_manifest_sha {
+            let current = self.capture(&capture.identity.observation_id)?;
+            if !valid_digest(sha)
+                || state != OutboxCaptureState::Incomplete
+                || current.identity != capture.identity
+                || current.state != OutboxCaptureState::Capturing
+            {
+                return Err(problem(OutboxProblem::Integrity));
+            }
+        }
         let tx = self.conn.transaction().map_err(storage)?;
+        if terminal_manifest_sha.is_some() {
+            let sealed: Option<String> = tx
+                .query_row(
+                    "SELECT manifest_sha FROM captures WHERE observation_id=?1",
+                    [&capture.identity.observation_id],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if sealed.is_some() {
+                return Err(problem(OutboxProblem::Integrity));
+            }
+        }
         tx.execute("DELETE FROM range_heads WHERE observation_id=?1", [&capture.identity.observation_id])
             .map_err(storage)?;
         tx.execute(
-            "UPDATE captures SET state=?1,problem=?2,charged_bytes=?3 WHERE observation_id=?4",
+            "UPDATE captures SET state=?1,problem=?2,charged_bytes=?3,manifest_sha=coalesce(?5,manifest_sha) WHERE observation_id=?4",
             params![
                 encode(&state)?,
                 reason.map(|reason| encode(&reason)).transpose()?,
                 bytes_to_sql(bytes)?,
-                capture.identity.observation_id
+                capture.identity.observation_id,
+                terminal_manifest_sha
             ],
         )
         .map_err(storage)?;

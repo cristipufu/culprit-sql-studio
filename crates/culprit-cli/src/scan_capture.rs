@@ -16,8 +16,10 @@ type ScanTask<'a> = Pin<Box<dyn Future<Output = Result<Box<Report>>> + 'a>>;
 
 #[derive(Args, Default)]
 #[command(group(clap::ArgGroup::new("captured_original")
-    .args(["memory_clerks_capture", "hyperscale_log_components_capture", "tempdb_metadata_memory_capture", "pool_settings_capture", "managed_instance_resources_capture", "cdc_capture", "change_feed_capture", "numa_nodes_capture"]).multiple(false)))]
+    .args(["source_overhead_capture", "memory_clerks_capture", "hyperscale_log_components_capture", "tempdb_metadata_memory_capture", "pool_settings_capture", "managed_instance_resources_capture", "cdc_capture", "change_feed_capture", "numa_nodes_capture"]).multiple(false)))]
 pub(crate) struct CapturedScanArgs {
+    #[arg(long,value_name="OBSERVATION",requires="evidence_outbox",help=culprit_core::t!("view.source_overhead.intake"))]
+    source_overhead_capture: Option<String>,
     #[arg(long,value_name="OBSERVATION",requires="evidence_outbox",help=culprit_core::t!("view.numa_nodes.intake"))]
     numa_nodes_capture: Option<String>,
     #[arg(long,value_name="OBSERVATION",requires="evidence_outbox",help=culprit_core::t!("view.change_capture.history.intake"))]
@@ -46,6 +48,7 @@ struct CapturedOriginal<'a> {
 impl CapturedScanArgs {
     fn original(&self) -> Result<Option<CapturedOriginal<'_>>> {
         let mut selected = [
+            (self.source_overhead_capture.as_deref(), LocalCaptureAnalysisKind::SourceOverhead),
             (self.numa_nodes_capture.as_deref(), LocalCaptureAnalysisKind::InstanceResources),
             (self.cdc_capture.as_deref(), LocalCaptureAnalysisKind::Cdc),
             (self.change_feed_capture.as_deref(), LocalCaptureAnalysisKind::ChangeFeed),
@@ -116,6 +119,12 @@ fn captured_action<'a>(
     captured: LocalCapturedAnalysis,
 ) -> ScanTask<'a> {
     match captured {
+        LocalCapturedAnalysis::SourceOverhead(captured) => boxed_report(workspace.scan_with_captured_source_overhead(
+            &args.connection,
+            options,
+            args.query_log.as_deref(),
+            *captured,
+        )),
         LocalCapturedAnalysis::ManagedInstanceResources(captured) => {
             boxed_report(workspace.scan_with_captured_managed_instance_resources(
                 &args.connection,

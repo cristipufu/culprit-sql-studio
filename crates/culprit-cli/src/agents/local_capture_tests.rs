@@ -9,6 +9,7 @@ mod participant_context;
 mod replication;
 mod rowgroups_backup;
 mod snapshots;
+mod source_overhead;
 mod table_memory;
 mod tempdb_metadata_memory;
 use super::*;

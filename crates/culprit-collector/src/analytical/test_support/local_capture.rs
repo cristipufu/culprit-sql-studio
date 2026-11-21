@@ -71,7 +71,42 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
         case("galera", super::galera_evidence(super::GaleraCase::Queued)),
     ]
 }
+/// These modes exercise real local manifest settlement, never native database behavior or cost.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SourceAcquisitionCase {
+    Complete,
+    Failed,
+    Unconfirmed,
+}
 impl LocalCaptureFixture {
+    pub async fn source_acquisition(case: SourceAcquisitionCase) -> Self {
+        Self::source_acquisition_for("local-evidence", case).await
+    }
+    pub async fn source_acquisition_for(connection: &str, case: SourceAcquisitionCase) -> Self {
+        let source = super::page_server_read_evidence_cases().remove(0).source;
+        let records = vec![];
+        let temporary = tempfile::tempdir().unwrap();
+        let directory = temporary.path().join("outbox");
+        let mut outbox = Outbox::create(&directory, OutboxLimits::default()).unwrap();
+        let selection = selection(&source);
+        // This metadata-only fixture uses the same capture/lease/close owner as every ordinary local corpus.
+        let (capture_directory, manifest) = collect_original_mode(
+            &mut outbox,
+            source,
+            records,
+            selection,
+            if case == SourceAcquisitionCase::Unconfirmed {
+                SourceShutdown::Unconfirmed
+            } else {
+                SourceShutdown::Quiescent
+            },
+            Some(case),
+            connection,
+        )
+        .await;
+        Self { outbox: Some(outbox), directory, capture_directory, manifest, _temporary: temporary }
+    }
+
     pub async fn query_history(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
         assert!(source.query_history().is_some());
         Self::with_shutdown(source, records, SourceShutdown::Quiescent).await
@@ -150,6 +185,17 @@ async fn collect_original(
     selection: CollectionSelection,
     shutdown: SourceShutdown,
 ) -> (PathBuf, CollectionManifest) {
+    collect_original_mode(outbox, source, records, selection, shutdown, None, "local-evidence").await
+}
+async fn collect_original_mode(
+    outbox: &mut Outbox,
+    source: CollectionDescription,
+    records: Vec<TelemetryRecord>,
+    selection: CollectionSelection,
+    shutdown: SourceShutdown,
+    acquisition: Option<SourceAcquisitionCase>,
+    connection: &str,
+) -> (PathBuf, CollectionManifest) {
     let request = CollectionRequest {
         subject: match &source.target {
             CollectionTarget::Database(_) => CollectionSubject::Database,
@@ -159,10 +205,10 @@ async fn collect_original(
         budget: CollectionBudget::default(),
     };
     let closed = Arc::new(AtomicBool::new(false));
-    let factory = OriginalSource { source, records, shutdown, closed: closed.clone() };
-    let mut lease = outbox.reserve("local-evidence", &request).await.unwrap();
+    let factory = OriginalSource { source, records, shutdown, closed: closed.clone(), acquisition };
+    let mut lease = outbox.reserve(connection, &request).await.unwrap();
     let capture_directory = lease.directory().to_owned();
-    let manifest = capture::collect(
+    let result = capture::collect(
         &culprit_read::admission::SourceGate::default(),
         &factory,
         request,
@@ -171,10 +217,21 @@ async fn collect_original(
         &CollectionCancellation::default(),
         Some(&mut lease),
     )
-    .await
-    .unwrap();
+    .await;
     assert!(closed.load(Ordering::SeqCst));
+    if acquisition == Some(SourceAcquisitionCase::Failed) {
+        assert_eq!(result.unwrap_err().code, culprit_core::ErrorCode::PermissionDenied);
+    } else {
+        result.unwrap();
+    }
     lease.finish().await.unwrap();
+    let manifest = Outbox::inspect_manifest(
+        outbox_path(&capture_directory),
+        capture_directory.file_name().unwrap().to_str().unwrap(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     (capture_directory, manifest)
 }
 
@@ -235,12 +292,16 @@ async fn retain_focused_parent(outbox: &mut Outbox, source: &mut CollectionDescr
     assert!(focus.matches_parent(source, &focus.original, &focus.parent));
 }
 
+fn outbox_path(directory: &std::path::Path) -> &std::path::Path {
+    directory.parent().unwrap().parent().unwrap()
+}
 #[derive(Clone)]
 struct OriginalSource {
     source: CollectionDescription,
     records: Vec<TelemetryRecord>,
     shutdown: SourceShutdown,
     closed: Arc<AtomicBool>,
+    acquisition: Option<SourceAcquisitionCase>,
 }
 #[async_trait::async_trait]
 impl SourceFactory for OriginalSource {
@@ -252,10 +313,32 @@ impl SourceFactory for OriginalSource {
 #[async_trait::async_trait]
 impl TelemetrySource for OriginalSource {
     async fn describe(&mut self) -> culprit_core::Result<CollectionDescription> {
-        Ok(self.source.clone())
+        if self.acquisition.is_some_and(|case| case != SourceAcquisitionCase::Complete) {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::PermissionDenied,
+                "controlled metadata refusal",
+            ));
+        }
+        // The acquisition-only fixture returns a genuine complete zero-row header, not a fabricated workload.
+        let mut source = self.source.clone();
+        if self.acquisition.is_some() {
+            let SourceObservation::QueryHistory(history) = &mut source.observation else { panic!() };
+            history.population_catalog = None;
+            history.population_binding = QueryHistoryPopulationBinding::Unknown;
+        }
+        Ok(source)
     }
     fn query_count(&self) -> u32 {
-        0
+        if self.acquisition.is_some() { 100 } else { 0 }
+    }
+    fn read_metrics(&self) -> Option<ReadWorkMetrics> {
+        self.acquisition.map(|case| {
+            let mut metrics = super::native_source_overhead_read_metrics();
+            if case == SourceAcquisitionCase::Unconfirmed {
+                metrics.active_tasks = 1;
+            }
+            metrics
+        })
     }
     async fn read_page(
         &mut self,

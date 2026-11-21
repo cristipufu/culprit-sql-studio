@@ -66,7 +66,7 @@ async fn fixture(analysis: LocalCaptureAnalysisKind) -> LocalCaptureFixture {
             let (source, records) = culprit_collector::analytical::test_support::query_wait_fragment_evidence();
             LocalCaptureFixture::query_history(source, records).await
         }
-        LocalCaptureAnalysisKind::PageServerReads => {
+        LocalCaptureAnalysisKind::SourceOverhead | LocalCaptureAnalysisKind::PageServerReads => {
             let case = page_server_read_evidence_cases().remove(0);
             LocalCaptureFixture::query_history(case.source, case.records).await
         }

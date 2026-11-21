@@ -24,7 +24,7 @@ async fn native_persistent_versions_distinguish_disabled_adr_and_preserve_off_ro
     .await;
     let pool = Arc::new(Pool::new(config(port, &database, &password, "culprit"), None));
     // Establish fixture readiness separately from a bounded observation on the freshly created database.
-    let warmed = pool.get().await.unwrap();
+    let warmed = pool.get_observed(None, None).await.unwrap();
     pool.put(warmed);
     let mut reader = ReadSession::new(pool.clone(), CollectionBudget::default());
     let disabled = read(&mut reader).await;

@@ -4,11 +4,26 @@ use culprit_core::{
     telemetry::{CollectionStatus, DeliveryProblem, ObservationBounds},
 };
 
+mod connections;
+mod history;
 mod native;
+pub fn explain_snapshot(snapshot: &culprit_core::Snapshot) -> Vec<culprit_core::HistoricalSourceOverhead> {
+    history::explain(snapshot)
+}
 
 pub fn explain(evidence: &SourceOverheadEvidence) -> Result<SourceOverheadReport> {
     validate(evidence)?;
-    let evidence = evidence.summary()?;
+    explain_summary(&evidence.summary()?)
+}
+
+/// Saved sanitized metadata shares the same interpretation; it can never reconstruct native authority.
+pub fn explain_summary(evidence: &culprit_core::SourceOverheadCaptureSummary) -> Result<SourceOverheadReport> {
+    if !evidence.is_valid() {
+        return Err(DeliveryProblem::Integrity.error());
+    }
+    let connection_work =
+        evidence.read_metrics.as_ref().and_then(|metrics| metrics.connection_work.as_deref()).map(connections::explain);
+    let evidence = evidence.clone();
     let native_interval =
         evidence.read_metrics.as_ref().and_then(|metrics| metrics.native_session_work.as_deref()).map(native::explain);
     let mut limitations = vec![
@@ -67,6 +82,7 @@ pub fn explain(evidence: &SourceOverheadEvidence) -> Result<SourceOverheadReport
         }
     };
     Ok(SourceOverheadReport {
+        connection_work,
         evidence,
         template_order,
         title: t!("view.source_overhead.title"),
@@ -82,11 +98,34 @@ fn validate(evidence: &SourceOverheadEvidence) -> Result<()> {
         || until.len() > 64
         || ObservationBounds::new(&evidence.started_at, until).is_none()
         || (evidence.status == CollectionStatus::Complete && evidence.finished_at.is_none())
-        || evidence.read_metrics.as_ref().is_some_and(|metrics| !metrics.is_valid())
+        || evidence.read_metrics.as_ref().is_some_and(|metrics| {
+            !metrics.is_valid()
+                || metrics.connection_work.as_ref().is_some_and(|work| {
+                    work.attempts.iter().flat_map(|attempt| &attempt.phases).any(|phase| {
+                        let Some(bounds) = ObservationBounds::new(&evidence.started_at, until) else { return true };
+                        !bounds.contains(&phase.client_started_at)
+                            || phase.client_finished_at.as_ref().is_some_and(|at| !bounds.contains(at))
+                    })
+                })
+        })
     {
         return Err(DeliveryProblem::Integrity.error());
     }
     Ok(())
+}
+
+/// Exact historical original. Current scan identity and clocks are deliberately not inputs.
+pub fn explain_recorded(original: &culprit_core::CapturedSourceAcquisition) -> Result<SourceOverheadReport> {
+    if !original.is_valid() {
+        return Err(DeliveryProblem::Integrity.error());
+    }
+    let mut report = explain_summary(&original.summary)?;
+    report.limitations.push(t!("view.source_overhead.limit.local"));
+    report.limitations.push(t!("view.source_overhead.limit.historical"));
+    if original.seal == culprit_core::SourceAcquisitionSeal::Provisional {
+        report.limitations.push(t!("view.source_overhead.limit.provisional"));
+    }
+    Ok(report)
 }
 
 #[cfg(test)]

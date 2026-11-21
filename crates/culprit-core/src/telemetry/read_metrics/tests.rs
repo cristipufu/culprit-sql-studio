@@ -121,3 +121,20 @@ fn public_summary_keeps_exact_stop_causes_without_source_sql_or_a_new_settlement
         DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted }
     ));
 }
+
+#[test]
+fn curated_work_summary_shares_counter_validation_but_refuses_any_available_sql_preview_on_replay() {
+    let metrics = aggregate();
+    let summary = metrics.summary(None).unwrap();
+    assert!(summary.is_valid());
+    let decoded: ReadWorkSummary = serde_json::from_slice(&serde_json::to_vec(&summary).unwrap()).unwrap();
+    assert!(decoded.is_valid());
+    assert_eq!(decoded, summary);
+    let mut preview = summary.clone();
+    preview.templates[0].statement = metrics.templates[0].statement.clone();
+    assert!(preview.templates[0].statement.is_available());
+    assert!(!preview.is_valid());
+    let mut malformed = summary;
+    malformed.templates[0].rows_decoded = "18446744073709551616".into();
+    assert!(!malformed.is_valid());
+}

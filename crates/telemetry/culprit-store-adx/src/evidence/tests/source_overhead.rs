@@ -13,8 +13,15 @@ async fn metadata_only_read_authenticates_source_totals_and_bounded_metrics_with
     for metrics in [
         Some(test_support::source_overhead_read_metrics()),
         Some(test_support::native_source_overhead_read_metrics()),
+        Some(test_support::connection_source_overhead_read_metrics()),
         None,
-        Some(ReadWorkMetrics { native_session_work: None, active_tasks: 0, untracked_tasks: 0, templates: vec![] }),
+        Some(ReadWorkMetrics {
+            connection_work: None,
+            native_session_work: None,
+            active_tasks: 0,
+            untracked_tasks: 0,
+            templates: vec![],
+        }),
     ] {
         let fixture = fixture(metrics.clone()).await;
         publication(&fixture, vec![fixture.publication.clone()]);
@@ -63,7 +70,7 @@ async fn altered_source_query_total_or_read_metrics_cannot_be_substituted_by_the
         fixture.publication[column] = if field == "SourceQueries" {
             json!(101)
         } else {
-            json!({"active_tasks":0,"untracked_tasks":0,"templates":[]})
+            json!({"connection_work":null,"active_tasks":0,"untracked_tasks":0,"templates":[],"native_session_work":null})
         };
         publication(&fixture, vec![fixture.publication.clone()]);
         let error = fixture.reader().read_metadata(&fixture.range, EvidenceReadBudget::default()).await.unwrap_err();
@@ -119,4 +126,28 @@ async fn numeric_native_summary_or_opaque_proof_tampering_is_not_authenticated_a
         assert_eq!(fixture.query.requests.lock().unwrap().len(), 1);
         assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
     }
+}
+
+#[tokio::test]
+async fn original_acquisition_codes_cannot_be_changed_into_a_successful_login_by_publication() {
+    let original = test_support::connection_source_overhead_read_metrics();
+    let mut fixture = fixture(Some(original)).await;
+    let schema = fixture.catalog.publication();
+    let column = schema.columns().iter().position(|column| column.name == "ReadMetrics").unwrap();
+    let public = &fixture.publication[column];
+    let mut public =
+        public.as_str().map(|text| serde_json::from_str::<Value>(text).unwrap()).unwrap_or_else(|| public.clone());
+    assert_eq!(public["connection_work"]["attempts"][0]["phases"][1]["outcome"]["native_code"], 18456);
+    public["connection_work"]["attempts"][0]["phases"][1]["outcome"] = json!({"kind":"completed"});
+    fixture.publication[column] =
+        if fixture.publication[column].is_string() { json!(serde_json::to_string(&public).unwrap()) } else { public };
+    publication(&fixture, vec![fixture.publication.clone()]);
+    let error = fixture
+        .reader()
+        .read_metadata(&fixture.range, EvidenceReadBudget { max_queries: 1, ..Default::default() })
+        .await
+        .unwrap_err();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    assert_eq!(fixture.query.requests.lock().unwrap().len(), 1);
+    assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
 }

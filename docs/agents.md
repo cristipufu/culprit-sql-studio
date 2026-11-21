@@ -68,7 +68,7 @@ Enable local evidence at server startup:
 culprit mcp --connection shop-staging --evidence-outbox /path/to/outbox
 ```
 
-`analyze_capture` takes `connection`, `observation_id` and a closed `analysis` choice. It supports `page_server_reads`,
+`analyze_capture` takes `connection`, `observation_id` and a closed `analysis` choice. It supports `source_overhead`, `page_server_reads`,
 `memory_clerks`, `hyperscale_log_components`, `performance_counters`, `database_properties`, `instance_resources`, `compilation`,
 `configured_log_rates`, `connection_outcomes`, `jobs`, `request_memory`, `task_space`, `current_request_work`,
 `statement_work`, `maintenance_progress`, `completed_spills`, `storage`, `blocking` and `session_census`.
@@ -76,6 +76,13 @@ culprit mcp --connection shop-staging --evidence-outbox /path/to/outbox
 journal entry. The tool reanalyzes verified originals, with redacted SQL previews only when their exact original
 definitions match. Memory clerks retain their original shared-server scope, native counts and read bounds; they
 are not allocations attributable to the selected database or its queries. It does not connect to the database or use credentials, recovery storage or a warehouse.
+
+`source_overhead` inspects sanitized acquisition metadata through the same bounded local worker and delegated
+connection. It can inspect failed or provisional attempts with no source/database identity; it reads no native result
+files and starts no database work. A provisional manifest is explicitly incomplete and cannot be retained as sealed
+saved-scan history. Sealed successful and failed attempts can be attached through the existing saved-report intake;
+these historical measurements do not describe the current scan or prove database/member continuity. Sharing
+withdraws the whole original. Regular scan/probe acquisition metrics remain a separate unavailable seam.
 
 Operational analyses share one authenticated original read. Results keep native source coverage and acquisition
 clocks independently of local verification bytes. Details return at most five entries with explicit presentation

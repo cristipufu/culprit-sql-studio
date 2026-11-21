@@ -2,6 +2,7 @@ mod query_wait_fragments;
 mod replication;
 mod rowgroups_backup;
 mod runtime_fragments;
+mod source_overhead;
 mod suspect_pages;
 mod table_full_text;
 mod table_memory;

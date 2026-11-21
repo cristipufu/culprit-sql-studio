@@ -8,6 +8,7 @@ use culprit_core::{
 use culprit_core::telemetry::{CachedRuntimeRead, CachedRuntimeReadOrigin};
 
 pub(crate) enum CapturedScanEvidence {
+    SourceAcquisition(culprit_core::RecordedSourceAcquisition),
     NumaNodes(Box<CapturedOperationalRead>),
     IndexConfiguration(Box<CapturedOperationalRead>),
     ChangeCapture {
@@ -30,6 +31,15 @@ pub(crate) enum CapturedScanEvidence {
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
 impl CapturedScanEvidence {
+    pub(crate) fn source_acquisition(original: culprit_core::RecordedSourceAcquisition) -> Result<Self> {
+        if let culprit_core::RecordedSourceAcquisition::Captured { original } = &original
+            && !original.is_saveable()
+        {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        Ok(Self::SourceAcquisition(original))
+    }
+
     pub(crate) fn numa_nodes(read: Box<CapturedOperationalRead>) -> Result<Self> {
         if !culprit_core::telemetry::numa_node_header_is_valid(&read.description) {
             return Err(DeliveryProblem::InvalidContract.error());
@@ -118,6 +128,17 @@ impl CapturedScanEvidence {
     }
     pub(crate) fn attach(self, snapshot: &mut Snapshot) -> Result<()> {
         match self {
+            Self::SourceAcquisition(original) => match original {
+                culprit_core::RecordedSourceAcquisition::Captured { original } => {
+                    culprit_core::append_source_acquisition(&mut snapshot.operations.source_acquisitions, original)?;
+                }
+                original @ culprit_core::RecordedSourceAcquisition::Unavailable { .. } => {
+                    if snapshot.operations.source_acquisitions.len() >= culprit_core::MAX_RECORDED_SOURCE_ACQUISITIONS {
+                        return Err(culprit_core::telemetry::CollectionStop::RowLimit.error());
+                    }
+                    snapshot.operations.source_acquisitions.push(original);
+                }
+            },
             Self::NumaNodes(read) => {
                 culprit_core::telemetry::append_recorded_operational_read(&mut snapshot.operations.numa_nodes, read)?;
             }

@@ -28,6 +28,7 @@ pub(crate) use page_server_reads::collected_page_server_reads;
 pub(crate) use query_wait_fragments::{compact_query_wait_fragments, query_wait_fragments};
 pub(crate) use runtime_fragments::{compact_runtime_fragments, runtime_fragments};
 mod source_overhead;
+pub(crate) use source_overhead::historical_source_overhead;
 pub(crate) use source_overhead::{collected_source_overhead, source_overhead};
 mod cache_entry_memory;
 pub(crate) use cache_entry_memory::cache_entry_memory;

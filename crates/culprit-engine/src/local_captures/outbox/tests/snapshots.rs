@@ -38,7 +38,8 @@ async fn every_new_snapshot_report_retains_one_exact_original_without_source_wor
     for kind in LocalCaptureAnalysisKind::ALL.iter().copied().filter(|kind| {
         !matches!(
             kind,
-            LocalCaptureAnalysisKind::ManagedInstanceResources
+            LocalCaptureAnalysisKind::SourceOverhead
+                | LocalCaptureAnalysisKind::ManagedInstanceResources
                 | LocalCaptureAnalysisKind::PoolSettings
                 | LocalCaptureAnalysisKind::Replication
                 | LocalCaptureAnalysisKind::RuntimeFragments

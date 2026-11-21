@@ -102,3 +102,65 @@ pub fn assert_native_source_overhead_summary(public: &serde_json::Value, private
     let stopped = public["templates"].as_array().unwrap().iter().find(|metric| metric["timeouts"] == 1).unwrap();
     assert_eq!(stopped["stop_causes"], serde_json::json!([{"reason":"timed-out","tasks":1}]));
 }
+
+pub fn connection_source_overhead_read_metrics() -> ReadWorkMetrics {
+    use culprit_core::telemetry::*;
+    let mut metrics = source_overhead_read_metrics();
+    let phase = |stage, outcome, template_id| ReadConnectionPhase {
+        stage,
+        outcome,
+        template_id,
+        client_started_at: "2020-01-01T12:00:00Z".into(),
+        client_finished_at: Some("2020-01-01T12:00:01Z".into()),
+        client_elapsed_ms: Some(1000.0),
+    };
+    metrics.connection_work = Some(Box::new(ReadConnectionWork {
+        attempted: 2,
+        omitted_attempts: 0,
+        omitted_phases: 0,
+        active_phases: 0,
+        unconfirmed_phases: 0,
+        attempts: vec![
+            ReadConnectionAttempt {
+                ordinal: 1,
+                connection_use: ReadConnectionUse::FreshConnection,
+                reader_generation: None,
+                omitted_phases: 0,
+                phases: vec![
+                    phase(
+                        ReadConnectionStage::Acquire,
+                        ReadConnectionOutcome::Failed { code: culprit_core::ErrorCode::AuthFailed, native_code: None },
+                        None,
+                    ),
+                    phase(
+                        ReadConnectionStage::HandshakeAndLogin,
+                        ReadConnectionOutcome::Failed {
+                            code: culprit_core::ErrorCode::AuthFailed,
+                            native_code: Some(18456),
+                        },
+                        None,
+                    ),
+                ],
+            },
+            ReadConnectionAttempt {
+                ordinal: 2,
+                connection_use: ReadConnectionUse::AuthenticatedReuse,
+                reader_generation: Some("1".into()),
+                omitted_phases: 0,
+                phases: vec![
+                    phase(ReadConnectionStage::Acquire, ReadConnectionOutcome::Completed, None),
+                    phase(
+                        ReadConnectionStage::FirstQuery,
+                        ReadConnectionOutcome::Failed {
+                            code: culprit_core::ErrorCode::PermissionDenied,
+                            native_code: None,
+                        },
+                        Some(digest(b"original-query-template")),
+                    ),
+                ],
+            },
+        ],
+    }));
+    assert!(metrics.is_valid());
+    metrics
+}

@@ -1,6 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::read::connection_work::{core_phase, native_phase};
+use culprit_core::telemetry::{ReadConnectionAttemptRecorder, ReadConnectionStage, ReadConnectionUse};
 use culprit_core::{
     AuthKind, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, Engine, Error, ErrorCode, Result,
     entra_host_allowed, t,
@@ -159,15 +161,23 @@ async fn open_tcp(
     config: Config,
     endpoint: Option<&ConnectionEndpoint>,
     work: &mut ConnectionWork<'_>,
+    attempt: Option<&ReadConnectionAttemptRecorder>,
 ) -> tiberius::Result<MsClient> {
     let addr = config.get_addr();
     let dial = endpoint.map_or_else(|| addr.clone(), |endpoint| endpoint.address.to_string());
-    let tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(&dial)).await.map_err(|_| {
-        tiberius::error::Error::Io { kind: std::io::ErrorKind::TimedOut, message: connect_timed_out(&addr) }
-    })??;
+    let tcp = native_phase(attempt, ReadConnectionStage::Transport, async {
+        tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(&dial))
+            .await
+            .map_err(|_| tiberius::error::Error::Io {
+                kind: std::io::ErrorKind::TimedOut,
+                message: connect_timed_out(&addr),
+            })?
+            .map_err(tiberius::error::Error::from)
+    })
+    .await?;
     tcp.set_nodelay(true)?;
     work.begin_login();
-    Client::connect(config, tcp.compat_write()).await
+    native_phase(attempt, ReadConnectionStage::HandshakeAndLogin, Client::connect(config, tcp.compat_write())).await
 }
 
 /// The TCP connection to `addr` didn't open in time: the message of the I/O error it becomes.
@@ -187,9 +197,11 @@ async fn connect(
     kind: SessionKind,
     work: &mut ConnectionWork<'_>,
     accounting: Option<&crate::read::qualification::SetupWork>,
+    observed: Option<&ReadConnectionAttemptRecorder>,
 ) -> Result<MsClient> {
-    let mut endpoint = endpoint_for(config, transport).await?;
-    let attempt = match open_tcp(config.clone(), endpoint.as_ref(), work).await {
+    let mut endpoint =
+        core_phase(observed, ReadConnectionStage::RouteSelection, endpoint_for(config, transport)).await?;
+    let attempt = match open_tcp(config.clone(), endpoint.as_ref(), work, observed).await {
         Err(tiberius::error::Error::Routing { host, port }) => {
             // A typed routing response completed at the gateway before a database session was admitted.
             work.confirmed();
@@ -199,8 +211,9 @@ async fn connect(
             let mut routed = config.clone();
             routed.host(&host);
             routed.port(port);
-            endpoint = endpoint_for(&routed, transport).await?;
-            open_tcp(routed, endpoint.as_ref(), work).await
+            endpoint =
+                core_phase(observed, ReadConnectionStage::RouteSelection, endpoint_for(&routed, transport)).await?;
+            open_tcp(routed, endpoint.as_ref(), work, observed).await
         }
         other => other,
     };
@@ -210,7 +223,8 @@ async fn connect(
         SessionKind::User => USER_SESSION_SETUP,
     };
     let recorded = accounting.map(|accounting| accounting.begin(setup)).transpose()?;
-    let result = execute(&mut client, setup).await.map_err(map_error);
+    let result =
+        native_phase(observed, ReadConnectionStage::SessionSetup, execute(&mut client, setup)).await.map_err(map_error);
     if let Some(recorded) = recorded {
         recorded.finish(result.is_ok());
     }
@@ -250,16 +264,17 @@ impl Pool {
     }
 
     pub(crate) async fn connect(&self, kind: SessionKind) -> Result<MsClient> {
-        self.connect_with_accounting(kind, None).await
+        self.connect_observed(kind, None, None).await
     }
-    async fn connect_with_accounting(
+    async fn connect_observed(
         &self,
         kind: SessionKind,
         accounting: Option<&crate::read::qualification::SetupWork>,
+        observed: Option<&ReadConnectionAttemptRecorder>,
     ) -> Result<MsClient> {
         self.ensure_available()?;
         let mut work = ConnectionWork { pool: self, started: false };
-        connect(&self.config, self.transport.as_deref(), kind, &mut work, accounting).await
+        connect(&self.config, self.transport.as_deref(), kind, &mut work, accounting, observed).await
     }
 
     pub(crate) fn mark_uncertain(&self) {
@@ -283,18 +298,22 @@ impl Pool {
         self.idle.lock().ok()?.pop()
     }
 
-    pub(crate) async fn get(&self) -> Result<MsClient> {
-        self.get_with_accounting(None).await
-    }
-    pub(crate) async fn get_with_accounting(
+    pub(crate) async fn get_observed(
         &self,
         accounting: Option<&crate::read::qualification::SetupWork>,
+        observed: Option<&ReadConnectionAttemptRecorder>,
     ) -> Result<MsClient> {
         self.ensure_available()?;
         if let Some(client) = self.take_idle() {
+            if let Some(observed) = observed {
+                observed.connection_use(ReadConnectionUse::AuthenticatedReuse);
+            }
             return Ok(client);
         }
-        self.connect_with_accounting(SessionKind::Stats, accounting).await
+        if let Some(observed) = observed {
+            observed.connection_use(ReadConnectionUse::FreshConnection);
+        }
+        self.connect_observed(SessionKind::Stats, accounting, observed).await
     }
 
     pub(crate) fn put(&self, client: MsClient) {

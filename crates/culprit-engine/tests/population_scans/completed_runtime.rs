@@ -13,6 +13,7 @@ mod database_performance_counters;
 mod full_text_populations;
 mod hyperscale_log_components;
 mod memory_clerks;
+mod source_overhead;
 mod table_memory;
 mod tempdb_metadata_memory;
 

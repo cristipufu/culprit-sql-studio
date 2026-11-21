@@ -100,6 +100,7 @@ async fn sampled_native_coverage_is_allowed_but_a_failed_or_stopped_source_read_
     require_readable_source(&scenario.activity_source).unwrap();
     require_readable_source(&scenario.page_source).unwrap();
     let mut metrics = ReadWorkMetrics {
+        connection_work: None,
         active_tasks: 0,
         untracked_tasks: 0,
         native_session_work: None,

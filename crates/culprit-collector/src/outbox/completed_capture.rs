@@ -82,6 +82,7 @@ impl ReadControl {
 }
 
 pub(super) enum ReadRequest {
+    SourceOverhead { connection: String, observation_id: String },
     Snapshot { attempt: DiagnosticAttemptReceipt, dataset: SnapshotDataset },
     SnapshotLookup { connection: String, observation_id: String, datasets: Vec<SnapshotDataset> },
     QueryHistory { connection: String, observation_id: String, selection: super::QueryHistoryReadKind },
@@ -93,7 +94,8 @@ impl ReadRequest {
     fn observation_id(&self) -> &str {
         match self {
             Self::Snapshot { attempt, .. } => &attempt.capture.observation_id,
-            Self::SnapshotLookup { observation_id, .. }
+            Self::SourceOverhead { observation_id, .. }
+            | Self::SnapshotLookup { observation_id, .. }
             | Self::QueryHistory { observation_id, .. }
             | Self::ManagedInstanceResources { observation_id, .. }
             | Self::ActivityLookup { observation_id, .. } => observation_id,
@@ -103,6 +105,7 @@ impl ReadRequest {
 
     fn retains(&self, stream: TelemetryStream) -> bool {
         match self {
+            Self::SourceOverhead { .. } => false,
             Self::Snapshot { dataset, .. } => stream == dataset.stream(),
             Self::SnapshotLookup { datasets, .. } => datasets.iter().any(|dataset| stream == dataset.stream()),
             Self::ManagedInstanceResources { .. } => stream == TelemetryStream::ResourceSamples,
@@ -124,6 +127,22 @@ pub(super) struct CompletedCaptureRead {
     required_connection: Option<String>,
 }
 impl CompletedCaptureRead {
+    pub fn source_overhead(
+        lookup: CompletedCaptureLookup<'_>,
+        budget: CompletedCaptureBudget,
+        operation: OperationHandle,
+    ) -> Result<Self> {
+        Self::lookup(
+            ReadRequest::SourceOverhead {
+                connection: lookup.connection.into(),
+                observation_id: lookup.observation_id.into(),
+            },
+            lookup,
+            budget,
+            operation,
+        )
+    }
+
     pub fn managed_instance_resources(
         lookup: CompletedCaptureLookup<'_>,
         budget: CompletedCaptureBudget,

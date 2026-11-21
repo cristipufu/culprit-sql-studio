@@ -1451,6 +1451,28 @@ template SHA values, exact decoded rows/charged bytes, client timings and failur
 An allocated attempt without an initial manifest has no report yet. Local inspection never promotes an incomplete
 attempt, clears native debt or authorizes publication.
 
+The existing authorized local `analyze_capture` tool also accepts `analysis: "source_overhead"`.
+It reads only the bounded manifest and original journal association, checked before and after inspection.
+This metadata route supports successful and failed attempts without requiring Ready state, source identity,
+confirmed native shutdown or result files. Those requirements remain mandatory for native-row analyses.
+Provisional attempts are explicitly incomplete and direct-inspection-only; a missing initial manifest returns
+an unavailable result without inventing a clock or measured zero.
+
+Sealed successful and terminal failed metadata can be attached through the existing saved-scan intake:
+`culprit scan CONNECTION --evidence-outbox DIRECTORY --source-overhead-capture OBSERVATION`.
+An embedding application uses `Workspace::scan_with_captured_source_overhead` with the authenticated local result.
+The scan's native owner settles before attachment. Saved reports reanalyze only the sanitized original summary,
+retain up to 32 independent capture revisions, refuse conflicting copies and expose any imported overflow.
+The consistency fingerprint detects changed saved bodies; it supplies no native scope or cost authority.
+The app's existing report reads show this history in a folded Health disclosure without collector credentials or
+an Outbox reader. Sharing withdraws the entire original, including its hash, clock, counters and references.
+These historical observations never describe the current scan's acquisition or establish a current DB/member join.
+Ordinary Provider scans and connection tests do not yet expose an acquisition-metrics hook through this route.
+
+Terminal failure sealing authenticates only finished manifest bytes. It leaves failure status, native cancellation
+debt, Ready/publication checks and retirement rules unchanged. The writer cannot reopen a finished revision;
+a later attempt receives a new capture identity. Inspection never retries a manifest or journal change.
+
 For a committed capture, use the same report through its archive:
 
 ```sh

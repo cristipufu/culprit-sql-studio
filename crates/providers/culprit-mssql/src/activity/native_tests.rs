@@ -131,7 +131,7 @@ async fn local_blocking_uses_the_shared_reader_for_live_and_export_at_compatibil
     let after = crate::live::collect(pool.clone(), "127.0.0.1".into(), port, false).await.unwrap();
     assert!(!after.sessions.iter().any(|session| session.id == waiter_id || session.id == blocker_id));
     // The shared source returns only fully drained statistics sessions to the existing pool.
-    let mut reused = pool.get().await.unwrap();
+    let mut reused = pool.get_observed(None, None).await.unwrap();
     assert_eq!(
         crate::conn::query_one(&mut reused, "SELECT /* culprit */ 1 AS value").await.unwrap().f64("value"),
         Some(1.0)
