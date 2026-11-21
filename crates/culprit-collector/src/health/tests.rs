@@ -322,3 +322,86 @@ fn missing_native_evidence_on_a_later_capture_is_unknown_instead_of_reusing_old_
     assert!(!metrics.lines().any(|line| line.starts_with("culprit_collector_schedule_native_coverage{")));
     assert!(metrics.contains("last_native_observation_age_seconds"), "the original observation clock remains visible");
 }
+
+#[test]
+fn withheld_standard_sources_are_machine_visible_and_cannot_report_complete_monitoring_readiness() {
+    let target = FleetTarget {
+        id: "configured-target".into(),
+        connection: "private-native-route-canary".into(),
+        subject: CollectionSubject::Database,
+        shard: "alpha".into(),
+        admission_group: "native-group".into(),
+        schedules: vec![],
+    };
+    let inventory = FleetInventory { targets: vec![target] };
+    assert!(CollectorHealth::new(&inventory, "alpha").is_err());
+    let health = CollectorHealth::for_assignments(&inventory, "alpha").unwrap();
+    let summary = MonitoringEnrollmentSummary {
+        assigned_targets: 1,
+        explicit_schedules: 0,
+        automatic: vec![],
+        gaps: vec![MonitoringGap {
+            target: "configured-target".into(),
+            recipe_id: Some("native.baseline".into()),
+            reason: MonitoringGapReason::Unqualified,
+        }],
+        omitted_gaps: 0,
+    };
+    health.enrollment(None, "alpha", &summary).unwrap();
+    health.outbox(&status(0)).unwrap();
+    health.initialized().unwrap();
+    let reply = health.reply().unwrap();
+    assert!(!reply.ready);
+    let lines = String::from_utf8(reply.metrics)
+        .unwrap()
+        .lines()
+        .filter(|line| line.starts_with("culprit_collector_monitoring_gaps "))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(lines, vec!["culprit_collector_monitoring_gaps 1"]);
+    assert!(
+        health.enrollment(None, "alpha", &summary).is_err(),
+        "startup enrollment cannot reset live attempts or readiness"
+    );
+    health.source_disabled().unwrap();
+    assert!(health.ready().unwrap(), "delivery-only readiness remains independent of missing native profiles");
+}
+
+#[test]
+fn standard_enrollment_health_keeps_the_existing_successful_schedule_and_gap_counts_separate() {
+    let health = health();
+    let summary = MonitoringEnrollmentSummary {
+        assigned_targets: 1,
+        explicit_schedules: 1,
+        automatic: vec![],
+        gaps: vec![],
+        omitted_gaps: 0,
+    };
+    let inventory = FleetInventory {
+        targets: vec![FleetTarget {
+            id: "private-connection-canary".into(),
+            connection: "private-connection-canary".into(),
+            subject: CollectionSubject::Database,
+            shard: "alpha".into(),
+            admission_group: "pool".into(),
+            schedules: vec![FleetSchedule {
+                id: "private-schedule-canary".into(),
+                every_seconds: 60,
+                jitter_seconds: 0,
+                collection: ScheduledCollection::Activity { policy: ActivityPolicy::default() },
+                budget: Default::default(),
+            }],
+        }],
+    };
+    health.enrollment(Some(&inventory), "alpha", &summary).unwrap();
+    health.initialized().unwrap();
+    health.outbox(&status(0)).unwrap();
+    health.collection(&event(CollectionStatus::Complete)).unwrap();
+    assert!(health.ready().unwrap());
+    health
+        .with(|state| {
+            assert_eq!(state.monitoring_gaps, 0);
+            assert_eq!(state.schedules.values().next().unwrap().complete, 1);
+        })
+        .unwrap();
+}

@@ -2,6 +2,7 @@
 pub mod config;
 mod destination;
 pub mod evidence;
+mod monitoring;
 mod recovery;
 mod runtime;
 pub use runtime::CollectorRuntime;
@@ -67,7 +68,7 @@ impl ConfiguredAdapters {
         runtime: &CollectorRuntime,
     ) -> Result<Self> {
         config.validate()?;
-        let mut workspace = Workspace::open_in(&config.workspace);
+        let mut workspace = runtime.workspace(&config.workspace);
         if mode == SourceMode::Collect {
             workspace = bind_sources(workspace, config, credentials.as_ref())?;
         }
@@ -167,7 +168,7 @@ async fn run_with_runtime(
     if mode == SourceMode::DeliveryOnly && max_work.is_some() {
         return Err(DeliveryProblem::InvalidContract.error());
     }
-    let health = CollectorHealth::new(&config.inventory, &config.shard)?;
+    let health = CollectorHealth::for_assignments(&config.inventory, &config.shard)?;
     if mode == SourceMode::DeliveryOnly {
         health.source_disabled()?;
     }
@@ -225,10 +226,17 @@ async fn run_configured(
     if source_paused && max_work.is_some() {
         return Err(CollectionStop::CancellationUnconfirmed.error());
     }
-    if mode == SourceMode::Collect && !source_paused {
+    let enrollment = if mode == SourceMode::Collect && !source_paused {
         adapters = adapters.activate_sources(config)?;
+        adapters.workspace.restore_qualifications(&outbox.delivery(), Default::default(), cancellation).await?;
+        let enrollment = monitoring::Enrollment::resolve(&adapters.workspace, config)?;
+        health.enrollment(enrollment.inventory.as_ref(), &config.shard, &enrollment.summary)?;
+        reporter.enrollment(&enrollment.summary)?;
         outbox.begin_remote_epoch(&fence, high).await?;
-    }
+        Some(enrollment)
+    } else {
+        None
+    };
     if cancellation.is_cancelled() {
         return Ok(FleetSummary::default());
     }
@@ -265,8 +273,17 @@ async fn run_configured(
             }
             return Ok(FleetSummary::default());
         }
-        let fleet = FleetJournal::open(&config.state.join("fleet"), &config.inventory, &config.shard).await?;
-        let source = FleetRunner::new(&adapters.workspace, &config.inventory, &config.shard, &fleet, &mut outbox)?
+        let enrollment = enrollment.as_ref().ok_or_else(|| CollectionStop::SourceNotReady.error())?;
+        let Some(inventory) = &enrollment.inventory else {
+            if max_work.is_some() {
+                return Err(CollectionStop::SourceNotReady.error());
+            }
+            run_delivery(&mut delivery, cancellation, &reporter).await?;
+            return Ok(FleetSummary::default());
+        };
+        let backend = enrollment.backend(&adapters.workspace);
+        let fleet = FleetJournal::open(&config.state.join("fleet"), inventory, &config.shard).await?;
+        let source = FleetRunner::new(&backend, inventory, &config.shard, &fleet, &mut outbox)?
             .with_recovery(&*adapters.recovery)?;
         CollectorService::new(source, delivery).run(cancellation, max_work, &reporter).await
     };
@@ -286,6 +303,9 @@ struct ObservedReporter<'a> {
     delegate: &'a dyn ServiceReporter,
 }
 impl ServiceReporter for ObservedReporter<'_> {
+    fn enrollment(&self, summary: &MonitoringEnrollmentSummary) -> Result<()> {
+        self.delegate.enrollment(summary)
+    }
     fn source_paused(&self, error: &culprit_core::Error) -> Result<()> {
         self.health.source_paused()?;
         self.delegate.source_paused(error)

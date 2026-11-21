@@ -46,6 +46,7 @@ async fn an_admitted_shared_question_requires_its_sealed_owner_before_route_cred
         window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &request.budget).unwrap(),
         route_revision: Some("fixture-saved-route".into()),
         investigation: Some(intent),
+        profile: None,
     };
     let workspace_path = root.path().join("workspace");
     let workspace = Workspace::open_in(&workspace_path);

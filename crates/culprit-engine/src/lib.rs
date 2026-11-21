@@ -90,9 +90,9 @@ pub use import::{ImportCandidate, ImportSource};
 pub use marks::Mark;
 pub use operation::run_blocking;
 pub use plans::{PlanFormat, parse_plan};
-pub use provider_registration::{ProviderConstructionPolicy, ProviderRegistration, RecipeCostVerifier};
 #[cfg(feature = "collector")]
-pub use provider_registration::{RecipeQualificationFactory, RecipeQualificationIssuer};
+pub use provider_registration::{ProfileSourceFactory, RecipeQualificationFactory, RecipeQualificationIssuer};
+pub use provider_registration::{ProviderConstructionPolicy, ProviderRegistration, RecipeCostVerifier};
 #[cfg(feature = "collector")]
 mod qualification_bindings;
 pub use reports::ReportSummary;
@@ -535,7 +535,9 @@ impl Workspace {
         let result = result.ok_or_else(|| culprit_core::telemetry::DeliveryProblem::Integrity.error())?;
         let mut collected = match result {
             Ok(collected) => collected,
-            Err(error) => return Ok(culprit_core::ProviderCall::completed(Err(error), finalization, acquisition)),
+            Err(error) => {
+                return Ok(culprit_core::ProviderCall::completed(Err(error), finalization, acquisition));
+            }
         };
         if let Err(error) = &finalization {
             return Ok(culprit_core::ProviderCall::unmaterialized_after_finalization(error.clone(), acquisition));

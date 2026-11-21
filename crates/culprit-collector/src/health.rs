@@ -30,6 +30,7 @@ struct State {
     archive_backlog: Option<DeliveryBacklog>,
     source_fenced: bool,
     source_enabled: bool,
+    monitoring_gaps: u32,
 }
 #[derive(Clone)]
 struct Schedule {
@@ -91,6 +92,11 @@ pub struct HealthReply {
 impl CollectorHealth {
     pub fn new(inventory: &FleetInventory, shard: &str) -> Result<Self> {
         inventory.validate(shard)?;
+        Self::for_assignments(inventory, shard)
+    }
+    /// Startup assignments may have no qualified standard jobs. That remains visible, never healthy coverage.
+    pub fn for_assignments(inventory: &FleetInventory, shard: &str) -> Result<Self> {
+        inventory.validate_assignments(shard)?;
         let mut schedules = BTreeMap::new();
         for target in inventory.targets.iter().filter(|t| t.shard == shard) {
             for schedule in &target.schedules {
@@ -129,8 +135,31 @@ impl CollectorHealth {
                 archive_backlog: None,
                 source_fenced: false,
                 source_enabled: true,
+                monitoring_gaps: 0,
             })),
         })
+    }
+    pub fn enrollment(
+        &self,
+        inventory: Option<&FleetInventory>,
+        shard: &str,
+        summary: &MonitoringEnrollmentSummary,
+    ) -> Result<()> {
+        let selected = inventory.map(|inventory| Self::new(inventory, shard)).transpose()?;
+        let schedules = match selected {
+            Some(selected) => {
+                let state = selected.state.lock().map_err(|_| DeliveryProblem::Storage.error())?;
+                state.schedules.clone()
+            }
+            None => BTreeMap::new(),
+        };
+        let mut state = self.state.lock().map_err(|_| DeliveryProblem::Storage.error())?;
+        if state.initialized {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        state.schedules = schedules;
+        state.monitoring_gaps = summary.gaps.len() as u32 + summary.omitted_gaps;
+        Ok(())
     }
     pub fn initialized(&self) -> Result<()> {
         self.with(|state| state.initialized = true)
@@ -195,6 +224,7 @@ impl CollectorHealth {
         let ready = state.ready(now);
         writeln!(body, "culprit_collector_uptime_seconds {}", now.duration_since(state.started).as_secs())
             .map_err(metric_error)?;
+        writeln!(body, "culprit_collector_monitoring_gaps {}", state.monitoring_gaps).map_err(metric_error)?;
         for schedule in state.schedules.values() {
             let overdue = state.source_enabled && schedule.overdue(now, state.started);
             for (name, count) in [
@@ -286,6 +316,7 @@ impl State {
     fn ready(&self, now: Instant) -> bool {
         self.initialized
             && !self.source_fenced
+            && (!self.source_enabled || self.monitoring_gaps == 0)
             && self.outbox.as_ref().is_some_and(|outbox| {
                 outbox.unconfirmed_sources == 0 && now.duration_since(outbox.updated_at) <= MAX_STATUS_AGE
             })

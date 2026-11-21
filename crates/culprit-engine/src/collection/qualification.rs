@@ -114,9 +114,15 @@ impl Workspace {
                 capture: source_id.clone(),
                 manifest_sha256: Some(binding.receipt().evidence.manifest_sha256.clone()),
             };
-            let dataset = binding.dataset();
+            let collection = binding.collection();
             let captured = delivery
-                .completed_snapshot_for_connection(binding.connection(), &attempt, dataset, budget, cancellation)
+                .completed_qualification_for_connection(
+                    binding.connection(),
+                    &attempt,
+                    collection,
+                    budget,
+                    cancellation,
+                )
                 .await?;
             budget.max_bytes = budget.max_bytes.checked_sub(captured.bytes_read()).ok_or_else(invalid)?;
             budget.max_rows = budget.max_rows.checked_sub(captured.records().len() as u32).ok_or_else(invalid)?;

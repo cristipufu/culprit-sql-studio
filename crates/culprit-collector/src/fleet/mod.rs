@@ -8,6 +8,7 @@ mod storage;
 mod windows;
 mod work;
 pub use journal::FleetJournal;
+pub use scheduler::{MIN_RESOURCE_GAP_SECONDS, minimum_collection_slot};
 
 use crate::{
     capture::{CollectionAdmissionWindow, CollectionCancellation},
@@ -25,6 +26,8 @@ pub struct FleetSourceAdmission {
     pub window: CollectionAdmissionWindow,
     pub route_revision: Option<String>,
     pub investigation: Option<DiagnosticInvestigationIntent>,
+    /// Authenticated standard source work, independent of any diagnostic episode.
+    pub profile: Option<SourceProfileAdmission>,
 }
 
 /// The capture owner returns native closure independently of success, storage failures or translated errors.

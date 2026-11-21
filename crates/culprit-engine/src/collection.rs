@@ -59,6 +59,10 @@ impl SourceFactory for AuthenticatedSource<'_> {
             )
             .await?;
         let connections = self.workspace.connection_service();
+        let profile_registration = admitted
+            .and_then(|value| value.profile.as_ref())
+            .map(|profile| connections.profile_registration(self.name, request, profile))
+            .transpose()?;
         let provider = match &self.selection {
             SourceSelection::Qualification { route, registration } => {
                 return connections.qualification_source_at_route(route, registration, request).await;
@@ -71,7 +75,14 @@ impl SourceFactory for AuthenticatedSource<'_> {
         if let Some(admitted) = admitted {
             admitted.window.check_start()?;
         }
-        provider.telemetry_source(request)
+        if let (Some(registration), Some(profile)) =
+            (profile_registration, admitted.and_then(|value| value.profile.as_ref()))
+        {
+            let bound = connections.bound_profile(self.name, request, profile)?;
+            registration.profile_source(provider.as_ref(), request, &bound)
+        } else {
+            provider.telemetry_source(request)
+        }
     }
 }
 
@@ -227,6 +238,12 @@ impl Workspace {
         let mut attempt = None;
         let result = async {
             request.validate()?;
+            if let Some(profile) = admitted.and_then(|value| value.profile.as_ref()) {
+                if admitted.is_some_and(|value| value.investigation.is_some()) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                self.connection_service().profile_registration(name, &request, profile)?;
+            }
             let investigation = admitted
                 .and_then(|admitted| admitted.investigation.as_ref())
                 .map(DiagnosticInvestigationLineage::from_intent)

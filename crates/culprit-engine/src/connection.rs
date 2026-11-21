@@ -78,6 +78,47 @@ impl Connections<'_> {
         route::revision(&self.store.get(name)?)
     }
 
+    #[cfg(feature = "collector")]
+    pub(crate) fn profile_registration(
+        &self,
+        name: &str,
+        request: &culprit_core::telemetry::CollectionRequest,
+        profile: &culprit_core::telemetry::SourceProfileAdmission,
+    ) -> Result<ProviderRegistration> {
+        if self.route_revision(name)? != profile.route_revision() {
+            return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+        }
+        let stored = self.store.get(name)?;
+        let installed = self.qualification_bindings.receipts(name, &route::revision(&stored)?)?;
+        if !installed.iter().any(|receipt| receipt == profile.qualification()) {
+            return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+        }
+        let registration = self.connection_registration(name)?;
+        registration.validate_profile(request, profile)?;
+        Ok(registration)
+    }
+
+    #[cfg(feature = "collector")]
+    pub(crate) fn bound_profile(
+        &self,
+        name: &str,
+        request: &culprit_core::telemetry::CollectionRequest,
+        requested: &culprit_core::telemetry::SourceProfileAdmission,
+    ) -> Result<culprit_core::telemetry::SourceProfileAdmission> {
+        self.profile_registration(name, request, requested)?;
+        let route = self.native_route_revision(name)?;
+        let binding = self
+            .qualification_bindings
+            .profile_binding(name, &route, requested.qualification())?
+            .ok_or_else(|| culprit_core::telemetry::CollectionStop::SourceChanged.error())?;
+        culprit_core::telemetry::SourceProfileAdmission::new(
+            requested.route_revision().into(),
+            requested.qualification().clone(),
+            request.budget.clone(),
+            move || binding.is_active(),
+        )
+    }
+
     pub(crate) fn telemetry_recipes(&self, name: &str) -> Result<Vec<culprit_core::telemetry::RecipeDescriptor>> {
         Ok(self.connection_registration(name)?.telemetry_recipes().to_vec())
     }
@@ -432,7 +473,9 @@ impl Connections<'_> {
         };
         let mut options = std::collections::BTreeMap::new();
         match d.engine {
-            Engine::Yugabyte => return Err(Error::invalid(t!("engine.connection.yugabyte_not_azure"))),
+            Engine::Yugabyte => {
+                return Err(Error::invalid(t!("engine.connection.yugabyte_not_azure")));
+            }
             Engine::Mysql => options.insert("ssl-mode".into(), "VERIFY_IDENTITY".into()),
             _ => options.insert("sslmode".into(), "verify-full".into()),
         };
@@ -482,7 +525,9 @@ impl Connections<'_> {
                 options.insert("trustServerCertificateCA".into(), aws::RDS_CA.into());
             }
             Engine::Sqlite => {}
-            Engine::Yugabyte => return Err(Error::invalid(t!("engine.connection.yugabyte_not_rds"))),
+            Engine::Yugabyte => {
+                return Err(Error::invalid(t!("engine.connection.yugabyte_not_rds")));
+            }
         }
         let stored = StoredConnection {
             engine: d.engine,

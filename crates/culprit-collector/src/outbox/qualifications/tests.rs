@@ -88,13 +88,13 @@ async fn trusted_live_issuance_is_atomic_pinned_and_restored_under_the_same_excl
     assert!(restored.is_active());
     let original = restarted
         .delivery()
-        .completed_snapshot_for_connection(
+        .completed_qualification_for_connection(
             restored.connection(),
             &DiagnosticAttemptReceipt {
                 capture: restored.receipt().evidence.capture.clone(),
                 manifest_sha256: Some(restored.receipt().evidence.manifest_sha256.clone()),
             },
-            restored.dataset(),
+            restored.collection(),
             Default::default(),
             &CollectionCancellation::default(),
         )
@@ -313,4 +313,23 @@ async fn queued_metadata_lookup_observes_cancellation_and_deadline_without_start
     drop(access);
     assert_eq!(bindings(&outbox).await.len(), 1);
     assert_eq!(fixture.opens(), 1);
+}
+
+#[tokio::test]
+async fn baseline_issuance_pins_the_actual_source_profile_without_creating_an_episode_or_investigation() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture = QualificationFixture::baseline(QualificationFixtureCase::Approve);
+    let mut outbox = Outbox::create(&root.path().join("outbox"), Default::default()).unwrap();
+    let summary = qualify(&mut outbox, &fixture).await.unwrap();
+    assert_eq!(summary.state, RecipeQualificationState::Installed);
+    assert_eq!((fixture.opens(), fixture.assessments()), (1, 1));
+    let issued = bindings(&outbox).await;
+    assert_eq!(issued.len(), 1);
+    assert_eq!(issued[0].receipt().purpose, RecipePurpose::Baseline);
+    assert!(issued[0].receipt().matches_recipe(&fixture.recipe));
+    assert!(outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
+    assert!(
+        outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 1).await.unwrap().checkpoints.is_empty()
+    );
+    assert!(fixture.closed());
 }

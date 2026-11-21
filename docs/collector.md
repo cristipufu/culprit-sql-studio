@@ -761,6 +761,24 @@ Validation reads saved metadata, checks unattended authentication and configures
 opens no database, object-storage or warehouse connections and creates no runtime state. `collect schema` generates DDL, mappings, canonical
 queries and native ingestion assets without opening a workspace or applying anything to a service.
 
+The required `monitoring` policy is `{ "kind": "explicit" }` in the deployment example, preserving its
+explicit schedules. `{ "kind": "standard", "budget": ... }` uses the same `CollectionBudget` fields as a
+schedule. Standard targets may start with empty schedules. The service restores original issued approvals,
+selects applicable Baseline recipes from each selected provider registration, and enrolls only matching
+approved profiles whose existing native reader can enforce the original scope before source work. Explicit
+schedules remain unchanged. Unsupported, unqualified, retired, conflicting or unavailable approvals are gaps;
+a successful small fixture or a returned-row cap never promotes one. No built-in native source is qualified
+by this enrollment implementation.
+
+Standard jobs have a five-minute minimum requested period, extended when the existing admitted source lifetime
+(start window, native timeout, shutdown) and per-resource cooldown require it. A conflicting or infeasible
+resource assignment stays unscheduled. The service emits a typed `monitoring-enrollment` JSON event, bounded
+text details and a monitoring-gap probe metric; missing standard coverage withholds source readiness. When
+nothing is admitted, archive delivery and retained analysis can continue. Interval-discovery work for Query
+Store history requires separate qualification; an approval for its capture alone does not authorize that work.
+A changed effective inventory retains the existing schedule-journal assignment refusal rather than erasing
+checkpoints or silently resetting pending work.
+
 Credential profiles are independent from source and destination selection. The example names four Azure profiles:
 `source`, `recovery`, `analytics` and `ingestion`. `source_credentials` maps saved connection names to their own
 unattended authentication profiles;

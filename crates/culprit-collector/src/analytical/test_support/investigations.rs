@@ -112,6 +112,7 @@ pub fn investigation_fixture() -> InvestigationFixture {
     .unwrap();
     let component = ComponentVersion::package("fixture-native-reader", "1.0.0", Some("fixture-native-reader-build"));
     let receipt = RecipeCostReceipt {
+        purpose: RecipePurpose::Investigation,
         selector: RecipeSelector::FocusedPageWait,
         recipe_id: "fixture.page-wait-focus".into(),
         recipe_version: 1,

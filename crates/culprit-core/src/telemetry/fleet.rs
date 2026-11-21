@@ -78,6 +78,16 @@ impl ScheduledCollection {
 }
 impl FleetInventory {
     pub fn validate(&self, shard: &str) -> Result<()> {
+        self.validate_assignments(shard)?;
+        if self.targets.iter().any(|target| target.schedules.is_empty()) {
+            return Err(invalid_inventory());
+        }
+        Ok(())
+    }
+
+    /// Validate configured owners and any explicit schedules before standard enrollment fills empty schedules.
+    /// Empty assignments confer neither native identity nor source admission.
+    pub fn validate_assignments(&self, shard: &str) -> Result<()> {
         let mut targets = std::collections::BTreeSet::new();
         let mut owners = std::collections::BTreeSet::new();
         let mut groups = std::collections::BTreeMap::new();
@@ -95,7 +105,6 @@ impl FleetInventory {
                 || !identifier(&target.admission_group)
                 || !targets.insert(&target.id)
                 || !owners.insert(target.subject.assignment_key(&target.connection)?)
-                || target.schedules.is_empty()
                 || target.schedules.len() > MAX_TARGET_SCHEDULES
                 || groups.insert(&target.admission_group, &target.shard).is_some_and(|owner| owner != &target.shard)
                 || routes.insert(&target.connection, assignment).is_some_and(|owner| owner != assignment)

@@ -24,6 +24,7 @@ pub struct CollectorConfig {
     pub workspace: PathBuf,
     pub state: PathBuf,
     pub inventory: FleetInventory,
+    pub monitoring: MonitoringPolicy,
     pub credentials: BTreeMap<String, CredentialProfile>,
     #[serde(default)]
     pub source_credentials: BTreeMap<String, String>,
@@ -98,7 +99,7 @@ impl CollectorConfig {
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
-        self.inventory.validate(&self.shard)?;
+        self.monitoring.validate(&self.inventory, &self.shard)?;
         for target in self.inventory.targets.iter().filter(|target| target.shard == self.shard) {
             for schedule in &target.schedules {
                 let budget = &schedule.budget;

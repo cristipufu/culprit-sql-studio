@@ -179,6 +179,7 @@ async fn admitted_discovery_times_out_on_an_occupied_permit_without_authenticati
         .unwrap(),
         route_revision: Some(workspace.connection_service().route_revision("pilot").unwrap()),
         investigation: None,
+        profile: None,
     };
     let error = workspace.discover_intervals_admitted("pilot", &discovery_request(), &admitted).await.unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::TimedOut);
@@ -216,6 +217,7 @@ async fn admitted_discovery_times_out_on_an_occupied_permit_without_authenticati
         .unwrap(),
         route_revision: Some(workspace.connection_service().route_revision("pilot").unwrap()),
         investigation: None,
+        profile: None,
     };
     let error = workspace.discover_intervals_admitted("pilot", &discovery_request(), &fresh).await.unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);

@@ -41,7 +41,7 @@ impl DiagnosticPolicies {
         })
     }
     pub fn from_inventory(inventory: &FleetInventory, shard: &str) -> Result<Self> {
-        inventory.validate(shard)?;
+        inventory.validate_assignments(shard)?;
         let assignments = inventory
             .targets
             .iter()
@@ -116,7 +116,9 @@ pub async fn analyze_pending(
             if !source_reads::parents(outbox, &input, recovery, cancellation).await? {
                 break;
             }
-            let Some(update) = source_reads::analyze(&input, &chrono::Utc::now().to_rfc3339())? else { break };
+            let Some(update) = source_reads::analyze(&input, &chrono::Utc::now().to_rfc3339())? else {
+                break;
+            };
             outbox.commit_diagnostics(input, update).await?;
             processed += 1;
             continue;
@@ -173,7 +175,9 @@ async fn attach_page_contexts(
     input: &DiagnosticInput,
     update: &mut DiagnosticUpdate,
 ) -> Result<()> {
-    let SourceObservation::FocusedPageWait { result, .. } = &input.source.observation else { return Ok(()) };
+    let SourceObservation::FocusedPageWait { result, .. } = &input.source.observation else {
+        return Ok(());
+    };
     let original = outbox
         .diagnostic_input(&result.focus.participant.parent.capture.observation_id, input.controller_version)
         .await?;

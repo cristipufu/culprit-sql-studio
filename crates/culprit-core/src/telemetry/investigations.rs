@@ -15,6 +15,8 @@ pub use scope::RecipeCostScope;
 pub struct RecipeCostReceipt {
     pub recipe_id: String,
     pub recipe_version: u32,
+    /// Qualification names source work; an incident is required only by an investigation intent.
+    pub purpose: RecipePurpose,
     pub selector: RecipeSelector,
     pub scope: RecipeCostScope,
     /// Exact native-reader/qualification authority identity supplied by the selected registration.
@@ -31,21 +33,13 @@ impl RecipeCostReceipt {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.recipe_id)
             && self.recipe_version > 0
-            && match (&self.scope, self.selector) {
-                (RecipeCostScope::NativeRead(_), selector) => {
-                    SourceReadQuestion::ALL.iter().any(|question| selector == question.selector())
+            && match self.purpose {
+                RecipePurpose::Baseline => {
+                    matches!(&self.scope, RecipeCostScope::NativeRead(_) | RecipeCostScope::SharedResource { .. })
+                        && matches!(self.selector,
+                            RecipeSelector::Collection(collection) if collection != TelemetryCollection::Diagnostics)
                 }
-                (_, selector) => matches!(
-                    selector,
-                    RecipeSelector::FocusedPageWait
-                        | RecipeSelector::FocusedBlocking
-                        | RecipeSelector::FocusedPageWaitWriters
-                        | RecipeSelector::FocusedPageTaskHolders
-                        | RecipeSelector::FocusedRequestMemory
-                        | RecipeSelector::FocusedCompilationAdmission
-                        | RecipeSelector::CurrentRequestWork
-                        | RecipeSelector::PageWaitTasks
-                ),
+                RecipePurpose::Investigation => self.investigation_selector_is_valid(),
             }
             && self.scope.is_valid()
             && self.scope.native_epoch().is_some()
@@ -56,11 +50,30 @@ impl RecipeCostReceipt {
             && settled_accounting(&self.read_metrics, &self.tested_budget)
     }
 
+    fn investigation_selector_is_valid(&self) -> bool {
+        match (&self.scope, self.selector) {
+            (RecipeCostScope::NativeRead(_), selector) => {
+                SourceReadQuestion::ALL.iter().any(|question| selector == question.selector())
+            }
+            (_, selector) => matches!(
+                selector,
+                RecipeSelector::FocusedPageWait
+                    | RecipeSelector::FocusedBlocking
+                    | RecipeSelector::FocusedPageWaitWriters
+                    | RecipeSelector::FocusedPageTaskHolders
+                    | RecipeSelector::FocusedRequestMemory
+                    | RecipeSelector::FocusedCompilationAdmission
+                    | RecipeSelector::CurrentRequestWork
+                    | RecipeSelector::PageWaitTasks
+            ),
+        }
+    }
+
     pub fn key(&self) -> Result<String> {
         if !self.is_valid() {
             return Err(invalid());
         }
-        hash(&("recipe-cost-receipt-v1", self))
+        hash(&("recipe-cost-receipt-v2", self))
     }
 
     /// Check the declared context of the focused investigation without granting authority or live admission.
@@ -68,7 +81,7 @@ impl RecipeCostReceipt {
         self.is_valid()
             && self.recipe_id == recipe.id
             && self.recipe_version == recipe.version
-            && recipe.purpose == RecipePurpose::Investigation
+            && recipe.purpose == self.purpose
             && recipe.selector == self.selector
             && recipe.subjects.iter().any(|subject| subject.accepts(&self.scope.subject()))
             && within(&self.tested_budget, &recipe.budget)
@@ -220,7 +233,9 @@ impl DiagnosticInvestigationIntent {
         component: &ComponentVersion,
         caller_budget: &CollectionBudget,
     ) -> Result<Self> {
-        let RecipeCostQualification::Measured(receipt) = &recipe.cost else { return Err(invalid()) };
+        let RecipeCostQualification::Measured(receipt) = &recipe.cost else {
+            return Err(invalid());
+        };
         let value = Self {
             episode_id: episode.id.clone(),
             episode_revision: episode.revision.clone(),
@@ -275,6 +290,7 @@ impl DiagnosticInvestigationIntent {
             && self.recipe_version > 0
             && self.focus.is_valid()
             && self.qualification.is_valid()
+            && self.qualification.purpose == RecipePurpose::Investigation
             && self.focus.selector() == self.qualification.selector
             && self.recipe_id == self.qualification.recipe_id
             && self.recipe_version == self.qualification.recipe_version
@@ -312,7 +328,9 @@ impl DiagnosticInvestigationIntent {
         component: &ComponentVersion,
         caller_budget: &CollectionBudget,
     ) -> bool {
-        let RecipeCostQualification::Measured(receipt) = &recipe.cost else { return false };
+        let RecipeCostQualification::Measured(receipt) = &recipe.cost else {
+            return false;
+        };
         self.is_valid()
             && self.matches_episode(episode)
             && episode.needs_question(&self.focus)

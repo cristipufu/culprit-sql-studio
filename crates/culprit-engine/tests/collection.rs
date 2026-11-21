@@ -752,6 +752,7 @@ async fn fleet_capture_uses_the_same_outbox_and_native_shutdown_fence_as_one_off
             window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &collection.budget).unwrap(),
             route_revision: FleetBackend::route_revision(&ws, "pilot").unwrap(),
             investigation: None,
+            profile: None,
         };
         let outcome =
             FleetBackend::capture(&ws, "pilot", collection, &mut outbox, &CollectionCancellation::default(), admission)
@@ -2098,6 +2099,7 @@ async fn fleet_owner_receipt_after_restart_never_calls_an_older_durable_native_d
         window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &collection.budget).unwrap(),
         route_revision: FleetBackend::route_revision(&workspace, "pilot").unwrap(),
         investigation: None,
+        profile: None,
     };
     let original = FleetBackend::capture(
         &workspace,
@@ -2141,6 +2143,7 @@ async fn fleet_owner_receipt_after_restart_never_calls_an_older_durable_native_d
         window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &collection.budget).unwrap(),
         route_revision: FleetBackend::route_revision(&restarted, "pilot").unwrap(),
         investigation: None,
+        profile: None,
     };
     let outcome = FleetBackend::capture(
         &restarted,
@@ -2191,6 +2194,7 @@ async fn fleet_owner_receipt_retains_confirmed_close_and_partial_native_evidence
         window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &collection.budget).unwrap(),
         route_revision: FleetBackend::route_revision(&workspace, "pilot").unwrap(),
         investigation: None,
+        profile: None,
     };
     let outcome = FleetBackend::capture(
         &workspace,

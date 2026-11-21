@@ -37,6 +37,26 @@ impl QualificationBindings {
             .map(|entry| entry.receipt().clone())
             .collect())
     }
+    pub(crate) fn profile_binding(
+        &self,
+        connection: &str,
+        route: &str,
+        receipt: &RecipeCostReceipt,
+    ) -> Result<Option<IssuedQualification>> {
+        Ok(self
+            .entries
+            .read()
+            .map_err(|_| invalid())?
+            .iter()
+            .find(|entry| {
+                entry.is_active()
+                    && entry.connection() == connection
+                    && entry.route_revision() == route
+                    && entry.receipt() == receipt
+                    && receipt.purpose == RecipePurpose::Baseline
+            })
+            .cloned())
+    }
     pub(crate) fn route_revision(&self, connection: &str, route: &str) -> Result<String> {
         let mut entries = self
             .entries

@@ -5,6 +5,10 @@ use culprit_core::{Result, telemetry::*};
 use std::future::Future;
 
 pub trait ServiceReporter: Sync {
+    /// Source-free startup enrollment. Unsupported/withheld work is separate from failed capture attempts.
+    fn enrollment(&self, _summary: &MonitoringEnrollmentSummary) -> Result<()> {
+        Ok(())
+    }
     fn collection(&self, event: &FleetCollectionEvent) -> Result<()>;
     fn delivery(&self, previous: Option<&DeliveryEntry>, result: Result<DeliveryEntry>) -> Result<()>;
     fn source_paused(&self, error: &culprit_core::Error) -> Result<()>;

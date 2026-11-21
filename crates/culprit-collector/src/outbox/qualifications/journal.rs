@@ -10,7 +10,7 @@ impl Files {
     pub(in crate::outbox) fn install_qualification(
         &mut self,
         mut binding: Binding,
-        captured: CompletedSnapshot,
+        captured: CompletedQualificationOriginal,
     ) -> Result<IssuedQualification> {
         if !matches!(self.authority, RevisionAuthority::Local) {
             return Err(DeliveryProblem::Fenced.error());

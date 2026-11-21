@@ -14,7 +14,13 @@ pub(super) use focus::{
 };
 use focus::{FocusFamilyAdmission, FocusedAdmission, focus_family_key, identifier, valid_cooldown};
 
-const RESOURCE_GAP: Duration = Duration::from_secs(60);
+/// Existing resource cooldown used by both execution and standard enrollment feasibility.
+pub const MIN_RESOURCE_GAP_SECONDS: u32 = 60;
+const RESOURCE_GAP: Duration = Duration::from_secs(MIN_RESOURCE_GAP_SECONDS as u64);
+/// Worst admitted native lifetime plus the existing resource cooldown. This is a scheduling bound, not cost proof.
+pub fn minimum_collection_slot(budget: &CollectionBudget) -> Duration {
+    native_reservation(budget) + RESOURCE_GAP
+}
 const MAX_FAILURE_DELAY: Duration = Duration::from_secs(900);
 /// A slow durability write must not let native work start after its saved crash reservation has aged out.
 pub(super) use crate::capture::SOURCE_ADMISSION_START_WINDOW as ADMISSION_START_WINDOW;
@@ -357,7 +363,9 @@ struct PeriodicDeadlines {
 }
 impl PeriodicDeadlines {
     fn permits(&self, job: &FocusedJob, start: Duration) -> bool {
-        let Some(end) = start.checked_add(native_reservation(&job.budget)) else { return false };
+        let Some(end) = start.checked_add(native_reservation(&job.budget)) else {
+            return false;
+        };
         if self.global.is_some_and(|due| end > due) {
             return false;
         }

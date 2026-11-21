@@ -82,6 +82,7 @@ impl ReadControl {
 }
 
 pub(super) enum ReadRequest {
+    Qualification { connection: String, attempt: DiagnosticAttemptReceipt, collection: TelemetryCollection },
     SourceOverhead { connection: String, observation_id: String },
     Snapshot { attempt: DiagnosticAttemptReceipt, dataset: SnapshotDataset },
     SnapshotLookup { connection: String, observation_id: String, datasets: Vec<SnapshotDataset> },
@@ -93,7 +94,7 @@ pub(super) enum ReadRequest {
 impl ReadRequest {
     fn observation_id(&self) -> &str {
         match self {
-            Self::Snapshot { attempt, .. } => &attempt.capture.observation_id,
+            Self::Snapshot { attempt, .. } | Self::Qualification { attempt, .. } => &attempt.capture.observation_id,
             Self::SourceOverhead { observation_id, .. }
             | Self::SnapshotLookup { observation_id, .. }
             | Self::QueryHistory { observation_id, .. }
@@ -106,6 +107,7 @@ impl ReadRequest {
     fn retains(&self, stream: TelemetryStream) -> bool {
         match self {
             Self::SourceOverhead { .. } => false,
+            Self::Qualification { .. } => true,
             Self::Snapshot { dataset, .. } => stream == dataset.stream(),
             Self::SnapshotLookup { datasets, .. } => datasets.iter().any(|dataset| stream == dataset.stream()),
             Self::ManagedInstanceResources { .. } => stream == TelemetryStream::ResourceSamples,
@@ -127,6 +129,22 @@ pub(super) struct CompletedCaptureRead {
     required_connection: Option<String>,
 }
 impl CompletedCaptureRead {
+    pub fn qualification(
+        connection: &str,
+        attempt: DiagnosticAttemptReceipt,
+        collection: TelemetryCollection,
+        budget: CompletedCaptureBudget,
+        cancellation: CollectionCancellation,
+    ) -> Result<Self> {
+        validate_connection(connection)?;
+        let budget = budget.validate()?;
+        if !attempt.is_valid() || attempt.manifest_sha256.is_none() || collection == TelemetryCollection::Diagnostics {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let deadline = Instant::now().checked_add(budget.timeout).ok_or_else(|| CollectionStop::TimedOut.error())?;
+        let request = ReadRequest::Qualification { connection: connection.into(), attempt, collection };
+        Ok(Self::new(request, ReadControl::Collection { cancellation, deadline }, budget))
+    }
     pub fn source_overhead(
         lookup: CompletedCaptureLookup<'_>,
         budget: CompletedCaptureBudget,
@@ -336,6 +354,12 @@ impl artifacts::VerificationObserver for CompletedCaptureRead {
         self.check()?;
         let source = manifest.description.as_ref().ok_or_else(unsupported)?;
         let rows = match &self.request {
+            ReadRequest::Qualification { collection, .. } => {
+                if manifest.request.collection() != *collection || source.observation.collection() != *collection {
+                    return Err(unsupported());
+                }
+                manifest.files.iter().try_fold(0u32, |sum, file| sum.checked_add(file.rows).ok_or_else(capacity))?
+            }
             ReadRequest::SnapshotLookup { datasets, .. } => {
                 source
                     .observation
@@ -443,6 +467,7 @@ impl Files {
         match &read.request {
             ReadRequest::ManagedInstanceResources { attempt: Some(attempt), .. }
             | ReadRequest::Snapshot { attempt, .. }
+            | ReadRequest::Qualification { attempt, .. }
                 if capture.identity != attempt.capture =>
             {
                 return Err(DeliveryProblem::Conflict.error());
@@ -450,7 +475,8 @@ impl Files {
             ReadRequest::ActivityReference { reference, .. } if capture.identity != reference.capture => {
                 return Err(DeliveryProblem::Conflict.error());
             }
-            ReadRequest::SnapshotLookup { connection, .. }
+            ReadRequest::Qualification { connection, .. }
+            | ReadRequest::SnapshotLookup { connection, .. }
             | ReadRequest::QueryHistory { connection, .. }
             | ReadRequest::ManagedInstanceResources { connection, .. }
             | ReadRequest::ActivityLookup { connection, .. }
@@ -467,6 +493,7 @@ impl Files {
         let validated = self.validated_observed(&capture.identity.observation_id, read)?;
         read.check()?;
         if let ReadRequest::Snapshot { attempt, .. }
+        | ReadRequest::Qualification { attempt, .. }
         | ReadRequest::ManagedInstanceResources { attempt: Some(attempt), .. } = &read.request
             && attempt.manifest_sha256.as_deref() != Some(&validated.manifest_sha)
         {

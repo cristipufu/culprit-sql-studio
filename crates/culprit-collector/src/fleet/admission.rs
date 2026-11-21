@@ -57,7 +57,7 @@ impl<'a> AdmittedBackend<'a> {
         }
         window.check_start()?;
         self.used_route.set(route_revision.clone()).map_err(|_| CollectionStop::QueryLimit.error())?;
-        Ok(FleetSourceAdmission { window, route_revision, investigation: None })
+        Ok(FleetSourceAdmission { window, route_revision, investigation: None, profile: None })
     }
     pub fn used_route_revision(&self) -> Option<&str> {
         self.used_route.get().and_then(|revision| revision.as_deref())

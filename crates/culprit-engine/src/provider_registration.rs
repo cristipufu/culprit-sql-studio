@@ -8,6 +8,12 @@ use culprit_core::{
     },
 };
 use std::sync::Arc;
+#[cfg(feature = "collector")]
+mod profile;
+#[cfg(feature = "collector")]
+use culprit_core::telemetry::{
+    CollectionRequest, RecipePurpose, RecipeSelector, SourceProfileAdmission, TelemetrySource,
+};
 
 /// Interpret authenticated native cost facts for this source implementation. The verifier must substantiate
 /// native work and receipt accounting; a bounded request or successful client timing alone is insufficient.
@@ -33,6 +39,25 @@ pub type RecipeQualificationIssuer = Arc<
         + Sync,
 >;
 
+/// Native profile intake reuses the constructed provider and its existing reader. Construction stays lazy.
+/// The implementation must check the expected native owner/role before source work and at its final witness;
+/// rejecting the result only after an unqualified query ran is insufficient. The same reader checks approval
+/// liveness at every internal dispatch, preserves the original deadline/caller caps and retains cancellation work.
+/// No default source fallback exists and this declaration issues no native cost approval.
+#[cfg(feature = "collector")]
+pub type ProfileSourceFactory = Arc<
+    dyn Fn(&dyn Provider, &CollectionRequest, &SourceProfileAdmission) -> Result<Box<dyn TelemetrySource>>
+        + Send
+        + Sync,
+>;
+
+#[cfg(feature = "collector")]
+#[derive(Clone)]
+struct ProfileSourceIntake {
+    selectors: Vec<RecipeSelector>,
+    open: ProfileSourceFactory,
+}
+
 /// The normal observed path never invokes an unverified/eager constructor. Configuration work is client-only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderConstructionPolicy {
@@ -52,6 +77,8 @@ pub struct ProviderRegistration {
     construction: ProviderConstructionPolicy,
     recipes: Vec<RecipeDescriptor>,
     qualification: Option<QualificationAuthority>,
+    #[cfg(feature = "collector")]
+    profile_source: Option<ProfileSourceIntake>,
     #[cfg(feature = "collector")]
     issuer: Option<RecipeQualificationIssuer>,
     #[cfg(feature = "collector")]
@@ -74,6 +101,8 @@ impl ProviderRegistration {
             recipes,
             qualification: None,
             #[cfg(feature = "collector")]
+            profile_source: None,
+            #[cfg(feature = "collector")]
             issuer: None,
             #[cfg(feature = "collector")]
             qualification_factory: None,
@@ -95,6 +124,69 @@ impl ProviderRegistration {
         }
         self.qualification = Some(QualificationAuthority { component, verifier });
         Ok(self)
+    }
+
+    /// Declare only the existing native routes that can enforce a source/profile expectation before reading.
+    /// This grants no cost approval, performs no native work and changes no ordinary explicit source route.
+    #[cfg(feature = "collector")]
+    pub fn with_profile_source(mut self, selectors: Vec<RecipeSelector>, open: ProfileSourceFactory) -> Result<Self> {
+        if self.construction != ProviderConstructionPolicy::DeferredNativeWork
+            || selectors.is_empty()
+            || selectors.len() > self.recipes.len()
+            || selectors.iter().enumerate().any(|(index, selector)| {
+                selectors[..index].contains(selector)
+                    || !self
+                        .recipes
+                        .iter()
+                        .any(|recipe| recipe.purpose == RecipePurpose::Baseline && recipe.selector == *selector)
+            })
+        {
+            return Err(Error::invalid(culprit_core::t!("engine.registry.invalid_qualification")));
+        }
+        self.profile_source = Some(ProfileSourceIntake { selectors, open });
+        Ok(self)
+    }
+
+    #[cfg(feature = "collector")]
+    pub fn supports_profile_source(&self, selector: RecipeSelector) -> bool {
+        self.construction == ProviderConstructionPolicy::DeferredNativeWork
+            && self.profile_source.as_ref().is_some_and(|intake| intake.selectors.contains(&selector))
+    }
+
+    #[cfg(feature = "collector")]
+    pub(crate) fn validate_profile(&self, request: &CollectionRequest, profile: &SourceProfileAdmission) -> Result<()> {
+        let receipt = profile.qualification();
+        let matches_selected = self.recipes.iter().any(|recipe| {
+            recipe.purpose == RecipePurpose::Baseline
+                && recipe.accepts(request)
+                && request.budget.intersection(&recipe.budget) == request.budget
+                && matches!(&recipe.cost, RecipeCostQualification::Measured(selected)
+                    if selected.as_ref() == receipt)
+        });
+        if !profile.matches_request(request)
+            || self.qualification_component() != Some(&receipt.component)
+            || !self.supports_profile_source(receipt.selector)
+            || !matches_selected
+        {
+            return Err(Error::invalid(culprit_core::t!("engine.registry.invalid_qualification")));
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "collector")]
+    pub(crate) fn profile_source(
+        &self,
+        provider: &dyn Provider,
+        request: &CollectionRequest,
+        profile: &SourceProfileAdmission,
+    ) -> Result<Box<dyn TelemetrySource>> {
+        self.validate_profile(request, profile)?;
+        let intake = self
+            .profile_source
+            .as_ref()
+            .ok_or_else(|| Error::invalid(culprit_core::t!("engine.registry.invalid_qualification")))?;
+        let source = (intake.open)(provider, request, profile)?;
+        Ok(Box::new(profile::ProfileSource::new(source, profile.clone())))
     }
 
     pub fn qualification_component(&self) -> Option<&ComponentVersion> {

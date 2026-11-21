@@ -203,6 +203,7 @@ fn admitted(workspace: &Workspace) -> FleetSourceAdmission {
         window: CollectionAdmissionWindow::new(Instant::now(), &baseline_request().budget).unwrap(),
         route_revision: Some(workspace.connection_service().route_revision("pilot").unwrap()),
         investigation: None,
+        profile: None,
     }
 }
 fn assert_no_source(state: &Boundaries) {

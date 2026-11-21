@@ -424,6 +424,7 @@ fn recipe(original: &Original) -> (RecipeDescriptor, crate::ComponentVersion) {
     let receipt = RecipeCostReceipt {
         recipe_id: "fixture.compilation-history".into(),
         recipe_version: 1,
+        purpose: RecipePurpose::Investigation,
         selector: SourceReadQuestion::CompilationHistory.selector(),
         scope: RecipeCostScope::NativeRead(original.execution.clone()),
         component: component.clone(),
@@ -663,4 +664,89 @@ fn restored_admitted_debt_does_not_grant_a_replacement_source_read() {
         collecting.plan_source_read_focus(&original.source, &original.row).unwrap(),
         DiagnosticFocusPlan::NotRequired
     ));
+}
+
+#[test]
+fn baseline_source_cost_is_independent_of_an_episode_but_cannot_authorize_an_investigation() {
+    let original = original();
+    let (mut recipe, component) = recipe(&original);
+    recipe.purpose = RecipePurpose::Baseline;
+    let RecipeCostQualification::Measured(receipt) = &mut recipe.cost else { panic!() };
+    receipt.purpose = RecipePurpose::Baseline;
+    assert!(recipe.is_valid());
+    let RecipeCostQualification::Measured(receipt) = &recipe.cost else { panic!() };
+    let profile = SourceProfileAdmission::new(
+        digest(b"baseline-native-route"),
+        receipt.as_ref().clone(),
+        receipt.tested_budget.clone(),
+        || true,
+    )
+    .unwrap();
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::QueryCompilation },
+        budget: receipt.tested_budget.clone(),
+    };
+    assert!(profile.matches_request(&request));
+    assert!(profile.matches_native_context(&NativeReadContext::from_activity(&original.source).unwrap()));
+    assert!(
+        DiagnosticInvestigationIntent::new_source_read(
+            &original.episode,
+            &recipe,
+            original.focus.clone(),
+            original.execution.clone(),
+            &component,
+            &recipe.budget
+        )
+        .is_err()
+    );
+    let mut changed_purpose = recipe.clone();
+    changed_purpose.purpose = RecipePurpose::Investigation;
+    assert!(!changed_purpose.is_valid());
+}
+
+#[test]
+fn baseline_profile_refuses_unknown_role_foreign_native_owner_changed_epoch_and_wider_caller_budget() {
+    let original = original();
+    let (recipe, _) = recipe(&original);
+    let RecipeCostQualification::Measured(mut receipt) = recipe.cost else { panic!() };
+    receipt.purpose = RecipePurpose::Baseline;
+    let profile = SourceProfileAdmission::new(
+        digest(b"baseline-native-route"),
+        receipt.as_ref().clone(),
+        receipt.tested_budget.clone(),
+        || true,
+    )
+    .unwrap();
+    let context = NativeReadContext::from_activity(&original.source).unwrap();
+    for field in ["unknown-role", "changed-role", "epoch", "database", "member", "clock"] {
+        let mut changed = context.clone();
+        match field {
+            "unknown-role" => changed.database_writable = None,
+            "changed-role" => changed.database_writable = Some(false),
+            "database" => {
+                let CollectionTarget::Database(database) = &mut changed.target else { panic!() };
+                database.incarnation = Some("another-original-database".into());
+            }
+            "epoch" => {
+                let SourcePartition::InstanceLocal { epoch, .. } = &mut changed.partition else { panic!() };
+                *epoch = Some("another-native-process".into());
+            }
+            "clock" => changed.observed_until = "1900-01-01T00:00:00Z".into(),
+            _ => {
+                let SourcePartition::InstanceLocal { member, .. } = &mut changed.partition else { panic!() };
+                *member = None;
+            }
+        }
+        assert!(!profile.matches_native_context(&changed), "{field}");
+    }
+    let mut wider = receipt.tested_budget.clone();
+    wider.max_queries += 1;
+    assert!(
+        SourceProfileAdmission::new(digest(b"baseline-native-route"), receipt.as_ref().clone(), wider, || true)
+            .is_err()
+    );
+    let mut value = serde_json::to_value(receipt).unwrap();
+    value.as_object_mut().unwrap().remove("purpose");
+    assert!(serde_json::from_value::<RecipeCostReceipt>(value).is_err());
 }

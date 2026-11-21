@@ -12483,5 +12483,19 @@
   "view.storage.file_summary.limit.types": "This summary covers native ROWS (type 0) and LOG (type 1) file entries. Other file types are counted separately and excluded from these byte totals.",
   "view.storage.file_summary.recorded": "Counts and byte totals come from one complete original native file census.",
   "view.storage.file_summary.title": "Database file census",
-  "view.storage.file_summary.unavailable": "No complete, consistent selected-database file census was retained. File counts and byte totals remain unknown."
+  "view.storage.file_summary.unavailable": "No complete, consistent selected-database file census was retained. File counts and byte totals remain unknown.",
+  "service.monitoring.additional_work": "{target} / {recipe}: separate interval-discovery work is unqualified; automatic collection is withheld.",
+  "service.monitoring.admission_unsupported": "{target} / {recipe}: the native reader cannot enforce the approved source profile before reading.",
+  "service.monitoring.cadence": "{target} / {recipe}: no feasible standard cadence fits the existing shared-resource allowance.",
+  "service.monitoring.capacity": "{target} / {recipe}: the intersected capture allowance cannot fit the archive contract.",
+  "service.monitoring.conflicting_schedule": "{target} / {recipe}: an explicit schedule already uses this schedule identity.",
+  "service.monitoring.missing_approval": "{target} / {recipe}: the original issued approval is missing, retired or does not match this route.",
+  "service.monitoring.more_gaps": "{count, plural, one {# additional gap is available in JSON output.} other {# additional gaps are available in JSON output.}}",
+  "service.monitoring.schedule_capacity": "{target} / {recipe}: the bounded schedule capacity is full; this source remains unscheduled.",
+  "service.monitoring.selected_target": "{target} / {recipe}: this source requires a qualified selected target; standard enrollment cannot infer it.",
+  "service.monitoring.shared_budget": "{target} / {recipe}: the same native member has conflicting configured admission groups; automatic collection is withheld.",
+  "service.monitoring.shared_route": "{target} / {recipe}: this native shared source already has an enrolled route; this route remains unscheduled.",
+  "service.monitoring.summary": "Standard monitoring: {automatic, plural, one {# enrolled source} other {# enrolled sources}}, {explicit, plural, one {# explicit schedule} other {# explicit schedules}}, {gaps, plural, one {# coverage gap} other {# coverage gaps}}.",
+  "service.monitoring.undeclared": "{target}: this provider declares no applicable baseline source.",
+  "service.monitoring.unqualified": "{target} / {recipe}: native source cost is unqualified; automatic collection is withheld."
 }

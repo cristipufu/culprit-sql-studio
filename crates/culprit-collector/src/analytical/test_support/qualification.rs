@@ -28,7 +28,7 @@ pub struct QualificationFixture {
     pub component: ComponentVersion,
     pub scope: NativeSourceReadScope,
     pub case: QualificationFixtureCase,
-    record: TelemetryRecord,
+    records: Vec<TelemetryRecord>,
     metrics: ReadWorkMetrics,
     state: Arc<FixtureState>,
 }
@@ -67,15 +67,34 @@ impl QualificationFixture {
             component: receipt.component,
             scope,
             case,
-            record: original.record.record,
+            records: vec![original.record.record],
             metrics: receipt.read_metrics,
             state: Arc::new(FixtureState::default()),
         }
     }
+    pub fn baseline(case: QualificationFixtureCase) -> Self {
+        let mut fixture = Self::new(case);
+        fixture.recipe.purpose = RecipePurpose::Baseline;
+        fixture
+    }
+    pub fn baseline_activity(case: QualificationFixtureCase) -> Self {
+        let mut fixture = Self::baseline(case);
+        let (mut source, records) = replica_activity_evidence_cases().remove(0);
+        source.target = fixture.scope.target.clone().into();
+        fixture.source = source;
+        fixture.records = records;
+        fixture.metrics.templates[0].rows_decoded = fixture.records.len().to_string();
+        fixture.recipe.id = "fixture.native-activity".into();
+        fixture.recipe.selector = RecipeSelector::Collection(TelemetryCollection::Activity);
+        fixture
+    }
     pub fn request(&self) -> CollectionRequest {
         CollectionRequest {
             subject: CollectionSubject::Database,
-            selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::QueryCompilation },
+            selection: match self.recipe.selector {
+                RecipeSelector::Collection(TelemetryCollection::Activity) => CollectionSelection::Activity,
+                _ => CollectionSelection::Snapshot { dataset: SnapshotDataset::QueryCompilation },
+            },
             budget: CollectionBudget { max_queries: 8, ..Default::default() },
         }
     }
@@ -91,13 +110,13 @@ impl QualificationFixture {
     pub fn telemetry_source(&self) -> Box<dyn TelemetrySource> {
         self.state.opens.fetch_add(1, Ordering::SeqCst);
         self.state.closed.store(false, Ordering::SeqCst);
-        Box::new(FixtureRead { fixture: self.clone(), rows: Some(vec![self.record.clone()]), queries: 0 })
+        Box::new(FixtureRead { fixture: self.clone(), rows: Some(self.records.clone()), queries: 0 })
     }
     /// Exact controlled native artifact meaning; neither elapsed time nor a returned-row ceiling grants approval.
     pub fn verifies(&self, receipt: &RecipeCostReceipt, source: &CollectionDescription, row: &ExportedRecord) -> bool {
         receipt.scope == RecipeCostScope::NativeRead(self.scope.clone())
             && source == &self.source
-            && row.record == self.record
+            && self.records.first() == Some(&row.record)
             && receipt.component == self.component
             && receipt.read_metrics.templates == self.metrics.templates
     }
@@ -115,6 +134,7 @@ impl NativeQualificationSource for QualificationFixture {
         let mut receipt = RecipeCostReceipt {
             recipe_id: self.recipe.id.clone(),
             recipe_version: self.recipe.version,
+            purpose: self.recipe.purpose,
             selector: self.recipe.selector,
             scope: RecipeCostScope::NativeRead(self.scope.clone()),
             component: self.component.clone(),
@@ -156,7 +176,7 @@ impl TelemetrySource for FixtureRead {
         Some(self.fixture.metrics.clone())
     }
     async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead> {
-        assert_eq!(stream, TelemetryStream::OperationalSamples);
+        assert_eq!(stream, self.fixture.records[0].stream());
         assert!(cursor.is_none());
         self.queries += 1;
         if matches!(self.fixture.case, QualificationFixtureCase::Cancelled) {

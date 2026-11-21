@@ -1,6 +1,6 @@
 //! Only a live selected native issuer can install authority; sealed/imported JSON remains evidence alone.
 use super::completed_capture::ReadControl;
-use super::{CompletedCaptureBudget, CompletedSnapshot, Outbox, OutboxDelivery, problem, storage};
+use super::{CompletedCaptureBudget, CompletedQualificationOriginal, Outbox, OutboxDelivery, problem, storage};
 use crate::capture::{self, CollectionCancellation, SourceFactory};
 use culprit_core::{
     RecipeQualificationGap, RecipeQualificationState, RecipeQualificationSummary, Result, telemetry::*,
@@ -45,7 +45,7 @@ pub trait NativeQualificationSource: Send + Sync {
 /// Borrowed originals authenticated by this Outbox owner, never constructed from caller-supplied JSON.
 pub struct NativeQualificationEvidence<'a> {
     pub manifest: &'a CollectionManifest,
-    pub captured: &'a CompletedSnapshot,
+    pub captured: &'a CompletedQualificationOriginal,
 }
 
 pub use culprit_core::RecipeQualificationAssessment as NativeQualificationDecision;
@@ -66,7 +66,7 @@ pub(super) struct Binding {
     route_revision: String,
     receipt: RecipeCostReceipt,
     active: bool,
-    dataset: SnapshotDataset,
+    collection: TelemetryCollection,
     revision: u64,
 }
 
@@ -81,10 +81,11 @@ impl Binding {
             return Err(integrity());
         }
         serde_json::to_vec(&(
-            "local-native-qualification-v1",
+            "local-native-qualification-v2",
             &self.connection,
             &self.route_revision,
             self.receipt.key()?,
+            self.collection,
             self.revision,
         ))
         .map(|bytes| digest(&bytes))
@@ -131,8 +132,8 @@ impl IssuedQualification {
     pub fn receipt(&self) -> &RecipeCostReceipt {
         &self.binding.receipt
     }
-    pub fn dataset(&self) -> SnapshotDataset {
-        self.binding.dataset
+    pub fn collection(&self) -> TelemetryCollection {
+        self.binding.collection
     }
     pub fn revision(&self) -> u64 {
         self.binding.revision
@@ -210,13 +211,13 @@ impl Outbox {
         }
         let attempt = self.attempt_receipt(&identity, None).await?;
         let description = manifest.description.as_ref().ok_or_else(integrity)?;
-        let dataset = description.observation.snapshot().ok_or_else(integrity)?.dataset;
+        let collection = description.observation.collection();
         let captured = self
             .delivery()
-            .completed_snapshot_for_connection(
+            .completed_qualification_for_connection(
                 input.connection,
                 &attempt,
-                dataset,
+                collection,
                 CompletedCaptureBudget::default(),
                 input.cancellation,
             )
@@ -234,7 +235,7 @@ impl Outbox {
             route_revision: input.route_revision.into(),
             receipt: *receipt,
             active: true,
-            dataset,
+            collection,
             revision: 1,
         };
         let cancellation = input.cancellation.clone();
@@ -299,7 +300,6 @@ fn validate_input(input: &NativeQualificationRequest<'_>) -> Result<()> {
         || input.connection.len() > 512
         || !valid_digest(input.route_revision)
         || !input.recipe.is_valid()
-        || input.recipe.purpose != RecipePurpose::Investigation
         || !input.recipe.selector.matches(&input.request)
         || !input.recipe.subjects.iter().any(|subject| subject.accepts(&input.request.subject))
         || input.request.budget.intersection(&input.recipe.budget) != input.request.budget
@@ -312,7 +312,7 @@ fn validate_receipt(
     receipt: &RecipeCostReceipt,
     recipe: &RecipeDescriptor,
     manifest: &CollectionManifest,
-    captured: &CompletedSnapshot,
+    captured: &CompletedQualificationOriginal,
 ) -> Result<()> {
     if !receipt.matches_recipe(recipe)
         || receipt.evidence.capture_ref() != *captured.capture()

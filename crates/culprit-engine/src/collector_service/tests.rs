@@ -4,7 +4,7 @@ use culprit_auth_azure::IdentityConfig;
 use culprit_blob_azure::AzureBlobConfig;
 use culprit_core::{AuthKind, Engine, Environment};
 
-fn config(root: &Path) -> CollectorConfig {
+pub(super) fn config(root: &Path) -> CollectorConfig {
     let workspace = root.join("workspace");
     Workspace::open_in(&workspace)
         .add_connection(NewConnection {
@@ -42,6 +42,7 @@ fn config(root: &Path) -> CollectorConfig {
                 }],
             }],
         },
+        monitoring: MonitoringPolicy::Explicit,
         source_credentials: [("fixture".into(), "source".into())].into(),
         credentials: [
             ("source", None),

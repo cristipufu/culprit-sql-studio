@@ -61,6 +61,14 @@ pub(crate) async fn run(command: ServiceCommand, out: &Out) -> Result<u8> {
 }
 struct Reporter<'a>(&'a Out);
 impl ServiceReporter for Reporter<'_> {
+    fn enrollment(&self, summary: &MonitoringEnrollmentSummary) -> Result<()> {
+        if self.0.format() == Format::Json {
+            write(&serde_json::json!({"kind":"monitoring-enrollment","event":summary}))
+        } else {
+            print_enrollment(summary);
+            Ok(())
+        }
+    }
     fn source_paused(&self, error: &culprit_core::Error) -> Result<()> {
         if self.0.format() == Format::Json {
             write(&serde_json::json!({"kind":"source-paused","code":error.code,"detail":error.detail}))
@@ -105,6 +113,71 @@ impl ServiceReporter for Reporter<'_> {
         }
     }
 }
+const MAX_ENROLLMENT_GAPS_SHOWN: usize = 8;
+fn print_enrollment(summary: &MonitoringEnrollmentSummary) {
+    eprintln!(
+        "{}",
+        culprit_core::t!(
+            "service.monitoring.summary",
+            automatic = culprit_core::format::count(summary.automatic.len() as f64),
+            explicit = culprit_core::format::count(summary.explicit_schedules as f64),
+            gaps = culprit_core::format::count((summary.gaps.len() as u32 + summary.omitted_gaps) as f64)
+        )
+    );
+    for gap in summary.gaps.iter().take(MAX_ENROLLMENT_GAPS_SHOWN) {
+        eprintln!("{}", enrollment_gap(gap).render());
+    }
+    let omitted = summary.gaps.len().saturating_sub(MAX_ENROLLMENT_GAPS_SHOWN) as u32 + summary.omitted_gaps;
+    if omitted > 0 {
+        eprintln!(
+            "{}",
+            culprit_core::t!("service.monitoring.more_gaps", count = culprit_core::format::count(omitted as f64))
+        );
+    }
+}
+fn enrollment_gap(gap: &MonitoringGap) -> culprit_core::i18n::Message {
+    let target = &gap.target;
+    let recipe = gap.recipe_id.as_deref().unwrap_or("");
+    match gap.reason {
+        MonitoringGapReason::Undeclared => {
+            culprit_core::message!("service.monitoring.undeclared", target = target)
+        }
+        MonitoringGapReason::Unqualified => {
+            culprit_core::message!("service.monitoring.unqualified", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::MissingApproval => {
+            culprit_core::message!("service.monitoring.missing_approval", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::AdmissionUnsupported => {
+            culprit_core::message!("service.monitoring.admission_unsupported", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::RequiresSelectedTarget => {
+            culprit_core::message!("service.monitoring.selected_target", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::AdditionalWorkUnqualified => {
+            culprit_core::message!("service.monitoring.additional_work", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::InfeasibleCadence => {
+            culprit_core::message!("service.monitoring.cadence", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::ScheduleCapacity => {
+            culprit_core::message!("service.monitoring.schedule_capacity", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::ConflictingSchedule => {
+            culprit_core::message!("service.monitoring.conflicting_schedule", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::SharedOwnerAlreadyScheduled => {
+            culprit_core::message!("service.monitoring.shared_route", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::SharedAdmissionConflict => {
+            culprit_core::message!("service.monitoring.shared_budget", target = target, recipe = recipe)
+        }
+        MonitoringGapReason::Capacity => {
+            culprit_core::message!("service.monitoring.capacity", target = target, recipe = recipe)
+        }
+    }
+}
+
 fn delivery_changed(previous: Option<&DeliveryEntry>, result: &Result<DeliveryEntry>) -> bool {
     let Some(before) = previous else {
         return true;
@@ -165,5 +238,39 @@ mod tests {
         redriven.attempt += 1;
         assert!(delivery_changed(Some(&previous), &Ok(redriven)));
         assert!(delivery_changed(None, &Err(DeliveryProblem::Transport.error())));
+    }
+    #[test]
+    fn monitoring_gaps_render_the_exact_logical_route_and_typed_reason_without_native_proof_fields() {
+        use super::*;
+        let gap = MonitoringGap {
+            target: "configured-target".into(),
+            recipe_id: Some("native.baseline".into()),
+            reason: MonitoringGapReason::Unqualified,
+        };
+        assert_eq!(
+            enrollment_gap(&gap),
+            culprit_core::message!(
+                "service.monitoring.unqualified",
+                target = "configured-target",
+                recipe = "native.baseline"
+            )
+        );
+        assert_eq!(
+            serde_json::to_value(&gap).unwrap(),
+            serde_json::json!({"target":"configured-target",
+            "recipe_id":"native.baseline","reason":"unqualified"})
+        );
+        let no_catalog = MonitoringGap { recipe_id: None, reason: MonitoringGapReason::Undeclared, ..gap };
+        assert_eq!(
+            enrollment_gap(&no_catalog),
+            culprit_core::message!("service.monitoring.undeclared", target = "configured-target")
+        );
+    }
+    #[test]
+    fn standard_monitoring_count_messages_cover_zero_one_and_many_through_the_actual_catalog() {
+        let singular = culprit_core::t!("service.monitoring.summary", automatic = "1", explicit = "1", gaps = "1");
+        assert_eq!(singular, "Standard monitoring: 1 enrolled source, 1 explicit schedule, 1 coverage gap.");
+        let plural = culprit_core::t!("service.monitoring.summary", automatic = "0", explicit = "2", gaps = "3");
+        assert_eq!(plural, "Standard monitoring: 0 enrolled sources, 2 explicit schedules, 3 coverage gaps.");
     }
 }
