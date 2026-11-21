@@ -138,7 +138,7 @@ impl LocalCaptureAnalysisKind {
             | Self::ConfiguredLogRates
             | Self::ConnectionOutcomes
             | Self::Storage => Snapshot(&[Dataset::Operational]),
-            Self::InstanceResources => Snapshot(&[Dataset::Operational, Dataset::NumaNodes]),
+            Self::InstanceResources => Snapshot(&[Dataset::Operational, Dataset::NumaNodes, Dataset::ProcessCpu]),
             Self::PerformanceCounters => Snapshot(&[Dataset::Operational, Dataset::DatabasePerformanceCounters]),
             Self::HyperscaleLogComponents => Snapshot(&[Dataset::HyperscaleLogComponents]),
             Self::SuspectPages => Snapshot(&[Dataset::SuspectPages]),

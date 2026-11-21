@@ -167,7 +167,7 @@ export function HealthTab({
   const counterRatioIssue = observationReadIssue("performance counters", report.snapshot.sources ?? []);
   const instanceResources = report.instance_resources;
   const instanceResourceRead = pressure?.instance_resources;
-  const instanceResourceRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "instance-resources" || source.source === "schedulers");
+  const instanceResourceRecorded = report.snapshot.operations.process_cpu_originals.length > 0 || (report.snapshot.sources ?? []).some((source) => source.source === "instance-resources" || source.source === "schedulers");
   const instanceResourceIssue = observationReadIssue("instance-resources", report.snapshot.sources ?? [], Boolean(instanceResourceRead))
     ?? observationReadIssue("schedulers", report.snapshot.sources ?? []);
   const storage = report.storage;

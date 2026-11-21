@@ -77,6 +77,9 @@ impl CollectionDescription {
         {
             return false;
         }
+        if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::ProcessCpu) {
+            return cpu_profile_header_is_valid(self);
+        }
         if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::NumaNodes) {
             return numa_node_header_is_valid(self);
         }

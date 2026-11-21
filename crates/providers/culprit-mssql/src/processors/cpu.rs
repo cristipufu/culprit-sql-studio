@@ -64,3 +64,6 @@ pub(super) fn decode(row: &Rec) -> Result<Option<NativeCounterSet>> {
     MssqlProcessCpuPoint::from_sample(&sample).map_err(|_| invalid_data())?;
     Ok(Some(sample))
 }
+
+pub(crate) mod native;
+pub(crate) use native::{read_history, read_pools};

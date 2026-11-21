@@ -1,5 +1,6 @@
 //! Real shared-state capture uses the owned loopback fixture, never a production endpoint.
 mod numa_nodes;
+mod process_cpu;
 mod suspect_rows;
 use super::*;
 use crate::{

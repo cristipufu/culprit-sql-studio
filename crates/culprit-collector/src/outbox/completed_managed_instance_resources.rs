@@ -81,4 +81,22 @@ impl OutboxDelivery {
         )?;
         self.with_completed_capture(read, (), |completed| Ok(CompletedManagedInstanceResources { completed })).await
     }
+    /// Intersect an existing whole-action local-read deadline without replacing its worker or counters.
+    pub async fn completed_managed_instance_resources_for_connection_until(
+        &self,
+        connection: &str,
+        attempt: &DiagnosticAttemptReceipt,
+        budget: CompletedCaptureBudget,
+        cancellation: &CollectionCancellation,
+        deadline: tokio::time::Instant,
+    ) -> Result<CompletedManagedInstanceResources> {
+        let read = CompletedCaptureRead::managed_instance_resources_attempt(
+            connection,
+            attempt.clone(),
+            budget,
+            cancellation.clone(),
+        )?
+        .until(deadline)?;
+        self.with_completed_capture(read, (), |completed| Ok(CompletedManagedInstanceResources { completed })).await
+    }
 }

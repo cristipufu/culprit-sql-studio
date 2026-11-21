@@ -1,4 +1,5 @@
 use super::*;
+use crate::read::ReadSession;
 use std::collections::BTreeSet;
 
 #[test]
@@ -382,6 +383,9 @@ async fn native_resource_discovery_derives_its_routes_from_registrations_and_obs
             TelemetryCollection::Snapshot(SnapshotDataset::NumaNodes),
             TelemetryCollection::Snapshot(SnapshotDataset::Operational),
         ];
+        if edition != crate::probe::ENGINE_EDITION_MANAGED_INSTANCE {
+            expected.insert(3, TelemetryCollection::Snapshot(SnapshotDataset::ProcessCpu));
+        }
         if edition == crate::probe::ENGINE_EDITION_MANAGED_INSTANCE {
             expected.insert(1, TelemetryCollection::ResourceHistory);
             expected.push(TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures));
@@ -706,4 +710,32 @@ fn pool_current_wait_recipe_is_closed_bounded_unqualified_and_distinct_from_data
     assert_eq!(recipe.budget.total_timeout_ms, 5000);
     let database = all.iter().find(|recipe| recipe.id == "mssql.wait-counters").unwrap();
     assert_eq!(database.subjects, vec![RecipeSubject::Database]);
+}
+
+#[test]
+fn boxed_cpu_recipe_is_explicit_shared_instance_only_and_reserves_setup_inside_ten() {
+    let selector = RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::ProcessCpu));
+    let descriptors = declarations();
+    let descriptor = descriptors.iter().find(|recipe| recipe.selector == selector).unwrap();
+    assert_eq!(descriptor.purpose, RecipePurpose::Investigation);
+    assert_eq!(descriptor.cost, RecipeCostQualification::Unqualified);
+    for edition in [2, 3, 4] {
+        assert!(
+            collections_for(
+                &match subject(RecipeSubject::Shared(SharedResourceKind::Instance)) {
+                    CollectionSubject::Shared { resource } => resource,
+                    _ => panic!(),
+                },
+                edition
+            )
+            .contains(&TelemetryCollection::Snapshot(SnapshotDataset::ProcessCpu))
+        );
+    }
+    let caller = CollectionBudget::upper_limits();
+    let bounded = state::process_cpu_budget(&caller);
+    assert_eq!(bounded.max_queries, 10);
+    assert_eq!(bounded.max_snapshot_rows, 69);
+    assert_eq!(bounded.page_bytes, 64 * 1024);
+    assert_eq!(bounded.total_bytes, 256 * 1024);
+    assert_eq!(ReadSession::budget_after_setup(bounded).unwrap().max_queries, 9);
 }

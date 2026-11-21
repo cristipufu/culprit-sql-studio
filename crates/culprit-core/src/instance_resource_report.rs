@@ -7,7 +7,7 @@ use ts_rs::TS;
 #[ts(export)]
 pub struct InstanceResourceField {
     pub key: String,
-    /// Labels include native units; numbers stay exact unformatted digits.
+    /// Labels include units. Native integers retain exact digits; derived intervals retain their formula inputs.
     pub label: String,
     pub value: Option<String>,
 }
@@ -27,6 +27,9 @@ pub struct InstanceResourceReport {
     pub numa_nodes: Option<Box<NumaNodeReport>>,
     /// A separate processor-source point, never merged into the resource point's clock or populations.
     pub process_cpu: Option<Box<ProcessCpuReport>>,
+    /// Independently authenticated original CPU captures, never current database workload ownership.
+    pub process_cpu_originals: Option<Vec<ProcessCpuReport>>,
+    pub process_cpu_interval: Option<Box<ProcessCpuIntervalReport>>,
     /// Per-scheduler rows are an independent source population, never the aggregate resource point.
     pub schedulers: Option<Box<SchedulerReport>>,
     pub context: Option<ObservationReadContext>,
@@ -45,6 +48,9 @@ pub struct InstanceResourceReport {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct ProcessCpuReport {
+    pub capture: Option<DiagnosticCaptureRef>,
+    /// Independent native populations; ordinary legacy totals have no newly acquired populations.
+    pub populations: Vec<ProcessCpuPopulationReport>,
     pub context: Option<ObservationReadContext>,
     pub native_source: Option<StateSourceCoverage>,
     pub source_state: SourceState,
@@ -172,4 +178,35 @@ pub struct NumaNodeReport {
     pub summary: String,
     pub limitations: Vec<String>,
     pub populations: Vec<NumaNodePopulationReport>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct ProcessCpuPopulationReport {
+    pub native_source: StateSourceCoverage,
+    pub source_state: SourceState,
+    pub read_complete: bool,
+    pub observed_at: Option<String>,
+    pub native_rows: u32,
+    pub observed_rows: u32,
+    pub title: String,
+    pub summary: String,
+    pub limitations: Vec<String>,
+    pub entries: Vec<InstanceResourceGroup>,
+}
+
+/// Only the pure original-pair interpreter derives this interval; it establishes no exclusive CPU cause.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct ProcessCpuIntervalReport {
+    pub available: bool,
+    pub first: Option<DiagnosticCaptureRef>,
+    pub second: Option<DiagnosticCaptureRef>,
+    pub first_context: Option<Box<NativeReadContext>>,
+    pub second_context: Option<Box<NativeReadContext>>,
+    pub title: String,
+    pub summary: String,
+    /// Approximate derived percentage plus exact numerator, native elapsed milliseconds and logical-CPU denominator.
+    pub fields: Vec<InstanceResourceField>,
+    pub limitations: Vec<String>,
 }

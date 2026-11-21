@@ -33,8 +33,11 @@ fn replies(final_identity: Rec) -> Vec<crate::read::ReadResult<Vec<Rec>>> {
         Ok(vec![replace(&instance_pressure_row(), &[("observed_at", Val::Text("2020-01-01T06:02:00.5Z".into()))])]),
         Ok(crate::schedulers::fixture_columns()),
         Ok(vec![crate::schedulers::tests::row()]),
-        Ok(vec![crate::performance::tests::row()]),
-        Ok(vec![crate::processors::tests::row()]),
+        Ok(vec![crate::performance::tests::instance_row("2020-01-01T06:02:00.5Z")]),
+        Ok(vec![replace(
+            &crate::processors::tests::row(),
+            &[("observed_at", Val::Text("2020-01-01T06:02:00.5Z".into()))],
+        )]),
         Ok(vec![crate::compiler_gateways::tests::row()]),
         Ok(vec![super::tests::clock(false, "2020-01-01T06:02:01Z")]),
         Ok(vec![final_identity]),
@@ -45,6 +48,15 @@ fn source(final_identity: Rec, shutdown: SourceShutdown) -> StateSource<FakeRead
     let mut reader = FakeRead::new(replies(final_identity));
     reader.shutdown = shutdown;
     StateSource::with_io(reader, &request(), "unused-member-route.invalid".into(), 1433).unwrap()
+}
+
+fn supplied_state(source: &str) -> culprit_core::SourceState {
+    if source == crate::sources::PERFORMANCE_COUNTERS.name {
+        // This fixture supplies one ordinary counter and no requested Resource Governor rows.
+        culprit_core::SourceState::Partial
+    } else {
+        culprit_core::SourceState::Collected
+    }
 }
 
 #[tokio::test]
@@ -61,8 +73,12 @@ async fn instance_capture_reuses_native_readers_and_never_charges_the_shared_fac
     assert!(description.is_partition_qualified());
     let snapshot = description.observation.snapshot().unwrap();
     assert_eq!(snapshot.sources.len(), 9);
-    assert_eq!(snapshot.records, 12);
-    assert!(snapshot.sources.iter().all(|source| source.state == culprit_core::SourceState::Collected));
+    assert_eq!(snapshot.records, 13);
+    assert!(
+        snapshot.sources.iter().all(|source| source.state == supplied_state(&source.source)),
+        "native source availability: {:?}",
+        snapshot.sources,
+    );
     let capture = CaptureIdentity { observation_id: "native-instance".into(), revision: None };
     let mut cursor = None;
     let mut records = vec![];
@@ -79,7 +95,8 @@ async fn instance_capture_reuses_native_readers_and_never_charges_the_shared_fac
         }
     }
     for record in records {
-        let row = ExportedRecord::new(&description, &capture, record).unwrap();
+        let row = ExportedRecord::new(&description, &capture, record.clone())
+            .unwrap_or_else(|error| panic!("original observation {record:?} failed: {error:?}"));
         assert!(row.record_id.is_some());
         let TelemetryRecord::Operational(observation) = row.record else { panic!() };
         match observation.fact {
@@ -184,7 +201,7 @@ async fn unavailable_tempdb_log_keeps_the_independent_data_population_and_does_n
         assert_eq!(log.records, 0);
         assert_eq!(data.state, culprit_core::SourceState::Collected);
         assert_eq!(data.records, 1);
-        assert_eq!(snapshot.records, 11);
+        assert_eq!(snapshot.records, 12);
         assert_eq!(
             source.io.calls.iter().filter(|call| call.sql.contains("FROM tempdb.sys.dm_db_log_space_usage")).count(),
             0
@@ -239,7 +256,7 @@ async fn metadata_memory_feature_and_data_visibility_remain_separate_without_wit
         );
         for native in &snapshot.sources {
             if native.source != metadata.source {
-                assert_eq!(native.state, culprit_core::SourceState::Collected);
+                assert_eq!(native.state, supplied_state(&native.source), "{}", native.source);
             }
         }
         let mut cursor = None;

@@ -379,6 +379,12 @@ impl CollectionRequest {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::ProcessCpu } => {
+                if !matches!(&self.subject,CollectionSubject::Shared{resource} if resource.engine == crate::Engine::Mssql && resource.kind == SharedResourceKind::Instance)
+                {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
             CollectionSelection::Snapshot { dataset: SnapshotDataset::GroupReplication } => {
                 if !matches!(&self.subject, CollectionSubject::Shared { resource } if resource.kind == SharedResourceKind::Instance)
                 {
@@ -756,6 +762,14 @@ impl TelemetryRecord {
                 row.fact.redact(source.target.engine());
                 let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
                 match (&source.observation, &row.fact) {
+                    (SourceObservation::Snapshot(header), _) if header.dataset == SnapshotDataset::ProcessCpu => {
+                        accepted && cpu_profile_observation_fits(row, source)
+                    }
+                    (_, OperationalFact::CounterSet(sample))
+                        if cpu_pool_candidate(sample) || cpu_history_candidate(sample) =>
+                    {
+                        false
+                    }
                     (SourceObservation::Jobs { snapshot, metadata }, _) => accepted && metadata.accepts(snapshot, row),
                     (_, OperationalFact::MysqlScheduledEvent(event)) => accepted && event.fits_source(source),
                     (SourceObservation::MysqlEvents { .. }, _) => false,

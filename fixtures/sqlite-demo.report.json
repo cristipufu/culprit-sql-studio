@@ -849,7 +849,7 @@
         "table": "orders"
       }
     ],
-    "format": 50,
+    "format": 51,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -1017,6 +1017,7 @@
       "log_failures": [],
       "multixacts": [],
       "numa_nodes": [],
+      "process_cpu_originals": [],
       "sequences": [],
       "source_acquisitions": [],
       "spaces": [],

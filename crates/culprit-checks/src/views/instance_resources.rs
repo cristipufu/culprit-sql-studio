@@ -14,6 +14,11 @@ pub fn explain_source(
     observations: &[OperationalObservation],
     read_complete: bool,
 ) -> Result<InstanceResourceReport> {
+    if source.observation.snapshot().is_some_and(|header| header.dataset == SnapshotDataset::ProcessCpu) {
+        let mut report = unavailable();
+        report.process_cpu = Some(Box::new(process_cpu::explain_profile(source, observations, read_complete)?));
+        return Ok(report);
+    }
     if source.observation.snapshot().is_some_and(|header| header.dataset == SnapshotDataset::NumaNodes) {
         return numa_nodes::explain_source(source, observations, read_complete);
     }
@@ -68,7 +73,12 @@ pub fn explain_captured(read: &CapturedOperationalRead) -> Result<InstanceResour
     if !read.is_valid() {
         return Err(CollectionStop::InvalidPage.error());
     }
-    explain_source(&read.description, &read.observations, read.read_complete)
+    let mut report = explain_source(&read.description, &read.observations, read.read_complete)?;
+    if cpu_profile_header_is_valid(&read.description) {
+        report.process_cpu.as_mut().ok_or_else(|| CollectionStop::InvalidPage.error())?.capture =
+            Some(read.origin.capture.clone());
+    }
+    Ok(report)
 }
 
 pub fn explain(read: &InstanceResourceRead) -> Result<InstanceResourceReport> {
@@ -109,6 +119,8 @@ fn unavailable() -> InstanceResourceReport {
     InstanceResourceReport {
         numa_nodes: None,
         process_cpu: None,
+        process_cpu_originals: None,
+        process_cpu_interval: None,
         schedulers: None,
         context: None,
         native_source: None,
@@ -295,4 +307,49 @@ pub fn explain_numa_recorded(recorded: &RecordedOperationalRead) -> Result<Insta
         }
         RecordedOperationalRead::Unavailable { reason } => Ok(unavailable_numa_nodes(reason)),
     }
+}
+
+/// Exact canonical origins/positions remain required; these entry points perform no native work.
+pub fn explain_cpu_recorded(original: &RecordedOperationalRead) -> Result<culprit_core::ProcessCpuReport> {
+    match original {
+        RecordedOperationalRead::Captured { read } => {
+            if !read.is_valid() {
+                return Err(CollectionStop::InvalidPage.error());
+            }
+            let mut report = process_cpu::explain_profile(&read.description, &read.observations, read.read_complete)?;
+            report.capture = Some(read.origin.capture.clone());
+            Ok(report)
+        }
+        RecordedOperationalRead::Unavailable { reason } => Ok(unavailable_cpu_original(reason)),
+    }
+}
+pub fn unavailable_cpu_original(reason: &culprit_core::i18n::Message) -> culprit_core::ProcessCpuReport {
+    let mut report = process_cpu::invalid_report();
+    report.summary = reason.render();
+    report
+}
+pub fn compare_cpu_originals(
+    first: &CapturedOperationalRead,
+    second: &CapturedOperationalRead,
+) -> Result<culprit_core::ProcessCpuIntervalReport> {
+    process_cpu::compare_originals(first, second)
+}
+pub(crate) use process_cpu::interval::CpuIntervalUnavailableReason;
+
+pub(crate) fn unavailable_cpu_interval(reason: CpuIntervalUnavailableReason) -> culprit_core::ProcessCpuIntervalReport {
+    process_cpu::interval::unavailable(reason)
+}
+pub(crate) fn with_cpu_originals(
+    current: Option<Box<InstanceResourceReport>>,
+    originals: Vec<culprit_core::ProcessCpuReport>,
+    interval: culprit_core::ProcessCpuIntervalReport,
+) -> Box<InstanceResourceReport> {
+    let mut report = current.unwrap_or_else(|| Box::new(unavailable()));
+    if report.process_cpu.is_none() && report.groups.is_empty() {
+        report.summary =
+            t!("view.process_cpu.saved_summary", count = culprit_core::format::digits(originals.len().to_string()));
+    }
+    report.process_cpu_originals = Some(originals);
+    report.process_cpu_interval = Some(Box::new(interval));
+    report
 }

@@ -74,7 +74,7 @@ cdc_history: Array<RecordedOperationalRead>,
 /**
  * Independently captured original NUMA node populations, never merged with the later scan.
  */
-numa_nodes: Array<RecordedOperationalRead>, change_feed_history: Array<RecordedOperationalRead>, 
+numa_nodes: Array<RecordedOperationalRead>, process_cpu_originals: Array<RecordedOperationalRead>, change_feed_history: Array<RecordedOperationalRead>, 
 /**
  * Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
  */

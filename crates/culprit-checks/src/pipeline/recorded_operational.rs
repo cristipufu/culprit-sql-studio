@@ -13,6 +13,16 @@ pub(super) fn explain<R>(
 ) -> Option<Vec<R>> {
     // Inspect all raw entries before the display cap, so a later conflict cannot leave a measured survivor.
     let positions = RecordedOperationalRead::replay_positions(originals);
+    explain_positions(originals, positions, interpret, unavailable, invalid, overflow)
+}
+pub(super) fn explain_positions<R>(
+    originals: &[RecordedOperationalRead],
+    positions: Vec<Result<usize>>,
+    interpret: fn(&RecordedOperationalRead) -> Result<R>,
+    unavailable: fn(&Message) -> R,
+    invalid: Message,
+    overflow: impl FnOnce(usize, usize) -> Message,
+) -> Option<Vec<R>> {
     let count = positions.len();
     if count == 0 {
         return None;

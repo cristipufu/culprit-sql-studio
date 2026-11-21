@@ -3,6 +3,9 @@ use crate::read::{NativeRead, ReadError, ReadSession, integer, invalid_data};
 use culprit_core::{Coverage, MeasurementScope, Result, telemetry::*};
 
 mod cpu;
+#[cfg(test)]
+pub(crate) use cpu::native::tests as cpu_test_support;
+pub(crate) use cpu::{read_history as read_cpu_history, read_pools as read_cpu_pools};
 fn topology_sql(include_process_cpu: bool) -> String {
     let cpu = if include_process_cpu { cpu::columns() } else { String::new() };
     format!(

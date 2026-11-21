@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     culprit_core::i18n::scope("en", generate)
 }
 fn generate() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cases = BTreeMap::new();
+    let mut cases: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     for (name, case) in [
         ("exact", InstanceResourceCase::Exact),
         ("zero", InstanceResourceCase::Zero),
@@ -30,7 +30,7 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
             .collect::<culprit_core::Result<Vec<_>>>()?;
         let read = InstanceResourceRead::from_source(&source, &rows, true)?;
         let report = culprit_checks::instance_resources::explain(&read)?;
-        cases.insert(name, serde_json::json!({"read":read,"report":report}));
+        cases.insert(name.into(), serde_json::json!({"read":read,"report":report}));
     }
     for (name, case) in [
         ("cpu_exact", ProcessCpuCase::Exact),
@@ -49,7 +49,7 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
             .collect::<culprit_core::Result<Vec<_>>>()?;
         let read = InstanceResourceRead::from_source(&source, &rows, true)?;
         let report = culprit_checks::instance_resources::explain_source(&source, &rows, true)?;
-        cases.insert(name, serde_json::json!({"read":read,"report":report}));
+        cases.insert(name.into(), serde_json::json!({"read":read,"report":report}));
     }
     for (name, case) in [
         ("schedulers_exact", SchedulerCase::Exact),
@@ -75,7 +75,7 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
             .collect::<culprit_core::Result<Vec<_>>>()?;
         let read = InstanceResourceRead::from_source(&source, &rows, true)?;
         let report = culprit_checks::instance_resources::explain_source(&source, &rows, true)?;
-        cases.insert(name, serde_json::json!({"read":read,"report":report}));
+        cases.insert(name.into(), serde_json::json!({"read":read,"report":report}));
     }
     for (name, case) in [
         ("numa_exact", culprit_collector::analytical::test_support::NumaNodeCase::Exact),
@@ -96,7 +96,18 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
             })
             .collect::<culprit_core::Result<Vec<_>>>()?;
         let report = culprit_checks::instance_resources::explain_source(&source, &rows, true)?;
-        cases.insert(name, serde_json::json!({"source":source,"report":report}));
+        cases.insert(name.into(), serde_json::json!({"source":source,"report":report}));
+    }
+    for case in culprit_collector::analytical::test_support::ProcessCpuIntervalCase::ALL {
+        let [first, second] = culprit_collector::analytical::test_support::process_cpu_interval_originals(case);
+        let mut report = culprit_checks::instance_resources::explain_captured(&second)?;
+        report.process_cpu_originals = Some(vec![
+            *culprit_checks::instance_resources::explain_captured(&first)?.process_cpu.unwrap(),
+            *report.process_cpu.take().unwrap(),
+        ]);
+        report.process_cpu_interval =
+            Some(Box::new(culprit_checks::instance_resources::compare_cpu_originals(&first, &second)?));
+        cases.insert(format!("cpu_profile_{case:?}").to_lowercase(), serde_json::json!({"read":null,"report":report}));
     }
     let path = std::env::args_os().nth(1).map(PathBuf::from).unwrap_or_else(|| {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/instance-resources.sample.json")

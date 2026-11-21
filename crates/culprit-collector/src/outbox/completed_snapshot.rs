@@ -213,6 +213,23 @@ impl OutboxDelivery {
         self.with_completed_capture(read, (), CompletedSnapshot::from_completed).await
     }
 
+    /// The caller's original absolute local-read cutoff also bounds queued ownership and verification.
+    /// This only tightens the same canonical worker; cancellation and actual row/byte accounting are unchanged.
+    pub async fn completed_snapshot_for_connection_until(
+        &self,
+        connection: &str,
+        attempt: &DiagnosticAttemptReceipt,
+        dataset: SnapshotDataset,
+        budget: CompletedCaptureBudget,
+        cancellation: &CollectionCancellation,
+        deadline: tokio::time::Instant,
+    ) -> Result<CompletedSnapshot> {
+        let read = CompletedCaptureRead::snapshot(attempt.clone(), dataset, budget, cancellation.clone())?
+            .for_connection(connection)?
+            .until(deadline)?;
+        self.with_completed_capture(read, (), CompletedSnapshot::from_completed).await
+    }
+
     /// The same worker owns lookup, authentication and projection under the caller's original operation.
     /// Its lifetime guard is released after exclusive Files access, including postcheck failure and unwind.
     pub async fn with_completed_snapshot<T: Send + 'static>(

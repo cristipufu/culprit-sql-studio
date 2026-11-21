@@ -18,7 +18,8 @@
     "numa_nodes": [],
     "source_acquisitions": [],
     "indexed_views": null,
-    "indexed_view_originals": []
+    "indexed_view_originals": [],
+    "process_cpu_originals": []
   },
   "sources": [
     {
@@ -72,7 +73,7 @@
       "reason": null
     }
   ],
-  "format": 50,
+  "format": 51,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",
   "environment": "local",

@@ -79,6 +79,7 @@ pub struct OperationalStats {
     pub cdc_history: Vec<crate::telemetry::RecordedOperationalRead>,
     /// Independently captured original NUMA node populations, never merged with the later scan.
     pub numa_nodes: Vec<crate::telemetry::RecordedOperationalRead>,
+    pub process_cpu_originals: Vec<crate::telemetry::RecordedOperationalRead>,
     pub change_feed_history: Vec<crate::telemetry::RecordedOperationalRead>,
     /// Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -223,6 +224,7 @@ impl OperationalStats {
             indexed_views: _,
             indexed_view_originals: _,
             source_acquisitions: _,
+            process_cpu_originals: _,
             runtime_fragments: _,
             query_wait_fragments: _,
             statement_work: _,

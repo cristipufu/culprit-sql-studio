@@ -84,25 +84,43 @@ pub(crate) fn instance_resources(report: &InstanceResourceReport) -> String {
             }
             if let Some(cpu) = &report.process_cpu {
                 text.push('\n');
+                text.push_str(&cpu_text(cpu));
+            }
+            if let Some(originals) = &report.process_cpu_originals {
+                for original in originals.iter().take(super::super::BRIEF_FINDING_LIMIT) {
+                    text.push('\n');
+                    text.push_str(&cpu_text(original));
+                }
+            }
+            if let Some(interval) = &report.process_cpu_interval {
+                text.push('\n');
                 text.push_str(&render_summary(
                     Summary {
-                        title: &cpu.title,
-                        summary: &cpu.summary,
-                        source: SourceQualification::Single { state: Some(cpu.source_state), reason: None },
-                        limitations: &cpu.limitations,
+                        title: &interval.title,
+                        summary: &interval.summary,
+                        source: SourceQualification::Single {
+                            state: Some(if interval.available {
+                                culprit_core::SourceState::Collected
+                            } else {
+                                culprit_core::SourceState::Unavailable
+                            }),
+                            reason: None,
+                        },
+                        limitations: &interval.limitations,
                     },
                     |text| {
-                        if let Some(at) = &cpu.observed_at {
+                        append_cpu_qualifications(text, &interval.limitations);
+                        for context in [&interval.first_context, &interval.second_context].into_iter().flatten() {
                             text.push('\n');
-                            text.push_str(&t!("view.instance_resources.observed_at", at = at));
+                            text.push_str(&t!(
+                                "view.wait_counters.bounds",
+                                from = &context.observed_from,
+                                until = &context.observed_until
+                            ));
                         }
-                        for field in &cpu.fields {
-                            let value = field.value.as_ref().map_or_else(
-                                || t!("view.database_properties.unknown"),
-                                |value| format::digits(value.clone()),
-                            );
+                        for field in interval.fields.iter().take(CPU_FIELD_LIMIT) {
                             text.push('\n');
-                            text.push_str(&t!("view.counter_ratios.cli.metric", label = &field.label, value = value));
+                            text.push_str(&cpu_field(field));
                         }
                     },
                 ));
@@ -187,4 +205,71 @@ pub(crate) fn compact_numa_nodes(report: &InstanceResourceReport) -> serde_json:
         "populations":nodes.map(|nodes|nodes.populations.iter().take(2).map(|population|serde_json::json!({"kind":population.kind,"title":population.title,"summary":population.summary,"native_source":population.native_source,"source_state":population.source_state,"native_rows":population.native_rows,"observed_rows":population.observed_rows,"entries_limited":population.entries_limited,
             "entries":population.entries.iter().take(super::super::BRIEF_FINDING_LIMIT).map(|entry|serde_json::json!({"node_id":entry.node_id,"title":entry.title,"fields":entry.fields.iter().take(NUMA_FIELD_LIMIT).map(|field|serde_json::json!({"native_name":statement::preview(&field.native_name),"label":statement::preview(&field.label),"value":field.value.as_deref().map(statement::preview),"availability":field.availability,"unit":field.unit,"nature":field.nature,"reset":field.reset})).collect::<Vec<_>>()})).collect::<Vec<_>>()
         })).collect::<Vec<_>>())})
+}
+
+const CPU_FIELD_LIMIT: usize = 8;
+const CPU_LIMITATION_LIMIT: usize = 3;
+
+fn append_cpu_qualifications(text: &mut String, limitations: &[String]) {
+    for limitation in limitations.iter().skip(1).take(CPU_LIMITATION_LIMIT - 1) {
+        text.push('\n');
+        text.push_str(&statement::preview_bounded(limitation, OBSERVATION_DETAIL_CHARS));
+    }
+}
+
+fn cpu_field(field: &culprit_core::InstanceResourceField) -> String {
+    t!(
+        "view.counter_ratios.cli.metric",
+        label = statement::preview(&field.label),
+        value =
+            field.value.as_deref().map(statement::preview).unwrap_or_else(|| t!("view.database_properties.unknown"))
+    )
+}
+fn cpu_text(cpu: &culprit_core::ProcessCpuReport) -> String {
+    render_summary(
+        Summary {
+            title: &cpu.title,
+            summary: &cpu.summary,
+            source: SourceQualification::Single { state: Some(cpu.source_state), reason: None },
+            limitations: &cpu.limitations,
+        },
+        |text| {
+            append_cpu_qualifications(text, &cpu.limitations);
+            if let Some(original) = &cpu.capture {
+                text.push('\n');
+                text.push_str(&t!(
+                    "view.counter_ratios.cli.metric",
+                    label = t!("ui.source_acquisitions.scope"),
+                    value = statement::preview(&original.capture.observation_id)
+                ));
+            }
+            if let Some(at) = &cpu.observed_at {
+                text.push('\n');
+                text.push_str(&t!("view.instance_resources.observed_at", at = statement::preview(at)));
+            }
+            if let Some(context) = &cpu.context {
+                let (from, until) = context.bounds();
+                text.push('\n');
+                text.push_str(&t!("view.wait_counters.bounds", from = from, until = until));
+            }
+            for field in cpu.fields.iter().take(CPU_FIELD_LIMIT) {
+                text.push('\n');
+                text.push_str(&cpu_field(field));
+            }
+            for population in cpu.populations.iter().take(2) {
+                text.push('\n');
+                text.push_str(&native_work_summary(
+                    Summary {
+                        title: &population.title,
+                        summary: &population.summary,
+                        source: SourceQualification::Single { state: Some(population.source_state), reason: None },
+                        limitations: &population.limitations,
+                    },
+                    population.entries.iter().map(|entry| {
+                        (entry.title.as_str(), entry.fields.iter().take(CPU_FIELD_LIMIT).map(cpu_field).collect())
+                    }),
+                ));
+            }
+        },
+    )
 }

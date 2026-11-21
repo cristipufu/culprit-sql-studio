@@ -19,6 +19,8 @@ fn report() -> InstanceResourceReport {
     InstanceResourceReport {
         numa_nodes: None,
         process_cpu: None,
+        process_cpu_originals: None,
+        process_cpu_interval: None,
         context: None,
         native_source: None,
         source_state: SourceState::Unavailable,
@@ -169,4 +171,59 @@ fn original_numa_child_preserves_independent_coverage_bounds_nulls_and_bounded_n
             assert!(!value.to_string().contains(private));
         }
     }
+}
+
+#[test]
+fn compact_cpu_populations_bound_fields_and_hide_manifest_and_native_owner_from_retained_originals() {
+    let mut report = report();
+    let fields = vec![culprit_core::InstanceResourceField {
+        key: "total_cpu_usage_ms".into(),
+        label: "native CPU milliseconds".into(),
+        value: Some("9007199254740993".into()),
+    }];
+    let population = culprit_core::ProcessCpuPopulationReport {
+        native_source: StateSourceCoverage::collected(MSSQL_CPU_POOLS_SOURCE.into(), 7),
+        source_state: SourceState::Collected,
+        read_complete: true,
+        observed_at: Some("2020-01-01T00:00:00Z".into()),
+        native_rows: 7,
+        observed_rows: 7,
+        title: "native pools".into(),
+        summary: "original point".into(),
+        limitations: vec!["no query ownership".into()],
+        entries: (0..7)
+            .map(|id| culprit_core::InstanceResourceGroup {
+                key: id.to_string(),
+                title: format!("pool {id}"),
+                fields: fields.clone(),
+            })
+            .collect(),
+    };
+    let cpu = culprit_core::ProcessCpuReport {
+        capture: Some(DiagnosticCaptureRef {
+            capture: CaptureIdentity { observation_id: "original".into(), revision: None },
+            manifest_sha256: "private-manifest".into(),
+            source_scope_id: "private-scope".into(),
+        }),
+        populations: vec![population],
+        context: None,
+        native_source: None,
+        source_state: SourceState::Partial,
+        read_complete: Some(false),
+        observed_at: None,
+        title: "CPU".into(),
+        summary: "kept original".into(),
+        limitations: vec![],
+        fields,
+    };
+    report.process_cpu_originals = Some(vec![cpu; 7]);
+    let value = value(&report);
+    let originals = value["process_cpu_originals"].as_array().unwrap();
+    assert_eq!(originals.len(), 5);
+    assert_eq!(value["process_cpu_originals_available"], 7);
+    assert_eq!(originals[0]["populations"][0]["entries"].as_array().unwrap().len(), 5);
+    assert_eq!(originals[0]["populations"][0]["native_rows"], 7);
+    assert_eq!(originals[0]["fields"][0]["value"], "9007199254740993");
+    let text = value.to_string();
+    assert!(!text.contains("private-manifest") && !text.contains("private-scope"));
 }

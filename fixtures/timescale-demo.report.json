@@ -654,7 +654,7 @@
     "escalations_before": null,
     "evictions_before": null,
     "foreign_keys": [],
-    "format": 50,
+    "format": 51,
     "histograms": null,
     "id": "20261023T213241Z",
     "identity": {
@@ -818,6 +818,7 @@
         }
       ],
       "numa_nodes": [],
+      "process_cpu_originals": [],
       "sequences": [
         {
           "allocated": true,

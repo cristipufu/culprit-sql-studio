@@ -172,3 +172,32 @@ async fn cold_scheduler_analysis_refuses_changed_original_state_without_any_live
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn cold_cpu_profile_uses_the_existing_local_instance_resource_interpreter_without_new_source_work() {
+    for (source, rows) in culprit_collector::analytical::test_support::process_cpu_interval_evidence(
+        culprit_collector::analytical::test_support::ProcessCpuIntervalCase::Exact,
+    ) {
+        let fixture = LocalCaptureFixture::snapshot(source.clone(), rows).await;
+        let reader = OutboxCaptureReader::delivery(
+            fixture.outbox.as_ref().unwrap().delivery(),
+            CompletedCaptureBudget::default(),
+        )
+        .unwrap();
+        let guard = OperationGuard::new(reader.timeout()).unwrap();
+        let value = reader
+            .analyze(LocalCaptureRequest {
+                connection: "local-evidence",
+                observation_id: &fixture.manifest.capture.observation_id,
+                analysis: LocalCaptureAnalysisKind::InstanceResources,
+                operation: guard.handle(),
+            })
+            .await
+            .unwrap();
+        let LocalCapturedAnalysis::Snapshot(value) = value else { panic!() };
+        let LocalSnapshotReport::InstanceResources(report) = value.report() else { panic!() };
+        assert_eq!(value.original().read().description, source);
+        assert_eq!(report.process_cpu.as_ref().unwrap().populations.len(), 2);
+        assert_eq!(report.process_cpu.as_ref().unwrap().capture.as_ref().unwrap().capture, fixture.manifest.capture);
+    }
+}

@@ -21,6 +21,7 @@ pub enum SnapshotDataset {
     FullTextPopulations,
     Operational,
     NumaNodes,
+    ProcessCpu,
     DatabasePerformanceCounters,
     SuspectPages,
     HyperscaleLogComponents,
@@ -78,6 +79,7 @@ impl SnapshotDataset {
             | Self::Galera
             | Self::FullTextPopulations
             | Self::Operational
+            | Self::ProcessCpu
             | Self::NumaNodes
             | Self::DatabasePerformanceCounters
             | Self::SuspectPages
@@ -693,6 +695,8 @@ impl OperationalFact {
             Self::DiagnosticRevision(revision) => revision.is_valid(),
             Self::CounterSet(counters) => {
                 counters.is_valid()
+                    && (!cpu_pool_candidate(counters) || MssqlCpuPoolPoint::from_sample(counters).is_ok())
+                    && (!cpu_history_candidate(counters) || MssqlCpuHistoryPoint::from_sample(counters).is_ok())
                     && (!resource_governor_candidate(counters)
                         || crate::Engine::Mssql
                             .spec()
@@ -775,6 +779,12 @@ impl OperationalObservation {
             && self.fact.is_valid()
             && self.fact.matches_key(&self.key)
             && match &self.fact {
+                OperationalFact::CounterSet(sample) if cpu_pool_candidate(sample) => {
+                    self.source == MSSQL_CPU_POOLS_SOURCE
+                }
+                OperationalFact::CounterSet(sample) if cpu_history_candidate(sample) => {
+                    self.source == MSSQL_CPU_HISTORY_SOURCE
+                }
                 OperationalFact::CounterSet(sample) if numa_node_candidate(sample) => {
                     MssqlNumaNodePoint::from_sample(sample).is_ok_and(|point| self.source == point.kind().source())
                 }

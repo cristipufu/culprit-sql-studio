@@ -35,8 +35,9 @@ pub mod completed_spill_report;
 mod configured_log_rate_report;
 mod instance_resource_report;
 pub use instance_resource_report::{
-    InstanceResourceField, InstanceResourceGroup, InstanceResourceReport, ProcessCpuReport, SchedulerEntry,
-    SchedulerField, SchedulerFieldAvailability, SchedulerReport, SchedulerUnqualifiedValue,
+    InstanceResourceField, InstanceResourceGroup, InstanceResourceReport, ProcessCpuIntervalReport,
+    ProcessCpuPopulationReport, ProcessCpuReport, SchedulerEntry, SchedulerField, SchedulerFieldAvailability,
+    SchedulerReport, SchedulerUnqualifiedValue,
 };
 mod table_temporal_report;
 pub use table_temporal_report::{TableTemporalEntry, TableTemporalField, TableTemporalReport};

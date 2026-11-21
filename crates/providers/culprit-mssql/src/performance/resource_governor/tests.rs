@@ -12,18 +12,7 @@ fn expected() -> instance::Context {
         .unwrap()
 }
 fn base() -> Rec {
-    let mut values = super::super::tests::row()
-        .columns()
-        .map(|(key, value)| (key.to_owned(), value.clone()))
-        .collect::<BTreeMap<_, _>>();
-    for row in [instance::test_support::metadata(), instance::test_support::epoch(100)] {
-        values.extend(row.columns().map(|(key, value)| (key.to_owned(), value.clone())));
-    }
-    values.insert("observed_at".into(), Val::Text("2020-01-01T12:00:00.5Z".into()));
-    for key in ["rg_group_id", "rg_pool_id", "rg_name", "rg_statistics_started_without_offset"] {
-        values.insert(key.into(), Val::Null);
-    }
-    Rec::of(&values.iter().map(|(key, value)| (key.as_str(), value.clone())).collect::<Vec<_>>())
+    super::super::tests::instance_row("2020-01-01T12:00:00.5Z")
 }
 fn workload(name: &str, code: i64, value: i64) -> Rec {
     replace(

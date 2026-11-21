@@ -317,6 +317,10 @@ const REGISTRATIONS: &[Registration] = &[
     .on_editions(&[2, 3, 4, 5, 8])
     .version(2),
     state!("mssql.operational", Operational).baseline().version(9),
+    state!("mssql.process-cpu", ProcessCpu)
+        .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
+        .on_editions(&[2, 3, 4])
+        .bounded(state::process_cpu_budget),
     state!("mssql.numa-nodes", NumaNodes)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .on_editions(crate::instance::SUPPORTED_EDITIONS)

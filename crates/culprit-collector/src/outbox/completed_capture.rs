@@ -266,6 +266,16 @@ impl CompletedCaptureRead {
         )
     }
 
+    /// Tighten the existing absolute worker cutoff; queueing or a delayed caller cannot rebase it.
+    pub fn until(mut self, cutoff: Instant) -> Result<Self> {
+        let deadline = match &mut self.control {
+            ReadControl::Collection { deadline, .. } | ReadControl::Operation { deadline, .. } => deadline,
+        };
+        *deadline = (*deadline).min(cutoff);
+        self.check()?;
+        Ok(self)
+    }
+
     pub fn for_connection(mut self, connection: &str) -> Result<Self> {
         validate_connection(connection)?;
         self.required_connection = Some(connection.into());

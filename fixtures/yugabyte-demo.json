@@ -2581,9 +2581,10 @@
     "numa_nodes": [],
     "source_acquisitions": [],
     "indexed_views": null,
-    "indexed_view_originals": []
+    "indexed_view_originals": [],
+    "process_cpu_originals": []
   },
-  "format": 50,
+  "format": 51,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

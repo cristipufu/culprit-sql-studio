@@ -41,7 +41,7 @@ pub use compilation::compilation;
 pub use completed_spills::completed_spills;
 mod compiler_admission;
 mod instance_resources;
-pub use instance_resources::instance_resources;
+pub use instance_resources::{instance_resources, process_cpu_interval};
 pub(crate) mod table_full_text;
 pub use table_full_text::table_full_text;
 pub(crate) mod table_temporal;

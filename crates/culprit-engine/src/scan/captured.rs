@@ -8,8 +8,12 @@ use culprit_core::{
 use culprit_core::telemetry::{CachedRuntimeRead, CachedRuntimeReadOrigin};
 
 pub(crate) enum CapturedScanEvidence {
+    #[cfg(feature = "collector")]
+    Multiple(Vec<Self>),
     SourceAcquisition(culprit_core::RecordedSourceAcquisition),
     NumaNodes(Box<CapturedOperationalRead>),
+    #[cfg(feature = "collector")]
+    ProcessCpu(Box<CapturedOperationalRead>),
     IndexConfiguration(Box<CapturedOperationalRead>),
     IndexedViews(Box<CapturedOperationalRead>),
     ChangeCapture {
@@ -41,6 +45,14 @@ impl CapturedScanEvidence {
         Ok(Self::SourceAcquisition(original))
     }
 
+    #[cfg(feature = "collector")]
+    pub(crate) fn process_cpu(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        if !culprit_core::telemetry::cpu_profile_header_is_valid(&read.description) {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        culprit_checks::instance_resources::explain_captured(&read)?;
+        Ok(Self::ProcessCpu(read))
+    }
     pub(crate) fn numa_nodes(read: Box<CapturedOperationalRead>) -> Result<Self> {
         if !culprit_core::telemetry::numa_node_header_is_valid(&read.description) {
             return Err(DeliveryProblem::InvalidContract.error());
@@ -133,6 +145,12 @@ impl CapturedScanEvidence {
     }
     pub(crate) fn attach(self, snapshot: &mut Snapshot) -> Result<()> {
         match self {
+            #[cfg(feature = "collector")]
+            Self::Multiple(originals) => {
+                for original in originals {
+                    original.attach(snapshot)?;
+                }
+            }
             Self::SourceAcquisition(original) => match original {
                 culprit_core::RecordedSourceAcquisition::Captured { original } => {
                     culprit_core::append_source_acquisition(&mut snapshot.operations.source_acquisitions, original)?;
@@ -144,6 +162,13 @@ impl CapturedScanEvidence {
                     snapshot.operations.source_acquisitions.push(original);
                 }
             },
+            #[cfg(feature = "collector")]
+            Self::ProcessCpu(read) => {
+                culprit_core::telemetry::append_recorded_operational_read(
+                    &mut snapshot.operations.process_cpu_originals,
+                    read,
+                )?;
+            }
             Self::NumaNodes(read) => {
                 culprit_core::telemetry::append_recorded_operational_read(&mut snapshot.operations.numa_nodes, read)?;
             }

@@ -974,7 +974,7 @@
         "table": "orders"
       }
     ],
-    "format": 50,
+    "format": 51,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -3509,6 +3509,7 @@
         "source": "yb_servers_metrics · shared YB-TServer nodes"
       },
       "numa_nodes": [],
+      "process_cpu_originals": [],
       "sequences": [],
       "source_acquisitions": [],
       "spaces": [],

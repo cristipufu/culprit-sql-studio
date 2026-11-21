@@ -2,6 +2,7 @@
 import type { InstanceResourceGroup } from "./InstanceResourceGroup";
 import type { NumaNodeReport } from "./NumaNodeReport";
 import type { ObservationReadContext } from "./ObservationReadContext";
+import type { ProcessCpuIntervalReport } from "./ProcessCpuIntervalReport";
 import type { ProcessCpuReport } from "./ProcessCpuReport";
 import type { SchedulerReport } from "./SchedulerReport";
 import type { SourceState } from "./SourceState";
@@ -16,6 +17,10 @@ numa_nodes: NumaNodeReport | null,
  * A separate processor-source point, never merged into the resource point's clock or populations.
  */
 process_cpu: ProcessCpuReport | null, 
+/**
+ * Independently authenticated original CPU captures, never current database workload ownership.
+ */
+process_cpu_originals: Array<ProcessCpuReport> | null, process_cpu_interval: ProcessCpuIntervalReport | null, 
 /**
  * Per-scheduler rows are an independent source population, never the aggregate resource point.
  */

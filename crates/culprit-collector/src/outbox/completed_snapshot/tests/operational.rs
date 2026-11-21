@@ -271,3 +271,72 @@ async fn snapshot_lookup_accepts_only_explicit_unique_same_layout_datasets_and_a
     assert_eq!(read.observations.len(), 1);
     assert!(read.is_valid());
 }
+
+#[tokio::test]
+async fn delayed_saved_reader_admission_keeps_the_original_absolute_worker_cutoff() {
+    let fixture = original().await;
+    let outbox = fixture.outbox.as_ref().unwrap();
+    let attempt = outbox.attempt_receipt(&fixture.manifest.capture, None).await.unwrap();
+    tokio::time::pause();
+    let cutoff = tokio::time::Instant::now() + Duration::from_secs(5);
+    tokio::time::advance(Duration::from_secs(2)).await;
+    let read = CompletedCaptureRead::snapshot(
+        attempt.clone(),
+        SnapshotDataset::Operational,
+        CompletedCaptureBudget { timeout: Duration::from_secs(5), ..Default::default() },
+        CollectionCancellation::default(),
+    )
+    .unwrap()
+    .until(cutoff)
+    .unwrap();
+    assert!(matches!(&read.control, ReadControl::Collection { deadline, .. } if *deadline == cutoff));
+    assert_eq!(cutoff.saturating_duration_since(tokio::time::Instant::now()), Duration::from_secs(3));
+    tokio::time::advance(Duration::from_secs(3)).await;
+    assert_eq!(
+        read.control.check().unwrap_err().detail,
+        Some(ErrorDetail::CollectionStopped(CollectionStop::TimedOut))
+    );
+    let error = outbox
+        .delivery()
+        .completed_snapshot_for_connection_until(
+            "local-evidence",
+            &attempt,
+            SnapshotDataset::Operational,
+            CompletedCaptureBudget::default(),
+            &CollectionCancellation::default(),
+            cutoff,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::TimedOut)));
+}
+#[tokio::test]
+async fn an_absolute_cutoff_never_extends_tighter_input_limits_or_heals_cancellation() {
+    let fixture = original().await;
+    let attempt = fixture.outbox.as_ref().unwrap().attempt_receipt(&fixture.manifest.capture, None).await.unwrap();
+    tokio::time::pause();
+    let input_cutoff = tokio::time::Instant::now() + Duration::from_secs(1);
+    let read = CompletedCaptureRead::snapshot(
+        attempt.clone(),
+        SnapshotDataset::Operational,
+        CompletedCaptureBudget { timeout: Duration::from_secs(1), ..Default::default() },
+        CollectionCancellation::default(),
+    )
+    .unwrap()
+    .until(tokio::time::Instant::now() + Duration::from_secs(5))
+    .unwrap();
+    assert!(matches!(&read.control, ReadControl::Collection { deadline, .. } if *deadline == input_cutoff));
+    let cancellation = CollectionCancellation::default();
+    let read = CompletedCaptureRead::snapshot(
+        attempt,
+        SnapshotDataset::Operational,
+        CompletedCaptureBudget::default(),
+        cancellation.clone(),
+    )
+    .unwrap();
+    cancellation.cancel();
+    assert!(matches!(
+        read.until(tokio::time::Instant::now() + Duration::from_secs(10)).err().unwrap().detail,
+        Some(ErrorDetail::CollectionStopped(CollectionStop::Cancelled))
+    ));
+}

@@ -240,3 +240,39 @@ fn numa_cli_bounds_each_field_and_entry_without_hiding_the_other_native_populati
     assert_eq!(populations[0]["entries"][0]["fields"].as_array().unwrap().len(), 13);
     assert!(populations[0]["entries"][0]["fields"][0]["value"].as_str().unwrap().chars().count() <= 141);
 }
+
+#[test]
+fn boxed_cpu_cli_keeps_original_pool_totals_interval_denominator_and_unknown_idle_qualifications() {
+    use culprit_collector::analytical::test_support::{ProcessCpuIntervalCase, process_cpu_interval_originals};
+    for case in ProcessCpuIntervalCase::ALL {
+        let [first, second] = process_cpu_interval_originals(case);
+        let mut report = culprit_checks::instance_resources::explain_captured(&second).unwrap();
+        report.process_cpu_interval =
+            Some(Box::new(culprit_checks::instance_resources::compare_cpu_originals(&first, &second).unwrap()));
+        let text = instance_resources(&report);
+        assert!(text.contains(&report.process_cpu_interval.as_ref().unwrap().summary));
+        assert!(text.contains(&t!("view.process_cpu.limit.no_other")));
+        if case.comparable() {
+            assert!(text.contains("4000"));
+            assert!(text.contains(&t!("view.process_cpu.field.host_processors")));
+        }
+        assert!(!text.contains("instance_epoch") && !text.contains("manifest_sha256"));
+        assert!(text.len() < 32768);
+    }
+}
+#[test]
+fn boxed_cpu_cli_bounds_each_original_population_field_without_control_characters_or_late_field_loss() {
+    let [_, second] = culprit_collector::analytical::test_support::process_cpu_interval_originals(
+        culprit_collector::analytical::test_support::ProcessCpuIntervalCase::Exact,
+    );
+    let mut report = culprit_checks::instance_resources::explain_captured(&second).unwrap();
+    let cpu = report.process_cpu.as_mut().unwrap();
+    cpu.populations[0].entries[0].fields[0].value = Some(format!("\x1b[31m\n{}", "x".repeat(4096)));
+    let extra = cpu.populations[0].entries[0].fields[0].clone();
+    cpu.populations[0].entries[0].fields.extend(vec![extra; 64]);
+    let text = instance_resources(&report);
+    assert!(!text.contains('\x1b'));
+    assert!(!text.contains(&"x".repeat(141)));
+    assert!(text.contains(&t!("view.process_cpu.field.raw_idle")));
+    assert!(text.len() < 32768);
+}

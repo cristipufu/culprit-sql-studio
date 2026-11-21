@@ -17,7 +17,8 @@
     "numa_nodes": [],
     "source_acquisitions": [],
     "indexed_views": null,
-    "indexed_view_originals": []
+    "indexed_view_originals": [],
+    "process_cpu_originals": []
   },
   "sources": [
     {
@@ -46,7 +47,7 @@
       "reason": null
     }
   ],
-  "format": 50,
+  "format": 51,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",

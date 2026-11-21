@@ -1906,7 +1906,7 @@
         "table": "orders"
       }
     ],
-    "format": 50,
+    "format": 51,
     "histograms": [
       {
         "buckets": 4.0,
@@ -2344,6 +2344,7 @@
       "log_failures": [],
       "multixacts": [],
       "numa_nodes": [],
+      "process_cpu_originals": [],
       "sequences": [],
       "source_acquisitions": [],
       "spaces": [],

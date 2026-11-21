@@ -40,20 +40,13 @@ export function InstanceResources({ report }: { report: InstanceResourceReport }
       />}
       {report.schedulers && <SchedulerDetails report={report.schedulers} />}
       {report.numa_nodes && <NumaDetails report={report.numa_nodes} />}
-      {cpu && (
-        <ObservationList
-          collapseEntries
-          source={cpu.title}
-          scope={t("ui.beyond_time.scope.server")}
-          time={cpu.observed_at && t("view.instance_resources.observed_at", { at: cpu.observed_at })}
-          report={{
-            ...cpu,
-            entries: cpu.fields.length ? [{ key: "process-cpu", title: cpu.title, fields: cpu.fields }] : [],
-            source_reason: null,
-          }}
-          renderEntry={renderResourceGroup}
-        />
-      )}
+      {cpu && <CpuDetails report={cpu} />}
+      {report.process_cpu_originals?.slice(0, 32).map((original, index) => <CpuDetails key={original.capture?.capture.observation_id ?? index} report={original} />)}
+      {report.process_cpu_interval && <ObservationList collapseEntries source={report.process_cpu_interval.title} scope={t("ui.beyond_time.scope.server")}
+        time={<>{[report.process_cpu_interval.first_context, report.process_cpu_interval.second_context].map((context, index) => context && <span key={index} style={{ display: "block" }}>{t("ui.memory_failures.read_between", { from: context.observed_from, until: context.observed_until })}</span>)}</>}
+        report={{ title: report.process_cpu_interval.title, summary: report.process_cpu_interval.summary, source_state: report.process_cpu_interval.available ? "collected" : "unavailable", source_reason: null, limitations: report.process_cpu_interval.limitations,
+          entries: report.process_cpu_interval.fields.length ? [{ key: "cpu-interval", title: report.process_cpu_interval.title, fields: report.process_cpu_interval.fields.slice(0, 8) }] : [] }} renderEntry={renderResourceGroup} />}
+
     </>
   );
 }
@@ -122,4 +115,16 @@ function renderNumaNode(entry: NumaNodeEntry) {
     <dl>{entry.fields.slice(0, MAX_NUMA_FIELDS).map((field) => <NativeValue key={field.native_name} label={field.label}
       value={field.availability === "native-null" ? t("view.schedulers.value.null") : field.availability === "column-unavailable" ? t("view.schedulers.value.unavailable") : field.value} />)}</dl>
   </article>;
+}
+
+function CpuDetails({ report }: { report: NonNullable<InstanceResourceReport["process_cpu"]> }) {
+  const bounds = report.context?.kind === "native" ? report.context.context : report.context;
+  return <>
+    <ObservationList collapseEntries source={report.title} scope={t("ui.beyond_time.scope.server")}
+      time={<>{report.capture && <span style={{ display: "block" }}>{t("ui.source_acquisitions.scope")}: <code>{report.capture.capture.observation_id}</code></span>}{report.observed_at && <>{t("view.instance_resources.observed_at", { at: report.observed_at })}<br /></>}{bounds && t("ui.memory_failures.read_between", { from: bounds.observed_from, until: bounds.observed_until })}</>}
+      report={{ ...report, entries: report.fields.length ? [{ key: "process-cpu", title: report.title, fields: report.fields.slice(0, 8) }] : [], source_reason: null }} renderEntry={renderResourceGroup} />
+    {report.populations.slice(0, 2).map((population) => <ObservationList key={population.native_source.source} collapseEntries source={population.native_source.source}
+      scope={t("ui.beyond_time.scope.server")} time={population.observed_at && t("view.instance_resources.observed_at", { at: population.observed_at })}
+      report={{ ...population, entries: population.entries.slice(0, 64).map((entry) => ({ ...entry, fields: entry.fields.slice(0, 8) })), source_reason: null }} renderEntry={renderResourceGroup} />)}
+  </>;
 }

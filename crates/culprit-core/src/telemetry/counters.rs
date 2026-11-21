@@ -6,8 +6,11 @@ mod ratios;
 mod schedulers;
 pub use native_fields::{MssqlNativeField, MssqlNativeFieldKind, MssqlNativeFieldRoster, MssqlNativeFieldValue};
 pub use process_cpu::{
-    MAX_MSSQL_PROCESSOR_OBSERVATIONS, MSSQL_PROCESS_CPU_COUNTERS, MSSQL_PROCESS_CPU_KIND, MSSQL_PROCESS_CPU_OBJECT,
-    MssqlProcessCpuPoint,
+    MAX_MSSQL_CPU_OBSERVATIONS, MAX_MSSQL_CPU_POOLS, MAX_MSSQL_PROCESSOR_OBSERVATIONS, MSSQL_CPU_HISTORY_KIND,
+    MSSQL_CPU_HISTORY_OBJECT, MSSQL_CPU_HISTORY_SOURCE, MSSQL_CPU_POOL_KIND, MSSQL_CPU_POOL_OBJECT,
+    MSSQL_CPU_POOLS_SOURCE, MSSQL_CPU_PROFILE_SOURCE, MSSQL_PROCESS_CPU_COUNTERS, MSSQL_PROCESS_CPU_KIND,
+    MSSQL_PROCESS_CPU_OBJECT, MssqlCpuHistoryPoint, MssqlCpuPoolPoint, MssqlProcessCpuPoint, cpu_history_candidate,
+    cpu_pool_candidate, cpu_profile_header_is_valid, cpu_profile_observation_fits,
 };
 pub use ratios::{CounterRatioGap, CounterRatioIssue, CounterRatioKind, CounterRatioSupport, NativeCounterRatio};
 pub use schedulers::{

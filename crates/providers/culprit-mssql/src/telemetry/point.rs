@@ -17,6 +17,8 @@ pub(super) enum Family {
     CleanupHorizon,
     PersistentVersions,
     ProcessorTopology,
+    CpuPools,
+    CpuHistory,
     CompilationGateways,
     MemoryClerks,
     TempdbMetadataMemory,
@@ -68,7 +70,8 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         SnapshotDataset::Tuning => crate::query_store::tuning::Kind::ALL.into_iter().map(Family::Tuning).collect(),
         SnapshotDataset::WaitCounters => vec![Family::WaitCounters],
         SnapshotDataset::Settings => crate::settings::Kind::ALL.into_iter().map(Family::Settings).collect(),
-        SnapshotDataset::NumaNodes
+        SnapshotDataset::ProcessCpu
+        | SnapshotDataset::NumaNodes
         | SnapshotDataset::HyperscaleLogComponents
         | SnapshotDataset::StatementCounters
         | SnapshotDataset::RuntimeDistributions
@@ -118,6 +121,9 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
 }
 
 pub(super) fn shared_families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
+    if dataset == SnapshotDataset::ProcessCpu {
+        return Ok(vec![Family::ProcessorTopology, Family::CpuPools, Family::CpuHistory]);
+    }
     if dataset == SnapshotDataset::NumaNodes {
         return Ok(MssqlNumaNodeKind::ALL.into_iter().map(Family::NumaNodes).collect());
     }
@@ -152,6 +158,8 @@ impl Family {
             Self::CleanupHorizon => &sources::OPEN_TRANSACTIONS,
             Self::PersistentVersions => &sources::PERSISTENT_VERSION_STORE,
             Self::ProcessorTopology => &sources::PROCESSOR_TOPOLOGY,
+            Self::CpuPools => &sources::CPU_POOLS,
+            Self::CpuHistory => &sources::CPU_HISTORY,
             Self::CompilationGateways => &sources::COMPILATION_GATEWAYS,
             Self::MemoryClerks => &sources::MEMORY_CLERKS,
             Self::TempdbMetadataMemory => &sources::TEMPDB_METADATA_MEMORY,
@@ -326,6 +334,17 @@ impl Family {
                     .into_iter()
                     .map(TelemetryRecord::Operational)
                     .collect()
+            }
+            Self::CpuPools | Self::CpuHistory => {
+                let Some(super::subject::Identity::Instance(owner)) = owner else {
+                    return Err(crate::read::invalid_data());
+                };
+                let samples = match self {
+                    Self::CpuPools => crate::processors::read_cpu_pools(reader, owner, limit).await?,
+                    Self::CpuHistory => crate::processors::read_cpu_history(reader, owner, limit).await?,
+                    _ => unreachable!(),
+                };
+                counter_sets(self.source().name, samples)?
             }
             Self::ProcessorTopology => {
                 let cpu = matches!(owner, Some(super::subject::Identity::Instance(_)));

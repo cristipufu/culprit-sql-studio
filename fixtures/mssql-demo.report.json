@@ -3385,7 +3385,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 50,
+    "format": 51,
     "histograms": null,
     "id": "20261011T121347.162Z",
     "identity": {
@@ -4111,6 +4111,7 @@
       "log_failures": [],
       "multixacts": [],
       "numa_nodes": [],
+      "process_cpu_originals": [],
       "sequences": [],
       "source_acquisitions": [],
       "spaces": [],

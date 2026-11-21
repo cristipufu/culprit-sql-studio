@@ -17,7 +17,9 @@ mod local_point;
 mod pool_current;
 pub(super) use pool_current::bounded_budget as pool_current_budget;
 mod numa_nodes;
+mod process_cpu;
 pub(super) use numa_nodes::bounded_budget as numa_nodes_budget;
+pub(super) use process_cpu::bounded_budget as process_cpu_budget;
 mod pool_settings;
 mod settings;
 pub(super) use pool_settings::bounded_budget as pool_settings_budget;
@@ -30,6 +32,8 @@ pub(super) use tuning::bounded_budget as tuning_budget;
 fn native_budget(request: &CollectionRequest) -> CollectionBudget {
     if pool_current::selected(request) {
         pool_current_budget(&request.budget)
+    } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::ProcessCpu }) {
+        process_cpu_budget(&request.budget)
     } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::NumaNodes }) {
         numa_nodes_budget(&request.budget)
     } else if pool_settings::selected(request) {
@@ -70,7 +74,7 @@ pub(super) struct StateSource<R = ReadSession> {
     description: Option<CollectionDescription>,
     identity: Option<subject::Identity>,
     database_authority: subject::DatabaseAuthority,
-    numa_generation: Option<u64>,
+    point_generation: Option<u64>,
     rows: Vec<TelemetryRecord>,
     pool_settings_point: Option<MssqlPoolSettingsPoint>,
     offset: usize,
@@ -97,7 +101,8 @@ impl<R: NativeRead> StateSource<R> {
         if pool_current::selected(&request)
             || matches!(
                 dataset,
-                SnapshotDataset::NumaNodes
+                SnapshotDataset::ProcessCpu
+                    | SnapshotDataset::NumaNodes
                     | SnapshotDataset::Tuning
                     | SnapshotDataset::Settings
                     | SnapshotDataset::DatabasePerformanceCounters
@@ -115,7 +120,7 @@ impl<R: NativeRead> StateSource<R> {
             description: None,
             identity: None,
             database_authority,
-            numa_generation: None,
+            point_generation: None,
             rows: vec![],
             pool_settings_point: None,
             offset: 0,
@@ -267,9 +272,17 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         if matches!(dataset, SnapshotDataset::DatabasePerformanceCounters | SnapshotDataset::SuspectPages) {
             local_point::require_profile(&read.identity)?;
         }
+        if dataset == SnapshotDataset::ProcessCpu
+            && !matches!(&read.identity,subject::Identity::Instance(owner) if [2,3,4].contains(&owner.engine_edition()))
+        {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                culprit_core::t!("collection.unsupported"),
+            ));
+        }
         let target = read.identity.target();
-        if dataset == SnapshotDataset::NumaNodes {
-            self.numa_generation = Some(
+        if matches!(dataset, SnapshotDataset::NumaNodes | SnapshotDataset::ProcessCpu) {
+            self.point_generation = Some(
                 self.io
                     .connection_generation()
                     .filter(|generation| *generation > 0)
@@ -355,6 +368,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             target,
             source: if pool_current::selected(&self.request) {
                 MSSQL_POOL_CURRENT_SOURCE
+            } else if dataset == SnapshotDataset::ProcessCpu {
+                MSSQL_CPU_PROFILE_SOURCE
             } else if dataset == SnapshotDataset::NumaNodes {
                 MSSQL_NUMA_NODES_SOURCE
             } else if pool_settings::selected(&self.request) {
@@ -376,7 +391,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     SnapshotDataset::PlanCacheSummary => "plan-cache-state",
                     SnapshotDataset::MissingIndexes => "missing-index-state",
                     SnapshotDataset::Tuning => "tuning-state",
-                    SnapshotDataset::NumaNodes
+                    SnapshotDataset::ProcessCpu
+                    | SnapshotDataset::NumaNodes
                     | SnapshotDataset::HyperscaleLogComponents
                     | SnapshotDataset::StatementCounters
                     | SnapshotDataset::RuntimeDistributions
@@ -495,7 +511,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         }
         self.progress = Progress::Failed;
         let owner = self.identity.as_ref().ok_or_else(invalid_data)?;
-        let (identity, final_at) = if self.numa_generation.is_some() {
+        let (identity, final_at) = if self.point_generation.is_some() {
             owner.recheck_clock(&mut self.io, &self.host, self.port).await?
         } else {
             (owner.recheck(&mut self.io, &self.host, self.port).await?, None)
@@ -507,7 +523,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             .ok_or_else(invalid_data)?
             .observed_until;
         let description = self.description.as_ref().ok_or_else(invalid_data)?;
-        let confirmed = self.numa_generation.is_none_or(|generation| {
+        let confirmed = self.point_generation.is_none_or(|generation| {
             self.io.connection_generation() == Some(generation)
                 && final_at.as_deref().is_some_and(|at| ObservationBounds::new(until, at).is_some())
         }) && self.identity.as_ref().ok_or_else(invalid_data)?.confirmed_by(&identity, until)

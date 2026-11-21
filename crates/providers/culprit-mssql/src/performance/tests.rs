@@ -17,6 +17,23 @@ pub(crate) fn row() -> Rec {
         ("value", Val::Int(9_007_199_254_740_993)),
     ])
 }
+
+pub(crate) fn instance_row(at: &str) -> Rec {
+    let mut values = row()
+        .columns()
+        .map(|(key, value)| (key.to_owned(), value.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for row in [crate::instance::test_support::metadata(), crate::instance::test_support::epoch(100)] {
+        values.extend(row.columns().map(|(key, value)| (key.to_owned(), value.clone())));
+    }
+    for column in ["observed_at", "counter_observed_at"] {
+        values.insert(column.into(), Val::Text(at.into()));
+    }
+    for column in ["rg_group_id", "rg_pool_id", "rg_name", "rg_statistics_started_without_offset"] {
+        values.insert(column.into(), Val::Null);
+    }
+    Rec::of(&values.iter().map(|(key, value)| (key.as_str(), value.clone())).collect::<Vec<_>>())
+}
 #[tokio::test]
 async fn native_meaning_scope_and_precision_survive_application_projection_and_export() {
     let gauge = replace(

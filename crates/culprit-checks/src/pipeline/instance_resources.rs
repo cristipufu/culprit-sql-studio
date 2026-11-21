@@ -1,7 +1,8 @@
+mod cpu_originals;
 use super::*;
 
 pub(super) fn explain(snapshot: &mut Snapshot) -> Option<Box<culprit_core::InstanceResourceReport>> {
-    match crate::instance_resources::explain_snapshot(snapshot) {
+    let current = match crate::instance_resources::explain_snapshot(snapshot) {
         Ok(report) => report.map(Box::new),
         Err(error) => admit_explanation(
             snapshot,
@@ -9,5 +10,6 @@ pub(super) fn explain(snapshot: &mut Snapshot) -> Option<Box<culprit_core::Insta
             culprit_core::message!("view.instance_resources.invalid"),
             Err(error),
         ),
-    }
+    };
+    cpu_originals::attach(snapshot, current)
 }

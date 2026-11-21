@@ -4,15 +4,18 @@ use culprit_collector::{
     capture::CollectionCancellation,
     outbox::{CompletedCaptureBudget, OutboxDelivery},
 };
+use tokio::time::Instant;
+
 use culprit_core::{
     Report, Result, SnapshotOptions,
     telemetry::{CollectionStop, DiagnosticAttemptReceipt, SnapshotDataset},
 };
 
 /// The retained family to attach; this selects no native source recipe or current execution population.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompletedCaptureAnalysis {
     ManagedInstanceResources,
+    ProcessCpu,
     CachedRuntime,
     MemoryClerks,
     DatabasePerformanceCounters,
@@ -31,6 +34,7 @@ impl CompletedCaptureAnalysis {
             Self::ManagedInstanceResources => {
                 return Err(culprit_core::telemetry::DeliveryProblem::UnsupportedSchema.error());
             }
+            Self::ProcessCpu => SnapshotDataset::ProcessCpu,
             Self::CachedRuntime => SnapshotDataset::CachedRuntime,
             Self::MemoryClerks => SnapshotDataset::Operational,
             Self::DatabasePerformanceCounters => SnapshotDataset::DatabasePerformanceCounters,
@@ -64,39 +68,54 @@ pub struct CompletedCaptureScanInput<'a> {
     pub cancellation: &'a CollectionCancellation,
 }
 impl CompletedCaptureScanInput<'_> {
-    async fn read(self, connection: &str) -> Result<super::CapturedScanEvidence> {
+    async fn read(
+        self,
+        connection: &str,
+        budget: CompletedCaptureBudget,
+        deadline: Instant,
+    ) -> Result<CompletedOriginal> {
         if matches!(self.analysis, CompletedCaptureAnalysis::ManagedInstanceResources) {
             let original = self
                 .delivery
-                .completed_managed_instance_resources_for_connection(
+                .completed_managed_instance_resources_for_connection_until(
                     connection,
                     self.attempt,
-                    self.budget,
+                    budget,
                     self.cancellation,
+                    deadline,
                 )
                 .await?;
-            let read = super::CapturedScanEvidence::managed_instance_resources(Box::new(original.into_read()?))?;
+            let bytes = original.bytes_read();
+            let original = original.into_read()?;
+            let rows = original.observations.len();
+            let read = super::CapturedScanEvidence::managed_instance_resources(Box::new(original))?;
             if self.cancellation.is_cancelled() {
                 return Err(CollectionStop::Cancelled.error());
             }
-            return Ok(read);
+            return Ok(CompletedOriginal { evidence: read, rows, bytes });
         }
         let captured = self
             .delivery
-            .completed_snapshot_for_connection(
+            .completed_snapshot_for_connection_until(
                 connection,
                 self.attempt,
                 self.analysis.dataset()?,
-                self.budget,
+                budget,
                 self.cancellation,
+                deadline,
             )
             .await?;
+        let rows = captured.records().len();
+        let bytes = captured.bytes_read();
         let read = match self.analysis {
             CompletedCaptureAnalysis::ManagedInstanceResources => {
                 return Err(culprit_core::telemetry::DeliveryProblem::UnsupportedSchema.error());
             }
             CompletedCaptureAnalysis::PoolSettings => {
                 super::CapturedScanEvidence::pool_settings(Box::new(captured.into_pool_settings_read()?))?
+            }
+            CompletedCaptureAnalysis::ProcessCpu => {
+                super::CapturedScanEvidence::process_cpu(Box::new(captured.into_operational_read()?))?
             }
             CompletedCaptureAnalysis::CachedRuntime => {
                 super::CapturedScanEvidence::CachedRuntime(Box::new(captured.into_cached_runtime_read()?))
@@ -132,8 +151,95 @@ impl CompletedCaptureScanInput<'_> {
         if self.cancellation.is_cancelled() {
             return Err(CollectionStop::Cancelled.error());
         }
-        Ok(read)
+        Ok(CompletedOriginal { evidence: read, rows, bytes })
     }
+}
+
+struct CompletedOriginal {
+    evidence: super::CapturedScanEvidence,
+    rows: usize,
+    bytes: u64,
+}
+
+/// One action's local verification allowance. Native acquisition keeps its existing independent owner.
+struct OriginalReadAllowance {
+    rows: u32,
+    bytes: u64,
+    deadline: Instant,
+}
+impl OriginalReadAllowance {
+    fn new(budget: CompletedCaptureBudget, started: Instant) -> Result<Self> {
+        let budget = budget.validate()?;
+        let deadline = started.checked_add(budget.timeout).ok_or_else(|| CollectionStop::TimedOut.error())?;
+        let allowance = Self { rows: budget.max_rows, bytes: budget.max_bytes, deadline };
+        allowance.check()?;
+        Ok(allowance)
+    }
+    fn for_input(&self, input: &CompletedCaptureScanInput<'_>) -> Result<(CompletedCaptureBudget, Instant)> {
+        let input = input.budget.validate()?;
+        let now = Instant::now();
+        let cutoff = now.checked_add(input.timeout).ok_or_else(|| CollectionStop::TimedOut.error())?.min(self.deadline);
+        let timeout = cutoff.saturating_duration_since(now);
+        if timeout.is_zero() {
+            return Err(CollectionStop::TimedOut.error());
+        }
+        let budget = CompletedCaptureBudget {
+            max_rows: self.rows.min(input.max_rows),
+            max_bytes: self.bytes.min(input.max_bytes),
+            timeout,
+        }
+        .validate()?;
+        Ok((budget, cutoff))
+    }
+    fn charge(&mut self, original: &CompletedOriginal) -> Result<()> {
+        self.rows =
+            self.rows.checked_sub(u32::try_from(original.rows).map_err(|_| capacity())?).ok_or_else(capacity)?;
+        self.bytes = self.bytes.checked_sub(original.bytes).ok_or_else(capacity)?;
+        self.check()
+    }
+    fn check(&self) -> Result<()> {
+        if Instant::now() >= self.deadline {
+            return Err(CollectionStop::TimedOut.error());
+        }
+        Ok(())
+    }
+}
+fn capacity() -> culprit_core::Error {
+    culprit_core::telemetry::DeliveryProblem::Capacity.error()
+}
+
+fn validate_selection(inputs: &[CompletedCaptureScanInput<'_>]) -> Result<()> {
+    // Inspect every claimed original before the cap. A late conflicting copy must never leave a plausible prefix.
+    let mut claimed = std::collections::BTreeMap::new();
+    for input in inputs {
+        // Serialize the existing complete identity type, rather than inventing a partial native/name key.
+        let identity = serde_json::to_string(&input.attempt.capture)
+            .map_err(|_| culprit_core::telemetry::DeliveryProblem::InvalidContract.error())?;
+        if let Some(attempt) = claimed.insert(identity, input.attempt)
+            && attempt != input.attempt
+        {
+            return Err(culprit_core::telemetry::DeliveryProblem::Conflict.error());
+        }
+    }
+    if inputs.is_empty() || inputs.len() > culprit_core::telemetry::MAX_RECORDED_OPERATIONAL_READS {
+        return Err(capacity());
+    }
+    for input in inputs {
+        if !input.attempt.is_valid() || input.attempt.manifest_sha256.is_none() {
+            return Err(culprit_core::telemetry::DeliveryProblem::InvalidContract.error());
+        }
+        input.budget.validate()?;
+        if !matches!(input.analysis, CompletedCaptureAnalysis::ManagedInstanceResources) {
+            input.analysis.dataset()?;
+        }
+    }
+    check_cancellation(inputs)
+}
+fn check_cancellation(inputs: &[CompletedCaptureScanInput<'_>]) -> Result<()> {
+    if inputs.iter().any(|input| input.cancellation.is_cancelled()) {
+        return Err(CollectionStop::Cancelled.error());
+    }
+    Ok(())
 }
 
 impl Workspace {
@@ -149,15 +255,64 @@ impl Workspace {
         self.scan_populations_with_completed_capture(name, options, input).await.map(|reports| *reports.requested)
     }
 
-    /// The normal one-acquisition population scan, with independently captured originals attached once after
-    /// confirmed native shutdown and before analysis/persistence. A conflicting requested input is refused.
+    /// Singular attachment uses the same shared local-read allowance and native scan owner as plural attachment.
     pub async fn scan_populations_with_completed_capture(
         &self,
         name: &str,
         options: &SnapshotOptions,
         input: CompletedCaptureScanInput<'_>,
     ) -> Result<PopulationReports> {
-        let read = input.read(name).await?;
-        Box::pin(self.scan_observation(name, options, None, Some(read))).await
+        let budget = input.budget;
+        self.scan_populations_with_completed_captures(name, options, vec![input], budget).await
+    }
+
+    /// Attach explicitly selected originals; no latest lookup, automatic pairing or current-source rebinding.
+    pub async fn scan_with_completed_captures(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        inputs: Vec<CompletedCaptureScanInput<'_>>,
+        budget: CompletedCaptureBudget,
+    ) -> Result<Report> {
+        self.scan_populations_with_completed_captures(name, options, inputs, budget)
+            .await
+            .map(|reports| *reports.requested)
+    }
+
+    /// Authenticate every selected original under one absolute local deadline and total row/byte allowance before
+    /// any provider acquisition. An error or cancellation returns without a native login. One ordinary scan owner
+    /// settles once, then attaches all authenticated originals before analysis/persistence. Repetitions retain the
+    /// shared immutable append policy; neither a second controller nor a new per-original native budget is created.
+    pub async fn scan_populations_with_completed_captures(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        inputs: Vec<CompletedCaptureScanInput<'_>>,
+        budget: CompletedCaptureBudget,
+    ) -> Result<PopulationReports> {
+        let started = Instant::now();
+        validate_selection(&inputs)?;
+        let mut allowance = OriginalReadAllowance::new(budget, started)?;
+        let mut originals = Vec::with_capacity(inputs.len());
+        // Keep cancellation references until every original has authenticated and the final admission check passes.
+        let cancellations = inputs.iter().map(|input| input.cancellation).collect::<Vec<_>>();
+        for input in inputs {
+            if cancellations.iter().any(|cancellation| cancellation.is_cancelled()) {
+                return Err(CollectionStop::Cancelled.error());
+            }
+            let (budget, cutoff) = allowance.for_input(&input)?;
+            let original = input.read(name, budget, cutoff).await?;
+            allowance.charge(&original)?;
+            originals.push(original.evidence);
+        }
+        allowance.check()?;
+        if cancellations.iter().any(|cancellation| cancellation.is_cancelled()) {
+            return Err(CollectionStop::Cancelled.error());
+        }
+        Box::pin(self.scan_observation(name, options, None, Some(super::CapturedScanEvidence::Multiple(originals))))
+            .await
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -171,6 +171,8 @@ pub mod source_id {
         crate::telemetry::MSSQL_AGENT_HISTORY_SOURCE,
         crate::telemetry::MSSQL_AGENT_CONTEXT_SOURCE,
         crate::telemetry::INSTANCE_RESOURCES_SOURCE,
+        crate::telemetry::MSSQL_CPU_POOLS_SOURCE,
+        crate::telemetry::MSSQL_CPU_HISTORY_SOURCE,
         DOCDB_EPOCHS,
         DOCDB_INDEX_USAGE,
         DOCDB_PLAN_HISTORY,

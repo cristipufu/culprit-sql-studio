@@ -1476,7 +1476,7 @@
         "table": "order_items"
       }
     ],
-    "format": 50,
+    "format": 51,
     "histograms": null,
     "id": "20261011T160540.394Z",
     "identity": {
@@ -1915,6 +1915,7 @@
       "log_failures": [],
       "multixacts": [],
       "numa_nodes": [],
+      "process_cpu_originals": [],
       "sequences": [],
       "source_acquisitions": [],
       "spaces": [],

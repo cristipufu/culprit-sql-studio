@@ -203,7 +203,7 @@ pub(super) fn is_shared(subject: &CollectionSubject) -> Result<bool> {
 
 pub(super) fn validate_dataset(subject: &CollectionSubject, dataset: SnapshotDataset) -> Result<()> {
     is_shared(subject)?;
-    if dataset == SnapshotDataset::NumaNodes
+    if matches!(dataset, SnapshotDataset::NumaNodes | SnapshotDataset::ProcessCpu)
         && !matches!(subject,CollectionSubject::Shared{resource} if resource.engine==culprit_core::Engine::Mssql && resource.kind==SharedResourceKind::Instance)
     {
         return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));

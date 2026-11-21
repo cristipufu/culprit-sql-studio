@@ -1077,8 +1077,9 @@ pub use qualification::{QualificationFixture, QualificationFixtureCase};
 
 mod instance_resources;
 pub use instance_resources::{
-    InstanceResourceCase, ProcessCpuCase, SchedulerCase, instance_resource_cpu_evidence, instance_resource_evidence,
-    instance_resource_scheduler_evidence,
+    InstanceResourceCase, ProcessCpuCase, ProcessCpuIntervalCase, SchedulerCase, instance_resource_cpu_evidence,
+    instance_resource_evidence, instance_resource_scheduler_evidence, process_cpu_interval_evidence,
+    process_cpu_interval_originals,
 };
 
 mod boxed_query_history;

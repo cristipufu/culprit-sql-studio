@@ -3,7 +3,7 @@ import english from "../../locales/en.json" with { type: "json" };
 import type { State } from "../src/lib/store";
 import { openConnection, waitForReport } from "./demo";
 
-async function openResourceEvidence(page: Page, name: "exact" | "cpu_exact" | "schedulers_limited") {
+async function openResourceEvidence(page: Page, name: "exact" | "cpu_exact" | "schedulers_limited" | "cpu_profile_exact" | "cpu_profile_manypools") {
   await openConnection(page, "mssql-demo");
   await waitForReport(page);
   await page.evaluate(async ({ storePath, fixturePath, name }) => {
@@ -70,4 +70,29 @@ test("individual scheduler rows use the folded paged observation surface on a na
   expect(await region.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await region.getByRole("heading", { name: "Scheduler 10", exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath("native-schedulers-paged-narrow.png") });
+});
+
+
+test("selected boxed CPU originals are folded and keyboard accessible on a narrow viewport", async ({ page }, info) => {
+  await openResourceEvidence(page, "cpu_profile_exact");
+  const interval = page.getByRole("region", { name: english["view.process_cpu.interval.title"], exact: true });
+  await expect(interval).toBeVisible();await expect(interval.locator("details[open]")).toHaveCount(0);
+  const toggle = interval.getByText(english["ui.retained_failures.observations"], { exact: true });
+  await toggle.focus();await page.keyboard.press("Enter");await expect(interval.getByText("4000", { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });expect(await interval.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await interval.screenshot({ path: info.outputPath("boxed-cpu-interval-narrow.png") });
+});
+
+
+test("native CPU pool pagination preserves the original later rows without a layout or calculation fork", async ({ page }, info) => {
+  await openResourceEvidence(page, "cpu_profile_manypools");
+  const pools = page.getByRole("region", { name: english["view.process_cpu.population.pools"], exact: true }).first();
+  await pools.getByText(english["ui.retained_failures.observations"], { exact: true }).click();
+  await expect(pools.locator("article")).toHaveCount(10);
+  await pools.getByRole("button", { name: english["ui.termination_history.next"], exact: true }).click();
+  await expect(pools.getByRole("heading", { name: english["view.process_cpu.pool.title"].replace("{id}", "11"), exact: true })).toBeVisible();
+  await expect(pools.locator("article")).toHaveCount(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await pools.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await pools.screenshot({ path: info.outputPath("boxed-cpu-pools-paged-narrow.png") });
 });

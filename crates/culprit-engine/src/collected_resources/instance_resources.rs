@@ -3,6 +3,14 @@ use culprit_core::collected_resource_analysis::CollectedInstanceResourceAnalysis
 
 pub fn instance_resources(capture: &EvidenceCapture) -> Result<CollectedInstanceResourceAnalysis> {
     let dataset = capture.source().observation.snapshot().ok_or_else(invalid)?.dataset;
+    if dataset == SnapshotDataset::ProcessCpu {
+        let original = super::references::operational_read(capture, dataset)?;
+        let report = culprit_checks::instance_resources::explain_captured(&original)?;
+        return Ok(CollectedInstanceResourceAnalysis {
+            context: crate::collected_context::from_capture(capture),
+            report: Box::new(report),
+        });
+    }
     if !matches!(dataset, SnapshotDataset::Operational | SnapshotDataset::NumaNodes) {
         return Err(DeliveryProblem::UnsupportedSchema.error());
     }
@@ -50,4 +58,14 @@ pub fn instance_resources(capture: &EvidenceCapture) -> Result<CollectedInstance
         context: crate::collected_context::from_capture(capture),
         report: Box::new(report),
     })
+}
+
+/// Both arguments are authenticated originals; no imported scalar or DTO asserts a measured pair.
+pub fn process_cpu_interval(
+    first: &EvidenceCapture,
+    second: &EvidenceCapture,
+) -> Result<culprit_core::ProcessCpuIntervalReport> {
+    let first = super::references::operational_read(first, SnapshotDataset::ProcessCpu)?;
+    let second = super::references::operational_read(second, SnapshotDataset::ProcessCpu)?;
+    culprit_checks::instance_resources::compare_cpu_originals(&first, &second)
 }

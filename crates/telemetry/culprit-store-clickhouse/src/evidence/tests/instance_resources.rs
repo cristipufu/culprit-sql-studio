@@ -253,3 +253,29 @@ async fn original_numa_node_fields_replay_from_the_same_canonical_store_source_w
         }
     }
 }
+
+#[tokio::test]
+async fn boxed_cpu_profiles_preserve_all_three_original_families_exact_pool_counters_and_ring_properties() {
+    for case in test_support::ProcessCpuIntervalCase::ALL {
+        for (source, rows) in test_support::process_cpu_interval_evidence(case) {
+            let (fixture, source, rows) = collected_original((source, rows)).await;
+            fixture.replies(if fixture.rows.is_empty() { vec![] } else { vec![fixture.rows.clone()] });
+            let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+            let capture = fixture
+                .reader
+                .read_capture(
+                    &fixture.range,
+                    &[EvidenceFamily::OperationalSamples],
+                    EvidenceReadBudget::default(),
+                    None,
+                )
+                .await
+                .unwrap();
+            test_support::assert_operational_capture(&capture, &source, &rows);
+            assert!(capture.is_read_complete());
+            assert_eq!(capture.source().observation.snapshot().unwrap().dataset, SnapshotDataset::ProcessCpu);
+            assert_eq!(capture.source().observation.snapshot().unwrap().sources.len(), 3);
+            assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+        }
+    }
+}

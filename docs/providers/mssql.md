@@ -269,6 +269,24 @@ and malformed bounded documents remain distinct. Equal native rows remain separa
 buffer supplies no occurrence identifier, can omit or evict failures, and resets on restart. An empty read cannot
 establish that no failures occurred. See the [native source and permission reference](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-out-of-memory-events?view=azuresqldb-current).
 
+### Boxed process CPU originals
+
+The manual `mssql.process-cpu` profile keeps three independent native populations: process user/kernel totals,
+Resource Governor pool CPU totals, and the newest retained scheduler-monitor CPU sample when available. It uses
+the existing shared-instance source owner, at most ten dispatches including session setup, and the caller’s
+stricter limits. Ordinary scans do not acquire these extra populations. The recipe remains cost-unqualified.
+
+Two explicitly selected complete originals can explain observed average engine CPU from the increase across
+all native pool totals, elapsed host ticks and the host’s logical CPU count. Matching process, pool roster,
+statistics-start witnesses and capacity are required. These endpoint checks do not exclude intervening reset,
+pool replacement or capacity changes; the acquisition is not atomic. The exact numerator and denominator remain
+available separately from the approximate derived percentage. Process user/kernel totals alone are not utilization.
+
+Retained scheduler samples keep host ticks separately from acquisition UTC. Their averaging window and original
+UTC event time are unknown. Linux `SystemIdle = 0` remains a raw diagnostic value, with measured idle unavailable;
+unsupported platforms also retain unknown measurements. The profile does not derive other-process CPU, identify
+a database/query cause, or qualify collection cost from these observations.
+
 ### Resource history
 
 On Azure SQL Database, scans and background capture share the same native resource reader. Scans reuse their retained samples for the resource timeline and pressure summary. Selected export windows and workload admission request their own bounded projections, with the same units, scope, null handling and timestamps. Instance CPU and memory remain shared context. Background resource capture currently supports primary replicas; native reads preserve the connected replica's role.

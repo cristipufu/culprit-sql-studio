@@ -349,3 +349,155 @@ fn foreign_or_unknown_native_node_owner_dataset_or_counter_semantics_cannot_expo
         );
     }
 }
+
+#[tokio::test]
+async fn boxed_cpu_original_pairs_preserve_exact_numerators_rosters_reset_and_capacity_without_requery() {
+    use test_support::{ProcessCpuIntervalCase, process_cpu_interval_evidence};
+    for case in ProcessCpuIntervalCase::ALL {
+        let [(a, ar), (b, br)] = process_cpu_interval_evidence(case);
+        let first = Fixture::with_sequence(a.clone(), ar.clone(), 100_001).await;
+        let second = Fixture::with_sequence(b.clone(), br.clone(), 100_002).await;
+        let opened = (first.recovery_object_reads(), second.recovery_object_reads());
+        let left = first.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let right = second.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        test_support::assert_operational_capture(&left, &a, &ar);
+        test_support::assert_operational_capture(&right, &b, &br);
+        let report = culprit_engine::collected_resources::instance_resources(&right).unwrap().report;
+        let cpu = report.process_cpu.as_ref().unwrap();
+        assert_eq!(cpu.populations.len(), 2);
+        assert!(cpu.capture.is_some());
+        let interval = culprit_engine::collected_resources::process_cpu_interval(&left, &right).unwrap();
+        assert_eq!(interval.available, case.comparable(), "{case:?}");
+        if case.comparable() {
+            let total = interval.fields.iter().find(|field| field.key == "engine_cpu_delta_ms").unwrap();
+            assert_eq!(total.value.as_deref(), Some(if case == ProcessCpuIntervalCase::Zero { "0" } else { "2000" }));
+            assert_eq!(
+                interval.fields.iter().find(|field| field.key == "capacity_processor_ms").unwrap().value.as_deref(),
+                Some("4000")
+            );
+        }
+        if case == ProcessCpuIntervalCase::LinuxIdle || case == ProcessCpuIntervalCase::UnknownPlatform {
+            let fields = &cpu.populations[1].entries[0].fields;
+            assert_eq!(fields.iter().find(|field| field.key == "idle_cpu_percent").unwrap().value, None);
+            assert!(fields.iter().find(|field| field.key == "raw_system_idle").unwrap().value.is_some());
+        }
+        assert!(!culprit_engine::collected_resources::process_cpu_interval(&left, &left).unwrap().available);
+        assert_eq!((first.recovery_object_reads(), second.recovery_object_reads()), opened);
+    }
+}
+#[tokio::test]
+async fn missing_pool_body_cannot_become_measured_cpu_but_independent_ring_history_remains_visible() {
+    let [(a, rows), (b, other)] =
+        test_support::process_cpu_interval_evidence(test_support::ProcessCpuIntervalCase::Exact);
+    let first = Fixture::with_sequence(a, rows, 100_003).await;
+    let second = Fixture::with_sequence(b, other, 100_004).await;
+    first.remove_row(TelemetryStream::OperationalSamples, 5);
+    let left = first.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let right = second.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(!left.is_read_complete());
+    assert!(!culprit_engine::collected_resources::process_cpu_interval(&left, &right).unwrap().available);
+    let report = culprit_engine::collected_resources::instance_resources(&left).unwrap().report;
+    let cpu = report.process_cpu.as_ref().unwrap();
+    assert_eq!(cpu.source_state, SourceState::Partial);
+    assert_eq!(cpu.populations[0].native_rows, 2);
+    assert_eq!(cpu.populations[0].observed_rows, 1);
+    assert_eq!(cpu.populations[1].entries.len(), 1);
+}
+#[test]
+fn imported_cpu_original_conflicts_withdraw_interval_even_beyond_display_cap_and_sharing_withdraws_proof() {
+    let [a, b] = test_support::process_cpu_interval_originals(test_support::ProcessCpuIntervalCase::Exact);
+    let mut snapshot: Box<culprit_core::Snapshot> =
+        serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/mssql-demo.json")))
+            .unwrap();
+    snapshot.operations.process_cpu_originals = vec![
+        RecordedOperationalRead::Captured { read: Box::new(a.clone()) },
+        RecordedOperationalRead::Captured { read: Box::new(b) },
+    ];
+    let report = replay_cpu_originals(&snapshot);
+    assert!(report.process_cpu_interval.as_ref().unwrap().available);
+    let mut conflict = a;
+    conflict.observations.remove(0);
+    conflict.origin.positions.remove(0);
+    conflict.read_complete = false;
+    assert!(conflict.is_valid());
+    for _ in 0..MAX_RECORDED_OPERATIONAL_READS {
+        snapshot
+            .operations
+            .process_cpu_originals
+            .push(RecordedOperationalRead::Unavailable { reason: culprit_core::message!("view.process_cpu.invalid") });
+    }
+    snapshot.operations.process_cpu_originals.push(RecordedOperationalRead::Captured { read: Box::new(conflict) });
+    let report = replay_cpu_originals(&snapshot);
+    assert!(!report.process_cpu_interval.as_ref().unwrap().available);
+    assert_eq!(snapshot.operations.process_cpu_originals.len(), MAX_RECORDED_OPERATIONAL_READS + 3);
+    let shared = culprit_core::redact::redact_snapshot(&snapshot);
+    assert!(
+        shared
+            .operations
+            .process_cpu_originals
+            .iter()
+            .all(|original| matches!(original, RecordedOperationalRead::Unavailable { .. }))
+    );
+    let shared = culprit_checks::analyze(shared);
+    let text = serde_json::to_string(&shared.instance_resources).unwrap();
+    assert!(!text.contains("controlled-cpu") && !text.contains("total_cpu_usage_ms"));
+}
+
+#[tokio::test]
+async fn boxed_cpu_nonadvancing_ticks_overlapping_acquisition_or_inconsistent_pool_cohorts_refuse_the_interval() {
+    for alternative in ["equal-ticks", "backward-ticks", "overlapping-acquisition", "inconsistent-capacity"] {
+        let [(a, rows), (mut b, mut other)] =
+            test_support::process_cpu_interval_evidence(test_support::ProcessCpuIntervalCase::Exact);
+        if alternative == "overlapping-acquisition" {
+            let SourceObservation::Snapshot(header) = &mut b.observation else { panic!() };
+            header.observed_from = "2020-01-01T12:00:00Z".into();
+        }
+        for row in &mut other {
+            let TelemetryRecord::Operational(row) = row else { panic!() };
+            if row.source != MSSQL_CPU_POOLS_SOURCE {
+                continue;
+            }
+            let OperationalFact::CounterSet(sample) = &mut row.fact else { panic!() };
+            match alternative {
+                "equal-ticks" => {
+                    sample.properties.insert("sample_ms_ticks".into(), "1000".into());
+                }
+                "backward-ticks" => {
+                    sample.properties.insert("sample_ms_ticks".into(), "999".into());
+                }
+                "inconsistent-capacity" if sample.identity.id == "2" => {
+                    sample.properties.insert("host_logical_processors".into(), "8".into());
+                }
+                _ => {}
+            }
+        }
+        let left = Fixture::with_sequence(a, rows, 100_005).await;
+        let right = Fixture::with_sequence(b, other, 100_006).await;
+        let left = left.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let right = right.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        assert!(left.is_read_complete() && right.is_read_complete());
+        let comparison = culprit_engine::collected_resources::process_cpu_interval(&left, &right).unwrap();
+        assert!(!comparison.available, "{alternative}");
+        assert!(comparison.fields.is_empty());
+    }
+}
+#[test]
+fn changed_native_cpu_counter_or_owner_cannot_borrow_an_original_structural_receipt() {
+    let [first, second] = test_support::process_cpu_interval_originals(test_support::ProcessCpuIntervalCase::Exact);
+    let mut changed = second.clone();
+    let row = changed.observations.iter_mut().find(|row| row.source == MSSQL_CPU_POOLS_SOURCE).unwrap();
+    let OperationalFact::CounterSet(sample) = &mut row.fact else { panic!() };
+    sample.counters[0].value = MeasurementValue::Integer("2001".into());
+    assert!(!changed.is_valid());
+    assert!(culprit_checks::instance_resources::compare_cpu_originals(&first, &changed).is_err());
+    let mut foreign = second;
+    let SourcePartition::InstanceLocal { epoch, .. } = &mut foreign.description.partition else { panic!() };
+    *epoch = Some(digest(b"foreign-process"));
+    assert!(!foreign.is_valid());
+    assert!(culprit_checks::instance_resources::compare_cpu_originals(&first, &foreign).is_err());
+}
+
+fn replay_cpu_originals(snapshot: &culprit_core::Snapshot) -> Box<culprit_core::InstanceResourceReport> {
+    let mut report = culprit_checks::analyze(snapshot.clone());
+    report.instance_resources.take().unwrap()
+}

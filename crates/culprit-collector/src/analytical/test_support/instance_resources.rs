@@ -157,3 +157,6 @@ pub fn instance_resource_evidence(case: InstanceResourceCase) -> (CollectionDesc
 
 mod schedulers;
 pub use schedulers::{SchedulerCase, instance_resource_scheduler_evidence};
+
+mod process_cpu_profile;
+pub use process_cpu_profile::{ProcessCpuIntervalCase, process_cpu_interval_evidence, process_cpu_interval_originals};

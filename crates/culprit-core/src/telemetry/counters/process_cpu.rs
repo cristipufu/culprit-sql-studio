@@ -1,5 +1,12 @@
 //! One native process CPU point. Process lifetime, acquisition clock and CPU capacity are separate facts.
 use super::*;
+mod native;
+pub use native::{
+    MAX_MSSQL_CPU_OBSERVATIONS, MAX_MSSQL_CPU_POOLS, MSSQL_CPU_HISTORY_KIND, MSSQL_CPU_HISTORY_OBJECT,
+    MSSQL_CPU_HISTORY_SOURCE, MSSQL_CPU_POOL_KIND, MSSQL_CPU_POOL_OBJECT, MSSQL_CPU_POOLS_SOURCE,
+    MSSQL_CPU_PROFILE_SOURCE, MssqlCpuHistoryPoint, MssqlCpuPoolPoint, cpu_history_candidate, cpu_pool_candidate,
+    cpu_profile_header_is_valid, cpu_profile_observation_fits,
+};
 
 pub const MSSQL_PROCESS_CPU_OBJECT: &str = "sys.dm_os_sys_info";
 pub const MSSQL_PROCESS_CPU_KIND: &str = "sql-server-process-cpu";

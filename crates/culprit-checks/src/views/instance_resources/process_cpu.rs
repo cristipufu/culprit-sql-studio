@@ -1,5 +1,9 @@
-//! Original process CPU totals carry their own source and point; no utilization ratio is inferred.
+//! Native process totals and explicit original-pair CPU comparisons retain independent populations and clocks.
+pub(super) mod interval;
+mod profile;
 use culprit_core::{Engine, InstanceResourceField, ProcessCpuReport, Result, Snapshot, SourceState, t, telemetry::*};
+pub(super) use interval::explain as compare_originals;
+pub(super) use profile::explain as explain_profile;
 
 pub fn explain_source(
     source: &CollectionDescription,
@@ -100,6 +104,8 @@ fn field(key: &str, label: String, value: Option<&str>) -> InstanceResourceField
 }
 fn empty(state: SourceState) -> ProcessCpuReport {
     ProcessCpuReport {
+        capture: None,
+        populations: Vec::new(),
         context: None,
         native_source: None,
         source_state: state,

@@ -608,3 +608,14 @@ pub(crate) fn read_rows<T>(
     coverage.completed(source, rows.len());
     Some(rows)
 }
+
+pub const CPU_POOLS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CPU_POOLS_SOURCE,
+    reads: culprit_core::key!("provider.mssql.source.cpu_pools"),
+    delivers: &[],
+};
+pub const CPU_HISTORY: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CPU_HISTORY_SOURCE,
+    reads: culprit_core::key!("provider.mssql.source.cpu_history"),
+    delivers: &[],
+};

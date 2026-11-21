@@ -437,3 +437,5 @@ mod managed_instance_resources;
 mod index_configuration;
 
 mod indexed_views;
+
+mod process_cpu;

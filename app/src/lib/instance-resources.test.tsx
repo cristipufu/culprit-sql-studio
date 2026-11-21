@@ -125,3 +125,51 @@ test("modern scheduler fields keep SQL layout absence and native NULL separate f
   expect(nativeNull).toContain(t("view.schedulers.value.null"));
   expect(nativeNull).not.toContain(t("view.schedulers.value.unqualified", { value: "0" }));
 });
+
+
+test("boxed CPU originals retain independent native points and qualified interval arithmetic from Rust", () => {
+  const { report } = instanceResourceCase("cpu_profile_exact");
+  const html = renderToStaticMarkup(<InstanceResources report={report} />);
+  expect(html).toContain(report.process_cpu_interval!.summary);
+  expect(html).toContain("4000");
+  expect(html).toContain(t("view.process_cpu.limit.native_sample"));
+  expect(html).not.toContain("<details open");
+  expect(html).not.toContain("sig-dot");
+});
+test("Linux and unknown-platform idle remain unavailable while raw native values stay separate", () => {
+  for (const name of ["cpu_profile_linuxidle", "cpu_profile_unknownplatform"] as const) {
+    const { report } = instanceResourceCase(name);
+    const cpu = report.process_cpu_originals![1]!;
+    expect(cpu.populations[1]!.entries[0]!.fields.find((field) => field.key === "idle_cpu_percent")!.value).toBeNull();
+    const html = renderToStaticMarkup(<InstanceResources report={report} />);
+    expect(html).toContain(t("view.process_cpu.field.raw_idle"));
+    expect(html).toContain(t("ui.memory_failures.not_reported"));
+    expect(html).toContain(report.process_cpu_interval!.summary);
+  }
+});
+test("missing or reset original CPU evidence never becomes healthy empty or measured interval", () => {
+  const data = instanceResourceHealthReport("cpu_profile_reset");
+  expect(data.instance_resources!.process_cpu_interval!.available).toBe(false);
+  data.snapshot.operations.process_cpu_originals = [{ kind: "unavailable", reason: { kind: "catalog", key: "view.process_cpu.invalid", arguments: {} } }];
+  data.snapshot.pressure = null;
+  data.snapshot.sources = [];
+  data.instance_resources = undefined;
+  const html = renderToStaticMarkup(<HealthTab report={data} pressure={data.snapshot.pressure} resources={[]} engineLabel="PostgreSQL" />);
+  expect(html).not.toContain(t("ui.health.empty"));
+  expect(html).toContain(t("view.instance_resources.invalid"));
+});
+test("native CPU values remain text and bounded fields preserve later raw context", () => {
+  const { report } = instanceResourceCase("cpu_profile_exact");
+  report.process_cpu_originals![0]!.populations[0]!.entries[0]!.fields[0]!.value = "<img src=x onerror=alert(1)>";
+  const html = renderToStaticMarkup(<InstanceResources report={report} />);
+  expect(html).toContain("&lt;img");expect(html).not.toContain("<img");expect(html).toContain(t("view.process_cpu.field.raw_idle"));
+});
+
+
+test("native resource-pool originals use the existing folded pagination and retain later pools", () => {
+  const { report } = instanceResourceCase("cpu_profile_manypools");
+  const html = renderToStaticMarkup(<InstanceResources report={report} />);
+  expect(html).toContain(t("ui.memory_failures.page", { first: "1", last: "10", total: "12" }));
+  expect(html).not.toContain(t("view.process_cpu.pool.title", { id: "11" }));
+  expect(html).toContain(report.process_cpu_interval!.summary);
+});

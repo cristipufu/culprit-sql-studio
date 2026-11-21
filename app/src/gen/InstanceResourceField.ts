@@ -2,6 +2,6 @@
 
 export type InstanceResourceField = { key: string, 
 /**
- * Labels include native units; numbers stay exact unformatted digits.
+ * Labels include units. Native integers retain exact digits; derived intervals retain their formula inputs.
  */
 label: string, value: string | null, };
