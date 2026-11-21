@@ -42,3 +42,7 @@ fn native_types_authorize_semantics_and_not_the_counter_suffix() {
 }
 
 mod common;
+
+mod detailed;
+
+mod locks;

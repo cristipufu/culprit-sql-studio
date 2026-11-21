@@ -9,7 +9,7 @@ test("idle session context remains folded and exposes exact values without a pro
   await page.evaluate(async ({ fixturePath, apiPath, storePath }) => {
     const { sessionCensusLive } = await import(fixturePath);
     const client = await (await import(apiPath)).api() as Api;
-    client.live = async () => sessionCensusLive("idle");
+    client.live = async () => sessionCensusLive("idle-connection");
     client.queryProgress = async () => { throw new Error("A quiet census must not request native progress"); };
     (await import(storePath)).setState({ view: "live" });
   }, { fixturePath: "/src/test/session-census.ts", apiPath: "/src/lib/api.ts", storePath: "/src/lib/store.ts" });
@@ -27,6 +27,7 @@ test("idle session context remains folded and exposes exact values without a pro
   await region.locator(":scope > details > summary").filter({ hasText: english["ui.retained_failures.observations"] }).click();
   const observations = region.locator(":scope > details > .observation-grid");
   await expect(observations.getByText("9007199254740993", { exact: true })).toBeVisible();
+  await expect(observations.getByText("37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12", { exact: true })).toBeVisible();
   await expect(observations.getByText("0", { exact: true }).first()).toBeVisible();
   await page.setViewportSize({ width: 520, height: 900 });
   expect(await census.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);

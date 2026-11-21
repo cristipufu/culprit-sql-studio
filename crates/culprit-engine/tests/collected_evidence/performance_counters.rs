@@ -319,10 +319,67 @@ async fn original_common_counter_inputs_share_canonical_semantics_without_rates_
         assert!(report.database.is_none() && report.native_database_id.is_none());
         assert_eq!(report.read_complete, Some(true));
         assert_eq!(report.source_state, Some(source.observation.snapshot().unwrap().sources[0].state));
+        let detailed = report
+            .entries
+            .iter()
+            .filter(|entry| entry.family == culprit_core::telemetry::PerformanceCounterFamily::AccessMethods)
+            .collect::<Vec<_>>();
+        assert_eq!(detailed.len(), if matches!(case, Case::Denied | Case::MissingCommon) { 0 } else { 6 });
+        for entry in detailed {
+            assert_eq!(entry.native_object, "SQLServer:Access Methods");
+            assert!(entry.native_instance.is_none());
+            assert_eq!(entry.scope, culprit_core::MeasurementScope::Server);
+            assert_eq!(entry.reset, culprit_core::ResetMarker::Unknown);
+            assert_eq!(entry.raw_value, if case == Case::MeasuredZero { "0" } else { "9007199254740993" });
+            let unknown_type = case == Case::UnknownNativeType && entry.field == "detailed_forwarded_records";
+            assert_eq!(
+                entry.explanation,
+                if unknown_type {
+                    culprit_core::t!("view.performance_counters.limit.native_type")
+                } else {
+                    culprit_core::t!("view.performance_counters.explain.access_methods")
+                }
+            );
+            assert_eq!(
+                entry.availability == culprit_core::PerformanceCounterAvailability::UnknownNativeType,
+                unknown_type
+            );
+        }
+        if case == Case::MissingCommon {
+            assert!(
+                report
+                    .missing_fields
+                    .iter()
+                    .any(|field| field.key == "view.performance_counters.field.detailed_full_scans")
+            );
+        }
         if case == Case::Denied {
             assert!(report.entries.is_empty() && report.ratios.is_none());
             assert_eq!(report.native_counter_rows, None);
         } else {
+            let average = report
+                .ratios
+                .as_ref()
+                .unwrap()
+                .entries
+                .iter()
+                .find(|ratio| ratio.kind == CounterRatioKind::LockWaitAverageInputs)
+                .unwrap();
+            assert_eq!(average.metrics.len(), 2);
+            assert!(average.metrics.iter().all(|metric| metric.key != "view.counter_ratios.metric.percent"));
+            assert!(average.issues.contains(&CounterRatioIssue::IntervalRequired));
+            assert!(!average.issues.contains(&CounterRatioIssue::OutsideSubset));
+            assert_eq!(average.native_object.is_some(), case != Case::MissingCommon);
+            if !matches!(case, Case::MissingCommon | Case::MissingBase) {
+                assert_eq!(
+                    average.metrics[0].text.as_deref(),
+                    Some(if case == Case::MeasuredZero { "0" } else { "4500" })
+                );
+                assert_eq!(
+                    average.metrics[1].text.as_deref(),
+                    Some(if case == Case::MeasuredZero { "0" } else { "3" })
+                );
+            }
             let fraction = report
                 .ratios
                 .as_ref()

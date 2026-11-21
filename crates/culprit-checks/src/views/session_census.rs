@@ -46,6 +46,9 @@ pub fn explain_frame(frame: &ActivityFrameEvidence<'_>) -> Result<SessionCensusR
         t!("view.session_census.limit.client"),
         t!("view.session_census.limit.database_ids"),
     ];
+    if rows.iter().any(|row|matches!(row.observation.session_context.as_deref().and_then(|context|context.native.as_deref()),Some(SessionNativeContext::Mssql(native)) if native.idle_connection.is_some())) {
+        limitations.push(t!("view.session_census.idle_connection.limit"));
+    }
     if native.population != ActivityPopulation::UserSessionsCurrentRequestsAndBlockers {
         limitations.push(t!("view.session_census.limit.population"));
     }
@@ -184,6 +187,9 @@ fn entry(row: &ActivityFrameRow<'_>) -> SessionCensusEntry {
     fields.extend(counter_fields(&point.session_counters, CounterLifetime::Session));
     if let Some(counters) = &point.request_counters {
         fields.extend(counter_fields(counters, CounterLifetime::CurrentRequest));
+    }
+    if let Some(connection) = native.and_then(|native| native.idle_connection.as_ref()) {
+        fields.extend(idle_connection_fields(connection));
     }
     if let Some(native) = native {
         fields.extend([
@@ -331,3 +337,29 @@ fn counter_fields(counters: &ActivityCounters, lifetime: CounterLifetime) -> Vec
 
 #[cfg(test)]
 mod tests;
+
+fn idle_connection_fields(connection: &MssqlIdleSessionConnection) -> Vec<SessionCensusField> {
+    let (state, id, at) = match connection {
+        MssqlIdleSessionConnection::Observed { connection_id, connected_without_offset } => (
+            t!("view.session_census.idle_connection.observed"),
+            Some(connection_id.clone()),
+            Some(connected_without_offset.clone()),
+        ),
+        MssqlIdleSessionConnection::ScopeUnavailable => {
+            (t!("view.session_census.idle_connection.scope_unavailable"), None, None)
+        }
+        MssqlIdleSessionConnection::Missing => (t!("view.session_census.idle_connection.missing"), None, None),
+        MssqlIdleSessionConnection::Ambiguous => (t!("view.session_census.idle_connection.ambiguous"), None, None),
+        MssqlIdleSessionConnection::VisibilityUnavailable { permitted: Some(false) } => {
+            (t!("view.session_census.idle_connection.denied"), None, None)
+        }
+        MssqlIdleSessionConnection::VisibilityUnavailable { .. } => {
+            (t!("view.session_census.idle_connection.visibility_unknown"), None, None)
+        }
+    };
+    vec![
+        field("idle_connection_state", t!("view.session_census.field.idle_connection_state"), Some(state)),
+        field("idle_connection_id", t!("view.session_census.field.idle_connection_id"), id),
+        field("idle_connection_connected", t!("view.session_census.field.idle_connection_connected"), at),
+    ]
+}

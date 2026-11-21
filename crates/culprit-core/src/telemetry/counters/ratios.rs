@@ -1,4 +1,4 @@
-//! A fraction declaration refers only to exact inputs retained together by its native source.
+//! A native ratio declaration refers only to exact inputs retained together by its source.
 use super::*;
 use std::collections::BTreeSet;
 
@@ -12,6 +12,27 @@ pub enum CounterRatioKind {
     LocalSsdCacheHit,
     PlanCacheHit,
     BufferCacheHit,
+    LockWaitAverageInputs,
+}
+
+impl CounterRatioKind {
+    fn accepts_scope(self, scope: crate::MeasurementScope) -> bool {
+        match self {
+            Self::LockWaitAverageInputs => scope == crate::MeasurementScope::Server,
+            Self::LocalSsdCacheHit | Self::PlanCacheHit | Self::BufferCacheHit => matches!(
+                scope,
+                crate::MeasurementScope::Server | crate::MeasurementScope::Pool | crate::MeasurementScope::Node
+            ),
+        }
+    }
+    pub fn numerator_meaning(self) -> (CounterNature, CounterUnit) {
+        match self {
+            Self::LockWaitAverageInputs => (CounterNature::AverageNumerator, CounterUnit::Milliseconds),
+            Self::LocalSsdCacheHit | Self::PlanCacheHit | Self::BufferCacheHit => {
+                (CounterNature::FractionNumerator, CounterUnit::Count)
+            }
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +93,7 @@ pub enum CounterRatioIssue {
     IncompatibleInputs,
     ZeroBase,
     OutsideSubset,
+    IntervalRequired,
 }
 
 impl NativeCounterRatio {
@@ -86,6 +108,10 @@ impl NativeCounterRatio {
     pub fn issues(&self, sample: &NativeCounterSet) -> Vec<CounterRatioIssue> {
         use CounterRatioIssue::*;
         let mut issues = BTreeSet::new();
+        if self.kind == CounterRatioKind::LockWaitAverageInputs {
+            // An original point keeps exact inputs, but supplies no change in numerator/base over an interval.
+            issues.insert(IntervalRequired);
+        }
         if !sample.ratios.contains(self) {
             issues.insert(IncompatibleInputs);
         }
@@ -104,9 +130,10 @@ impl NativeCounterRatio {
         let numerator = self.input(sample, self.numerator.as_deref(), MissingNumerator, InvalidNumerator, &mut issues);
         let base = self.input(sample, self.base.as_deref(), MissingBase, InvalidBase, &mut issues);
         if let (Some(numerator), Some(base)) = (numerator, base) {
-            if numerator.nature != CounterNature::FractionNumerator
+            let (nature, unit) = self.kind.numerator_meaning();
+            if numerator.nature != nature
                 || base.nature != CounterNature::FractionBase
-                || numerator.unit != CounterUnit::Count
+                || numerator.unit != unit
                 || base.unit != CounterUnit::Count
                 || numerator.native_type.is_none()
                 || base.native_type.is_none()
@@ -117,10 +144,7 @@ impl NativeCounterRatio {
                 || numerator.native_instance != base.native_instance
                 || numerator.scope != base.scope
                 || numerator.reset != base.reset
-                || !matches!(
-                    sample.scope,
-                    crate::MeasurementScope::Server | crate::MeasurementScope::Pool | crate::MeasurementScope::Node
-                )
+                || !self.kind.accepts_scope(sample.scope)
             {
                 issues.insert(IncompatibleInputs);
             }
@@ -128,7 +152,7 @@ impl NativeCounterRatio {
                 if base == 0 {
                     issues.insert(ZeroBase);
                 }
-                if numerator > base {
+                if self.kind != CounterRatioKind::LockWaitAverageInputs && numerator > base {
                     issues.insert(OutsideSubset);
                 }
             } else {

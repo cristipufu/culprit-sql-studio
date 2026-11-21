@@ -213,3 +213,42 @@ fn missing_native_session_context_and_zero_ids_do_not_borrow_the_displayed_targe
         assert_eq!(value(&report.entries[0], key), None);
     }
 }
+
+#[test]
+fn idle_connection_context_cannot_become_request_identity_or_session_grouping() {
+    let mut read = recorded();
+    let row = &mut read.observations[0];
+    row.key.request = None;
+    row.request_counters = None;
+    row.idle = true;
+    row.statement_identity = None;
+    row.state = "sleeping".into();
+    row.command = None;
+    row.scope = ActivityScopeBasis::SessionDatabase;
+    let context = row.session_context.as_deref_mut().unwrap();
+    context.lifecycle = SessionLifecycle::Idle;
+    let Some(SessionNativeContext::Mssql(native)) = context.native.as_deref_mut() else { panic!() };
+    native.native_state = "Sleeping".into();
+    native.has_current_request = false;
+    native.request_database_id = None;
+    native.request_connection_id = None;
+    native.idle_connection = Some(MssqlIdleSessionConnection::Observed {
+        connection_id: "37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12".into(),
+        connected_without_offset: "2019-12-31T23:00:00.0000000".into(),
+    });
+    let report = explain(&read).unwrap();
+    assert_eq!(value(&report.entries[0], "idle_connection_id"), Some("37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12"));
+    assert_eq!(value(&report.entries[0], "request_connection_id"), None);
+    assert_eq!(report.observed_requests, 0);
+    let groups = report.client_groups.clone();
+    let Some(SessionNativeContext::Mssql(native)) =
+        read.observations[0].session_context.as_deref_mut().unwrap().native.as_deref_mut()
+    else {
+        panic!()
+    };
+    native.idle_connection = Some(MssqlIdleSessionConnection::Ambiguous);
+    let report = explain(&read).unwrap();
+    assert_eq!(value(&report.entries[0], "idle_connection_id"), None);
+    assert_eq!(serde_json::to_value(report.client_groups).unwrap(), serde_json::to_value(groups).unwrap());
+    assert!(report.limitations.contains(&t!("view.session_census.idle_connection.limit")));
+}

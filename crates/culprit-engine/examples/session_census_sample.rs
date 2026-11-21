@@ -10,6 +10,12 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
     let mut cases = BTreeMap::new();
     for (name, case) in [
         ("idle", SessionCensusCase::Idle),
+        ("idle-connection", SessionCensusCase::IdleConnection),
+        ("idle-connection-missing", SessionCensusCase::IdleConnectionMissing),
+        ("idle-connection-scope-unavailable", SessionCensusCase::IdleConnectionScopeUnavailable),
+        ("idle-connection-ambiguous", SessionCensusCase::IdleConnectionAmbiguous),
+        ("idle-connection-visibility-unknown", SessionCensusCase::IdleConnectionVisibilityUnknown),
+        ("idle-connection-visibility-denied", SessionCensusCase::IdleConnectionVisibilityDenied),
         ("dormant", SessionCensusCase::Dormant),
         ("mars", SessionCensusCase::Mars),
         ("unknown", SessionCensusCase::Unknown),

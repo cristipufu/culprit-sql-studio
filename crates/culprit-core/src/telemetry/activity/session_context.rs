@@ -2,6 +2,8 @@
 use super::*;
 
 const MAX_NATIVE_DATABASE_NAME_BYTES: usize = 512;
+mod idle_connection;
+pub use idle_connection::MssqlIdleSessionConnection;
 mod mysql;
 mod postgres;
 pub use mysql::MysqlSessionContext;
@@ -75,6 +77,9 @@ pub struct MssqlSessionContext {
     pub has_current_request: bool,
     /// Taken only from this exact native request row. No representative connection is selected by session ID.
     pub request_connection_id: Option<String>,
+    /// A separately observed primary connection for this idle session, never a current-request identity.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub idle_connection: Option<MssqlIdleSessionConnection>,
 }
 impl MssqlSessionContext {
     fn database_context_is_valid(&self, has_request: bool) -> bool {
@@ -113,7 +118,12 @@ impl ActivitySessionContext {
             && self.client_library.as_deref().is_none_or(|value| value.len() <= 512)
             && self.native.as_deref().is_none_or(|native| match native {
                 SessionNativeContext::Mssql(context) => {
-                    identifier(&context.native_state)
+                    context.idle_connection.as_ref().is_none_or(|connection| {
+                        idle && key.request.is_none()
+                            && !context.has_current_request
+                            && context.login_established
+                            && connection.is_valid()
+                    }) && identifier(&context.native_state)
                         && self.lifecycle == MssqlSessionContext::lifecycle_from_native_state(&context.native_state)
                         && context.tds_protocol_version.as_deref().is_none_or(native_integer_code)
                         && context.elapsed_ms.as_deref().is_none_or(native_integer_code)

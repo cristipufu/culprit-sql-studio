@@ -28,6 +28,7 @@ pub enum CounterNature {
     Gauge,
     /// The documented 64-bit native raw-fraction format, never a cooked ratio or independent rate.
     FractionNumerator,
+    AverageNumerator,
     FractionBase,
     Unknown,
 }
@@ -38,6 +39,7 @@ impl CounterNature {
             272_696_320 | 272_696_576 => Self::Cumulative,
             65_792 => Self::Gauge,
             537_003_264 => Self::FractionNumerator,
+            1_073_874_176 => Self::AverageNumerator,
             1_073_939_712 => Self::FractionBase,
             _ => Self::Unknown,
         }
@@ -112,6 +114,11 @@ impl NativeCounterSample {
                         && self.value.integer().is_some()
                         && self.native_type.as_deref() == Some("537003264")
                 }
+                CounterNature::AverageNumerator => {
+                    self.unit != CounterUnit::Unknown
+                        && self.value.integer().is_some()
+                        && self.native_type.as_deref() == Some("1073874176")
+                }
                 CounterNature::FractionBase => {
                     self.unit == CounterUnit::Count
                         && self.value.integer().is_some()
@@ -131,7 +138,7 @@ pub struct NativeCounterSet {
     pub counters: Vec<NativeCounterSample>,
     /// Source-declared pairs from this one native read, never joined across objects or captures.
     pub ratios: Vec<NativeCounterRatio>,
-    /// Exact rejected native fraction values remain evidence without becoming valid measurements.
+    /// Exact rejected native ratio values remain evidence without becoming valid measurements.
     pub ratio_gaps: Vec<CounterRatioGap>,
     /// Bounded native labels and state codes, never SQL text or connection secrets.
     pub properties: std::collections::BTreeMap<String, String>,

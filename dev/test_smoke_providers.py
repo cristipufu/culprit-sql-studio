@@ -623,9 +623,10 @@ class NativeSelection(unittest.TestCase):
         strict_writer = "local_native_writer_plans_keep_targeted_writes_separate_from_readers_and_other_resources"
         cache_control = "exact_original_scalar_metadata_is_observed_without_memory_collection"
         phase_control = "exact_original_scalar_metadata_is_observed_between_memory_source_phases"
+        mars_control = "activity::native_tests::census::idle_connections::"
         for selection, expected in [
-            ("native_tests::", ["telemetry::replication::native_tests::", "jobs::", strict_holder, strict_writer, cache_control, phase_control]),
-            ("jobs::native_tests::", ["telemetry::replication::native_tests::", strict_holder, strict_writer, cache_control, phase_control]),
+            ("native_tests::", [mars_control, "telemetry::replication::native_tests::", "jobs::", strict_holder, strict_writer, cache_control, phase_control]),
+            ("jobs::native_tests::", [mars_control, "telemetry::replication::native_tests::", strict_holder, strict_writer, cache_control, phase_control]),
         ]:
             with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
                 plain.test("culprit-mssql", selection)

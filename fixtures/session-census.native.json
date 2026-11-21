@@ -65,7 +65,8 @@
             "request_connection_id": null,
             "session_database_id": null,
             "session_database_name": null,
-            "request_database_id": null
+            "request_database_id": null,
+            "idle_connection": null
           }
         }
       },

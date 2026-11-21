@@ -13,6 +13,7 @@ mod process;
 pub(crate) struct Context {
     pub activity: ActivityContext,
     pub database_id: u32,
+    pub catalog_database_id: u32,
     pub database_created: String,
     pub physical_database: Option<String>,
     pub database_file_guid: Option<String>,
@@ -65,6 +66,7 @@ impl Context {
     pub(crate) fn same_observed_source(&self, other: &Self) -> bool {
         self.activity.same_source(&other.activity)
             && self.database_id == other.database_id
+            && self.catalog_database_id == other.catalog_database_id
             && self.database_created == other.database_created
             && self.physical_database == other.physical_database
             && self.database_file_guid == other.database_file_guid
@@ -260,10 +262,19 @@ fn decode(
     if !(1..=i16::MAX as u32).contains(&database_id) {
         return Err(invalid_data());
     }
+    let catalog_database_id = u32::try_from(integer(row, "catalog_database_id")?).map_err(|_| invalid_data())?;
+    if catalog_database_id == 0
+        || i32::try_from(catalog_database_id).is_err()
+        || text(row, "catalog_database_name")? != activity.database.database
+        || (activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE && catalog_database_id != database_id)
+    {
+        return Err(CollectionStop::SourceChanged.error());
+    }
     let process = process::ProcessEpoch::decode(row)?;
     let context = Context {
         activity,
         database_id,
+        catalog_database_id,
         database_created: crate::sql_time::native_time(&text(row, "database_created_without_offset")?)?,
         physical_database: if identity == IdentityDetail::AzureDatabase {
             optional_text(row, "physical_incarnation")?
@@ -308,7 +319,7 @@ fn query(identity: IdentityDetail, detail: Detail) -> String {
     };
     let rows = format!(
         r#"SELECT CAST(NULL AS int) AS session_id,
- sd.database_id AS selected_database_id,CONVERT(varchar(40),CAST(sd.create_date AS datetime2),126) AS database_created_without_offset,
+ {current_database_id} AS selected_database_id,sd.database_id AS catalog_database_id,sd.name AS catalog_database_name,CONVERT(varchar(40),CAST(sd.create_date AS datetime2),126) AS database_created_without_offset,
  CONVERT(varchar(36),df.file_guid) AS database_file_guid,CONVERT(varchar(30),df.create_lsn) AS database_file_create_lsn,
  {recovery},{process_columns}{page},
  collector.session_id AS collector_session_id,
@@ -318,7 +329,9 @@ fn query(identity: IdentityDetail, detail: Detail) -> String {
  collector.memory_usage AS collector_memory_pages
  FROM sys.databases sd LEFT JOIN sys.database_files df ON df.file_id=1 AND df.type=0
  LEFT JOIN sys.dm_exec_sessions collector ON collector.session_id=@@SPID
- {join} WHERE sd.database_id=DB_ID()"#,
+ {join} WHERE {catalog_predicate}"#,
+        current_database_id = crate::database_identity::catalog::CURRENT_DATABASE_ID,
+        catalog_predicate = crate::database_identity::catalog::predicate("sd"),
         process_columns =
             if identity == IdentityDetail::AzureDatabase { process::COLUMNS } else { process::UNAVAILABLE_COLUMNS }
     );

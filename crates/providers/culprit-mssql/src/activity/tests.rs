@@ -186,6 +186,8 @@ pub(crate) fn authority(row: &Rec) -> Rec {
     let mut columns: Vec<_> = row.columns().map(|(name, value)| (name, value.clone())).collect();
     columns.extend([
         ("selected_database_id", Val::Int(7)),
+        ("catalog_database_id", Val::Int(7)),
+        ("catalog_database_name", Val::Text(crate::read::text(row, "database_name").unwrap())),
         ("database_created_without_offset", Val::Text("2019-01-01T00:00:00".into())),
         ("database_file_guid", Val::Text("11111111-2222-3333-4444-555555555555".into())),
         ("database_file_create_lsn", Val::Null),
@@ -236,7 +238,8 @@ async fn live_and_baseline_share_all_request_facts_without_baseline_sql_enrichme
     assert!(native.coverage.complete_scope);
     assert_eq!(native.population, ActivityPopulation::UserSessionsCurrentRequestsAndBlockers);
     assert_eq!(exporting.query_count(), 3);
-    assert!(exporting.io.calls[2].sql.contains("WHERE sd.database_id=DB_ID()"));
+    assert!(exporting.io.calls[2].sql.contains("WHERE sd.name=@culprit_catalog_current_name"));
+    assert!(exporting.io.calls[2].sql.contains("@culprit_catalog_current_id int=DB_ID()"));
     assert!(!exporting.io.calls.iter().any(|call| call.sql.contains("sys.dm_exec_sql_text")));
     assert!(xml_parameter(&interactive.io.calls[1]).contains("session=\"99\""));
 }
@@ -718,4 +721,17 @@ async fn selected_database_reader_keeps_the_existing_native_template_and_fixed_s
     assert!(matches!(&owner.io.calls[0].parameters[1], Parameter::Integer(value) if *value == CURRENT_DATABASE_SCOPE));
     assert_eq!(CURRENT_DATABASE_SCOPE, 1);
     assert_eq!(owner.close().await, SourceShutdown::Quiescent);
+}
+
+#[test]
+fn current_activity_frames_keep_current_dmv_filters_and_select_catalog_context_by_original_name() {
+    for identity in [IdentityDetail::Endpoint, IdentityDetail::AzureDatabase] {
+        let native = sql::metadata(identity, page_server_reads::Availability::Unknown);
+        assert_eq!(native.matches(crate::database_identity::catalog::BINDING).count(), 1);
+        assert!(native.contains("FROM sys.databases WHERE name=@culprit_catalog_current_name) AS compatibility_level"));
+        assert!(native.contains("FROM (SELECT @culprit_catalog_current_name AS database_name) d"));
+        assert!(native.contains("r.database_id=DB_ID()"));
+        assert!(!native.contains("FROM sys.databases WHERE database_id=DB_ID()"));
+        assert_eq!(native.contains("g.database_id=DB_ID()"), identity == IdentityDetail::AzureDatabase);
+    }
 }

@@ -142,3 +142,60 @@ fn original_header_and_complete_record_receipts_are_validated_without_authentica
     ];
     assert!(ActivityFrameEvidence::new(&source, &mixed, true).is_err());
 }
+
+/// One established idle native session; the transport predates login and is not request identity.
+pub(crate) fn idle_connection() -> ActivityObservation {
+    let mut row = request("42");
+    row.key.request = None;
+    row.idle = true;
+    row.scope = ActivityScopeBasis::SessionDatabase;
+    row.state = "sleeping".into();
+    row.command = None;
+    row.elapsed_ms = None;
+    row.request_counters = None;
+    super::super::activity::tests::native_session_context(&mut row, "sleeping", "2020-01-01T00:00:00.0000000");
+    let Some(SessionNativeContext::Mssql(native)) = row.session_context.as_deref_mut().unwrap().native.as_deref_mut()
+    else {
+        unreachable!()
+    };
+    native.idle_connection = Some(MssqlIdleSessionConnection::Observed {
+        connection_id: "a8a44410-5033-4db1-9e90-79354ab31702".into(),
+        connected_without_offset: "2019-12-31T23:59:00.0000000".into(),
+    });
+    assert!(row.is_valid());
+    row
+}
+
+#[test]
+fn ordinary_canonical_export_retains_idle_connection_and_authenticates_the_same_original_body() {
+    let original = idle_connection();
+    let mut source = source(1);
+    let SourceObservation::Activity(header) = &mut source.observation else { unreachable!() };
+    header.population = ActivityPopulation::UserSessionsCurrentRequestsAndBlockers;
+    let capture = CaptureIdentity {
+        observation_id: "original-idle-connection".into(),
+        revision: Some(CaptureRevision {
+            outbox_id: digest(b"idle original"),
+            owner_epoch: "1".into(),
+            sequence: "1".into(),
+        }),
+    };
+    let exported = ExportedRecord::new(&source, &capture, original.clone().into()).unwrap();
+    let TelemetryRecord::Activity(retained) = &exported.record else { unreachable!() };
+    assert_eq!(retained.as_ref(), &original);
+    let reference = DiagnosticEvidenceRef::from_export(&source, &digest(b"original manifest"), &exported, 0).unwrap();
+    reference.validate_canonical_record(&source, &original.clone().into()).unwrap();
+    let exported_again = ExportedRecord::new(&source, &capture, exported.record.clone()).unwrap();
+    assert_eq!(exported_again.payload_sha256().unwrap(), exported.payload_sha256().unwrap());
+    let mut withdrawn = original.clone();
+    let Some(SessionNativeContext::Mssql(native)) =
+        withdrawn.session_context.as_deref_mut().unwrap().native.as_deref_mut()
+    else {
+        unreachable!()
+    };
+    native.idle_connection = None;
+    assert!(
+        reference.validate_canonical_record(&source, &withdrawn.into()).is_err(),
+        "ordinary sealing must not rewrite the native child"
+    );
+}

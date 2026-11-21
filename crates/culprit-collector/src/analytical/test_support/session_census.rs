@@ -18,13 +18,19 @@ pub enum SessionCensusCase {
     ContradictoryMars,
     GroupUnknownTotals,
     NativeSignedElapsed,
+    IdleConnection,
+    IdleConnectionMissing,
+    IdleConnectionScopeUnavailable,
+    IdleConnectionAmbiguous,
+    IdleConnectionVisibilityUnknown,
+    IdleConnectionVisibilityDenied,
     PostgresWorker,
     MysqlShared,
     MysqlSwitched,
     MysqlWorker,
 }
 impl SessionCensusCase {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 22] = [
         Self::Idle,
         Self::Dormant,
         Self::Mars,
@@ -37,6 +43,12 @@ impl SessionCensusCase {
         Self::ContradictoryMars,
         Self::GroupUnknownTotals,
         Self::NativeSignedElapsed,
+        Self::IdleConnection,
+        Self::IdleConnectionMissing,
+        Self::IdleConnectionScopeUnavailable,
+        Self::IdleConnectionAmbiguous,
+        Self::IdleConnectionVisibilityUnknown,
+        Self::IdleConnectionVisibilityDenied,
         Self::PostgresWorker,
         Self::MysqlShared,
         Self::MysqlSwitched,
@@ -80,8 +92,28 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
     native.session_database_name = Some("db".into());
     native.request_database_id = None;
     native.elapsed_ms = Some("600000".into());
+    native.idle_connection = None;
     match case {
         SessionCensusCase::Idle | SessionCensusCase::Partial => (),
+        SessionCensusCase::IdleConnection => {
+            native.idle_connection = Some(MssqlIdleSessionConnection::Observed {
+                connection_id: "37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12".into(),
+                connected_without_offset: "2019-12-31T23:00:00.0000000".into(),
+            })
+        }
+        SessionCensusCase::IdleConnectionScopeUnavailable => {
+            native.idle_connection = Some(MssqlIdleSessionConnection::ScopeUnavailable)
+        }
+        SessionCensusCase::IdleConnectionMissing => native.idle_connection = Some(MssqlIdleSessionConnection::Missing),
+        SessionCensusCase::IdleConnectionAmbiguous => {
+            native.idle_connection = Some(MssqlIdleSessionConnection::Ambiguous)
+        }
+        SessionCensusCase::IdleConnectionVisibilityUnknown => {
+            native.idle_connection = Some(MssqlIdleSessionConnection::VisibilityUnavailable { permitted: None })
+        }
+        SessionCensusCase::IdleConnectionVisibilityDenied => {
+            native.idle_connection = Some(MssqlIdleSessionConnection::VisibilityUnavailable { permitted: Some(false) })
+        }
         SessionCensusCase::Dormant => {
             let row = &mut read.observations[0];
             row.key.session.generation = "1900-01-01T00:00:00.0000000".into();
@@ -186,5 +218,6 @@ fn current_request(mut row: ActivityObservation, id: &str, connection: &str) -> 
     native.request_database_id = Some("7".into());
     native.has_current_request = true;
     native.request_connection_id = Some(connection.into());
+    native.idle_connection = None;
     row
 }

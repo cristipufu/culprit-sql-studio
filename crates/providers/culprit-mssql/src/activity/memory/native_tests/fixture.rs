@@ -91,21 +91,24 @@ impl Fixture {
 
     async fn setup(&mut self, case: Case) -> Result<()> {
         self.control_unconfirmed = true;
-        let admitted = until_cancelled(&self.cancellation, OwnedSourceFixture::open("culprit")).await?;
+        let admitted = until_cancelled(&self.cancellation, Box::pin(OwnedSourceFixture::open("culprit"))).await?;
         self.admitted = Some(admitted);
         let admitted = self.admitted.as_ref().ok_or_else(invalid_data)?;
         let admin = tokio::time::timeout(
             CONTROL_TIMEOUT,
-            until_cancelled(&self.cancellation, async {
-                let mut admin = crate::test_support::connect(
-                    &config(admitted.port, "master", admitted.password(), "grant-fixture-admin"),
-                    SessionKind::User,
-                )
-                .await?;
-                // The FULL native baseline nonce is verified on this same held actor before any derived DDL.
-                verify_owned_source(&mut admin).await?;
-                Ok(admin)
-            }),
+            until_cancelled(
+                &self.cancellation,
+                Box::pin(async {
+                    let mut admin = crate::test_support::connect(
+                        &config(admitted.port, "master", admitted.password(), "grant-fixture-admin"),
+                        SessionKind::User,
+                    )
+                    .await?;
+                    // The FULL native baseline nonce is verified on this same held actor before any derived DDL.
+                    verify_owned_source(&mut admin).await?;
+                    Ok(admin)
+                }),
+            ),
         )
         .await
         .map_err(|_| CollectionStop::CancellationUnconfirmed.error())??;

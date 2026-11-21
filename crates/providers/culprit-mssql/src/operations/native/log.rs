@@ -65,15 +65,21 @@ pub(super) fn query(kind: Kind) -> String {
     } else {
         ("DB_NAME()", "", "sys.database_files", "sys.dm_db_log_space_usage", "DB_ID()")
     };
-    format!(
+    let catalog_predicate = if kind == Kind::TempLog {
+        format!("database_id={database_id}")
+    } else {
+        crate::database_identity::catalog::predicate("")
+    };
+    let sql = format!(
         "DECLARE /* culprit */ @observed_at varchar(40)=CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z';
  SELECT /* culprit */ @observed_at AS observed_at,{database_name} AS database_name,
  {identity}total_log_size_in_bytes AS total,used_log_space_in_bytes AS used,
- (SELECT log_reuse_wait_desc FROM sys.databases WHERE database_id={database_id}) AS reuse_wait,
+ (SELECT log_reuse_wait_desc FROM sys.databases WHERE {catalog_predicate}) AS reuse_wait,
  (SELECT MAX(CASE WHEN growth>0 AND(max_size=-1 OR size<max_size) THEN 1 ELSE 0 END) FROM {files} WHERE type=1) AS can_grow,
  (SELECT CASE WHEN MAX(CASE WHEN growth>0 AND max_size=-1 THEN 1 ELSE 0 END)=1 THEN NULL ELSE SUM(CONVERT(bigint,CASE WHEN growth=0 OR max_size<size THEN size ELSE max_size END))*CONVERT(bigint,8192) END FROM {files} WHERE type=1) AS max_bytes
  FROM {usage}"
-    )
+    );
+    if kind == Kind::TempLog { sql } else { crate::database_identity::catalog::bind(&sql) }
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ export type NativeCounterSet = { identity: NativeIdentity, scope: MeasurementSco
  */
 ratios: Array<NativeCounterRatio>, 
 /**
- * Exact rejected native fraction values remain evidence without becoming valid measurements.
+ * Exact rejected native ratio values remain evidence without becoming valid measurements.
  */
 ratio_gaps: Array<CounterRatioGap>, 
 /**

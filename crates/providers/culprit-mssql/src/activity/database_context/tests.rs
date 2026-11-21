@@ -16,6 +16,8 @@ pub(crate) fn row(edition: i64) -> Rec {
     let mut values = base.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
     values.extend([
         ("selected_database_id", Val::Int(7)),
+        ("catalog_database_id", Val::Int(7)),
+        ("catalog_database_name", Val::Text(crate::read::text(&base, "database_name").unwrap())),
         ("database_created_without_offset", Val::Text("2019-01-01T04:00:00.3066667".into())),
         ("database_file_guid", Val::Text("native-file-guid".into())),
         ("database_file_create_lsn", Val::Text("0".into())),

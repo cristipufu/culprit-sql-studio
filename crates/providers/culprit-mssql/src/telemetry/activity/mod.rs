@@ -94,11 +94,7 @@ impl TelemetrySource for ActivitySource {
 pub(crate) async fn capture<R: crate::read::NativeRead>(
     reader: &mut ActivityReader<R>,
 ) -> Result<(CollectionDescription, Vec<ActivityObservation>)> {
-    let pending = crate::activity::capture::PendingActivityFrame::begin(
-        reader,
-        crate::activity::capture::ActivityAuthorityPolicy::RetainPartialBaseline,
-    )
-    .await?;
+    let pending = crate::activity::capture::PendingActivityFrame::begin_census(reader).await?;
     if !matches!(pending.baseline.frame.context.edition, 2 | 3 | 4 | 5 | 8) || pending.baseline.frame.context.major < 11
     {
         return Err(culprit_core::Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));

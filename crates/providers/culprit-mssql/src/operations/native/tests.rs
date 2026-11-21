@@ -113,11 +113,26 @@ fn complete_select_builders_preserve_all_existing_native_dispatch_bytes() {
     for (kind, original) in [
         (Kind::Log, log::query(Kind::Log)),
         (Kind::TempLog, log::query(Kind::TempLog)),
-        (Kind::Filegroups, FILES_SQL.into()),
+        (Kind::Filegroups, files_sql()),
         (Kind::Temp, TEMP_SQL.into()),
         (Kind::Sequences, SEQUENCES_SQL.into()),
     ] {
         assert_eq!(kind.sql(), format!("{original} OPTION(MAXDOP 1)"), "{kind:?}");
         assert_eq!(kind.sql().matches("OPTION(MAXDOP 1)").count(), 1, "{kind:?}: one complete serial SELECT");
     }
+}
+
+#[tokio::test]
+async fn file_snapshot_basis_uses_original_catalog_name_without_filtering_or_adding_native_file_work() {
+    let mut native = FakeRead::new(vec![Ok(vec![space_row(), file_row()])]);
+    let files = read(&mut native, Kind::Filegroups, 10).await.unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(native.calls.len(), 1);
+    let sql = &native.calls[0].sql;
+    assert!(sql.starts_with(crate::database_identity::catalog::BINDING));
+    assert!(sql.contains("FROM sys.databases WHERE name=@culprit_catalog_current_name) AS database_is_snapshot"));
+    assert!(sql.contains("@culprit_catalog_current_name AS database_name,@culprit_catalog_current_id AS database_id"));
+    assert!(sql.contains("FROM sys.database_files"));
+    assert!(!sql.contains("WHERE database_id=DB_ID()"));
+    assert_eq!(native.calls[0].limit, 11);
 }

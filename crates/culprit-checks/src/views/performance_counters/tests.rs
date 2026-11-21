@@ -465,3 +465,5 @@ fn selected_report_refuses_foreign_source_counter_clock_or_native_database_befor
 }
 
 mod recorded;
+
+mod detailed;

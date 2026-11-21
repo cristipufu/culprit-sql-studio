@@ -217,3 +217,5 @@ fn a_declaration_cannot_borrow_another_reads_inputs_profile_or_clock() {
     assert!(original.ratios[0].percent(&later).is_none());
     assert!(original.ratios[0].issues(&later).contains(&CounterRatioIssue::IncompatibleInputs));
 }
+
+mod average_inputs;

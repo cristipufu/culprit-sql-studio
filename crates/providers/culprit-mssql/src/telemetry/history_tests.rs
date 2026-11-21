@@ -72,6 +72,7 @@ pub(super) fn authority(edition: i64) -> Rec {
         &crate::activity::database_context::tests::row(edition),
         &[
             ("database_name", Val::Text("fixture".into())),
+            ("catalog_database_name", Val::Text("fixture".into())),
             ("incarnation", if edition == 5 { Val::Text("logical".into()) } else { Val::Null }),
             ("physical_incarnation", if edition == 5 { Val::Text("physical".into()) } else { Val::Null }),
         ],

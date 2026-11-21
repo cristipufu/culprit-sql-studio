@@ -172,3 +172,27 @@ fn backend_and_current_default_database_groups_render_canonical_scope_kind_clock
         assert!(text.len() < 32 * 1024);
     }
 }
+
+#[test]
+fn idle_connection_disclosure_does_not_fabricate_request_identity_for_unavailable_native_values() {
+    for case in [
+        SessionCensusCase::IdleConnection,
+        SessionCensusCase::IdleConnectionMissing,
+        SessionCensusCase::IdleConnectionScopeUnavailable,
+        SessionCensusCase::IdleConnectionAmbiguous,
+        SessionCensusCase::IdleConnectionVisibilityUnknown,
+        SessionCensusCase::IdleConnectionVisibilityDenied,
+    ] {
+        let report = report(case);
+        let text = session_census(&report);
+        assert_eq!((report.observed_sessions, report.observed_requests), (1, 0));
+        let fields = &report.entries[0].fields;
+        let status =
+            fields.iter().find(|field| field.key == "idle_connection_state").unwrap().value.as_deref().unwrap();
+        assert!(text.contains(status));
+        assert_eq!(
+            text.contains("37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12"),
+            matches!(case, SessionCensusCase::IdleConnection)
+        );
+    }
+}

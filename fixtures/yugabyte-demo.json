@@ -2584,7 +2584,7 @@
     "indexed_view_originals": [],
     "process_cpu_originals": []
   },
-  "format": 51,
+  "format": 52,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

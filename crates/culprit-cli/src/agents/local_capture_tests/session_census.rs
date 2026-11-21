@@ -34,7 +34,14 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
         assert_eq!(report["read_complete"], true);
         assert_eq!(report["native_rows"], native.native_rows);
         let (grouped, requests) = match case {
-            SessionCensusCase::Idle | SessionCensusCase::Partial => (1, 0),
+            SessionCensusCase::Idle
+            | SessionCensusCase::Partial
+            | SessionCensusCase::IdleConnection
+            | SessionCensusCase::IdleConnectionScopeUnavailable
+            | SessionCensusCase::IdleConnectionMissing
+            | SessionCensusCase::IdleConnectionAmbiguous
+            | SessionCensusCase::IdleConnectionVisibilityUnknown
+            | SessionCensusCase::IdleConnectionVisibilityDenied => (1, 0),
             SessionCensusCase::Mars => (1, 2),
             SessionCensusCase::GroupedClients | SessionCensusCase::NativeSignedElapsed => (2, 3),
             SessionCensusCase::GroupUnknownTotals => (2, 2),
@@ -56,7 +63,14 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
         );
         assert_eq!(report["client_groups"]["groups_omitted"], 0);
         let expected = match case {
-            SessionCensusCase::Idle | SessionCensusCase::Partial => (Some("7"), Some("db"), None),
+            SessionCensusCase::Idle
+            | SessionCensusCase::Partial
+            | SessionCensusCase::IdleConnection
+            | SessionCensusCase::IdleConnectionScopeUnavailable
+            | SessionCensusCase::IdleConnectionMissing
+            | SessionCensusCase::IdleConnectionAmbiguous
+            | SessionCensusCase::IdleConnectionVisibilityUnknown
+            | SessionCensusCase::IdleConnectionVisibilityDenied => (Some("7"), Some("db"), None),
             SessionCensusCase::Mars
             | SessionCensusCase::GroupedClients
             | SessionCensusCase::ContradictoryMars
@@ -80,6 +94,29 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
                 let field = fields.iter().find(|field| field["key"] == key).unwrap();
                 assert_eq!(field["value"], json!(expected), "{case:?}: {key}");
             }
+        }
+        if matches!(
+            case,
+            SessionCensusCase::IdleConnection
+                | SessionCensusCase::IdleConnectionScopeUnavailable
+                | SessionCensusCase::IdleConnectionMissing
+                | SessionCensusCase::IdleConnectionAmbiguous
+                | SessionCensusCase::IdleConnectionVisibilityUnknown
+                | SessionCensusCase::IdleConnectionVisibilityDenied
+        ) {
+            let entry = &report["entries"][0];
+            assert!(entry["request"].is_null() && entry["idle"] == true);
+            let fields = entry["fields"].as_array().unwrap();
+            let id = fields.iter().find(|field| field["key"] == "idle_connection_id").unwrap();
+            assert_eq!(
+                id["value"],
+                if matches!(case, SessionCensusCase::IdleConnection) {
+                    json!("37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12")
+                } else {
+                    serde_json::Value::Null
+                }
+            );
+            assert!(fields.iter().find(|field| field["key"] == "request_connection_id").unwrap()["value"].is_null());
         }
         assert_eq!(value["local_verification_bytes"], bytes);
         assert_eq!(value["collected_from"], fixture.manifest.started_at);

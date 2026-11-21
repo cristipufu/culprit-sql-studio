@@ -134,6 +134,16 @@ fn redact_qualifiers_except(identity: &mut crate::telemetry::NativeIdentity, str
     }
 }
 
+/// Ordinary export retains native evidence. Only this explicit sharing boundary withdraws private context.
+fn redact_activity_context_for_sharing(observation: &mut crate::telemetry::ActivityObservation) {
+    observation.client = None;
+    if let Some(crate::telemetry::SessionNativeContext::Mssql(native)) =
+        observation.session_context.as_deref_mut().and_then(|context| context.native.as_deref_mut())
+    {
+        native.idle_connection = None;
+    }
+}
+
 fn redact_target(target: &mut crate::telemetry::CollectionTarget) {
     match target {
         crate::telemetry::CollectionTarget::Database(identity) => redact_identity(identity),
@@ -572,7 +582,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         for row in &mut evidence.observations {
             if let crate::telemetry::OperationalFact::CompilerWaiter(waiter) = &mut row.fact {
                 waiter.request.redact(engine);
-                waiter.request.client = None;
+                redact_activity_context_for_sharing(&mut waiter.request);
             }
         }
     }
@@ -600,7 +610,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             redact_partition(&mut focus.partition);
             focus.epoch = opaque(&focus.epoch);
             focus.original.redact(engine);
-            focus.original.client = None;
+            redact_activity_context_for_sharing(&mut focus.original);
             redact_native_identity(&mut focus.statement_identity);
             focus.original.statement_identity = Some(focus.statement_identity.clone());
         }
@@ -613,7 +623,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     if let Some(evidence) = &mut s.operations.page_waits {
         for observation in &mut evidence.observations {
             observation.redact(engine);
-            observation.request.client = None;
+            redact_activity_context_for_sharing(&mut observation.request);
             if let Some(target) = &mut observation.target
                 && !redact_page_target(target)
             {
@@ -638,7 +648,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         for observation in &mut evidence.observations {
             observation.redact(engine);
             if let Some(request) = &mut observation.request {
-                request.client = None;
+                redact_activity_context_for_sharing(request);
             }
         }
     }
@@ -837,7 +847,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             for grant in &mut grants.observations {
                 grant.redact(engine);
                 if let Some(request) = &mut grant.request {
-                    request.client = None;
+                    redact_activity_context_for_sharing(request);
                 }
             }
         }

@@ -55,7 +55,11 @@ fn request() -> CollectionRequest {
 fn authority(at: &str) -> Rec {
     replace(
         &crate::activity::database_context::tests::row(3),
-        &[("selected_database_id", Val::Int(5)), ("observed_at", Val::Text(at.into()))],
+        &[
+            ("selected_database_id", Val::Int(5)),
+            ("catalog_database_id", Val::Int(5)),
+            ("observed_at", Val::Text(at.into())),
+        ],
     )
 }
 fn replies() -> Vec<ReadResult<Vec<Rec>>> {

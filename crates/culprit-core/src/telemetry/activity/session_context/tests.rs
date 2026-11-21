@@ -28,6 +28,7 @@ fn session_context_fixture(request: bool) -> (ActivityKey, ActivitySessionContex
             },
             has_current_request: request,
             request_connection_id: request.then(|| "a8a44410-5033-4db1-9e90-79354ab31702".into()),
+            idle_connection: None,
         }))),
     };
     (key, context)
@@ -242,5 +243,66 @@ fn malformed_or_out_of_native_range_elapsed_cannot_become_a_groupable_session_fa
         };
         native.elapsed_ms = Some(elapsed.into());
         assert!(!context.is_valid_for(&key, true), "{elapsed}");
+    }
+}
+
+#[test]
+fn idle_primary_connection_is_separate_from_requests_and_pooled_login_times() {
+    let (key, mut context) = session_context_fixture(false);
+    let Some(SessionNativeContext::Mssql(native)) = context.native.as_deref_mut() else { panic!() };
+    native.idle_connection = Some(MssqlIdleSessionConnection::Observed {
+        connection_id: "a8a44410-5033-4db1-9e90-79354ab31702".into(),
+        connected_without_offset: "2019-12-31T23:59:00.0000000".into(),
+    });
+    assert!(context.is_valid_for(&key, true), "transport can predate a pooled session login");
+    let encoded = serde_json::to_value(&context).unwrap();
+    let restored: ActivitySessionContext = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(restored, context);
+    let mut missing = encoded;
+    missing["native"]["data"].as_object_mut().unwrap().remove("idle_connection");
+    assert!(serde_json::from_value::<ActivitySessionContext>(missing).is_err());
+    for change in 0..5 {
+        let mut changed = context.clone();
+        let Some(SessionNativeContext::Mssql(native)) = changed.native.as_deref_mut() else { panic!() };
+        match change {
+            0 => native.request_connection_id = Some("a8a44410-5033-4db1-9e90-79354ab31702".into()),
+            1 => native.has_current_request = true,
+            2 => {
+                native.idle_connection = Some(MssqlIdleSessionConnection::Observed {
+                    connection_id: "00000000-0000-0000-0000-000000000000".into(),
+                    connected_without_offset: "2020-01-01T00:00:00".into(),
+                })
+            }
+            3 => {
+                native.idle_connection = Some(MssqlIdleSessionConnection::Observed {
+                    connection_id: "a8a44410-5033-4db1-9e90-79354ab31702".into(),
+                    connected_without_offset: "2020-01-01T00:00:00Z".into(),
+                })
+            }
+            _ => {
+                native.idle_connection =
+                    Some(MssqlIdleSessionConnection::VisibilityUnavailable { permitted: Some(true) })
+            }
+        }
+        assert!(!changed.is_valid_for(&key, true), "{change}");
+    }
+    let (request, mut active) = session_context_fixture(true);
+    let Some(SessionNativeContext::Mssql(native)) = active.native.as_deref_mut() else { panic!() };
+    native.idle_connection = Some(MssqlIdleSessionConnection::Missing);
+    assert!(!active.is_valid_for(&request, false));
+}
+
+#[test]
+fn idle_connection_absence_ambiguity_and_visibility_do_not_manufacture_a_native_id() {
+    let (key, mut context) = session_context_fixture(false);
+    for observation in [
+        MssqlIdleSessionConnection::Missing,
+        MssqlIdleSessionConnection::Ambiguous,
+        MssqlIdleSessionConnection::VisibilityUnavailable { permitted: None },
+        MssqlIdleSessionConnection::VisibilityUnavailable { permitted: Some(false) },
+    ] {
+        let Some(SessionNativeContext::Mssql(native)) = context.native.as_deref_mut() else { panic!() };
+        native.idle_connection = Some(observation);
+        assert!(context.is_valid_for(&key, true));
     }
 }

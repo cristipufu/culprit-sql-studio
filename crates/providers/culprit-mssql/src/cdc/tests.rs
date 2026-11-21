@@ -141,3 +141,17 @@ async fn wrong_database_negative_counter_and_malformed_native_time_withdraw_the_
         assert_eq!(io.queries(), 1);
     }
 }
+
+#[test]
+fn status_binds_both_native_namespaces_into_the_same_optional_column_batch() {
+    let native = sql::status();
+    assert!(native.starts_with(crate::database_identity::catalog::BINDING));
+    assert_eq!(native.matches("WHERE d.name=@culprit_catalog_current_name").count(), 2);
+    assert!(!native.contains("WHERE d.database_id=DB_ID()"));
+    assert!(native.contains("@culprit_catalog_current_id AS database_id"));
+    assert!(native.contains("@P1 nvarchar(128),@culprit_catalog_current_id int,@culprit_catalog_current_name sysname"));
+    assert!(native.contains("@culprit_catalog_current_id=@culprit_catalog_current_id,@culprit_catalog_current_name=@culprit_catalog_current_name"));
+    assert!(native.contains("COL_LENGTH(N'sys.databases',N'is_cdc_enabled')"));
+    assert!(sql::SCANS.contains("DB_ID() AS database_id"));
+    assert!(sql::ERRORS.contains("DB_ID() AS database_id"));
+}

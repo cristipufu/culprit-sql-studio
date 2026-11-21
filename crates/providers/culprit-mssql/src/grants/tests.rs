@@ -45,7 +45,9 @@ pub(crate) fn authority(at: &str) -> Rec {
         &[
             ("observed_at", Val::Text(at.into())),
             ("selected_database_id", Val::Int(5)),
+            ("catalog_database_id", Val::Int(5)),
             ("database_name", Val::Text("sample".into())),
+            ("catalog_database_name", Val::Text("sample".into())),
             ("incarnation", Val::Text("logical-guid".into())),
             ("physical_incarnation", Val::Text("physical-guid".into())),
         ],

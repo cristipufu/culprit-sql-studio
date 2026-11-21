@@ -38,14 +38,17 @@ pub(super) fn status() -> String {
     );
     let select = |enabled: &str| {
         format!(
-            "SELECT /* culprit */ DB_ID() AS database_id,CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,CAST({enabled} AS int) AS enabled,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE',@P1) AS has_permission,{scan} AS scan_layout,{errors} AS error_layout FROM sys.databases d WHERE d.database_id=DB_ID() OPTION(MAXDOP 1)"
+            "SELECT /* culprit */ {current_id} AS database_id,CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,CAST({enabled} AS int) AS enabled,HAS_PERMS_BY_NAME({current_name},'DATABASE',@P1) AS has_permission,{scan} AS scan_layout,{errors} AS error_layout FROM sys.databases d WHERE {predicate} OPTION(MAXDOP 1)",
+            current_id = crate::database_identity::catalog::CURRENT_DATABASE_ID,
+            current_name = crate::database_identity::catalog::CURRENT_DATABASE_NAME,
+            predicate = crate::database_identity::catalog::predicate("d")
         )
     };
     let available = select("d.is_cdc_enabled").replace('\'', "''");
-    format!(
-        "IF COL_LENGTH(N'sys.databases',N'is_cdc_enabled') IS NULL BEGIN {} END ELSE BEGIN EXEC sys.sp_executesql N'{available}',N'@P1 nvarchar(128)',@P1=@P1; END",
+    crate::database_identity::catalog::bind(&format!(
+        "IF COL_LENGTH(N'sys.databases',N'is_cdc_enabled') IS NULL BEGIN {} END ELSE BEGIN EXEC sys.sp_executesql N'{available}',N'@P1 nvarchar(128),@culprit_catalog_current_id int,@culprit_catalog_current_name sysname',@P1=@P1,@culprit_catalog_current_id=@culprit_catalog_current_id,@culprit_catalog_current_name=@culprit_catalog_current_name; END",
         select("NULL")
-    )
+    ))
 }
 pub(super) const SCANS: &str = r#"SELECT TOP (@P1) /* culprit */ DB_ID() AS database_id,
  CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,session_id,

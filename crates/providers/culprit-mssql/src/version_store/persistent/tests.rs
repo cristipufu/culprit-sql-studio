@@ -128,3 +128,17 @@ async fn documented_cleanup_skip_mechanisms_keep_distinct_native_counts_and_colu
         }
     }
 }
+
+#[tokio::test]
+async fn adr_catalog_flag_uses_original_name_while_native_statistics_keep_the_current_id_namespace() {
+    let mut native = reader(row());
+    assert!(read(&mut native).await.unwrap().is_some());
+    assert_eq!(native.calls.len(), 3);
+    assert!(native.calls[1].sql.starts_with(crate::database_identity::catalog::BINDING));
+    assert!(
+        native.calls[1].sql.contains("FROM sys.databases WHERE name=@culprit_catalog_current_name OPTION(MAXDOP 1)")
+    );
+    assert!(!native.calls[1].sql.contains("database_id=DB_ID()"));
+    assert_eq!(native.calls[2].sql, STATISTICS);
+    assert!(native.calls[2].sql.contains("WHERE database_id=DB_ID()"));
+}

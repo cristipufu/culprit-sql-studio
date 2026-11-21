@@ -35,7 +35,7 @@ impl Kind {
     fn sql(self) -> String {
         match self {
             Self::Log | Self::TempLog => serial_select(&log::query(self)),
-            Self::Filegroups => serial_select(FILES_SQL),
+            Self::Filegroups => serial_select(&files_sql()),
             Self::Temp => serial_select(TEMP_SQL),
             Self::Sequences => serial_select(SEQUENCES_SQL),
             Self::SuspectPages => suspect_pages::query(),
@@ -309,12 +309,13 @@ fn sequence(row: &Rec) -> Result<SequenceFact> {
 }
 
 // One existing catalog dispatch now keeps every visible file independently of the narrower growth population.
-const FILES_SQL: &str = "DECLARE /* culprit */ @observed_at varchar(40)=CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z';
+fn files_sql() -> String {
+    crate::database_identity::catalog::bind(&format!("DECLARE /* culprit */ @observed_at varchar(40)=CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z';
  WITH files AS(SELECT df.*,fg.name AS filegroup_name,fg.is_read_only AS filegroup_read_only,
  CASE WHEN df.type=0 AND df.state=0 THEN FILEPROPERTY(df.name,'SpaceUsed') END AS used_pages,
- (SELECT CASE WHEN source_database_id IS NULL THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END FROM sys.databases WHERE database_id=DB_ID()) AS database_is_snapshot
+ (SELECT CASE WHEN source_database_id IS NULL THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END FROM sys.databases WHERE {catalog_predicate}) AS database_is_snapshot
  FROM sys.database_files df LEFT JOIN sys.filegroups fg ON fg.data_space_id=df.data_space_id)
- SELECT /* culprit */ 0 AS row_kind,@observed_at AS observed_at,DB_NAME() AS database_name,DB_ID() AS database_id,
+ SELECT /* culprit */ 0 AS row_kind,@observed_at AS observed_at,{current_name} AS database_name,{current_id} AS database_id,
  data_space_id AS native_id,filegroup_name AS name,
  SUM(CONVERT(bigint,size))*CONVERT(bigint,8192) AS total,
  CASE WHEN COUNT(used_pages)=COUNT(*) THEN SUM(CONVERT(bigint,used_pages))*CONVERT(bigint,8192) END AS used,
@@ -327,9 +328,14 @@ const FILES_SQL: &str = "DECLARE /* culprit */ @observed_at varchar(40)=CONVERT(
  CAST(NULL AS bit) AS is_sparse,CAST(NULL AS bit) AS database_is_snapshot,CAST(NULL AS int) AS used_pages
  FROM files WHERE type=0 AND state=0 AND filegroup_read_only=0 GROUP BY data_space_id,filegroup_name
  UNION ALL
- SELECT 1,@observed_at,DB_NAME(),DB_ID(),file_id,name,NULL,NULL,NULL,NULL,CONVERT(varchar(36),file_guid),type,type_desc,state,state_desc,
+ SELECT 1,@observed_at,{current_name},{current_id},file_id,name,NULL,NULL,NULL,NULL,CONVERT(varchar(36),file_guid),type,type_desc,state,state_desc,
  data_space_id,size,max_size,growth,is_percent_growth,is_read_only,filegroup_read_only,is_sparse,database_is_snapshot,used_pages
- FROM files ORDER BY row_kind,native_id";
+ FROM files ORDER BY row_kind,native_id",
+        catalog_predicate = crate::database_identity::catalog::predicate(""),
+        current_name = crate::database_identity::catalog::CURRENT_DATABASE_NAME,
+        current_id = crate::database_identity::catalog::CURRENT_DATABASE_ID,
+    ))
+}
 
 const TEMP_SQL: &str = "DECLARE /* culprit */ @observed_at varchar(40)=CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z';
  SELECT /* culprit */ @observed_at AS observed_at,CAST(NULL AS nvarchar(128)) AS database_name,

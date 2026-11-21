@@ -111,7 +111,11 @@ pub(super) fn missing(
     }
     let mut missing = Vec::new();
     let common_requested = samples.iter().any(|sample| profile.common_requested(sample));
-    for field in profile.fields.iter().chain(profile.common_fields.iter().filter(|_| common_requested)) {
+    for field in profile
+        .fields
+        .iter()
+        .chain(profile.common_fields.iter().chain(profile.detailed_fields).filter(|_| common_requested))
+    {
         if population == PerformanceCounterPopulation::SelectedDatabase
             && !profile.database_field_ids.contains(&field.id)
         {
@@ -181,6 +185,8 @@ fn family_label(family: PerformanceCounterFamily) -> String {
         PerformanceCounterFamily::Transactions => t!("view.performance_counters.family.transactions"),
         PerformanceCounterFamily::Concurrency => t!("view.performance_counters.family.concurrency"),
         PerformanceCounterFamily::Errors => t!("view.performance_counters.family.errors"),
+        PerformanceCounterFamily::AccessMethods => t!("view.performance_counters.family.access_methods"),
+        PerformanceCounterFamily::Locks => t!("view.performance_counters.family.locks"),
     }
 }
 fn explanation(field: &PerformanceCounterSpec) -> String {
@@ -201,5 +207,7 @@ fn explanation(field: &PerformanceCounterSpec) -> String {
         PerformanceCounterFamily::Transactions => t!("view.performance_counters.explain.transactions"),
         PerformanceCounterFamily::Concurrency => t!("view.performance_counters.explain.concurrency"),
         PerformanceCounterFamily::Errors => t!("view.performance_counters.explain.errors"),
+        PerformanceCounterFamily::AccessMethods => t!("view.performance_counters.explain.access_methods"),
+        PerformanceCounterFamily::Locks => t!("view.performance_counters.explain.locks"),
     }
 }

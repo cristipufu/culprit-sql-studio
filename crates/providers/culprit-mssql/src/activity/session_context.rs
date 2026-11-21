@@ -49,6 +49,7 @@ pub(super) fn decode(
             request_database_id: optional_counter(row, "request_database_id")?,
             has_current_request: key.request.is_some() || !no_current_request,
             request_connection_id: optional_text(row, "request_connection_id")?,
+            idle_connection: super::idle_connections::decode(row, idle && established && key.request.is_none())?,
             times: MssqlSessionTimeTokens {
                 login_without_offset: key.session.generation.clone(),
                 last_request_start_without_offset: optional_text(row, "last_request_start")?

@@ -11,7 +11,12 @@ const LAYOUT: &str = r#"SELECT CAST(SERVERPROPERTY('EngineEdition') AS int) AS e
  CASE WHEN OBJECT_ID(N'sys.dm_tran_persistent_version_store_stats') IS NOT NULL THEN 1 ELSE 0 END AS native_view,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.databases')
  AND name=N'is_accelerated_database_recovery_on') THEN 1 ELSE 0 END AS adr_column"#;
-const ADR: &str = "SELECT CAST(is_accelerated_database_recovery_on AS int) AS adr FROM sys.databases WHERE database_id=DB_ID() OPTION(MAXDOP 1)";
+fn adr_query() -> String {
+    crate::database_identity::catalog::bind(&format!(
+        "SELECT CAST(is_accelerated_database_recovery_on AS int) AS adr FROM sys.databases WHERE {} OPTION(MAXDOP 1)",
+        crate::database_identity::catalog::predicate("")
+    ))
+}
 const STATISTICS: &str =
     "SELECT * FROM sys.dm_tran_persistent_version_store_stats WHERE database_id=DB_ID() OPTION(MAXDOP 1)";
 
@@ -31,7 +36,7 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<Option<MssqlPe
     if !boolean(layout, "native_view")? || !boolean(layout, "adr_column")? {
         return Err(CollectionStop::SourceUnavailable.error());
     }
-    let adr = reader.query(ADR, vec![], 2).await.map_err(ReadError::into_error)?;
+    let adr = reader.query(&adr_query(), vec![], 2).await.map_err(ReadError::into_error)?;
     let [adr] = adr.as_slice() else { return Err(invalid_data()) };
     if !boolean(adr, "adr")? {
         return Ok(None);

@@ -114,8 +114,8 @@ fn require_pair(
 }
 
 pub(super) async fn prove(fixture: &mut Fixture) -> Result<()> {
-    let pair = establish(fixture, HolderRequirement::Reservation).await?;
-    verify_metadata(fixture, &pair).await?;
+    let pair = Box::pin(establish(fixture, HolderRequirement::Reservation)).await?;
+    Box::pin(verify_metadata(fixture, &pair)).await?;
     save_cost_receipt(
         &fixture.directory,
         "reservation-acceptance",

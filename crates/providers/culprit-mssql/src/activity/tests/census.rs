@@ -303,3 +303,138 @@ async fn malformed_or_missing_native_elapsed_is_refused_and_the_original_source_
         assert_eq!(reader.query_count(), 1);
     }
 }
+
+fn idle_connection_row(visible: Val, count: Val, id: Val, connected: Val) -> Rec {
+    let row = census_row(55, None, "Sleeping");
+    let mut columns = row.columns().map(|(n, v)| (n, v.clone())).collect::<Vec<_>>();
+    columns.extend([
+        ("idle_connection_scope", Val::Bool(true)),
+        ("idle_connection_visibility", visible),
+        ("idle_connection_candidates", count),
+        ("idle_connection_id", id),
+        ("idle_connected_without_offset", connected),
+    ]);
+    Rec::of(&columns)
+}
+fn connection(row: &ActivityObservation) -> Option<&MssqlIdleSessionConnection> {
+    let SessionNativeContext::Mssql(native) = row.session_context.as_deref()?.native.as_deref()? else {
+        return None;
+    };
+    native.idle_connection.as_ref()
+}
+#[tokio::test]
+async fn explicit_census_adds_idle_primary_connection_without_changing_live_or_request_selection() {
+    let native = idle_connection_row(
+        Val::Bool(true),
+        Val::Int(1),
+        Val::Text("a8a44410-5033-4db1-9e90-79354ab31702".into()),
+        Val::Text("2019-01-01T00:00:00".into()),
+    );
+    let mut source = baseline_reader(vec![native]);
+    let (_, rows) = crate::telemetry::activity::capture(&mut source).await.unwrap();
+    assert!(matches!(connection(&rows[0]), Some(MssqlIdleSessionConnection::Observed { .. })));
+    assert!(rows[0].idle && rows[0].key.request.is_none() && rows[0].statement_identity.is_none());
+    assert!(rows[0].conditions(&ActivityPolicy::default()).is_empty());
+    assert_eq!(source.query_count(), 3);
+    let query = &source.io.calls[1].sql;
+    assert!(query.contains("IF @idle_connection_scope=1 AND @idle_connection_visibility=1"));
+    assert!(query.contains("SELECT TOP (2) CONVERT(varchar(36),c.connection_id)"));
+    assert!(
+        query.contains("c.parent_connection_id IS NULL") && query.contains("c.most_recent_session_id=s.session_id")
+    );
+    assert!(query.contains("current_request.session_id=s.session_id"));
+    assert!(
+        !query.contains("current_request.database_id"),
+        "foreign-database current requests must withhold idle identity"
+    );
+    assert!(!query.contains("COALESCE(r.connection_id"));
+    let ordinary = sql::metadata(IdentityDetail::Endpoint, page_server_reads::Availability::Unknown);
+    assert!(!ordinary.contains("idle_connection") && !ordinary.contains("sys.dm_exec_connections"));
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+#[test]
+fn idle_primary_candidates_withhold_ambiguity_missing_and_restricted_without_fabricating_requests() {
+    let uuid = || Val::Text("a8a44410-5033-4db1-9e90-79354ab31702".into());
+    let clock = || Val::Text("2019-01-01T00:00:00".into());
+    for (visible, count, id, at, expected) in [
+        (Val::Bool(true), Val::Int(0), Val::Null, Val::Null, MssqlIdleSessionConnection::Missing),
+        (Val::Bool(true), Val::Int(2), uuid(), clock(), MssqlIdleSessionConnection::Ambiguous),
+        (
+            Val::Bool(false),
+            Val::Null,
+            Val::Null,
+            Val::Null,
+            MssqlIdleSessionConnection::VisibilityUnavailable { permitted: Some(false) },
+        ),
+        (
+            Val::Null,
+            Val::Null,
+            Val::Null,
+            Val::Null,
+            MssqlIdleSessionConnection::VisibilityUnavailable { permitted: None },
+        ),
+    ] {
+        let row = rows::record(&idle_connection_row(visible, count, id, at)).unwrap().unwrap();
+        assert_eq!(connection(&row.facts), Some(&expected));
+        assert!(row.current_locator.is_none() && row.facts.request_counters.is_none());
+    }
+    for (count, id, at) in [
+        (Val::Int(3), uuid(), clock()),
+        (Val::Int(1), Val::Null, clock()),
+        (Val::Int(1), uuid(), Val::Null),
+        (Val::Int(0), uuid(), clock()),
+        (Val::Int(1), Val::Text("not-a-native-guid".into()), clock()),
+    ] {
+        assert!(rows::record(&idle_connection_row(Val::Bool(true), count, id, at)).is_err());
+    }
+}
+#[test]
+fn selected_database_request_absence_does_not_authorize_idle_connection_with_a_foreign_current_request() {
+    let native = idle_connection_row(
+        Val::Bool(true),
+        Val::Int(1),
+        Val::Text("a8a44410-5033-4db1-9e90-79354ab31702".into()),
+        Val::Text("2019-01-01T00:00:00".into()),
+    );
+    let foreign = replace(
+        &native,
+        &[
+            ("no_current_request", Val::Int(0)),
+            ("state", Val::Text("running".into())),
+            ("native_session_state", Val::Text("Running".into())),
+        ],
+    );
+    let row = rows::record(&foreign).unwrap().unwrap();
+    assert!(row.facts.key.request.is_none() && !row.facts.idle);
+    assert!(connection(&row.facts).is_none());
+    assert!(row.current_locator.is_none());
+    let mut active = census_row(55, Some(1), "Running");
+    let mut columns = active.columns().map(|(n, v)| (n, v.clone())).collect::<Vec<_>>();
+    columns.extend(
+        native
+            .columns()
+            .filter(|(name, _)| name.starts_with("idle_connection") || *name == "idle_connected_without_offset")
+            .map(|(n, v)| (n, v.clone())),
+    );
+    active = Rec::of(&columns);
+    let row = rows::record(&active).unwrap().unwrap();
+    assert!(connection(&row.facts).is_none());
+    let query = sql::census_metadata(IdentityDetail::AzureDatabase, page_server_reads::Availability::Unknown);
+    assert!(query.contains("IS_SRVROLEMEMBER('##MS_ServerStateReader##')"));
+    assert!(query.contains("IN(2,3,4,8)"));
+    assert!(
+        !super::super::visibility::connections().split("THEN").nth(1).unwrap().contains("HAS_PERMS_BY_NAME(NULL,NULL")
+    );
+}
+
+#[test]
+fn azure_and_unknown_request_population_scope_never_become_idle_connection_permission() {
+    for scope in [Val::Bool(false), Val::Null] {
+        let row = idle_connection_row(Val::Null, Val::Null, Val::Null, Val::Null);
+        let row = replace(&row, &[("idle_connection_scope", scope)]);
+        let record = rows::record(&row).unwrap().unwrap();
+        assert_eq!(connection(&record.facts), Some(&MssqlIdleSessionConnection::ScopeUnavailable));
+        let changed = replace(&row, &[("idle_connection_visibility", Val::Bool(true))]);
+        assert!(rows::record(&changed).is_err());
+    }
+}

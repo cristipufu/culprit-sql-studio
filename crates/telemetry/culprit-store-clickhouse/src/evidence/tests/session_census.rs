@@ -55,6 +55,16 @@ async fn missing_session_bodies_keep_original_mars_population_and_never_requery_
 #[tokio::test]
 async fn altered_client_lifetimes_large_totals_nullable_fields_or_connection_id_cannot_borrow_native_receipts() {
     for (case, pointer, value) in [
+        (
+            SessionCensusCase::IdleConnection,
+            "/session_context/native/data/idle_connection/connection_id",
+            json!("47dd5a75-5bb6-4487-89a7-a6b1b0d1ca12"),
+        ),
+        (
+            SessionCensusCase::IdleConnection,
+            "/session_context/native/data/idle_connection/connected_without_offset",
+            json!("2019-12-31T23:00:00.0033333"),
+        ),
         (SessionCensusCase::Mars, "/session_context/client_library", json!("another-library")),
         (SessionCensusCase::Mars, "/session_context/native/data/elapsed_ms", json!("600001")),
         (SessionCensusCase::Mars, "/session_context/native/data/session_database_id", json!("8")),

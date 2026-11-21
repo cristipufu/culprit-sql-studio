@@ -282,3 +282,67 @@ async fn native_backend_and_mutable_default_groups_replay_original_scope_kind_an
         assert_eq!(fixture.recovery_object_reads(), opened);
     }
 }
+
+#[tokio::test]
+async fn idle_primary_connection_uses_original_receipts_without_becoming_request_action_or_group_identity() {
+    for case in [
+        SessionCensusCase::IdleConnection,
+        SessionCensusCase::IdleConnectionMissing,
+        SessionCensusCase::IdleConnectionScopeUnavailable,
+        SessionCensusCase::IdleConnectionAmbiguous,
+        SessionCensusCase::IdleConnectionVisibilityUnknown,
+        SessionCensusCase::IdleConnectionVisibilityDenied,
+    ] {
+        let (source, rows) = test_support::session_census_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let before = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+        let analysis = culprit_engine::collected_resources::session_census(&capture).unwrap();
+        assert_eq!((analysis.report.observed_sessions, analysis.report.observed_requests), (1, 0));
+        let entry = &analysis.report.entries[0];
+        assert!(entry.idle && entry.activity.request.is_none());
+        entry.reference.as_ref().unwrap().validate_canonical_record(&source, &rows[0]).unwrap();
+        let id = entry.fields.iter().find(|field| field.key == "idle_connection_id").unwrap().value.as_deref();
+        assert_eq!(
+            id,
+            if matches!(case, SessionCensusCase::IdleConnection) {
+                Some("37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12")
+            } else {
+                None
+            }
+        );
+        let TelemetryRecord::Activity(original) = &rows[0] else { panic!() };
+        assert!(original.statement_identity.is_none() && original.conditions(&ActivityPolicy::default()).is_empty());
+        if matches!(case, SessionCensusCase::IdleConnection) {
+            let mut changed = original.as_ref().clone();
+            let Some(SessionNativeContext::Mssql(native)) =
+                changed.session_context.as_deref_mut().unwrap().native.as_deref_mut()
+            else {
+                panic!()
+            };
+            native.idle_connection = Some(MssqlIdleSessionConnection::Observed {
+                connection_id: "47dd5a75-5bb6-4487-89a7-a6b1b0d1ca12".into(),
+                connected_without_offset: "2019-12-31T23:00:00.0000000".into(),
+            });
+            assert!(changed.is_valid());
+            assert!(
+                entry
+                    .reference
+                    .as_ref()
+                    .unwrap()
+                    .validate_canonical_record(&source, &TelemetryRecord::from(changed))
+                    .is_err()
+            );
+            let mut exported = original.as_ref().clone();
+            let key = exported.key.clone();
+            exported.redact(culprit_core::Engine::Mssql);
+            assert!(exported.is_valid());
+            assert_eq!(exported.key, key);
+            assert!(
+                serde_json::to_string(&exported).unwrap().contains("37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12"),
+                "ordinary evidence export retains the original transport; explicit sharing withdraws it"
+            );
+        }
+        assert_eq!(fixture.recovery_object_reads(), before);
+    }
+}

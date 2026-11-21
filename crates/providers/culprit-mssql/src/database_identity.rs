@@ -5,6 +5,7 @@ use crate::{
 };
 use culprit_core::{DatabaseIdentity, Engine, Result, telemetry::CollectionStop};
 
+pub(crate) mod catalog;
 pub(crate) mod log_rates;
 
 const AZURE_COLUMNS: &str = "database_name,CONVERT(varchar(36),logical_database_guid) AS incarnation,CONVERT(varchar(36),physical_database_guid) AS physical_incarnation,CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(32)) AS updateability";

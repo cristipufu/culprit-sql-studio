@@ -17,6 +17,7 @@ fn authority(edition: i64, writable: Option<bool>) -> Rec {
         &crate::activity::database_context::tests::row(edition),
         &[
             ("selected_database_id", Val::Int(5)),
+            ("catalog_database_id", Val::Int(5)),
             (
                 "updateability",
                 writable

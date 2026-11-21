@@ -3,4 +3,4 @@
 /**
  * Families describe native populations. They do not declare the selected database or a causal owner.
  */
-export type PerformanceCounterFamily = "compilation" | "connections" | "buffer-cache" | "workspace-memory" | "plan-cache" | "temporary-tables" | "transaction-log" | "local-ssd-cache" | "workload-group" | "resource-pool" | "transactions" | "concurrency" | "errors";
+export type PerformanceCounterFamily = "compilation" | "connections" | "buffer-cache" | "workspace-memory" | "plan-cache" | "temporary-tables" | "transaction-log" | "local-ssd-cache" | "workload-group" | "resource-pool" | "transactions" | "concurrency" | "errors" | "access-methods" | "locks";

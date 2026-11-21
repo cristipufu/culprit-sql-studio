@@ -1,6 +1,7 @@
 //! The finite SQL Server performance-counter contract is shared by selection, decode and explanation.
 use crate::{key, telemetry::*};
 mod common;
+mod detailed;
 mod resource_governor;
 
 const CACHE_INSTANCES: &[&str] = &[
@@ -19,6 +20,7 @@ pub(super) static PROFILE: PerformanceCounterProfile = PerformanceCounterProfile
     database_field_ids: &["log_bytes_flushed", "log_flushes", "log_flush_wait"],
     investigation_fields: resource_governor::FIELDS,
     common_fields: common::FIELDS,
+    detailed_fields: detailed::FIELDS,
     fields: &[
         PerformanceCounterSpec {
             id: "batches",

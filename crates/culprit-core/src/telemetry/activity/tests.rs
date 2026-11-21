@@ -26,6 +26,7 @@ pub(crate) fn native_session_context(row: &mut ActivityObservation, state: &str,
             },
             has_current_request: !row.idle,
             request_connection_id: None,
+            idle_connection: None,
         }))),
     }));
 }

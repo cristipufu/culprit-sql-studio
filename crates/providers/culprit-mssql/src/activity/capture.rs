@@ -22,17 +22,36 @@ pub(crate) enum ActivityAuthorityPolicy {
     AdministrativeCandidates,
     MetadataOnly,
 }
+enum MetadataProjection {
+    Standard,
+    Census,
+}
+
 impl PendingActivityFrame {
     pub(crate) async fn begin<R: crate::read::NativeRead>(
         reader: &mut ActivityReader<R>,
         authority: ActivityAuthorityPolicy,
+    ) -> Result<Self> {
+        Self::begin_with_projection(reader, authority, MetadataProjection::Standard).await
+    }
+    pub(crate) async fn begin_census<R: crate::read::NativeRead>(reader: &mut ActivityReader<R>) -> Result<Self> {
+        Self::begin_with_projection(reader, ActivityAuthorityPolicy::RetainPartialBaseline, MetadataProjection::Census)
+            .await
+    }
+    async fn begin_with_projection<R: crate::read::NativeRead>(
+        reader: &mut ActivityReader<R>,
+        authority: ActivityAuthorityPolicy,
+        projection: MetadataProjection,
     ) -> Result<Self> {
         let before = if authority != ActivityAuthorityPolicy::MetadataOnly {
             AuthorityRead::admit(database_context::initial(reader).await, authority)?
         } else {
             AuthorityRead::unobserved()
         };
-        let baseline = reader.observe_baseline().await?;
+        let baseline = match projection {
+            MetadataProjection::Standard => reader.observe_baseline().await?,
+            MetadataProjection::Census => reader.observe_census_baseline().await?,
+        };
         Ok(Self { baseline, before, authority })
     }
     pub(crate) fn require_complete(&self) -> Result<()> {

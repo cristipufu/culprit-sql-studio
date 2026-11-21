@@ -26,8 +26,10 @@ pub(crate) fn frame_query(rows: &str, identity: IdentityDetail, policy: QueryPol
     format!("{FRAME_CLOCK}{}", frame_select(rows, identity, policy))
 }
 
-pub(super) const FRAME_CLOCK: &str =
-    "\nDECLARE /* culprit */ @at datetime2=SYSUTCDATETIME(), @native_now datetime2=SYSDATETIME();\n";
+pub(super) const FRAME_CLOCK: &str = concat!(
+    include_str!("../database_identity/catalog_binding.sql"),
+    "\nDECLARE /* culprit */ @at datetime2=SYSUTCDATETIME(), @native_now datetime2=SYSDATETIME();\n"
+);
 
 /// Conditional projections share one native point clock without redeclaring batch-scoped SQL variables.
 pub(super) fn frame_select(rows: &str, identity: IdentityDetail, policy: QueryPolicy) -> String {
@@ -62,7 +64,7 @@ pub(super) fn frame_select_with_context(
  CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(32)) AS updateability,
  {replica_id} AS replica_id,
  CONVERT(varchar(128),SERVERPROPERTY('ProductVersion')) AS server_version,
- (SELECT compatibility_level FROM sys.databases WHERE database_id=DB_ID()) AS compatibility_level,
+ (SELECT compatibility_level FROM sys.databases WHERE {catalog_predicate}) AS compatibility_level,
  CAST(PARSENAME(CONVERT(varchar(128),SERVERPROPERTY('ProductVersion')),4) AS int) AS major,
  SUSER_SNAME() AS reader_login,USER_NAME() AS reader_user,
  CASE WHEN (CAST(SERVERPROPERTY('EngineEdition') AS int)=5 AND
@@ -72,11 +74,13 @@ pub(super) fn frame_select_with_context(
  d.database_name, CONVERT(varchar(40),@at,126)+'Z' AS observed_at,
  CONVERT(varchar(40),@native_now,126) AS native_observed_at,
  {context_columns}{identity_columns}, a.*
-FROM (SELECT DB_NAME() AS database_name) d
+FROM (SELECT {current_database_name} AS database_name) d
 {identity_join}
 OUTER APPLY ({rows}) a
 {ordering} {hints}"#,
-        replica_id = crate::replica::ID_EXPRESSION
+        replica_id = crate::replica::ID_EXPRESSION,
+        catalog_predicate = crate::database_identity::catalog::predicate(""),
+        current_database_name = crate::database_identity::catalog::CURRENT_DATABASE_NAME
     )
 }
 
@@ -120,9 +124,18 @@ pub(crate) fn request_columns(availability: Availability) -> String {
 }
 
 pub(super) fn metadata(identity: IdentityDetail, availability: Availability) -> String {
+    let rows = metadata_rows(availability, "", "");
+    request_frame_query(&rows, identity, QueryPolicy::Activity)
+}
+
+pub(super) fn census_metadata(identity: IdentityDetail, availability: Availability) -> String {
+    super::idle_connections::query(identity, availability)
+}
+
+pub(super) fn metadata_rows(availability: Availability, extra_columns: &str, extra_relation: &str) -> String {
     let columns = request_columns(availability);
-    let session_context = super::session_context::COLUMNS;
-    let rows = format!(
+    let session_context = format!("{}{extra_columns}", super::session_context::COLUMNS);
+    format!(
         r#"SELECT {columns},{session_context},
   CASE WHEN s.session_id IN(SELECT blocking_session_id FROM sys.dm_exec_requests WHERE blocking_session_id>0) THEN 1 ELSE 0 END AS reported_blocker,
   CASE WHEN NOT EXISTS(SELECT 1 FROM sys.dm_exec_requests ar WHERE ar.session_id=s.session_id) THEN 1 ELSE 0 END AS no_current_request,
@@ -140,13 +153,12 @@ pub(super) fn metadata(identity: IdentityDetail, availability: Availability) -> 
   JOIN sys.dm_tran_database_transactions dt ON dt.transaction_id=st.transaction_id AND (@P2=0 OR dt.database_id=DB_ID())
   JOIN sys.dm_tran_active_transactions at ON at.transaction_id=st.transaction_id
   WHERE st.session_id=s.session_id ORDER BY at.transaction_begin_time,st.transaction_id,dt.database_id
- ) tx
+ ) tx{extra_relation}
  WHERE s.is_user_process=1 AND s.session_id<>@@SPID
   AND (@P2=0 OR r.request_id IS NOT NULL OR s.database_id=DB_ID() OR (s.open_transaction_count>0 AND tx.transaction_id IS NOT NULL)
    OR s.session_id IN(SELECT blocking_session_id FROM sys.dm_exec_requests WHERE database_id=DB_ID() AND blocking_session_id>0))
 "#
-    );
-    request_frame_query(&rows, identity, QueryPolicy::Activity)
+    )
 }
 
 // XML selectors work on databases whose compatibility level predates OPENJSON. Values are typed and validated.

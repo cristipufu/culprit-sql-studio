@@ -98,8 +98,8 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.database-performance-counters", DatabasePerformanceCounters)
         .on_editions(&[2, 3, 4])
         .bounded(state::local_point_budget)
-        .version(2),
-    state!("mssql.suspect-pages", SuspectPages).on_editions(&[2, 3, 4]).bounded(state::local_point_budget).version(2),
+        .version(3),
+    state!("mssql.suspect-pages", SuspectPages).on_editions(&[2, 3, 4]).bounded(state::local_point_budget).version(3),
     Registration::database(
         "mssql.agent-jobs",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Jobs)),
@@ -115,14 +115,14 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(hyperscale_log_components::bounded_budget)
     .on_editions(&[5])
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.query-history",
         RecipeSelector::Collection(TelemetryCollection::QueryHistory),
         |pool, request, host, port| Ok(Box::new(Source::new(pool, request, host, port)?)),
     )
     .baseline()
-    .version(6),
+    .version(7),
     Registration::database(
         "mssql.resource-history",
         RecipeSelector::Collection(TelemetryCollection::ResourceHistory),
@@ -169,19 +169,19 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(activity::bounded_budget)
     .baseline()
-    .version(6),
+    .version(7),
     Registration::database(
         "mssql.page-wait-targets",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)),
         |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
     )
     .bounded(page_waits::bounded_budget)
-    .version(3),
+    .version(4),
     Registration::database("mssql.page-wait-tasks", RecipeSelector::PageWaitTasks, |pool, request, host, port| {
         Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?))
     })
     .bounded(page_waits::bounded_budget)
-    .version(3),
+    .version(4),
     Registration::database(
         "mssql.shared-tempdb-page-wait-targets",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)),
@@ -189,26 +189,26 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
     .bounded(page_waits::bounded_budget)
-    .version(4),
+    .version(5),
     Registration::database("mssql.focused-page-wait", RecipeSelector::FocusedPageWait, |pool, request, host, port| {
         Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?))
     })
     .bounded(page_waits::focused_budget)
-    .version(3),
+    .version(4),
     Registration::database(
         "mssql.focused-page-task-holders",
         RecipeSelector::FocusedPageTaskHolders,
         |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
     )
     .bounded(page_waits::holder_budget)
-    .version(3),
+    .version(4),
     Registration::database(
         "mssql.focused-page-wait-writers",
         RecipeSelector::FocusedPageWaitWriters,
         |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
     )
     .bounded(page_waits::writer_budget)
-    .version(4),
+    .version(5),
     Registration::database(
         "mssql.focused-shared-tempdb-page-wait",
         RecipeSelector::FocusedPageWait,
@@ -216,7 +216,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
     .bounded(page_waits::focused_budget)
-    .version(4),
+    .version(5),
     Registration::database(
         "mssql.focused-compiler-admission",
         RecipeSelector::FocusedCompilationAdmission,
@@ -225,7 +225,7 @@ const REGISTRATIONS: &[Registration] = &[
         },
     )
     .bounded(compiler_admission::focused_budget)
-    .version(3),
+    .version(4),
     Registration::database(
         "mssql.focused-shared-compiler-admission",
         RecipeSelector::FocusedCompilationAdmission,
@@ -235,21 +235,21 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
     .bounded(compiler_admission::focused_budget)
-    .version(3),
+    .version(4),
     Registration::database(
         "mssql.current-request-memory",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestMemory)),
         |pool, request, host, port| Ok(Box::new(request_memory::MemorySource::new(pool, request, host, port)?)),
     )
     .bounded(request_memory::bounded_budget)
-    .version(5),
+    .version(6),
     Registration::database(
         "mssql.focused-request-memory",
         RecipeSelector::FocusedRequestMemory,
         |pool, request, host, port| Ok(Box::new(request_memory::MemorySource::new(pool, request, host, port)?)),
     )
     .bounded(request_memory::bounded_budget)
-    .version(5),
+    .version(6),
     Registration::database(
         "mssql.cache-entry-memory",
         RecipeSelector::CacheEntryMemory,
@@ -258,14 +258,14 @@ const REGISTRATIONS: &[Registration] = &[
         },
     )
     .bounded(cache_entry_memory::bounded_budget)
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.task-space",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::TaskSpace)),
         |pool, request, host, port| Ok(Box::new(task_space::TaskSpaceSource::new(pool, request, host, port)?)),
     )
     .bounded(task_space::bounded_budget)
-    .version(4),
+    .version(5),
     Registration::database(
         "mssql.cleanup",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cleanup)),
@@ -273,11 +273,12 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(cleanup::bounded_budget)
     .on_editions(crate::instance::SUPPORTED_EDITIONS)
-    .version(2),
+    .version(3),
     Registration::database("mssql.table-memory", RecipeSelector::TableMemory, |pool, request, host, port| {
         Ok(Box::new(table_memory::TableMemorySource::new(pool, request, host, port)?))
     })
-    .bounded(table_memory::bounded_budget),
+    .bounded(table_memory::bounded_budget)
+    .version(2),
     Registration::database(
         "mssql.columnstore-rowgroups",
         RecipeSelector::ColumnstoreRowgroups,
@@ -286,7 +287,7 @@ const REGISTRATIONS: &[Registration] = &[
         },
     )
     .bounded(columnstore_rowgroups::bounded_budget)
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.full-text-populations",
         RecipeSelector::FullTextPopulations,
@@ -294,20 +295,22 @@ const REGISTRATIONS: &[Registration] = &[
             Ok(Box::new(full_text_populations::FullTextPopulationSource::new(pool, request, host, port)?))
         },
     )
-    .bounded(full_text_populations::bounded_budget),
+    .bounded(full_text_populations::bounded_budget)
+    .version(2),
     Registration::database(
         "mssql.cdc",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cdc)),
         |pool, request, host, port| Ok(Box::new(change_capture::ChangeCaptureSource::new(pool, request, host, port)?)),
     )
     .bounded(change_capture::bounded_budget)
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.change-feed",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::ChangeFeed)),
         |pool, request, host, port| Ok(Box::new(change_capture::ChangeCaptureSource::new(pool, request, host, port)?)),
     )
-    .bounded(change_capture::bounded_budget),
+    .bounded(change_capture::bounded_budget)
+    .version(2),
     Registration::database(
         "mssql.backup-history",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::BackupHistory)),
@@ -315,8 +318,8 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(backup_history::bounded_budget)
     .on_editions(&[2, 3, 4, 5, 8])
-    .version(2),
-    state!("mssql.operational", Operational).baseline().version(9),
+    .version(3),
+    state!("mssql.operational", Operational).baseline().version(10),
     state!("mssql.process-cpu", ProcessCpu)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .on_editions(&[2, 3, 4])
@@ -328,7 +331,7 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
-        .version(11),
+        .version(12),
     state!("mssql.memory-failures", MemoryFailures)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance), RecipeSubject::Shared(SharedResourceKind::Pool)])
         .bounded(state::memory_failure_budget)
@@ -337,7 +340,7 @@ const REGISTRATIONS: &[Registration] = &[
         .version(2),
     state!("mssql.plan-cache-summary", PlanCacheSummary).baseline().version(2),
     state!("mssql.missing-indexes", MissingIndexes).version(2),
-    state!("mssql.tuning", Tuning).bounded(state::tuning_budget).version(3),
+    state!("mssql.tuning", Tuning).bounded(state::tuning_budget).version(4),
     state!("mssql.pool-wait-counters", WaitCounters)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Pool)])
         .on_editions(&[crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE])
@@ -351,7 +354,7 @@ const REGISTRATIONS: &[Registration] = &[
     .bounded(replication::bounded_budget)
     .baseline()
     .version(4),
-    state!("mssql.settings", Settings).bounded(state::settings_budget).baseline().version(6),
+    state!("mssql.settings", Settings).bounded(state::settings_budget).baseline().version(7),
     Registration::database(
         "mssql.resource-pool-settings",
         RecipeSelector::ResourcePoolSettings,
@@ -360,7 +363,7 @@ const REGISTRATIONS: &[Registration] = &[
     .shared(&[RecipeSubject::Database, RecipeSubject::Shared(SharedResourceKind::Pool)])
     .on_editions(&[5])
     .bounded(state::pool_settings_budget),
-    streamed!("mssql.statement-grants", StatementGrants, grants::Grants).version(2),
+    streamed!("mssql.statement-grants", StatementGrants, grants::Grants).version(3),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations).version(2),
     streamed!("mssql.tables", Tables, tables::Tables).version(8),
     streamed!("mssql.foreign-keys", ForeignKeys, foreign_keys::ForeignKeys).version(2),
@@ -368,14 +371,14 @@ const REGISTRATIONS: &[Registration] = &[
     streamed!("mssql.statistics", Statistics, statistics::Statistics).version(2),
     streamed!("mssql.indexes", Indexes, indexes::Indexes).version(5),
     streamed!("mssql.check-constraints", CheckConstraints, check_constraints::CheckConstraints).version(2),
-    streamed!("mssql.query-compilation", QueryCompilation, compilation::QueryCompilation).version(4),
-    streamed!("mssql.cached-runtime", CachedRuntime, cached_runtime::CachedRuntime).version(3),
+    streamed!("mssql.query-compilation", QueryCompilation, compilation::QueryCompilation).version(5),
+    streamed!("mssql.cached-runtime", CachedRuntime, cached_runtime::CachedRuntime).version(4),
     streamed!("mssql.objects", Objects, objects::Objects).version(2),
     streamed!("mssql.triggers", Triggers, triggers::Triggers).version(2),
     streamed!("mssql.partitions", Partitions, partitions::Partitions).version(2),
-    streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions).version(6),
+    streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions).version(7),
     streamed!("mssql.retained-plans", RetainedPlans, retained_definitions::RetainedPlans)
-        .version(7)
+        .version(8)
         .bounded(retained_definitions::bounded_budget),
 ];
 

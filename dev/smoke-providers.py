@@ -77,6 +77,7 @@ OPTIONAL_NATIVE_MODULES = {
         "telemetry::native_tests::group_replication::", "telemetry::native_tests::galera::",
     ),
     "culprit-mssql": (
+        "activity::native_tests::census::idle_connections::",
         "telemetry::replication::native_tests::", "jobs::",
         "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request",
         "local_native_writer_plans_keep_targeted_writes_separate_from_readers_and_other_resources",

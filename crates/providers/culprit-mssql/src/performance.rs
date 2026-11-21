@@ -37,7 +37,10 @@ impl Population<'_> {
             Self::Shared => specs().iter().find(|spec| spec.matches(object, name, instance)),
             Self::InstanceInvestigation => {
                 specs().iter().find(|spec| spec.matches(object, name, instance)).or_else(|| {
-                    culprit_core::Engine::Mssql.spec().performance_counters()?.common_field(object, name, instance)
+                    let profile = culprit_core::Engine::Mssql.spec().performance_counters()?;
+                    profile
+                        .common_field(object, name, instance)
+                        .or_else(|| profile.detailed_field(object, name, instance))
                 })
             }
             Self::Database(owner) => {
@@ -74,24 +77,19 @@ fn query(governed: bool) -> String {
         .performance_counters()
         .map(|profile| profile.common_fields)
         .unwrap_or_default();
-    let selected =
-        specs().iter().chain(common.iter().filter(|_| governed)).chain(investigation.iter().filter(|_| governed));
-    let filter = selected
-        .map(|spec| {
-            let family =
-                spec.object_family.map(|family| format!("object_name LIKE N'%{family}%' AND ")).unwrap_or_default();
-            let instance = match spec.instances {
-                PerformanceCounterInstances::Uninstanced => " AND RTRIM(instance_name)=N''".into(),
-                PerformanceCounterInstances::Named(names) => format!(
-                    " AND RTRIM(instance_name) IN ({})",
-                    names.iter().map(|name| format!("N'{name}'")).collect::<Vec<_>>().join(",")
-                ),
-                PerformanceCounterInstances::Any => String::new(),
-            };
-            format!("({family}counter_name=N'{}'{instance})", spec.native_name)
-        })
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    let detailed = culprit_core::Engine::Mssql
+        .spec()
+        .performance_counters()
+        .map(|profile| profile.detailed_fields)
+        .unwrap_or_default();
+    let selected = specs()
+        .iter()
+        .chain(common.iter().filter(|_| governed))
+        .chain(investigation.iter().filter(|_| governed))
+        .map(|spec| (spec, false))
+        .chain(detailed.iter().filter(|_| governed).map(|spec| (spec, true)));
+    let filter =
+        selected.map(|(spec, exact_object)| counter_predicate(spec, exact_object)).collect::<Vec<_>>().join(" OR ");
     let extra = if governed { resource_governor::columns() } else { String::new() };
     let relation = if governed { resource_governor::FROM } else { "FROM sys.dm_os_performance_counters" };
     format!(
@@ -103,6 +101,27 @@ CONVERT(nvarchar(128),DATABASEPROPERTYEX(DB_NAME(),N'Edition')) AS database_edit
 CONVERT(nvarchar(128),DATABASEPROPERTYEX(DB_NAME(),N'ReplicaID')) AS replica_id{extra}
 {relation} WHERE {filter} OPTION(MAXDOP 1)"
     )
+}
+fn counter_predicate(spec: &PerformanceCounterSpec, exact_object: bool) -> String {
+    let family = spec
+        .object_family
+        .map(|family| {
+            if exact_object {
+                format!("RIGHT(RTRIM(object_name),LEN(N':{family}'))=N':{family}' AND ")
+            } else {
+                format!("object_name LIKE N'%{family}%' AND ")
+            }
+        })
+        .unwrap_or_default();
+    let instance = match spec.instances {
+        PerformanceCounterInstances::Uninstanced => " AND RTRIM(instance_name)=N''".into(),
+        PerformanceCounterInstances::Named(names) => format!(
+            " AND RTRIM(instance_name) IN ({})",
+            names.iter().map(|name| format!("N'{name}'")).collect::<Vec<_>>().join(",")
+        ),
+        PerformanceCounterInstances::Any => String::new(),
+    };
+    format!("({family}counter_name=N'{}'{instance})", spec.native_name)
 }
 pub(crate) async fn read<R: NativeRead>(reader: &mut R, limit: usize) -> Result<PerformanceRead> {
     if specs().is_empty() {

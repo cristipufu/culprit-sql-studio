@@ -35,12 +35,14 @@ async fn shared_log_uses_the_original_bounded_projection_with_native_database_tw
 }
 
 #[test]
-fn ordinary_database_log_template_and_default_scan_population_remain_byte_for_byte_unchanged() {
+fn current_log_catalog_selection_is_bound_without_changing_the_shared_tempdb_or_default_population() {
     let sql = Kind::Log.sql();
-    assert_eq!(
-        culprit_core::telemetry::digest(sql.as_bytes()),
-        "3768ff0c254c704159ec14523d9647155ccf4d57f842e09d884d252441b606f4"
-    );
+    assert!(sql.starts_with(crate::database_identity::catalog::BINDING));
+    assert!(sql.contains("FROM sys.databases WHERE name=@culprit_catalog_current_name) AS reuse_wait"));
+    assert!(!sql.contains("WHERE database_id=DB_ID()"));
+    let shared = Kind::TempLog.sql();
+    assert!(!shared.contains("@culprit_catalog_current"));
+    assert!(shared.contains("FROM sys.databases WHERE database_id=2) AS reuse_wait"));
     assert!(!sql.contains("tempdb") && !sql.contains("database_id AS database_id"));
     assert!(!Kind::SCAN.contains(&Kind::TempLog));
 }

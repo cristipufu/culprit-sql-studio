@@ -140,3 +140,5 @@ fn an_observed_uninstanced_descriptor_does_not_borrow_a_rejected_inputs_instance
     assert_eq!(entry.metrics.len(), 2);
     assert_eq!(entry.metrics[0].text.as_deref(), Some("-1"));
 }
+
+mod average_inputs;

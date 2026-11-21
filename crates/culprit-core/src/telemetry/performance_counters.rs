@@ -61,6 +61,8 @@ pub enum PerformanceCounterFamily {
     Transactions,
     Concurrency,
     Errors,
+    AccessMethods,
+    Locks,
 }
 
 pub struct PerformanceCounterSpec {
@@ -98,6 +100,8 @@ pub struct PerformanceCounterProfile {
     pub investigation_fields: &'static [PerformanceCounterSpec],
     /// Additional documented Common inputs, retained only by explicit instance investigations.
     pub common_fields: &'static [PerformanceCounterSpec],
+    /// Fixed Detailed inputs retained by the same explicit instance investigation, never ordinary/default reads.
+    pub detailed_fields: &'static [PerformanceCounterSpec],
     /// Explicit native descriptors eligible for the separately bound selected-database population.
     pub database_field_ids: &'static [&'static str],
 }
@@ -129,6 +133,7 @@ impl PerformanceCounterProfile {
             .find(|field| field.matches(object, name, instance))
             .or_else(|| self.investigation_field(object, name, instance))
             .or_else(|| self.common_field(object, name, instance))
+            .or_else(|| self.detailed_field(object, name, instance))
     }
     pub fn investigation_field(
         &self,
@@ -136,18 +141,13 @@ impl PerformanceCounterProfile {
         name: &str,
         instance: Option<&str>,
     ) -> Option<&PerformanceCounterSpec> {
-        self.investigation_fields.iter().find(|field| {
-            field.native_name == name
-                && field.instances.accepts(instance)
-                && field.object_family.is_some_and(|family| object.ends_with(&format!(":{family}")))
-        })
+        qualified_field(self.investigation_fields, object, name, instance)
     }
     pub fn common_field(&self, object: &str, name: &str, instance: Option<&str>) -> Option<&PerformanceCounterSpec> {
-        self.common_fields.iter().find(|field| {
-            field.native_name == name
-                && field.instances.accepts(instance)
-                && field.object_family.is_some_and(|family| object.ends_with(&format!(":{family}")))
-        })
+        qualified_field(self.common_fields, object, name, instance)
+    }
+    pub fn detailed_field(&self, object: &str, name: &str, instance: Option<&str>) -> Option<&PerformanceCounterSpec> {
+        qualified_field(self.detailed_fields, object, name, instance)
     }
     pub fn common_requested(&self, sample: &NativeCounterSet) -> bool {
         sample.properties.get(PERFORMANCE_COUNTER_PROFILE_PROPERTY).map(String::as_str)
@@ -178,10 +178,14 @@ impl PerformanceCounterProfile {
                 None
             }
         } else {
-            self.fields
-                .iter()
-                .find(|field| field.matches(object, name, instance))
-                .or_else(|| self.common_requested(sample).then(|| self.common_field(object, name, instance)).flatten())
+            self.fields.iter().find(|field| field.matches(object, name, instance)).or_else(|| {
+                self.common_requested(sample)
+                    .then(|| {
+                        self.common_field(object, name, instance)
+                            .or_else(|| self.detailed_field(object, name, instance))
+                    })
+                    .flatten()
+            })
         }
     }
 
@@ -257,14 +261,16 @@ impl PerformanceCounterProfile {
             {
                 return Err(CollectionStop::InvalidPage.error());
             }
-            if ratio.kind == CounterRatioKind::BufferCacheHit && !self.common_requested(sample) {
+            if matches!(ratio.kind, CounterRatioKind::BufferCacheHit | CounterRatioKind::LockWaitAverageInputs)
+                && !self.common_requested(sample)
+            {
                 return Err(CollectionStop::InvalidPage.error());
             }
             if ratio.kind == CounterRatioKind::PlanCacheHit && ratio.numerator.is_none() && ratio.base.is_none() {
                 return Err(CollectionStop::InvalidPage.error());
             }
             for (key, role) in
-                [(&ratio.numerator, CounterNature::FractionNumerator), (&ratio.base, CounterNature::FractionBase)]
+                [(&ratio.numerator, ratio.kind.numerator_meaning().0), (&ratio.base, CounterNature::FractionBase)]
             {
                 let Some(key) = key else { continue };
                 let descriptor = sample
@@ -318,6 +324,20 @@ impl PerformanceCounterProfile {
                 || value == MSSQL_COMMON_COUNTER_PROFILE
         })
     }
+}
+
+/// Explicit investigation descriptors require an exact native object suffix and declared instance population.
+fn qualified_field<'a>(
+    fields: &'a [PerformanceCounterSpec],
+    object: &str,
+    name: &str,
+    instance: Option<&str>,
+) -> Option<&'a PerformanceCounterSpec> {
+    fields.iter().find(|field| {
+        field.native_name == name
+            && field.instances.accepts(instance)
+            && field.object_family.is_some_and(|family| object.ends_with(&format!(":{family}")))
+    })
 }
 
 #[cfg(test)]

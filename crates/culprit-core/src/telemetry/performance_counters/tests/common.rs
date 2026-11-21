@@ -1,5 +1,5 @@
 use super::*;
-fn sample() -> NativeCounterSet {
+pub(super) fn sample() -> NativeCounterSet {
     let object = "SQLServer:Buffer Manager";
     let counters = [
         ("hits", "Buffer cache hit ratio", 537003264, CounterNature::FractionNumerator, "3"),
@@ -52,7 +52,13 @@ fn common_roster_is_explicit_opt_in_and_keeps_the_existing_default_and_applicati
     assert!(profile.common_field("SQLServer:Databases", "Transactions/sec", Some("app")).is_none());
     assert!(profile.common_field("SQLServer:Databases", "Transactions/sec", Some("_Total")).is_some());
     let mut keys = std::collections::BTreeSet::new();
-    for field in profile.fields.iter().chain(profile.common_fields).chain(profile.investigation_fields) {
+    for field in profile
+        .fields
+        .iter()
+        .chain(profile.common_fields)
+        .chain(profile.investigation_fields)
+        .chain(profile.detailed_fields)
+    {
         assert!(keys.insert(field.id));
     }
 }

@@ -280,3 +280,27 @@ fn standalone_finding_exports_do_not_retain_private_cached_grant_read_receipts()
     assert!(!serde_json::to_string(&shared).unwrap().to_ascii_lowercase().contains("new-private"));
     assert_eq!(shared.metrics.len(), finding.metrics.len());
 }
+
+#[test]
+fn explicit_activity_sharing_withdraws_idle_transport_without_rewriting_the_ordinary_original() {
+    let original = crate::telemetry::activity_frame::tests::idle_connection();
+    let mut shared = original.clone();
+    redact_activity_context_for_sharing(&mut shared);
+    assert!(shared.is_valid());
+    assert_eq!(shared.key, original.key);
+    assert_eq!(shared.scope, original.scope);
+    assert_eq!(shared.session_counters, original.session_counters);
+    let native = |row: &ActivityObservation| {
+        let Some(SessionNativeContext::Mssql(native)) = row.session_context.as_deref().unwrap().native.as_deref()
+        else {
+            unreachable!()
+        };
+        native.clone()
+    };
+    assert!(native(&original).idle_connection.is_some());
+    assert!(native(&shared).idle_connection.is_none());
+    assert_eq!(native(&shared).request_connection_id, None);
+    let before = serde_json::to_value(&shared).unwrap();
+    redact_activity_context_for_sharing(&mut shared);
+    assert_eq!(serde_json::to_value(&shared).unwrap(), before);
+}

@@ -27,6 +27,7 @@ async fn all_fixed_native_fields_use_one_query_without_entering_the_original_app
                 CounterNature::Cumulative => 272_696_576,
                 CounterNature::Gauge => 65_792,
                 CounterNature::FractionNumerator => 537_003_264,
+                CounterNature::AverageNumerator => 1_073_874_176,
                 CounterNature::FractionBase => 1_073_939_712,
                 CounterNature::Unknown => unreachable!(),
             };

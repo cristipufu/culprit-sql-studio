@@ -160,3 +160,21 @@ test("native worker participants keep raw evidence without entering client group
     expect(html).not.toContain("sig-dot");
   }
 });
+
+test("original idle primary connection is folded context and never supplies a request or progress target", () => {
+  for (const name of ["idle-connection", "idle-connection-missing", "idle-connection-scope-unavailable", "idle-connection-ambiguous", "idle-connection-visibility-unknown", "idle-connection-visibility-denied"] as const) {
+    const { report } = sessionCensusCase(name);
+    const html = renderToStaticMarkup(<SessionCensus report={report} />);
+    const entry = report.entries[0]!;
+    const id = entry.fields.find((field) => field.key === "idle_connection_id")!;
+    expect(entry.idle).toBe(true);
+    expect(entry.activity.request).toBeNull();
+    expect(report.observed_requests).toBe(0);
+    expect(id.value).toBe(name === "idle-connection" ? "37dd5a75-5bb6-4487-89a7-a6b1b0d1ca12" : null);
+    expect(html).toContain(entry.fields.find((field) => field.key === "idle_connection_state")!.value!);
+    expect(html).not.toContain("<details open");
+    expect(html).not.toContain("sig-dot");
+    const live = sessionCensusLive(name);
+    expect(liveSessionPresentation(live).canInspect(live.sessions[0]!)).toBe(false);
+  }
+});

@@ -299,7 +299,10 @@ fn created_since_server_start(started_at: Option<&str>, created: String) -> Opti
 async fn usage_counted_since(client: &mut impl NativeRead, probe: &Probe) -> Option<String> {
     let r = crate::read::one(
         client,
-        "SELECT is_auto_close_on AS auto_close, CONVERT(varchar(19), DATEADD(minute, DATEDIFF(minute, GETDATE(), GETUTCDATE()), create_date), 126) + 'Z' AS created FROM sys.databases WHERE database_id = DB_ID()",
+        &crate::database_identity::catalog::bind(&format!(
+            "SELECT is_auto_close_on AS auto_close, CONVERT(varchar(19), DATEADD(minute, DATEDIFF(minute, GETDATE(), GETUTCDATE()), create_date), 126) + 'Z' AS created FROM sys.databases WHERE {}",
+            crate::database_identity::catalog::predicate("")
+        )),
     )
     .await
     .ok()?;
@@ -789,6 +792,27 @@ mod tests {
                 assert_eq!(outcome.reason, failed_reason, "limited visibility cannot replace a recorded failure");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn scan_counter_lifetime_selects_the_original_catalog_name_without_an_extra_read_or_denial_fallback() {
+        use crate::{
+            resources::test_support::FakeRead,
+            value::{Rec, Val},
+        };
+        let probe = crate::probe::tests::probe(crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE, false);
+        let original =
+            Rec::of(&[("auto_close", Val::Bool(false)), ("created", Val::Text("2020-01-01T06:00:00Z".into()))]);
+        let mut native = FakeRead::new(vec![Ok(vec![original])]);
+        assert_eq!(super::usage_counted_since(&mut native, &probe).await.as_deref(), Some("2020-01-01T06:00:00Z"));
+        assert_eq!(native.calls.len(), 1);
+        assert!(native.calls[0].sql.starts_with(crate::database_identity::catalog::BINDING));
+        assert!(native.calls[0].sql.contains("FROM sys.databases WHERE name=@culprit_catalog_current_name"));
+        assert!(!native.calls[0].sql.contains("database_id = DB_ID()"));
+        let denied = culprit_core::Error::new(culprit_core::ErrorCode::PermissionDenied, "fixture denied");
+        let mut native = FakeRead::new(vec![Err(denied.into())]);
+        assert!(super::usage_counted_since(&mut native, &probe).await.is_none());
+        assert_eq!(native.calls.len(), 1);
     }
 
     #[test]

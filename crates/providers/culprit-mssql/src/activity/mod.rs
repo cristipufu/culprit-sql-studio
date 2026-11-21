@@ -2,6 +2,7 @@
 pub(crate) mod capture;
 pub(crate) mod compiler_admission;
 pub(crate) mod database_context;
+mod idle_connections;
 pub(crate) mod memory;
 pub(crate) mod page_server_reads;
 pub(crate) mod page_targets;
@@ -9,6 +10,7 @@ pub(crate) mod participants;
 mod resources;
 mod rows;
 mod session_context;
+mod visibility;
 pub(crate) use session_context::{ESTABLISHED_SESSION_SQL, established_login};
 pub(crate) mod sql;
 mod statement_identity;
@@ -265,10 +267,17 @@ impl<R: NativeRead> ActivityReader<R> {
     pub(crate) async fn close(&mut self) -> SourceShutdown {
         self.io.close().await
     }
+    pub(crate) async fn observe_census_baseline(&mut self) -> Result<ActivityBaseline> {
+        let sql = sql::census_metadata(self.options.identity, self.request_page_server_read_capability);
+        self.observe_metadata(&sql).await
+    }
     pub(crate) async fn observe_baseline(&mut self) -> Result<ActivityBaseline> {
         let sql = sql::metadata(self.options.identity, self.request_page_server_read_capability);
+        self.observe_metadata(&sql).await
+    }
+    async fn observe_metadata(&mut self, sql: &str) -> Result<ActivityBaseline> {
         self.read_baseline_frame(
-            &sql,
+            sql,
             vec![
                 Parameter::Integer(i64::from(self.options.budget.max_snapshot_rows) + 1),
                 Parameter::Integer(CURRENT_DATABASE_SCOPE),

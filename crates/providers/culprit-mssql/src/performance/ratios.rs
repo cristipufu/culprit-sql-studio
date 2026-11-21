@@ -62,7 +62,7 @@ pub(super) fn captured(
         if let Some(kind) = spec.ratio {
             let pair = populations.entry((kind, object.clone(), instance.clone())).or_default();
             match spec.nature {
-                CounterNature::FractionNumerator => pair.0 = Some(key.clone()),
+                CounterNature::FractionNumerator | CounterNature::AverageNumerator => pair.0 = Some(key.clone()),
                 CounterNature::FractionBase => pair.1 = Some(key.clone()),
                 _ => return Err(invalid_data()),
             }
@@ -100,6 +100,17 @@ pub(super) fn captured(
     {
         ratios.push(NativeCounterRatio {
             kind: CounterRatioKind::BufferCacheHit,
+            numerator: None,
+            base: None,
+            support: CounterRatioSupport::Supported,
+            observed_at: metadata.at.clone(),
+        });
+    }
+    if matches!(population, Population::InstanceInvestigation)
+        && !populations.keys().any(|(kind, _, _)| *kind == CounterRatioKind::LockWaitAverageInputs)
+    {
+        ratios.push(NativeCounterRatio {
+            kind: CounterRatioKind::LockWaitAverageInputs,
             numerator: None,
             base: None,
             support: CounterRatioSupport::Supported,

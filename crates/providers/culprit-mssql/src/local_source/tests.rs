@@ -127,12 +127,13 @@ impl NativeRead for GenerationalRead {
 
 #[test]
 fn authority_templates_do_not_acquire_activity_column_metadata() {
-    for (identity, expected) in [
-        (IdentityDetail::Endpoint, "abfa21b61903a15089f69f635ce3573162c284c086ef63a32a76e0f272d78e53"),
-        (IdentityDetail::AzureDatabase, "fd1631d35518b7535b0104be9a8cf231e45f3f6dac20f743694c8bfbbc688f92"),
-    ] {
+    for identity in [IdentityDetail::Endpoint, IdentityDetail::AzureDatabase] {
         let authority = query(identity, Detail::Authority);
-        assert_eq!(digest(authority.as_bytes()), expected);
+        assert_eq!(authority.matches(crate::database_identity::catalog::BINDING).count(), 1);
+        assert!(authority.contains("@culprit_catalog_current_id AS selected_database_id"));
+        assert!(authority.contains("sd.database_id AS catalog_database_id,sd.name AS catalog_database_name"));
+        assert!(authority.contains("WHERE sd.name=@culprit_catalog_current_name"));
+        assert!(!authority.contains("WHERE sd.database_id=DB_ID()"));
         assert!(!authority.contains("sys.all_columns"));
         assert!(!authority.contains("request_page_server_read_capability"));
         for detail in [Detail::Activity, Detail::PageLookup] {
@@ -174,4 +175,72 @@ async fn optional_activity_detail_uses_the_same_context_owner_and_dispatch_count
         assert_eq!(reader.close().await, SourceShutdown::Quiescent);
         assert_eq!(reader.closed, 1);
     }
+}
+
+#[tokio::test]
+async fn azure_current_and_catalog_ids_remain_distinct_through_the_same_owned_recheck() {
+    let native = replace(&row(5), &[("catalog_database_id", Val::Int(90_001))]);
+    let mut reader = FakeRead::new(vec![Ok(vec![native.clone()]), Ok(vec![native])]);
+    let (before, _) =
+        read_initial(&mut reader, "fixture.invalid", 1433, IdentityDetail::AzureDatabase, Detail::Authority)
+            .await
+            .unwrap();
+    let (after, _) = read_again(&mut reader, "fixture.invalid", 1433, &before, Detail::Authority).await.unwrap();
+    assert_eq!(before.database_id, 7, "only the original current ID can select native DMV rows");
+    assert_eq!(before.catalog_database_id, 90_001, "the Azure catalog ID is an independent namespace");
+    assert!(before.completed(&after).unwrap().partition.is_qualified());
+    assert_eq!(reader.queries(), 2);
+    assert_eq!(reader.closed, 0);
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn changed_catalog_id_is_not_repaired_from_an_equal_current_id_or_display_name() {
+    let initial = replace(&row(5), &[("catalog_database_id", Val::Int(90_001))]);
+    let final_row = replace(&initial, &[("catalog_database_id", Val::Int(90_002))]);
+    let mut reader = FakeRead::new(vec![Ok(vec![initial]), Ok(vec![final_row])]);
+    let (before, _) =
+        read_initial(&mut reader, "fixture.invalid", 1433, IdentityDetail::AzureDatabase, Detail::Authority)
+            .await
+            .unwrap();
+    let (after, _) = read_again(&mut reader, "fixture.invalid", 1433, &before, Detail::Authority).await.unwrap();
+    assert_eq!(before.database_id, after.database_id);
+    assert_eq!(before.activity.database, after.activity.database);
+    assert_eq!(CollectionStop::from_error(&before.completed(&after).unwrap_err()), CollectionStop::SourceChanged);
+    assert_eq!(reader.queries(), 2);
+    assert_eq!(reader.closed, 0);
+}
+
+#[tokio::test]
+async fn missing_invalid_or_foreign_catalog_rows_cannot_supply_authority() {
+    let missing_id = Rec::of(
+        &row(5)
+            .columns()
+            .filter(|(name, _)| *name != "catalog_database_id")
+            .map(|(name, value)| (name, value.clone()))
+            .collect::<Vec<_>>(),
+    );
+    for (case, native) in [
+        ("missing-id", missing_id),
+        ("null-id", replace(&row(5), &[("catalog_database_id", Val::Null)])),
+        ("zero-id", replace(&row(5), &[("catalog_database_id", Val::Int(0))])),
+        ("negative-id", replace(&row(5), &[("catalog_database_id", Val::Int(-1))])),
+        ("foreign-name", replace(&row(5), &[("catalog_database_name", Val::Text("other".into()))])),
+    ] {
+        let mut reader = FakeRead::new(vec![Ok(vec![native])]);
+        assert!(
+            read_initial(&mut reader, "fixture.invalid", 1433, IdentityDetail::AzureDatabase, Detail::Authority)
+                .await
+                .is_err(),
+            "{case}"
+        );
+        assert_eq!(reader.queries(), 1, "{case}");
+        assert_eq!(reader.closed, 0, "{case}: the caller retains its existing owner");
+    }
+    let native = replace(&row(3), &[("catalog_database_id", Val::Int(90_001))]);
+    let mut reader = FakeRead::new(vec![Ok(vec![metadata()]), Ok(vec![epoch(100)]), Ok(vec![native])]);
+    let error = Context::read(&mut reader, "fixture.invalid", 1433).await.err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+    assert_eq!(reader.queries(), 3, "boxed/MI namespaces must still agree");
+    assert_eq!(reader.closed, 0);
 }

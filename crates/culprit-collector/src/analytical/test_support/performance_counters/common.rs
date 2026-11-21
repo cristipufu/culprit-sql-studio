@@ -53,6 +53,13 @@ pub fn common_performance_counter_evidence(
         support: CounterRatioSupport::Supported,
         observed_at: sample.properties.get(PERFORMANCE_COUNTER_CLOCK_PROPERTY).cloned(),
     });
+    sample.ratios.push(NativeCounterRatio {
+        kind: CounterRatioKind::LockWaitAverageInputs,
+        numerator: key("Average Wait Time (ms)"),
+        base: key("Average Wait Time Base"),
+        support: CounterRatioSupport::Supported,
+        observed_at: sample.properties.get(PERFORMANCE_COUNTER_CLOCK_PROPERTY).cloned(),
+    });
     common.append(&mut sample.counters);
     sample.counters = common;
     sample.properties.insert(PERFORMANCE_COUNTER_PROFILE_PROPERTY.into(), MSSQL_COMMON_COUNTER_PROFILE.into());
@@ -81,6 +88,7 @@ fn counters(case: CommonPerformanceCounterCase) -> Vec<NativeCounterSample> {
     profile
         .common_fields
         .iter()
+        .chain(profile.detailed_fields)
         .flat_map(|spec| {
             let instances = match spec.instances {
                 PerformanceCounterInstances::Named(instances) => {
@@ -94,14 +102,18 @@ fn counters(case: CommonPerformanceCounterCase) -> Vec<NativeCounterSample> {
                     return None;
                 }
                 let object = format!("SQLServer:{}", spec.object_family.unwrap());
-                let code = if case == CommonPerformanceCounterCase::UnknownNativeType && spec.id == "common_page_reads"
-                {
+                let code = if case == CommonPerformanceCounterCase::UnknownNativeType
+                    && matches!(
+                        spec.id,
+                        "common_page_reads" | "detailed_forwarded_records" | "detailed_lock_wait_numerator"
+                    ) {
                     42
                 } else {
                     match spec.nature {
                         CounterNature::Gauge => 65_792,
                         CounterNature::Cumulative => 272_696_576,
                         CounterNature::FractionNumerator => 537_003_264,
+                        CounterNature::AverageNumerator => 1_073_874_176,
                         CounterNature::FractionBase => 1_073_939_712,
                         _ => panic!("Unexpected Common fixture meaning"),
                     }
@@ -112,6 +124,8 @@ fn counters(case: CommonPerformanceCounterCase) -> Vec<NativeCounterSample> {
                     match spec.id {
                         "common_buffer_hits" => "3",
                         "common_buffer_base" => "4",
+                        "detailed_lock_wait_numerator" => "4500",
+                        "detailed_lock_wait_base" => "3",
                         "common_blocked" => "0",
                         _ => "9007199254740993",
                     }
@@ -180,6 +194,72 @@ pub fn assert_common_performance_counter_capture(
     assert!(
         common.iter().all(|counter| counter.reset == ResetMarker::Unknown && counter.scope == MeasurementScope::Server)
     );
+    let detailed = sample
+        .counters
+        .iter()
+        .filter(|counter| {
+            profile
+                .detailed_field(&counter.native_object, &counter.native_name, counter.native_instance.as_deref())
+                .is_some_and(|field| field.family == PerformanceCounterFamily::AccessMethods)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(detailed.len(), if case == CommonPerformanceCounterCase::MissingCommon { 0 } else { 6 });
+    for counter in detailed {
+        assert_eq!(counter.native_object, "SQLServer:Access Methods");
+        assert_eq!(counter.native_instance, None);
+        assert_eq!(counter.scope, MeasurementScope::Server);
+        assert_eq!(counter.reset, ResetMarker::Unknown);
+        assert_eq!(
+            counter.value.integer(),
+            Some(if case == CommonPerformanceCounterCase::MeasuredZero { 0 } else { 9_007_199_254_740_993 })
+        );
+        assert_eq!(
+            (counter.nature, counter.unit),
+            if case == CommonPerformanceCounterCase::UnknownNativeType && counter.native_name == "Forwarded Records/sec"
+            {
+                (CounterNature::Unknown, CounterUnit::Unknown)
+            } else {
+                (CounterNature::Cumulative, CounterUnit::Count)
+            }
+        );
+    }
+    let locks = sample
+        .counters
+        .iter()
+        .filter(|counter| {
+            profile
+                .detailed_field(&counter.native_object, &counter.native_name, counter.native_instance.as_deref())
+                .is_some_and(|field| field.family == PerformanceCounterFamily::Locks)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        locks.len(),
+        match case {
+            CommonPerformanceCounterCase::MissingCommon => 0,
+            CommonPerformanceCounterCase::MissingBase => 5,
+            _ => 6,
+        }
+    );
+    assert!(locks.iter().all(|counter| counter.native_object == "SQLServer:Locks"
+        && counter.native_instance.as_deref() == Some("_Total")
+        && counter.scope == MeasurementScope::Server
+        && counter.reset == ResetMarker::Unknown));
+    let average = sample.ratios.iter().find(|ratio| ratio.kind == CounterRatioKind::LockWaitAverageInputs).unwrap();
+    assert!(average.percent(sample).is_none());
+    let issues = average.issues(sample);
+    assert!(issues.contains(&CounterRatioIssue::IntervalRequired));
+    assert!(!issues.contains(&CounterRatioIssue::OutsideSubset));
+    match case {
+        CommonPerformanceCounterCase::MissingCommon => assert!(
+            issues.contains(&CounterRatioIssue::MissingNumerator) && issues.contains(&CounterRatioIssue::MissingBase)
+        ),
+        CommonPerformanceCounterCase::MissingBase => assert!(issues.contains(&CounterRatioIssue::MissingBase)),
+        CommonPerformanceCounterCase::MeasuredZero => assert!(issues.contains(&CounterRatioIssue::ZeroBase)),
+        CommonPerformanceCounterCase::UnknownNativeType => {
+            assert!(issues.contains(&CounterRatioIssue::UnsupportedCounterType))
+        }
+        _ => assert_eq!(issues, [CounterRatioIssue::IntervalRequired]),
+    }
     let ratio = sample.ratios.iter().find(|ratio| ratio.kind == CounterRatioKind::BufferCacheHit).unwrap();
     match case {
         CommonPerformanceCounterCase::MissingCommon => {
