@@ -13,6 +13,10 @@ pub enum ReplicationCase {
     MariaDbChannel,
     MssqlAvailabilityGroup,
     MssqlGeoLink,
+    MssqlHyperscale,
+    MssqlHyperscaleNulls,
+    MssqlHyperscalePartial,
+    MssqlHyperscaleUnavailable,
     Partial,
     Empty,
     Unavailable,
@@ -31,6 +35,10 @@ impl ReplicationCase {
         Self::MariaDbChannel,
         Self::MssqlAvailabilityGroup,
         Self::MssqlGeoLink,
+        Self::MssqlHyperscale,
+        Self::MssqlHyperscaleNulls,
+        Self::MssqlHyperscalePartial,
+        Self::MssqlHyperscaleUnavailable,
         Self::Partial,
         Self::Empty,
         Self::Unavailable,
@@ -65,6 +73,15 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
             (Engine::Mssql, availability_group(), vec!["availability-group-state", "geo-replication-links"])
         }
         MssqlGeoLink => (Engine::Mssql, geo_links(), vec!["availability-group-state", "geo-replication-links"]),
+        MssqlHyperscale | MssqlHyperscaleNulls | MssqlHyperscalePartial | MssqlHyperscaleUnavailable => (
+            Engine::Mssql,
+            if matches!(case, MssqlHyperscaleUnavailable) {
+                vec![]
+            } else {
+                hyperscale(matches!(case, MssqlHyperscaleNulls))
+            },
+            vec![MSSQL_HYPERSCALE_REPLICAS_SOURCE],
+        ),
         Empty | Unavailable | NotApplicable => {
             (Engine::Postgres, vec![], vec!["pg_stat_replication", "pg_replication_slots"])
         }
@@ -74,7 +91,9 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
         .map(|source| {
             let count = rows.iter().filter(|row| row.source == source).count() as u32;
             match case {
-                Unavailable => StateSourceCoverage::unavailable(source.into(), ErrorCode::PermissionDenied, None),
+                Unavailable | MssqlHyperscaleUnavailable => {
+                    StateSourceCoverage::unavailable(source.into(), ErrorCode::PermissionDenied, None)
+                }
                 NotApplicable => StateSourceCoverage::not_applicable(source.into()),
                 Partial if source == "pg_replication_slots" => {
                     StateSourceCoverage::unavailable(source.into(), ErrorCode::PermissionDenied, None)
@@ -84,6 +103,12 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
                     coverage.stopped = Some(CollectionStop::RowLimit);
                     coverage
                 }
+                MssqlHyperscalePartial => {
+                    let mut coverage = StateSourceCoverage::observed(source.into(), count, false);
+                    coverage.stopped = Some(CollectionStop::RowLimit);
+                    coverage
+                }
+                MssqlHyperscale | MssqlHyperscaleNulls => StateSourceCoverage::observed(source.into(), count, false),
                 UnqualifiedOwner => StateSourceCoverage::observed(source.into(), count, false),
                 MssqlAvailabilityGroup | MssqlGeoLink if count == 0 => {
                     StateSourceCoverage::not_applicable(source.into())
@@ -92,7 +117,7 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
             }
         })
         .collect();
-    let source = CollectionDescription {
+    let mut source = CollectionDescription {
         target: DatabaseIdentity::server(
             engine,
             "app",
@@ -127,6 +152,27 @@ pub fn replication_evidence(case: ReplicationCase) -> (CollectionDescription, Ve
             sources,
         }),
     };
+    if matches!(case, MssqlHyperscale | MssqlHyperscaleNulls | MssqlHyperscalePartial | MssqlHyperscaleUnavailable) {
+        let mut database = DatabaseIdentity::server(Engine::Mssql, "app", "replication.fixture.invalid", 1433, None);
+        database.incarnation = Some("original-logical-database".into());
+        source.target = database.into();
+        source.partition = SourcePartition::InstanceLocal {
+            member: Some(SharedResourceIdentity {
+                engine: Engine::Mssql,
+                kind: SharedResourceKind::Node,
+                namespace: NativeIdentity::new("original-logical-database")
+                    .qualified("kind", "azure-sql-logical-database"),
+                native: NativeIdentity::new(HS_OBSERVER).qualified("kind", "azure-sql-hyperscale-replica"),
+            }),
+            epoch: Some("original-native-process".into()),
+        };
+        let SourceObservation::Snapshot(snapshot) = source.observation else { unreachable!() };
+        source.observation = SourceObservation::MssqlReplication {
+            snapshot,
+            scope: Box::new(MssqlReplicationScope { database_id: 7, replica_id: HS_OBSERVER.into() }),
+            database_writable: true,
+        };
+    }
     assert!(source.partition_is_consistent(), "{case:?}");
     let input = ReplicationSnapshot::from_source(&source, rows.clone()).unwrap();
     assert!(input.is_valid(), "{case:?}");
@@ -154,6 +200,33 @@ pub fn assert_replication_capture(
     assert_eq!(context.target, source.target);
     assert_eq!(context.partition, source.partition);
     assert_eq!(input.sources, source.observation.snapshot().unwrap().sources);
+}
+
+const HS_OBSERVER: &str = "91487244-730d-4b83-8e49-d482241c7288";
+fn hyperscale(nulls: bool) -> Vec<ReplicationObservation> {
+    (0..4)
+        .map(|role| {
+            let id = if role == 0 { HS_OBSERVER.to_string() } else { format!("11111111-1111-1111-1111-{role:012}") };
+            ReplicationObservation {
+                source: MSSQL_HYPERSCALE_REPLICAS_SOURCE.into(),
+                fact: ReplicationFact::HyperscaleReplica(Box::new(MssqlHyperscaleReplica {
+                    selected_database_id: 7,
+                    observer_replica_id: HS_OBSERVER.into(),
+                    database_writable: true,
+                    observed_at: "2020-01-01T12:00:00.5Z".into(),
+                    replica_id: id,
+                    replica_server_name: (!nulls).then(|| "orders-logical-server".into()),
+                    replica_database_name: (!nulls).then(|| "app".into()),
+                    is_local: (!nulls).then_some(role == 0),
+                    replica_role: (!nulls).then_some(role),
+                    native_role: (!nulls)
+                        .then(|| ["PRIMARY", "HA SECONDARY", "GEO FORWARDER", "NAMED"][role as usize].into()),
+                    local_database_id: (!nulls).then_some(if role == 0 { 7 } else { 70 + u32::from(role) }),
+                    parent_replica_id: (role == 1 && !nulls).then(|| HS_OBSERVER.into()),
+                })),
+            }
+        })
+        .collect()
 }
 
 fn native(

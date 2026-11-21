@@ -231,6 +231,7 @@ enum CollectionChoice {
     WaitCounters,
     Replication,
     GroupReplication,
+    Galera,
     Settings,
     PlanCacheSummary,
     StatementGrants,
@@ -274,6 +275,7 @@ impl CollectionChoice {
             Self::WaitCounters => SnapshotDataset::WaitCounters,
             Self::Replication => SnapshotDataset::Replication,
             Self::GroupReplication => SnapshotDataset::GroupReplication,
+            Self::Galera => SnapshotDataset::Galera,
             Self::Settings => SnapshotDataset::Settings,
             Self::PlanCacheSummary => SnapshotDataset::PlanCacheSummary,
             Self::StatementGrants => SnapshotDataset::StatementGrants,
@@ -725,3 +727,6 @@ mod tests {
 
 #[cfg(test)]
 mod group_replication_tests;
+
+#[cfg(test)]
+mod galera_tests;

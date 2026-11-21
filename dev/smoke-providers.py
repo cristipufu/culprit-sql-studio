@@ -18,6 +18,7 @@ from replication_fixtures import MySqlReplication, PostgresReplication
 from mssql_replication_fixture import SqlServerReplication
 from mysql_replication_fixture import MySqlMovingReplication
 from mysql_group_replication_fixture import MySqlGroupReplication
+from mariadb_galera_fixture import MariaDbGalera
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -73,7 +74,7 @@ OPTIONAL_NATIVE_MODULES = {
     "culprit-postgres": ("telemetry::native_tests::replication::", "jobs::", "maintenance_waits::"),
     "culprit-mysql": (
         "telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::",
-        "telemetry::native_tests::group_replication::",
+        "telemetry::native_tests::group_replication::", "telemetry::native_tests::galera::",
     ),
     "culprit-mssql": (
         "telemetry::replication::native_tests::", "jobs::",
@@ -255,6 +256,7 @@ class Database:
             raise RuntimeError("Docker did not publish exactly one loopback port")
         deadline = time.monotonic() + STARTUP_BUDGET
         while time.monotonic() < deadline:
+            self.require_running()
             try:
                 status, _ = self.sql(self.readiness_query(), database=self.admin_database(), check=False, timeout=5)
             except TimeoutError:
@@ -265,6 +267,19 @@ class Database:
             time.sleep(2)
         self.commands.run(["docker", "logs", "--tail", "60", self.name], check=False, echo=True)
         raise TimeoutError(f"{self.fixture.name} did not become ready")
+
+    def require_running(self):
+        template = '{{index .Config.Labels "' + OWNER_LABEL + '"}}\t{{.State.Status}}\t{{.State.ExitCode}}'
+        status, result = self.commands.run(
+            ["docker", "inspect", "--format", template, self.name], check=False, timeout=5,
+        )
+        fields = result.strip().split("\t")
+        if status or len(fields) != 3 or fields[0] != self.owner:
+            raise RuntimeError("the exact owned fixture disappeared during readiness")
+        _, state, exit_code = fields
+        if state != "running":
+            self.commands.run(["docker", "logs", "--tail", "60", self.name], check=False, echo=True)
+            raise RuntimeError(f"{self.fixture.name} stopped during startup ({state}, exit {exit_code})")
 
     def readiness_query(self):
         return "SELECT 1;"
@@ -702,7 +717,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("fixtures", nargs="+", choices=[f.name for f in FIXTURES + REPLICATION_FIXTURES]
                         + list(POSTGRES_REPLICATION_IMAGES)
-                        + ["mssql-agent", "mssql-hadr", "mssql-replication", "mysql-moving-replication", "mysql-group-replication", "yugabyte-cluster", "ssh", "all"])
+                        + ["mariadb-galera", "mssql-agent", "mssql-hadr", "mssql-replication", "mysql-moving-replication", "mysql-group-replication", "yugabyte-cluster", "ssh", "all"])
     parser.add_argument("--test", nargs=2, action="append", metavar=("CRATE", "FILTER"),
                         help="run only this live test selection; repeat for multiple commands in the same fixture")
     args = parser.parse_args()
@@ -718,6 +733,11 @@ def main():
             with MySqlReplication(Database(fixture)) as database:
                 database.verify(args.test)
             count += 1
+    if "mariadb-galera" in args.fixtures:
+        fixture = Fixture("mariadb-galera", "mariadb:11.8-ubi", "mysql", 3306, "culprit_smoke", "root")
+        with MariaDbGalera(Database(fixture)) as database:
+            database.verify(args.test)
+        count += 1
     for name, image in POSTGRES_REPLICATION_IMAGES.items():
         if name in args.fixtures:
             primary = Database(Fixture("pg-repl-primary", image, "postgres", 5432, "culprit_replication", "postgres"))

@@ -2,6 +2,36 @@ use super::*;
 use culprit_collector::analytical::test_support::{InstanceResourceCase, instance_resource_evidence};
 use culprit_core::{SourceState, telemetry::*};
 
+#[test]
+fn processor_cpu_text_uses_the_canonical_point_with_exact_totals_and_independent_native_clock() {
+    use culprit_collector::analytical::test_support::{ProcessCpuCase, instance_resource_cpu_evidence};
+    for case in ProcessCpuCase::ALL {
+        let (source, rows) = instance_resource_cpu_evidence(case);
+        let rows = rows
+            .into_iter()
+            .map(|row| {
+                let TelemetryRecord::Operational(row) = row else { panic!() };
+                row
+            })
+            .collect::<Vec<_>>();
+        let report = culprit_checks::instance_resources::explain_source(&source, &rows, true).unwrap();
+        let cpu = report.process_cpu.as_ref().unwrap();
+        let text = instance_resources(&report);
+        assert!(text.contains(&cpu.title) && text.contains(&cpu.summary));
+        assert!(text.contains(&cpu.limitations[0]));
+        assert!(text.len() < 20_000);
+        if case != ProcessCpuCase::Denied {
+            assert!(text.contains("2020-01-01T12:00:00.5Z"));
+        }
+        if case == ProcessCpuCase::Exact {
+            assert!(text.contains(&culprit_core::format::digits("9007199254740993".into())));
+        }
+        if case == ProcessCpuCase::Null {
+            assert!(text.contains(&t!("view.database_properties.unknown")));
+        }
+    }
+}
+
 fn instance_report(case: InstanceResourceCase) -> InstanceResourceReport {
     let (source, rows) = instance_resource_evidence(case);
     let observations = rows

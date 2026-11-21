@@ -3,6 +3,33 @@ use culprit_collector::analytical::test_support::{InstanceResourceCase, instance
 use culprit_engine::LocalCaptureAnalysisKind;
 
 #[tokio::test]
+async fn processor_cpu_original_reaches_compact_mcp_without_private_epoch_or_another_source() {
+    use culprit_collector::analytical::test_support::{ProcessCpuCase, instance_resource_cpu_evidence};
+    for case in ProcessCpuCase::ALL {
+        let (source, rows) = instance_resource_cpu_evidence(case);
+        let epoch = match &source.partition {
+            SourcePartition::InstanceLocal { epoch: Some(epoch), .. } => epoch.clone(),
+            _ => panic!(),
+        };
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::InstanceResources)
+                .await;
+        assert!(!error, "{case:?}:{value}");
+        let cpu = &value["instance_resources"]["process_cpu"];
+        assert!(!cpu.is_null());
+        assert_eq!(cpu["native_source"]["source"], json!(culprit_core::source_id::PROCESSOR_TOPOLOGY));
+        assert!(cpu["fields"].as_array().unwrap().len() <= 5);
+        assert!(!cpu.to_string().contains(&epoch));
+        assert!(!cpu.to_string().contains("manifest_sha256"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
 async fn exact_shared_instance_reports_reach_mcp_with_bounded_fields_original_clocks_and_no_private_scope() {
     for case in InstanceResourceCase::ALL {
         let (source, rows) = instance_resource_evidence(case);

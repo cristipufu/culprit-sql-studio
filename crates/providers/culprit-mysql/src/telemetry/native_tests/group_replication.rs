@@ -6,10 +6,6 @@ use crate::{
     native::{self, group_replication as group},
     read::ReadSession,
 };
-use culprit_collector::{
-    capture::{self, CollectionCancellation},
-    outbox::Outbox,
-};
 use std::collections::BTreeSet;
 
 async fn owned() -> (crate::MysqlProvider, group::Context) {
@@ -41,32 +37,16 @@ async fn owned() -> (crate::MysqlProvider, group::Context) {
     assert_eq!(native.connection_id, context.instance.connection_id);
     (provider, context)
 }
-async fn capture(provider: crate::MysqlProvider, context: &group::Context) -> super::capture::Capture {
+fn capture(
+    provider: crate::MysqlProvider,
+    context: &group::Context,
+) -> impl std::future::Future<Output = Box<super::capture::Capture>> {
     let request = CollectionRequest {
         subject: CollectionSubject::Shared { resource: context.instance.resource.clone() },
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::GroupReplication },
         budget: CollectionBudget { page_rows: 1, ..crate::group_replication::budget() },
     };
-    let temporary = tempfile::tempdir().unwrap();
-    let mut outbox = Outbox::create(&temporary.path().join("outbox"), OutboxLimits::default()).unwrap();
-    let mut lease = outbox.reserve("owned-group-replication", &request).await.unwrap();
-    let output = lease.directory().to_path_buf();
-    let factory = super::capture::Factory(provider);
-    let result = capture::collect(
-        &culprit_read::admission::SourceGate::default(),
-        &factory,
-        request.clone(),
-        &output,
-        lease.identity().clone(),
-        &CollectionCancellation::default(),
-        Some(&mut lease),
-    )
-    .await;
-    let finished = lease.finish().await;
-    assert_eq!(factory.0.source_shutdown(), SourceShutdown::Quiescent);
-    let manifest = super::replication::required(result, "actual Group Replication source/Outbox capture");
-    super::replication::required(finished, "sealed Group Replication outbox completion");
-    super::capture::read_capture(manifest, &request.budget, &output)
+    super::capture::original(provider, request, "owned-group-replication")
 }
 #[tokio::test]
 #[ignore = "requires nonce-owned MySQL with an active Group Replication group and exact expected member UUIDs; supervisor owns setup"]

@@ -131,6 +131,9 @@ pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Pro
     }
     if let Some(topology) = crate::processors::collect(pool.clone(), probe, coverage).await {
         (p.cpus, p.numa_nodes) = topology.application();
+        if let Some(cpu) = topology.into_cpu_counters() {
+            p.resource_counters.get_or_insert_with(Vec::new).push(cpu);
+        }
     }
     let version_store = crate::version_store::application(pool.clone(), probe, coverage).await;
     if let Some(bytes) = version_store.tempdb_bytes {

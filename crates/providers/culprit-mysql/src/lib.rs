@@ -870,3 +870,5 @@ mod tests {
 }
 
 mod group_replication;
+
+mod galera;

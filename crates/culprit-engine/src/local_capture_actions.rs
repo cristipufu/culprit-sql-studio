@@ -114,6 +114,25 @@ impl Workspace {
             .map(|reports| *reports.requested)
     }
 
+    /// Attach independently scoped original Group Replication evidence without a new native read.
+    pub async fn scan_with_captured_galera(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalSnapshotAnalysis,
+    ) -> Result<Report> {
+        if captured.original().connection() != name
+            || captured.report().kind() != crate::LocalCaptureAnalysisKind::Galera
+        {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::galera(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
     /// Attach one original shared tempdb read after the normal scan owner ends. Current database identity and
     /// host clocks neither qualify nor relabel this historical shared instance/process observation.
     pub async fn scan_with_captured_tempdb_metadata_memory(

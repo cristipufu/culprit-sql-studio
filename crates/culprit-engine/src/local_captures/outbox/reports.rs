@@ -77,6 +77,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
             let native = JobsSnapshot::from_source(source, read.observations.clone(), read.read_complete)?;
             Ok(LocalSnapshotReport::Jobs(Box::new(culprit_checks::jobs::explain(&native)?)))
         }
+        LocalCaptureAnalysisKind::Galera => {
+            Ok(LocalSnapshotReport::Galera(Box::new(culprit_checks::galera::explain_captured(read)?)))
+        }
         LocalCaptureAnalysisKind::GroupReplication => Ok(LocalSnapshotReport::GroupReplication(Box::new(
             culprit_checks::group_replication::explain_captured(read)?,
         ))),
@@ -122,7 +125,8 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::Storage => {
             Ok(LocalSnapshotReport::Storage(Box::new(culprit_checks::storage::explain_captured(read)?)))
         }
-        LocalCaptureAnalysisKind::PageServerReads
+        LocalCaptureAnalysisKind::Replication
+        | LocalCaptureAnalysisKind::PageServerReads
         | LocalCaptureAnalysisKind::SessionCensus
         | LocalCaptureAnalysisKind::Blocking
         | LocalCaptureAnalysisKind::MemoryClerks

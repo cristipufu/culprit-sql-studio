@@ -1,6 +1,21 @@
 use crate::{MeasurementScope, Snapshot, SourceOutcome, SourceState, telemetry::*};
 use std::collections::BTreeMap;
 
+#[test]
+fn process_cpu_sharing_withdraws_native_identity_and_clock_qualification_without_changing_exact_values() {
+    let sample: NativeCounterSet = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/process-cpu.sample.json"
+    )))
+    .unwrap();
+    let values = sample.counters.iter().map(|value| value.value.clone()).collect::<Vec<_>>();
+    assert!(MssqlProcessCpuPoint::from_sample(&sample).is_ok());
+    let shared = super::redact(vec![sample], None).unwrap();
+    assert_eq!(shared[0].counters.iter().map(|value| value.value.clone()).collect::<Vec<_>>(), values);
+    assert!(MssqlProcessCpuPoint::from_sample(&shared[0]).is_err());
+    assert!(!serde_json::to_string(&shared).unwrap().contains("2020-01-01T12:00:00.5Z"));
+}
+
 fn clerk() -> NativeCounterSet {
     let name = "clerk_private_name_canary";
     NativeCounterSet {

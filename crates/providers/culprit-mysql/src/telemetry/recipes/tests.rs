@@ -87,6 +87,7 @@ fn baseline_and_investigation_meaning_is_explicit_without_qualifying_native_cost
     for id in [
         "mysql.session-memory",
         "mysql.group-replication",
+        "mariadb.galera",
         "mysql.runtime-distributions",
         "mysql.tables",
         "mysql.statement-definitions",
@@ -243,5 +244,24 @@ fn current_request_work_requires_its_database_subject_and_exact_source_statement
             crate::telemetry::source(connector(), &wrong).is_err(),
             "invalid selection cannot construct a native reader"
         );
+    }
+}
+
+#[test]
+fn galera_is_an_explicit_shared_investigation_with_one_original_point_and_no_cost_or_default_approval() {
+    let recipe = declarations().into_iter().find(|recipe| recipe.id == "mariadb.galera").unwrap();
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, [RecipeSubject::Shared(SharedResourceKind::Instance)]);
+    assert_eq!((recipe.budget.max_queries, recipe.budget.max_snapshot_rows), (17, 1));
+    for wrong in
+        [resource(SharedResourceKind::Pool, Engine::Mysql), resource(SharedResourceKind::Instance, Engine::Postgres)]
+    {
+        let request = CollectionRequest {
+            subject: CollectionSubject::Shared { resource: wrong },
+            selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Galera },
+            budget: recipe.budget.clone(),
+        };
+        assert!(crate::telemetry::source(connector(), &request).is_err());
     }
 }

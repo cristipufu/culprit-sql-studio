@@ -104,6 +104,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     let capture = CaptureIdentity { observation_id: "owned-shared-native".into(), revision: None };
     let mut counter_sources = BTreeSet::new();
     let mut instance_points = 0;
+    let mut process_cpu_points = 0;
     let mut tempdb_log_points = 0;
     let mut tempdb_data_points = 0;
     let mut tempdb_metadata_features = 0;
@@ -125,6 +126,18 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
                     OperationalFact::CounterSet(set) => {
                         assert_eq!(set.scope, MeasurementScope::Server);
                         assert!(set.is_valid());
+                        if source == crate::sources::PROCESSOR_TOPOLOGY.name {
+                            let cpu = MssqlProcessCpuPoint::from_original(&set, &context).unwrap();
+                            assert!(
+                                cpu.user_ms().is_some() && cpu.kernel_ms().is_some(),
+                                "supported owned native process CPU totals must be measured, not skipped"
+                            );
+                            assert!(
+                                cpu.sampled_ticks().parse::<u64>().unwrap()
+                                    >= cpu.started_ticks().parse::<u64>().unwrap()
+                            );
+                            process_cpu_points += 1;
+                        }
                         if source == crate::sources::TEMPDB_METADATA_MEMORY.name {
                             if set.identity.qualifiers.get("kind").map(String::as_str)
                                 == Some(MSSQL_TEMPDB_METADATA_FEATURE_KIND)
@@ -175,6 +188,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     }
     assert_eq!(records, snapshot.records as usize);
     assert_eq!(instance_points, 1, "the seventh family retains its raw instance point without admission");
+    assert_eq!(process_cpu_points, 1, "one actual same-query process CPU point; no utilization or cost qualification");
     assert_eq!(tempdb_log_points, 1, "native tempdb log visibility must be proved, never skipped");
     assert_eq!(tempdb_data_points, 1, "data and log retain independent source populations");
     assert_eq!(tempdb_metadata_features, 1, "native feature state is measured once, including when disabled");

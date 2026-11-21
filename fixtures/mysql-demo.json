@@ -10,7 +10,8 @@
     "sequences": [],
     "multixacts": [],
     "sqlite": null,
-    "cluster": null
+    "cluster": null,
+    "galera": []
   },
   "sources": [
     {
@@ -49,7 +50,7 @@
       "reason": null
     }
   ],
-  "format": 37,
+  "format": 38,
   "id": "20261011T120900.394Z",
   "connection": "mysql-demo",
   "environment": "local",

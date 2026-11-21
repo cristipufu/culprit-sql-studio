@@ -62,7 +62,9 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
                 .runtime,
         ),
         case("storage", super::storage_evidence(super::StorageCase::Exact)),
+        case("replication", super::replication_evidence(super::ReplicationCase::MssqlHyperscale)),
         case("group_replication", super::group_replication_evidence(super::GroupReplicationCase::Queued)),
+        case("galera", super::galera_evidence(super::GaleraCase::Queued)),
     ]
 }
 impl LocalCaptureFixture {

@@ -1,0 +1,45 @@
+{
+  "identity": {
+    "id": "42",
+    "qualifiers": {
+      "kind": "sql-server-process-cpu",
+      "native_object": "sys.dm_os_sys_info",
+      "instance_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "instance_epoch": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  },
+  "scope": "server",
+  "counters": [
+    {
+      "key": "process_user_time_ms",
+      "value": {"kind": "integer", "value": "9007199254740993"},
+      "unit": {"kind": "milliseconds"},
+      "nature": "cumulative",
+      "scope": "server",
+      "reset": {"kind": "generation", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+      "native_object": "sys.dm_os_sys_info",
+      "native_name": "process_user_time_ms",
+      "native_instance": null,
+      "native_type": null
+    },
+    {
+      "key": "process_kernel_time_ms",
+      "value": {"kind": "integer", "value": "0"},
+      "unit": {"kind": "milliseconds"},
+      "nature": "cumulative",
+      "scope": "server",
+      "reset": {"kind": "generation", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+      "native_object": "sys.dm_os_sys_info",
+      "native_name": "process_kernel_time_ms",
+      "native_instance": null,
+      "native_type": null
+    }
+  ],
+  "ratios": [],
+  "ratio_gaps": [],
+  "properties": {
+    "observed_at": "2020-01-01T12:00:00.5Z",
+    "started_at_ticks": "100",
+    "sample_ms_ticks": "500"
+  }
+}

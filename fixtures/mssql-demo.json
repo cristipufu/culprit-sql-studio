@@ -10,7 +10,8 @@
     "sequences": [],
     "multixacts": [],
     "sqlite": null,
-    "cluster": null
+    "cluster": null,
+    "galera": []
   },
   "sources": [
     {
@@ -64,7 +65,7 @@
       "reason": null
     }
   ],
-  "format": 37,
+  "format": 38,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",
   "environment": "local",
@@ -96,7 +97,9 @@
   },
   "workload": {
     "population_catalog": {
-      "membership": { "kind": "native-catalog" },
+      "membership": {
+        "kind": "native-catalog"
+      },
       "source": "query_store",
       "partitioned": false,
       "requires_selection": false,
@@ -1681,7 +1684,7 @@
             "rows_read": null,
             "table_rows": null,
             "subtree_cost": 0.0166036,
-            "self_cost": 5.000000000005e-7,
+            "self_cost": 5.000000000005e-07,
             "act_time_ms": null,
             "runtime": null,
             "warnings": [],
@@ -1734,7 +1737,7 @@
                 "rows_read": null,
                 "table_rows": null,
                 "subtree_cost": 0.0166031,
-                "self_cost": 0.00002090000000000078,
+                "self_cost": 2.090000000000078e-05,
                 "act_time_ms": null,
                 "runtime": null,
                 "warnings": [],

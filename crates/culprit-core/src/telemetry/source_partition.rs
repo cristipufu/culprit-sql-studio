@@ -158,6 +158,16 @@ impl CollectionDescription {
         {
             return false;
         }
+        if matches!(self.observation, SourceObservation::MssqlReplication { .. })
+            && mssql_replication_scope(self).is_err()
+        {
+            return false;
+        }
+        if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::Galera)
+            && (!matches!(self.observation, SourceObservation::Galera { .. }) || galera_context(self).is_err())
+        {
+            return false;
+        }
         if matches!(self.observation, SourceObservation::TableMemory { .. }) && table_memory_context(self).is_err() {
             return false;
         }

@@ -423,3 +423,5 @@ async fn ordinary_scans_do_not_read_or_attach_existing_local_captures() {
 }
 
 mod group_replication;
+
+mod galera;

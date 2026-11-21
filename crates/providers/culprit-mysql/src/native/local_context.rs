@@ -64,13 +64,7 @@ impl Context {
     }
 
     async fn read_native_facts<R: QueryRead>(&mut self, reader: &mut R, purpose: Purpose) -> Result<()> {
-        let sql = match self.connection.flavor {
-            Flavor::Mysql => Some("SELECT @@GLOBAL.server_uuid AS server_uuid"),
-            Flavor::Mariadb if has_mariadb_uid(&self.connection.version) => {
-                Some("SELECT @@GLOBAL.server_uid AS server_uid")
-            }
-            Flavor::Mariadb => None,
-        };
+        let sql = instance::configuration_query(self.connection.flavor, &self.connection.version);
         self.member = match sql {
             Some(sql) => {
                 let configuration = native::one(reader, sql, vec![]).await?;

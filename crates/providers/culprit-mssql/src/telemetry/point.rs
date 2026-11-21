@@ -100,6 +100,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         | SnapshotDataset::ColumnstoreRowgroups
         | SnapshotDataset::TableMemory
         | SnapshotDataset::GroupReplication
+        | SnapshotDataset::Galera
         | SnapshotDataset::FullTextPopulations
         | SnapshotDataset::Cdc
         | SnapshotDataset::BackupHistory
@@ -282,12 +283,14 @@ impl Family {
                     .collect()
             }
             Self::ProcessorTopology => {
-                if limit < 3 {
+                let cpu = matches!(owner, Some(super::subject::Identity::Instance(_)));
+                let minimum_rows = if cpu { MAX_MSSQL_PROCESSOR_OBSERVATIONS as usize } else { 3 };
+                if limit < minimum_rows {
                     return Err(CollectionStop::RowLimit.error());
                 }
-                crate::processors::read(reader)
+                crate::processors::read(reader, cpu)
                     .await?
-                    .observations()
+                    .observations()?
                     .into_iter()
                     .map(TelemetryRecord::Operational)
                     .collect()

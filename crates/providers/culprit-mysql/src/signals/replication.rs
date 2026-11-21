@@ -27,7 +27,7 @@ pub(super) async fn read(reader: &mut impl QueryRead, flavor: Flavor, version: &
             (vec![], coverage, Some(error))
         }
     };
-    let snapshot = ReplicationSnapshot { context, sources: vec![coverage], observations };
+    let snapshot = ReplicationSnapshot { mssql_scope: None, context, sources: vec![coverage], observations };
     if !snapshot.is_valid() {
         return Err(native::invalid());
     }

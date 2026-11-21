@@ -134,13 +134,41 @@ class DisposableOwnership(unittest.TestCase):
 
     def test_readiness_deadline_cannot_wait_forever_after_restart(self):
         database = self.database()
-        database.commands.run.return_value = (0, "127.0.0.1:55439\n")
+        database.commands.run.side_effect = lambda args, **_: (
+            0, f"{database.owner}\trunning\t0\n" if args[1] == "inspect" else "127.0.0.1:55439\n",
+        )
         database.sql = Mock(return_value=(1, "starting"))
         with patch.object(smoke.time, "monotonic", side_effect=[0, 1, smoke.STARTUP_BUDGET + 1]), patch.object(smoke.time, "sleep"):
             with self.assertRaisesRegex(TimeoutError, "did not become ready"):
                 database.wait_until_ready()
         database.sql.assert_called_once_with("SELECT 1;", database="postgres", check=False, timeout=5)
         self.assertEqual(database.commands.run.call_args_list[-1].args[0], ["docker", "logs", "--tail", "60", database.name])
+
+    def test_exited_or_dead_owned_fixture_stops_before_sql_or_a_readiness_sleep(self):
+        for state in ["exited", "dead"]:
+            with self.subTest(state=state):
+                database = self.database()
+                database.commands.run.side_effect = lambda args, **_: (
+                    0, f"{database.owner}\t{state}\t1\n" if args[1] == "inspect" else "127.0.0.1:55439\n",
+                )
+                database.sql = Mock()
+                with patch.object(smoke.time, "sleep") as sleep:
+                    with self.assertRaisesRegex(RuntimeError, "stopped during startup"):
+                        database.wait_until_ready()
+                    sleep.assert_not_called()
+                database.sql.assert_not_called()
+                self.assertEqual(database.commands.run.call_args_list[-1].args[0], ["docker", "logs", "--tail", "60", database.name])
+
+    def test_foreign_readiness_owner_stops_without_sql_or_reading_its_logs(self):
+        database = self.database()
+        database.commands.run.side_effect = lambda args, **_: (
+            0, "foreign\trunning\t0\n" if args[1] == "inspect" else "127.0.0.1:55439\n",
+        )
+        database.sql = Mock()
+        with self.assertRaisesRegex(RuntimeError, "exact owned fixture disappeared"):
+            database.wait_until_ready()
+        database.sql.assert_not_called()
+        self.assertFalse(any(call.args[0][1] == "logs" for call in database.commands.run.call_args_list))
 
 
 class ReplicationOwnership(unittest.TestCase):
@@ -680,6 +708,7 @@ class NativeSelection(unittest.TestCase):
                     "telemetry::native_tests::replication::",
                     "telemetry::native_tests::replication_movement::",
                     "telemetry::native_tests::group_replication::",
+                    "telemetry::native_tests::galera::",
                 ])
 
     def test_explicit_topology_selection_runs_only_that_topology(self):
@@ -688,7 +717,7 @@ class NativeSelection(unittest.TestCase):
         with patch.object(smoke, "run_tests") as run_tests:
             database.test("culprit-mysql", "telemetry::native_tests::replication_movement::")
         self.assertEqual(run_tests.call_args.kwargs["skip"], [
-            "telemetry::native_tests::replication::", "telemetry::native_tests::group_replication::",
+            "telemetry::native_tests::replication::", "telemetry::native_tests::group_replication::", "telemetry::native_tests::galera::",
         ])
 
     def test_explicit_group_replication_selection_keeps_both_native_cases_admitted(self):
@@ -701,7 +730,7 @@ class NativeSelection(unittest.TestCase):
             with patch.object(smoke, "run_tests") as run_tests:
                 database.test("culprit-mysql", selection)
             self.assertEqual(run_tests.call_args.kwargs["skip"], [
-                "telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::",
+                "telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::", "telemetry::native_tests::galera::",
             ])
 
     def test_generic_postgres_selections_skip_optional_native_fixtures(self):
@@ -1059,6 +1088,64 @@ class TestSelection(unittest.TestCase):
         commands.run.return_value = (0, "test result: ok. 0 passed; 0 failed; 4 filtered out")
         with redirect_stdout(io.StringIO()), self.assertRaisesRegex(RuntimeError, "did not execute any"):
             smoke.run_tests(commands, "culprit-yugabyte", "missing-case", {})
+
+
+class GaleraSupervisor(unittest.TestCase):
+    def database(self):
+        database = smoke.Database(smoke.Fixture("mariadb-galera", "mariadb:11.8-ubi", "mysql", 3306, "culprit_smoke", "root"))
+        database.start = Mock()
+        database.close = Mock()
+        database.owns_container = Mock(return_value=True)
+        database.sql = Mock(return_value=(0, f"11.8.9-MariaDB\tculprit-smoke-mysql-{database.owner}\tiFL88RG7XPipmQ5HOnA9iLqJw6w=\n"))
+        database.test = Mock()
+        return database
+
+    def test_genuine_component_selector_keeps_one_existing_owner_and_no_fixture_sql_mutation(self):
+        from mariadb_galera_fixture import MariaDbGalera, GALERA_OPTIONS, NATIVE_SELECTION
+        database = self.database()
+        with MariaDbGalera(database) as fixture:
+            fixture.verify()
+        database.close.assert_called_once()
+        self.assertEqual(tuple(database.options), GALERA_OPTIONS)
+        self.assertIn("--wsrep-cluster-address=gcomm://", GALERA_OPTIONS)
+        self.assertEqual(database.sql.call_count, 2)
+        self.assertTrue(all(call.kwargs["timeout"] == 5 for call in database.sql.call_args_list))
+        self.assertTrue(all(call.args[0].startswith("/* culprit */ SELECT VERSION(),@@hostname,") for call in database.sql.call_args_list))
+        self.assertEqual(database.test.call_args.args, ("culprit-mysql", NATIVE_SELECTION))
+        self.assertEqual(database.test.call_args.kwargs["environment"]["CULPRIT_MARIADB_GALERA_SINGLE_NODE"], "1")
+
+    def test_foreign_container_fails_before_metadata_sql_and_closes_the_same_owner(self):
+        from mariadb_galera_fixture import MariaDbGalera
+        database = self.database()
+        database.owns_container.return_value = False
+        with self.assertRaises(RuntimeError):
+            with MariaDbGalera(database):
+                self.fail("foreign owner entered")
+        database.sql.assert_not_called()
+        database.close.assert_called_once()
+
+    def test_failed_or_cancelled_native_case_closes_without_later_fixture_sql_or_retries(self):
+        from mariadb_galera_fixture import MariaDbGalera
+        for failure in [RuntimeError("native failure"), KeyboardInterrupt()]:
+            with self.subTest(failure=type(failure).__name__):
+                database = self.database()
+                database.test.side_effect = failure
+                with self.assertRaises(type(failure)):
+                    with MariaDbGalera(database) as fixture:
+                        fixture.verify()
+                database.close.assert_called_once()
+                self.assertEqual(database.sql.call_count, 2)
+                database.test.assert_called_once()
+
+    def test_generic_native_selection_skips_galera_but_its_exact_selector_is_never_skipped(self):
+        from mariadb_galera_fixture import NATIVE_SELECTION
+        database = smoke.Database(smoke.FIXTURES[1])
+        database.test_environment = Mock(return_value={})
+        for selection in ["telemetry::native_tests::", NATIVE_SELECTION]:
+            with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                database.test("culprit-mysql", selection)
+                skips = run_tests.call_args.kwargs["skip"]
+                self.assertEqual(any("telemetry::native_tests::galera::" == skip for skip in skips), selection != NATIVE_SELECTION)
 
 
 if __name__ == "__main__":

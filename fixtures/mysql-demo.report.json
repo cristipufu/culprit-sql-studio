@@ -1904,7 +1904,7 @@
         "table": "orders"
       }
     ],
-    "format": 37,
+    "format": 38,
     "histograms": [
       {
         "buckets": 4.0,
@@ -2326,7 +2326,8 @@
       "sequences": [],
       "spaces": [],
       "sqlite": null,
-      "table_memory": []
+      "table_memory": [],
+      "galera": []
     },
     "options": {
       "collect_memory_failures": false,

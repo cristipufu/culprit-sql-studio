@@ -11,6 +11,7 @@ mod blocking;
 mod context;
 mod hyperscale_log_components;
 mod memory_clerks;
+mod replication;
 mod session_census;
 mod snapshots;
 
@@ -73,6 +74,7 @@ impl CulpritMcp {
             LocalCapturedAnalysis::Snapshot(analysis) => snapshots::captured(&analysis)?,
             LocalCapturedAnalysis::Blocking(analysis) => blocking::captured(&analysis)?,
             LocalCapturedAnalysis::SessionCensus(analysis) => session_census::captured(&analysis)?,
+            LocalCapturedAnalysis::Replication(analysis) => replication::captured(&analysis)?,
         };
         json_size(&value, MAX_OUTPUT_BYTES).map_err(|error| match error {
             JsonSizeError::LimitExceeded => DeliveryProblem::Capacity.error(),

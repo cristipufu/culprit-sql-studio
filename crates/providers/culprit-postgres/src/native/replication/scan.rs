@@ -60,6 +60,7 @@ pub(crate) async fn acquire<R: QueryRead>(reader: &mut R, platform: Option<Platf
         })
         .collect();
     let snapshot = ReplicationSnapshot {
+        mssql_scope: None,
         context: ObservationReadContext::collector(from, SystemTime::now())?,
         sources,
         observations,

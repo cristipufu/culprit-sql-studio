@@ -197,6 +197,10 @@ fn append_replication_entry(text: &mut String, entry: &culprit_core::Replication
         text.push('\n');
         text.push_str(&format::list(&entry.conditions.iter().map(|condition| condition.label()).collect::<Vec<_>>()));
     }
+    for detail in [&entry.investigation, &entry.verify] {
+        text.push('\n');
+        text.push_str(&super::brief_detail(detail, OBSERVATION_DETAIL_CHARS));
+    }
     append_replication_fields(text, &entry.fields);
     for group in &entry.groups {
         text.push('\n');
@@ -1311,3 +1315,40 @@ mod jobs_tests;
 
 mod group_replication;
 pub(crate) use group_replication::{compact as compact_group_replication, group_replication};
+
+#[cfg(test)]
+mod hyperscale_replication_tests {
+    use super::*;
+    use culprit_collector::analytical::test_support::{ReplicationCase, replication_evidence};
+    use culprit_core::telemetry::*;
+    #[test]
+    fn canonical_replication_text_keeps_hyperscale_roles_nullable_parents_and_bounded_next_steps() {
+        let (source, records) = replication_evidence(ReplicationCase::MssqlHyperscale);
+        let read = ReplicationSnapshot::from_source(
+            &source,
+            records
+                .into_iter()
+                .map(|row| {
+                    let TelemetryRecord::Replication(row) = row else { panic!() };
+                    row
+                })
+                .collect(),
+        )
+        .unwrap();
+        let report = culprit_checks::replication::explain(&read, true).unwrap();
+        let text = replication(&report);
+        assert!(text.contains(&report.summary));
+        assert!(text.contains(&culprit_core::t!("view.replication.mssql.hyperscale.limit")));
+        for entry in &report.entries {
+            assert!(text.contains(&entry.investigation));
+            assert!(text.contains(&entry.verify));
+        }
+        assert!(text.contains("orders-logical-server"));
+        assert!(text.contains("HA SECONDARY"));
+        assert!(text.contains("GEO FORWARDER"));
+        assert!(text.contains("NAMED"));
+    }
+}
+
+mod galera;
+pub(crate) use galera::{compact as compact_galera, galera};

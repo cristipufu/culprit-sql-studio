@@ -9,6 +9,7 @@ use culprit_core::{
 };
 use std::collections::BTreeSet;
 mod fields;
+pub(crate) mod hyperscale;
 mod native;
 mod selection;
 use fields::{availability_replica, geo_link};
@@ -44,6 +45,7 @@ const GEO: &str = r#"SELECT link_guid AS link_id, partner_server, partner_databa
 pub(crate) enum Selection {
     AvailabilityGroup,
     GeoLinks,
+    Hyperscale,
 }
 
 #[derive(Default)]
@@ -155,6 +157,7 @@ async fn read<R: NativeRead>(
     let limit = limit.min(MAX_REPLICAS);
     let (sql, decode): (String, fn(&Rec) -> Result<ReplicationFact>) = match selection {
         Selection::GeoLinks => (GEO.into(), geo_link),
+        Selection::Hyperscale => return Err(invalid_data()), // Requires the independent held Context.
         Selection::AvailabilityGroup => {
             let layout = match native::read(reader, LAYOUT, 1).await? {
                 native::NativeRows::Available(rows) => rows,
@@ -224,7 +227,7 @@ fn counter(row: &Rec, name: &str) -> Result<Option<String>> {
 }
 pub(crate) fn application(fact: &ReplicationFact) -> Option<Replica> {
     match fact {
-        ReplicationFact::Native(_) => None,
+        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) => None,
         ReplicationFact::AvailabilityGroup(row) => {
             let (local, primary) = (row.is_local?, row.is_primary?);
             if local && primary {
@@ -275,7 +278,7 @@ fn bytes(value: &Option<String>) -> Option<f64> {
 }
 fn direction_known(fact: &ReplicationFact) -> bool {
     match fact {
-        ReplicationFact::Native(_) => false,
+        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) => false,
         ReplicationFact::AvailabilityGroup(row) => row.is_local.is_some() && row.is_primary.is_some(),
         ReplicationFact::GeoLink(row) => matches!(row.role, Some(0 | 1)),
     }
@@ -292,7 +295,7 @@ fn record_application_result(coverage: &mut Coverage, result: Result<Vec<Replica
 }
 fn record_local_role(settings: &mut Vec<culprit_core::Setting>, facts: &[ReplicationFact]) {
     let secondary = facts.iter().any(|fact| match fact {
-        ReplicationFact::Native(_) => false,
+        ReplicationFact::Native(_) | ReplicationFact::HyperscaleReplica(_) => false,
         ReplicationFact::AvailabilityGroup(row) => row.is_local == Some(true) && row.is_primary == Some(false),
         ReplicationFact::GeoLink(row) => row.role == Some(1),
     });
@@ -344,7 +347,7 @@ async fn collect_from<R: NativeRead>(reader: &mut R, edition: i64, grant_hint: &
     let completed = result.and_then(|read| {
         let context = ObservationReadContext::collector(from, until)?;
         let (observations, sources) = read.into_scan_observations();
-        let raw = ReplicationSnapshot { context, sources, observations };
+        let raw = ReplicationSnapshot { mssql_scope: None, context, sources, observations };
         if !raw.is_valid() {
             return Err(invalid_data());
         }

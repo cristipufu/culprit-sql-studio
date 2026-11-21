@@ -35,3 +35,18 @@ test("the actual Health path shows shared evidence or a withheld-analysis gap wi
   expect(render()).toContain(t("view.instance_resources.invalid"));
   expect(render()).not.toContain(t("ui.health.empty"));
 });
+
+test("processor CPU disclosure preserves the canonical separate clock, exact totals and unknown state", () => {
+  const { report } = instanceResourceCase("cpu_exact");
+  const cpu = report.process_cpu!;
+  const html = renderToStaticMarkup(<InstanceResources report={report} />);
+  expect(html).toContain(cpu.title);
+  expect(html).toContain("2020-01-01T12:00:00.5Z");
+  expect(html).toContain("9007199254740993");
+  expect(html).toContain(cpu.limitations[0]!);
+  expect(html).not.toContain("<details open");
+  const unknown = renderToStaticMarkup(<InstanceResources report={instanceResourceCase("cpu_null").report} />);
+  expect(unknown).toContain(t("ui.memory_failures.not_reported"));
+  const denied = renderToStaticMarkup(<InstanceResources report={instanceResourceCase("cpu_denied").report} />);
+  expect(denied).toContain(t("ui.dashboard.status.unavailable"));
+});

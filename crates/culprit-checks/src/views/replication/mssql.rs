@@ -137,5 +137,54 @@ pub(super) fn geo(row: &ReplicationObservation, sample: &GeoReplicationSample) -
     result
 }
 
+pub(super) fn hyperscale(row: &ReplicationObservation, sample: &MssqlHyperscaleReplica) -> ReplicationEntry {
+    let mut result = entry(
+        row,
+        MeasurementScope::Database,
+        t!("view.replication.mssql.hyperscale.title"),
+        t!("view.replication.mssql.hyperscale.explanation"),
+    );
+    result.fields = vec![
+        native("replica_id", t!("view.replication.mssql.field.replica_id"), Some(sample.replica_id.as_str())),
+        native(
+            "replica_server_name",
+            t!("view.replication.mssql.hyperscale.logical_server"),
+            sample.replica_server_name.as_deref(),
+        ),
+        native(
+            "replica_database_name",
+            t!("view.replication.mssql.field.database_name"),
+            sample.replica_database_name.as_deref(),
+        ),
+        native("is_local", t!("view.replication.mssql.field.local"), sample.is_local),
+        native("role_code", t!("view.replication.mssql.field.role_code"), sample.replica_role),
+        native("role", t!("view.replication.mssql.field.role"), sample.native_role.as_deref()),
+        native(
+            "local_database_id",
+            t!("view.replication.mssql.hyperscale.local_database_id"),
+            sample.local_database_id,
+        ),
+        native(
+            "parent_replica_id",
+            t!("view.replication.mssql.hyperscale.parent_replica_id"),
+            sample.parent_replica_id.as_deref(),
+        ),
+        native(
+            "selected_database_id",
+            t!("view.replication.mssql.hyperscale.selected_database_id"),
+            Some(sample.selected_database_id),
+        ),
+        native(
+            "observer_replica_id",
+            t!("view.replication.mssql.hyperscale.observer_replica_id"),
+            Some(sample.observer_replica_id.as_str()),
+        ),
+        native("observed_at", t!("view.replication.mssql.hyperscale.observed_at"), Some(sample.observed_at.as_str())),
+    ];
+    result.investigation = t!("view.replication.mssql.hyperscale.investigate");
+    result.verify = t!("view.replication.mssql.hyperscale.verify");
+    result
+}
+
 #[cfg(test)]
 mod tests;

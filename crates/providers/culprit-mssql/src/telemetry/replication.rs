@@ -7,9 +7,16 @@ use crate::{
 use culprit_core::{Result, telemetry::*};
 use std::sync::Arc;
 
+// Existing worst-case MI: 3 initial + 2 AG + 1 geo + 3 frame recheck + 3 final = 12 reader dispatches.
+// Azure HS: 2 initial + 1 pressure + 1 geo + 1 layout + 1 topology + 1 frame + 1 final + 1 topology final = 9.
+const MAX_TOTAL_QUERIES: u32 = 13; // Reader envelope plus the existing one-session SET dispatch.
+
 pub(super) fn bounded_budget(caller: &CollectionBudget) -> CollectionBudget {
     caller.intersection(&CollectionBudget {
         max_snapshot_rows: crate::replication::MAX_REPLICAS as u32,
+        max_queries: MAX_TOTAL_QUERIES,
+        statement_timeout_ms: 1_000,
+        total_timeout_ms: 5_000,
         ..CollectionBudget::upper_limits()
     })
 }
@@ -23,6 +30,7 @@ struct Reader<R: NativeRead> {
     host: String,
     port: u16,
     owner: Option<Context>,
+    topology: Option<crate::replication::hyperscale::Witness>,
 }
 
 impl ReplicationSource {
@@ -39,7 +47,7 @@ impl<R: NativeRead> ReplicationSource<R> {
         if request.selection != (CollectionSelection::Snapshot { dataset: SnapshotDataset::Replication }) {
             return Err(invalid_data());
         }
-        let reader = Reader { io, host, port, owner: None };
+        let reader = Reader { io, host, port, owner: None, topology: None };
         Ok(Self { inner: culprit_read::FrozenSource::new(reader, request)? })
     }
 }
@@ -53,30 +61,55 @@ impl<R: NativeRead> culprit_read::ObservationReader for Reader<R> {
         if before.activity.edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
             crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         }
-        let observed = crate::replication::read_selected(
+        let mut observed = crate::replication::read_selected(
             &mut self.io,
             before.activity.edition,
             request.budget.max_snapshot_rows as usize,
         )
         .await?;
+        let scope = if before.activity.edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
+            let remaining = observed.remaining(request.budget.max_snapshot_rows as usize);
+            let (part, witness) = crate::replication::hyperscale::read(&mut self.io, &before, remaining).await?;
+            observed.parts.push(part);
+            self.topology = witness;
+            crate::replication::hyperscale::scope(&before).ok()
+        } else {
+            None
+        };
         let after = before.recheck(&mut self.io, &self.host, self.port).await?;
         let context = before.completed(&after)?;
         let (records, sources) = observed.into_records(
             before.is_qualified() && after.is_qualified(),
             before.qualification_error.or(after.qualification_error),
         );
+        if self
+            .topology
+            .as_ref()
+            .is_some_and(|witness| ObservationBounds::new(&witness.observed_at, &context.observed_until).is_none())
+        {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        let snapshot = StateSnapshotDescription {
+            dataset: SnapshotDataset::Replication,
+            observed_from: context.observed_from.clone(),
+            observed_until: context.observed_until.clone(),
+            records: records.len() as u32,
+            sources,
+        };
+        let observation = match scope {
+            Some(scope) => SourceObservation::MssqlReplication {
+                snapshot,
+                scope: Box::new(scope),
+                database_writable: context.database_writable.ok_or_else(invalid_data)?,
+            },
+            None => SourceObservation::Snapshot(snapshot),
+        };
         let description = CollectionDescription {
             target: context.target,
             partition: context.partition,
             source: "replication-state".into(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::Replication,
-                observed_from: context.observed_from,
-                observed_until: context.observed_until,
-                records: records.len() as u32,
-                sources,
-            }),
+            observation,
         };
         self.owner = Some(after);
         Ok(culprit_read::FrozenObservation { description, records })
@@ -86,7 +119,10 @@ impl<R: NativeRead> culprit_read::ObservationReader for Reader<R> {
         let owner = self.owner.as_ref().ok_or_else(invalid_data)?;
         let after = owner.recheck(&mut self.io, &self.host, self.port).await?;
         match owner.completed(&after) {
-            Ok(_) => Ok(true),
+            Ok(_) => match &self.topology {
+                Some(witness) => witness.verify(&mut self.io, &after, &after.activity.at).await,
+                None => Ok(true),
+            },
             Err(error) if CollectionStop::from_error(&error) == CollectionStop::SourceChanged => Ok(false),
             Err(error) => Err(error),
         }

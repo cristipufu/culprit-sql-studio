@@ -107,7 +107,7 @@ pub(crate) fn resource(flavor: Flavor, value: &str) -> Result<SharedResourceIden
             SharedResourceIdentity {
                 engine: Engine::Mysql,
                 kind: SharedResourceKind::Instance,
-                namespace: NativeIdentity::new("mariadb-server-uid"),
+                namespace: NativeIdentity::new(MARIADB_SERVER_UID_NAMESPACE),
                 native: NativeIdentity::new(value),
             }
         }
@@ -124,4 +124,15 @@ fn valid_uuid(uuid: &str) -> bool {
         && uuid.bytes().enumerate().all(|(offset, value)| {
             if matches!(offset, 8 | 13 | 18 | 23) { value == b'-' } else { value.is_ascii_hexdigit() }
         })
+}
+
+/// The existing native identifier availability policy, shared by discovery and local ownership.
+pub(crate) fn configuration_query(flavor: Flavor, version: &str) -> Option<&'static str> {
+    match flavor {
+        Flavor::Mysql => Some("SELECT @@GLOBAL.server_uuid AS server_uuid"),
+        Flavor::Mariadb if super::local_context::has_mariadb_uid(version) => {
+            Some("SELECT @@GLOBAL.server_uid AS server_uid")
+        }
+        Flavor::Mariadb => None,
+    }
 }

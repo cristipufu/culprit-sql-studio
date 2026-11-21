@@ -3,16 +3,41 @@ use culprit_core::{
     InstanceResourceField, InstanceResourceGroup, InstanceResourceReport, Result, Snapshot, SourceState, t,
     telemetry::*,
 };
+mod process_cpu;
+pub use process_cpu::explain_source as explain_process_cpu_source;
+
+pub fn explain_source(
+    source: &CollectionDescription,
+    observations: &[OperationalObservation],
+    read_complete: bool,
+) -> Result<InstanceResourceReport> {
+    let mut report = explain(&InstanceResourceRead::from_source(source, observations, read_complete)?)?;
+    if let Some(coverage) = source.observation.snapshot().and_then(|snapshot| {
+        snapshot.sources.iter().find(|source| source.source == culprit_core::source_id::PROCESSOR_TOPOLOGY)
+    }) {
+        let rows = observations.iter().filter(|row| row.source == coverage.source).collect::<Vec<_>>();
+        report.process_cpu = Some(Box::new(process_cpu::explain_source(source, coverage, &rows, read_complete)?));
+    }
+    Ok(report)
+}
 
 pub fn explain_snapshot(snapshot: &Snapshot) -> Result<Option<InstanceResourceReport>> {
-    if let Some(read) = snapshot.pressure.as_ref().and_then(|pressure| pressure.instance_resources.as_deref()) {
-        return explain(read).map(Some);
-    }
-    let Some(source) = snapshot.sources.iter().find(|source| source.source == INSTANCE_RESOURCES_SOURCE) else {
-        return Ok(None);
+    let cpu = match process_cpu::explain_snapshot(snapshot) {
+        Ok(cpu) => cpu,
+        Err(_) => Some(process_cpu::invalid_report()),
     };
+    if let Some(read) = snapshot.pressure.as_ref().and_then(|pressure| pressure.instance_resources.as_deref()) {
+        let mut report = explain(read)?;
+        report.process_cpu = cpu.map(Box::new);
+        return Ok(Some(report));
+    }
+    let source = snapshot.sources.iter().find(|source| source.source == INSTANCE_RESOURCES_SOURCE);
+    if source.is_none() && cpu.is_none() {
+        return Ok(None);
+    }
     let mut report = unavailable();
-    report.source_state = match source.state {
+    report.process_cpu = cpu.map(Box::new);
+    report.source_state = match source.map(|source| source.state).unwrap_or(SourceState::Unavailable) {
         SourceState::Collected | SourceState::Empty | SourceState::Partial => SourceState::Partial,
         state => state,
     };
@@ -23,8 +48,7 @@ pub fn explain_captured(read: &CapturedOperationalRead) -> Result<InstanceResour
     if !read.is_valid() {
         return Err(CollectionStop::InvalidPage.error());
     }
-    let point = InstanceResourceRead::from_source(&read.description, &read.observations, read.read_complete)?;
-    explain(&point)
+    explain_source(&read.description, &read.observations, read.read_complete)
 }
 
 pub fn explain(read: &InstanceResourceRead) -> Result<InstanceResourceReport> {
@@ -63,6 +87,7 @@ pub fn explain(read: &InstanceResourceRead) -> Result<InstanceResourceReport> {
 
 fn unavailable() -> InstanceResourceReport {
     InstanceResourceReport {
+        process_cpu: None,
         context: None,
         native_source: None,
         source_state: SourceState::Unavailable,

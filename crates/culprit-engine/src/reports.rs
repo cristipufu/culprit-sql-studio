@@ -35,6 +35,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         group_replication: &'a Option<Vec<culprit_core::GroupReplicationReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        galera: &'a Option<Vec<culprit_core::GaleraReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         full_text_populations: &'a Option<Vec<culprit_core::FullTextPopulationReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         tempdb_metadata_memory: &'a Option<Box<culprit_core::TempdbMetadataMemoryReport>>,
@@ -118,6 +120,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         tempdb_metadata_memory,
         table_memory,
         group_replication,
+        galera,
         full_text_populations,
         database_properties,
         suspect_pages,
@@ -159,6 +162,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         tempdb_metadata_memory,
         table_memory,
         group_replication,
+        galera,
         full_text_populations,
         database_properties,
         suspect_pages,
@@ -1050,6 +1054,7 @@ mod tests {
         use std::time::SystemTime;
         let mut snapshot = fixture_report("20261021T100000.000Z", 60).snapshot;
         snapshot.pressure.get_or_insert_default().replication = Some(Box::new(ReplicationSnapshot {
+            mssql_scope: None,
             context: ObservationReadContext::collector(SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH).unwrap(),
             sources: vec![StateSourceCoverage::unavailable(
                 "replication-channels".into(),

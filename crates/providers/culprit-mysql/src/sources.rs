@@ -181,3 +181,9 @@ pub const GROUP_REPLICATION: Source = Source {
     reads: culprit_core::key!("provider.mysql.source.group_replication"),
     delivers: &[],
 };
+
+pub const GALERA: Source = Source {
+    name: culprit_core::telemetry::MARIADB_GALERA_SOURCE,
+    reads: culprit_core::key!("provider.mysql.source.galera"),
+    delivers: &[],
+};

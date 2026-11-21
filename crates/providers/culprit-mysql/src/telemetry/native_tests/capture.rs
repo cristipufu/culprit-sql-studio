@@ -1,7 +1,10 @@
 //! Existing provider factory and sealed snapshot receipt reader shared by owned native controls.
 use super::replication::required;
 use super::*;
-use culprit_collector::capture::SourceFactory;
+use culprit_collector::{
+    capture::{self, CollectionCancellation, SourceFactory},
+    outbox::Outbox,
+};
 use std::path::Path;
 
 pub(in crate::telemetry::native_tests) struct Factory(pub(in crate::telemetry::native_tests) crate::MysqlProvider);
@@ -16,6 +19,38 @@ impl SourceFactory for Factory {
 pub(in crate::telemetry::native_tests) struct Capture {
     pub manifest: CollectionManifest,
     pub records: Vec<ExportedRecord>,
+}
+
+pub(in crate::telemetry::native_tests) async fn original(
+    provider: crate::MysqlProvider,
+    request: CollectionRequest,
+    binding: &str,
+) -> Box<Capture> {
+    let temporary = tempfile::tempdir().unwrap();
+    let mut outbox = Box::new(Outbox::create(&temporary.path().join("outbox"), OutboxLimits::default()).unwrap());
+    let mut lease = Box::new(Box::pin(outbox.reserve(binding, &request)).await.unwrap());
+    let output = lease.directory().to_path_buf();
+    let identity = lease.identity().clone();
+    let factory = Factory(provider);
+    let result = Box::new(
+        Box::pin(capture::collect(
+            &culprit_read::admission::SourceGate::default(),
+            &factory,
+            request.clone(),
+            &output,
+            identity.clone(),
+            &CollectionCancellation::default(),
+            Some(lease.as_mut()),
+        ))
+        .await,
+    );
+    let finished = Box::pin((*lease).finish()).await;
+    assert_eq!(factory.0.source_shutdown(), SourceShutdown::Quiescent);
+    let manifest = required(*result, "actual native source/Outbox capture");
+    required(finished, "sealed native original completion");
+    let sealed = required(Box::pin(outbox.verify(&identity.observation_id)).await, "verified sealed native original");
+    assert_eq!(sealed.capture, manifest.capture);
+    Box::new(read_capture(sealed, &request.budget, &output))
 }
 
 pub(in crate::telemetry::native_tests) fn read_capture(

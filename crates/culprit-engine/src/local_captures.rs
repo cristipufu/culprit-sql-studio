@@ -15,6 +15,8 @@ mod operational;
 pub use operational::{LocalOperationalCapture, LocalSnapshotAnalysis, LocalSnapshotReport};
 mod blocking;
 pub use blocking::{LocalActivityRead, LocalBlockingAnalysis};
+mod replication;
+pub use replication::LocalReplication;
 mod session_census;
 pub use session_census::LocalSessionCensus;
 
@@ -41,6 +43,8 @@ pub enum LocalCaptureAnalysisKind {
     FullTextPopulations,
     TableMemory,
     GroupReplication,
+    Replication,
+    Galera,
     BackupHistory,
     RequestMemory,
     TaskSpace,
@@ -53,7 +57,7 @@ pub enum LocalCaptureAnalysisKind {
     SessionCensus,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 30] = [
         Self::PageServerReads,
         Self::MemoryClerks,
         Self::TempdbMetadataMemory,
@@ -72,6 +76,8 @@ impl LocalCaptureAnalysisKind {
         Self::FullTextPopulations,
         Self::TableMemory,
         Self::GroupReplication,
+        Self::Replication,
+        Self::Galera,
         Self::BackupHistory,
         Self::RequestMemory,
         Self::TaskSpace,
@@ -90,6 +96,7 @@ impl LocalCaptureAnalysisKind {
         use culprit_core::telemetry::SnapshotDataset as Dataset;
         match self {
             Self::PageServerReads => QueryHistory,
+            Self::Replication => LocalCaptureReadPlan::Replication,
             Self::Blocking => Blocking,
             Self::SessionCensus => Activity,
             Self::MemoryClerks
@@ -110,6 +117,7 @@ impl LocalCaptureAnalysisKind {
             Self::FullTextPopulations => Snapshot(&[Dataset::FullTextPopulations]),
             Self::TableMemory => Snapshot(&[Dataset::TableMemory]),
             Self::GroupReplication => Snapshot(&[Dataset::GroupReplication]),
+            Self::Galera => Snapshot(&[Dataset::Galera]),
             Self::BackupHistory => Snapshot(&[Dataset::BackupHistory]),
             Self::RequestMemory => Snapshot(&[Dataset::CurrentRequestMemory]),
             Self::TaskSpace => Snapshot(&[Dataset::TaskSpace]),
@@ -127,6 +135,7 @@ impl LocalCaptureAnalysisKind {
 
 #[cfg(feature = "collector")]
 enum LocalCaptureReadPlan {
+    Replication,
     Activity,
     QueryHistory,
     Snapshot(&'static [culprit_core::telemetry::SnapshotDataset]),
@@ -152,6 +161,7 @@ pub enum LocalCapturedAnalysis {
     Snapshot(LocalSnapshotAnalysis),
     Blocking(Box<LocalBlockingAnalysis>),
     SessionCensus(Box<LocalSessionCensus>),
+    Replication(Box<LocalReplication>),
 }
 impl LocalCapturedAnalysis {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
@@ -162,6 +172,7 @@ impl LocalCapturedAnalysis {
             Self::Snapshot(analysis) => analysis.report().kind(),
             Self::Blocking(_) => LocalCaptureAnalysisKind::Blocking,
             Self::SessionCensus(_) => LocalCaptureAnalysisKind::SessionCensus,
+            Self::Replication(_) => LocalCaptureAnalysisKind::Replication,
         }
     }
 }

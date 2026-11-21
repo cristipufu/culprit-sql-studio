@@ -340,3 +340,7 @@ impl SnapshotReader for MysqlSnapshotReader {
 pub(crate) fn require_group_instance(request: &CollectionRequest) -> Result<&SharedResourceIdentity> {
     shared_instance(request, SnapshotDataset::GroupReplication)
 }
+
+pub(crate) fn require_galera_instance(request: &CollectionRequest) -> Result<&SharedResourceIdentity> {
+    shared_instance(request, SnapshotDataset::Galera)
+}

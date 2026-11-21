@@ -658,3 +658,5 @@ mod instance_resources;
 mod boxed_query_history;
 
 mod group_replication;
+
+mod galera;

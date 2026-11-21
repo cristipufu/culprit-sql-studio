@@ -16,6 +16,7 @@ pub enum SnapshotDataset {
     ColumnstoreRowgroups,
     TableMemory,
     GroupReplication,
+    Galera,
     FullTextPopulations,
     Operational,
     DatabasePerformanceCounters,
@@ -71,6 +72,7 @@ impl SnapshotDataset {
             | Self::ColumnstoreRowgroups
             | Self::TableMemory
             | Self::GroupReplication
+            | Self::Galera
             | Self::FullTextPopulations
             | Self::Operational
             | Self::DatabasePerformanceCounters
@@ -497,6 +499,7 @@ pub enum OperationalFact {
     MssqlColumnstoreRowgroup(Box<MssqlColumnstoreRowgroup>),
     MssqlTableMemory(Box<MssqlTableMemory>),
     MysqlGroupReplication(Box<MysqlGroupReplicationPoint>),
+    MariadbGalera(Box<MariadbGaleraPoint>),
     MssqlFullTextPopulation(Box<MssqlFullTextPopulation>),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
     MssqlPersistentVersionStore(Box<MssqlPersistentVersionStore>),
@@ -522,6 +525,7 @@ impl OperationalFact {
             Self::MssqlColumnstoreRowgroup(point) => point.key(),
             Self::MssqlTableMemory(point) => point.key(),
             Self::MysqlGroupReplication(point) => point.key(),
+            Self::MariadbGalera(point) => point.key(),
             Self::MssqlFullTextPopulation(point) => point.key(),
             Self::CounterSet(counters) => counters.key(),
             Self::CompilerWaiter(waiter) => waiter.key(),
@@ -583,6 +587,7 @@ impl OperationalFact {
             | Self::MssqlColumnstoreRowgroup(_)
             | Self::MssqlTableMemory(_)
             | Self::MysqlGroupReplication(_)
+            | Self::MariadbGalera(_)
             | Self::MssqlFullTextPopulation(_)
             | Self::ConfiguredLogRateLimits(_)
             | Self::HyperscaleLogComponent(_)
@@ -679,7 +684,11 @@ impl OperationalFact {
             Self::StatementCounters(counters) => counters.is_valid(),
             Self::RuntimeDistribution(observation) => observation.is_valid(),
             Self::DiagnosticRevision(revision) => revision.is_valid(),
-            Self::CounterSet(counters) => counters.is_valid(),
+            Self::CounterSet(counters) => {
+                counters.is_valid()
+                    && (counters.identity.qualifiers.get("kind").map(String::as_str) != Some(MSSQL_PROCESS_CPU_KIND)
+                        || MssqlProcessCpuPoint::from_sample(counters).is_ok())
+            }
             Self::CompilerWaiter(waiter) => waiter.is_valid(),
             Self::MaintenanceProgress(point) => point.is_valid(),
             Self::CurrentRequestWork(point) => point.is_valid(),
@@ -709,6 +718,7 @@ impl OperationalFact {
             Self::MssqlColumnstoreRowgroup(point) => point.is_valid(),
             Self::MssqlTableMemory(point) => point.is_valid(),
             Self::MysqlGroupReplication(point) => point.is_valid(),
+            Self::MariadbGalera(point) => point.is_valid(),
             Self::MssqlFullTextPopulation(point) => point.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),
@@ -752,11 +762,17 @@ impl OperationalObservation {
             && self.fact.is_valid()
             && self.fact.matches_key(&self.key)
             && match &self.fact {
+                OperationalFact::CounterSet(sample)
+                    if sample.identity.qualifiers.get("kind").map(String::as_str) == Some(MSSQL_PROCESS_CPU_KIND) =>
+                {
+                    self.source == crate::source_id::PROCESSOR_TOPOLOGY
+                }
                 OperationalFact::MssqlCdc(point) => self.source == point.source(),
                 OperationalFact::MssqlBackupHistory(_) => self.source == MSSQL_BACKUP_HISTORY_SOURCE,
                 OperationalFact::MssqlColumnstoreRowgroup(_) => self.source == MSSQL_COLUMNSTORE_ROWGROUPS_SOURCE,
                 OperationalFact::MssqlTableMemory(_) => self.source == MSSQL_TABLE_MEMORY_SOURCE,
                 OperationalFact::MysqlGroupReplication(point) => self.source == point.source(),
+                OperationalFact::MariadbGalera(point) => self.source == point.source(),
                 OperationalFact::MssqlFullTextPopulation(_) => self.source == MSSQL_FULL_TEXT_POPULATIONS_SOURCE,
                 OperationalFact::MssqlAgentJob(_) => self.source == MSSQL_AGENT_JOBS_SOURCE,
                 OperationalFact::MysqlScheduledEvent(_) => self.source == MYSQL_SCHEDULED_EVENTS_SOURCE,

@@ -19,6 +19,13 @@ pub(crate) fn value(report: &culprit_core::InstanceResourceReport) -> Value {
         "title":report.title,"summary":report.summary,"source_state":report.source_state,
         "read_complete":report.read_complete,"observed_at":report.observed_at,
         "native_populations_complete":report.native_populations_complete,"limitations":report.limitations,
+        "process_cpu":report.process_cpu.as_ref().map(|cpu|json!({
+            "title":cpu.title,"summary":cpu.summary,"source_state":cpu.source_state,"native_source":cpu.native_source,
+            "read_complete":cpu.read_complete,"observed_at":cpu.observed_at,"limitations":cpu.limitations,
+            "fields":cpu.fields.iter().take(ENTRY_LIMIT).map(|field|json!({
+                "key":field.key,"label":field.label,"value":field.value,
+            })).collect::<Vec<_>>(),
+        })),
         "groups":report.groups.iter().take(ENTRY_LIMIT).map(|group|json!({
             "key":group.key,"title":group.title,
             "fields":group.fields.iter().take(ENTRY_LIMIT).map(|field|json!({

@@ -38,10 +38,16 @@ impl Observation {
         self.native.is_some()
     }
     pub(crate) async fn context<R: NativeRead>(&self, reader: &mut R) -> Result<Option<Context>> {
+        if self.native.is_none() {
+            return Ok(None);
+        }
+        self.context_from_epoch(&one(reader, EPOCH).await?)
+    }
+
+    pub(crate) fn context_from_epoch(&self, epoch: &crate::value::Rec) -> Result<Option<Context>> {
         let Some((identity, process_id)) = &self.native else { return Ok(None) };
-        let epoch = one(reader, EPOCH).await?;
-        let started_at_ticks = u64::try_from(integer(&epoch, "started_at_ticks")?).map_err(|_| invalid_data())?;
-        let now_ticks = u64::try_from(integer(&epoch, "ms_ticks")?).map_err(|_| invalid_data())?;
+        let started_at_ticks = u64::try_from(integer(epoch, "started_at_ticks")?).map_err(|_| invalid_data())?;
+        let now_ticks = u64::try_from(integer(epoch, "ms_ticks")?).map_err(|_| invalid_data())?;
         if started_at_ticks > now_ticks {
             return Err(invalid_data());
         }
@@ -78,19 +84,23 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<(Context, Stri
 
 pub(crate) async fn observe<R: NativeRead>(reader: &mut R) -> Result<Observation> {
     let row = one(reader, IDENTITY).await?;
-    let edition = integer(&row, "edition")?;
-    let major = text(&row, "major")?.parse::<u32>().map_err(|_| invalid_data())?;
-    let observed_at = canonical_time(&text(&row, "observed_at")?)?;
+    observation(&row)
+}
+
+pub(crate) fn observation(row: &crate::value::Rec) -> Result<Observation> {
+    let edition = integer(row, "edition")?;
+    let major = text(row, "major")?.parse::<u32>().map_err(|_| invalid_data())?;
+    let observed_at = canonical_time(&text(row, "observed_at")?)?;
     if !supports_profile(edition, major) {
         return Ok(Observation { edition, major, observed_at, native: None });
     }
     let identity = SharedResourceIdentity {
         engine: Engine::Mssql,
         kind: SharedResourceKind::Instance,
-        namespace: NativeIdentity::new(text(&row, "machine_name")?).qualified("kind", "sql-server-network-machine"),
-        native: NativeIdentity::new(text(&row, "server_name")?).qualified("kind", "sql-server-instance"),
+        namespace: NativeIdentity::new(text(row, "machine_name")?).qualified("kind", "sql-server-network-machine"),
+        native: NativeIdentity::new(text(row, "server_name")?).qualified("kind", "sql-server-instance"),
     };
-    let process_id = u64::try_from(integer(&row, "process_id")?).map_err(|_| invalid_data())?;
+    let process_id = u64::try_from(integer(row, "process_id")?).map_err(|_| invalid_data())?;
     if !identity.is_valid() || process_id == 0 {
         return Err(invalid_data());
     }

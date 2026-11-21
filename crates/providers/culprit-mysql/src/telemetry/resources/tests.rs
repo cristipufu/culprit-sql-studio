@@ -53,7 +53,7 @@ async fn each_native_profile_keeps_its_own_product_and_version_boundary() {
         assert_eq!(reader.queries.len(), 6);
         assert_eq!(reader.closed, 1);
     }
-    for (version, instrumentation) in [("11.8.0-MariaDB", true), ("5.7.16", true), ("8.4.0", false)] {
+    for (version, instrumentation) in [("10.11.8-MariaDB", true), ("5.7.16", true), ("8.4.0", false)] {
         let mut reader = Read::with(vec![Ok(vec![rows::platform(version, instrumentation)])]);
         assert_eq!(discover_from(&mut reader, &request()).await.err().unwrap().code, ErrorCode::Unsupported);
         assert_eq!(reader.queries.len(), 1);
@@ -90,4 +90,20 @@ async fn discovery_cancellation_stops_at_each_native_boundary_without_source_fal
         assert_eq!(reader.queries.len(), boundary + 1);
         assert_eq!(reader.closed, 1);
     }
+}
+
+#[tokio::test]
+async fn mariadb_galera_discovery_uses_its_actual_native_uid_without_performance_schema_or_mysql_fallback() {
+    let mut replies = crate::native::galera::tests::context_rows("2026-11-13T10:00:00.123456Z");
+    replies.extend(crate::native::galera::tests::context_rows("2026-11-13T10:00:00.123458Z"));
+    let mut reader = Read::with(replies);
+    let discovered = discover_from(&mut reader, &request()).await.unwrap();
+    assert_eq!(discovered[0].identity, crate::native::galera::tests::resource());
+    assert_eq!(discovered[0].collections, [TelemetryCollection::Snapshot(SnapshotDataset::Galera)]);
+    assert_eq!(reader.queries.len(), 6);
+    assert_eq!(reader.closed, 1);
+    assert_eq!(reader.queries[1].0, "SELECT @@GLOBAL.server_uid AS server_uid");
+    assert!(
+        reader.queries.iter().all(|(sql, _, _)| !sql.contains("server_uuid") && !sql.contains("performance_schema."))
+    );
 }

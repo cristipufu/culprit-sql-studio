@@ -17,6 +17,7 @@ pub enum CompletedCaptureAnalysis {
     DatabasePerformanceCounters,
     TableMemory,
     GroupReplication,
+    Galera,
     FullTextPopulations,
     HyperscaleLogComponents,
 }
@@ -28,6 +29,7 @@ impl CompletedCaptureAnalysis {
             Self::DatabasePerformanceCounters => SnapshotDataset::DatabasePerformanceCounters,
             Self::TableMemory => SnapshotDataset::TableMemory,
             Self::GroupReplication => SnapshotDataset::GroupReplication,
+            Self::Galera => SnapshotDataset::Galera,
             Self::FullTextPopulations => SnapshotDataset::FullTextPopulations,
             Self::HyperscaleLogComponents => SnapshotDataset::HyperscaleLogComponents,
         }
@@ -68,6 +70,9 @@ impl CompletedCaptureScanInput<'_> {
             }
             CompletedCaptureAnalysis::GroupReplication => {
                 super::CapturedScanEvidence::group_replication(Box::new(captured.into_operational_read()?))?
+            }
+            CompletedCaptureAnalysis::Galera => {
+                super::CapturedScanEvidence::galera(Box::new(captured.into_operational_read()?))?
             }
             CompletedCaptureAnalysis::TableMemory => {
                 super::CapturedScanEvidence::table_memory(Box::new(captured.into_operational_read()?))?

@@ -1020,3 +1020,5 @@ async fn session_memory_actor_ready(reader: &mut ReadSession, actor_id: &str, no
 }
 
 mod group_replication;
+
+mod galera;

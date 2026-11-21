@@ -1170,6 +1170,8 @@ version = "0.5.6"
 dependencies = [
  "async-trait",
  "chrono",
+ "culprit-checks",
+ "culprit-collector",
  "culprit-core",
  "culprit-engine",
  "rmcp",

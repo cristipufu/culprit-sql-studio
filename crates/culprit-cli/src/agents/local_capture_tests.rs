@@ -5,6 +5,7 @@ mod full_text_populations;
 mod grant_output;
 mod hyperscale_log_components;
 mod participant_context;
+mod replication;
 mod rowgroups_backup;
 mod snapshots;
 mod table_memory;
@@ -308,3 +309,5 @@ mod session_census;
 mod instance_resources;
 
 mod group_replication;
+
+mod galera;

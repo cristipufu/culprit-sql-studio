@@ -48,6 +48,7 @@ fn carrier(context: ObservationReadContext, observations: Vec<ReplicationObserva
         *counts.entry(row.source.clone()).or_default() += 1;
     }
     ReplicationSnapshot {
+        mssql_scope: None,
         context,
         sources: counts
             .into_iter()
@@ -521,6 +522,7 @@ fn an_unavailable_native_source_cannot_gain_a_member_generation_or_positive_poin
     native.partition = SourcePartition::InstanceLocal { member: None, epoch: None };
     native.database_writable = None;
     let read = ReplicationSnapshot {
+        mssql_scope: None,
         context,
         sources: vec![StateSourceCoverage::unavailable(
             "availability-replicas".into(),
@@ -553,4 +555,54 @@ fn an_invalid_original_native_key_is_withheld_instead_of_becoming_valid_through_
     assert!(shared.pressure.as_ref().unwrap().replication.is_none());
     assert_private_and_idempotent(&original, &shared);
     assert!(!shared_read(&original).is_valid_read(false), "sharing does not repair the original receipt/key mismatch");
+}
+
+#[test]
+fn sharing_withdraws_indivisible_hyperscale_native_scope_and_points_while_preserving_other_replication_history() {
+    let mut context = native_context(Engine::Mssql);
+    let ObservationReadContext::Native { context: native } = &mut context else { panic!() };
+    let local = "91487244-730d-4b83-8e49-d482241c7288";
+    let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut native.partition else { panic!() };
+    member.kind = SharedResourceKind::Node;
+    member.native = NativeIdentity::new(local).qualified("kind", "azure-sql-hyperscale-replica");
+    member.namespace = NativeIdentity::new(native.target.database().unwrap().incarnation.as_ref().unwrap())
+        .qualified("kind", "azure-sql-logical-database");
+    let point = MssqlHyperscaleReplica {
+        selected_database_id: 7,
+        observer_replica_id: local.into(),
+        database_writable: false,
+        observed_at: FROM.into(),
+        replica_id: "11111111-1111-1111-1111-111111111111".into(),
+        replica_server_name: Some(format!("{PRIVATE}-logical-server")),
+        replica_database_name: Some(format!("{PRIVATE}-database")),
+        is_local: Some(false),
+        replica_role: Some(1),
+        native_role: Some("HA SECONDARY".into()),
+        local_database_id: Some(70),
+        parent_replica_id: Some(local.into()),
+    };
+    let mut read = carrier(
+        context,
+        vec![
+            ReplicationObservation {
+                source: MSSQL_HYPERSCALE_REPLICAS_SOURCE.into(),
+                fact: ReplicationFact::HyperscaleReplica(Box::new(point)),
+            },
+            ReplicationObservation { source: "geo-links".into(), fact: ReplicationFact::GeoLink(Box::new(geo())) },
+        ],
+    );
+    read.mssql_scope = Some(Box::new(MssqlReplicationScope { database_id: 7, replica_id: local.into() }));
+    assert!(read.is_valid());
+    let original = snapshot(Engine::Mssql, read);
+    let shared = redact_snapshot(&original);
+    let redacted = shared_read(&shared);
+    assert!(redacted.is_valid());
+    assert!(redacted.mssql_scope.is_none());
+    assert_eq!(redacted.observations.len(), 1);
+    assert!(matches!(redacted.observations[0].fact, ReplicationFact::GeoLink(_)));
+    let source = redacted.sources.iter().find(|source| source.source == MSSQL_HYPERSCALE_REPLICAS_SOURCE).unwrap();
+    assert_eq!(source.state, crate::SourceState::Unavailable);
+    assert_eq!(source.records, 0);
+    assert!(!source.complete_scope);
+    assert_private_and_idempotent(&original, &shared);
 }

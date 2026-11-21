@@ -168,6 +168,7 @@ pub enum ReplicationFact {
     Native(Box<NativeReplicationSample>),
     AvailabilityGroup(Box<AvailabilityReplicaSample>),
     GeoLink(Box<GeoReplicationSample>),
+    HyperscaleReplica(Box<MssqlHyperscaleReplica>),
 }
 impl ReplicationFact {
     pub fn key(&self) -> String {
@@ -177,11 +178,20 @@ impl ReplicationFact {
                 format!("ag:{}:{}:{}", row.group_id, row.group_database_id, row.replica_id)
             }
             Self::GeoLink(row) => format!("geo:{}", row.link_id),
+            Self::HyperscaleReplica(row) => {
+                format!(
+                    "hs:{}:{}:{}",
+                    row.observer_replica_id.to_ascii_lowercase(),
+                    row.selected_database_id,
+                    row.replica_id.to_ascii_lowercase()
+                )
+            }
         }
     }
     pub fn is_valid(&self) -> bool {
         match self {
             Self::Native(row) => row.is_valid(),
+            Self::HyperscaleReplica(row) => row.is_valid(),
             Self::AvailabilityGroup(row) => {
                 [&row.group_id, &row.group_database_id, &row.replica_id].into_iter().all(|id| native_guid(id))
                     && row.database_id != Some(0)
@@ -361,7 +371,7 @@ impl AvailabilityReplicaContext {
     }
 }
 
-fn native_name(value: &str) -> bool {
+pub(super) fn native_name(value: &str) -> bool {
     value.len() <= 2048 && !value.chars().any(char::is_control)
 }
 fn log_position(value: &str) -> bool {
@@ -376,7 +386,7 @@ fn local_time(value: &str) -> bool {
         && chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f")
             .is_ok_and(|at| (1753..=9999).contains(&at.year()) && at.nanosecond().is_multiple_of(100))
 }
-fn native_guid(id: &str) -> bool {
+pub(super) fn native_guid(id: &str) -> bool {
     id.len() == 36
         && id
             .bytes()
@@ -392,6 +402,17 @@ pub struct ReplicationObservation {
 }
 impl ReplicationObservation {
     pub fn is_valid(&self) -> bool {
-        valid_key(&self.source) && self.fact.is_valid()
+        valid_key(&self.source)
+            && self.fact.is_valid()
+            && (matches!(self.fact, ReplicationFact::HyperscaleReplica(_))
+                == (self.source == MSSQL_HYPERSCALE_REPLICAS_SOURCE))
+    }
+    pub fn fits_source(&self, source: &CollectionDescription) -> bool {
+        if !self.is_valid() {
+            return false;
+        }
+        let ReplicationFact::HyperscaleReplica(point) = &self.fact else { return true };
+        let Ok(Some(scope)) = mssql_replication_scope(source) else { return false };
+        NativeReadContext::from_snapshot(source).is_ok_and(|context| point.fits_read(scope, &context))
     }
 }

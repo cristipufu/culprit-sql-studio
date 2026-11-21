@@ -78,6 +78,7 @@ mod focus;
 mod focused_request;
 mod foreign_keys;
 mod grants;
+mod hyperscale_replicas;
 mod identity;
 mod index_operations;
 mod indexes;
@@ -107,6 +108,7 @@ mod read_accounting;
 mod read_metrics;
 mod recipes;
 mod relational_input_proof;
+pub use hyperscale_replicas::*;
 mod replication;
 mod replication_snapshot;
 mod request_resources;
@@ -359,6 +361,12 @@ impl CollectionRequest {
                 }
             }
             CollectionSelection::Snapshot { dataset: SnapshotDataset::GroupReplication } => {
+                if !matches!(&self.subject, CollectionSubject::Shared { resource } if resource.kind == SharedResourceKind::Instance)
+                {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::Galera } => {
                 if !matches!(&self.subject, CollectionSubject::Shared { resource } if resource.kind == SharedResourceKind::Instance)
                 {
                     return Err(CollectionStop::InvalidPage.error());
@@ -761,6 +769,8 @@ impl TelemetryRecord {
                     | (_, OperationalFact::MaintenanceProgress(_)) => false,
                     (_, OperationalFact::MysqlGroupReplication(point)) => accepted && point.fits_source(source),
                     (SourceObservation::GroupReplication { .. }, _) => false,
+                    (_, OperationalFact::MariadbGalera(point)) => accepted && point.fits_source(source),
+                    (SourceObservation::Galera { .. }, _) => false,
                     (_, OperationalFact::MssqlTableMemory(point)) => accepted && point.fits_source(source),
                     (SourceObservation::TableMemory { .. }, _) => false,
                     (_, OperationalFact::MssqlColumnstoreRowgroup(point)) => accepted && point.fits_source(source),
@@ -770,6 +780,15 @@ impl TelemetryRecord {
                     (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::CounterSet(sample)) if database_performance_candidate(sample) => {
                         accepted && database_performance_sample_fits_source(sample, source)
+                    }
+                    (_, OperationalFact::CounterSet(sample))
+                        if sample.identity.qualifiers.get("kind").map(String::as_str)
+                            == Some(MSSQL_PROCESS_CPU_KIND) =>
+                    {
+                        accepted
+                            && row.source == crate::source_id::PROCESSOR_TOPOLOGY
+                            && MssqlProcessCpuPoint::from_original(sample, &NativeReadContext::from_snapshot(source)?)
+                                .is_ok()
                     }
                     (SourceObservation::DatabasePerformanceCounters { .. }, _) => false,
                     (_, OperationalFact::MssqlBackupHistory(point)) => accepted && point.fits_source(source),
@@ -838,6 +857,7 @@ impl TelemetryRecord {
             }
             Self::Replication(row) => {
                 source.observation.accepts_snapshot_record(TelemetryStream::ReplicationSamples, &row.source)
+                    && row.fits_source(source)
             }
             Self::Setting(row) => {
                 source.observation.accepts_snapshot_record(TelemetryStream::SettingObservations, &row.source)
@@ -1174,3 +1194,6 @@ mod contracts_tests;
 
 mod group_replication;
 pub use group_replication::*;
+
+mod galera;
+pub use galera::*;

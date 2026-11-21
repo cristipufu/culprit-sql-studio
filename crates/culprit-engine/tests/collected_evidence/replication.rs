@@ -156,3 +156,49 @@ async fn unknown_local_owner_retains_positive_partial_points_without_authority_a
     let wrong_family = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(collected_resources::replication(&wrong_family).is_err());
 }
+
+#[tokio::test]
+async fn hyperscale_original_topology_stays_database_scoped_and_missing_archive_rows_never_gain_complete_tree_health() {
+    for case in [
+        ReplicationCase::MssqlHyperscale,
+        ReplicationCase::MssqlHyperscaleNulls,
+        ReplicationCase::MssqlHyperscalePartial,
+        ReplicationCase::MssqlHyperscaleUnavailable,
+    ] {
+        let (source, records) = replication_evidence(case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let capture = fixture.read_families(FAMILY).await;
+        let analysis = collected_resources::replication(&capture).unwrap();
+        assert_eq!(analysis.report.state_rows, 0);
+        assert_eq!(analysis.report.context.native().unwrap().target, source.target);
+        assert!(
+            analysis
+                .report
+                .sources
+                .iter()
+                .all(|source| source.state != SourceState::Collected && source.state != SourceState::Empty)
+        );
+        for row in &records {
+            let TelemetryRecord::Replication(row) = row else { panic!() };
+            let ReplicationFact::HyperscaleReplica(point) = &row.fact else { panic!() };
+            let entry =
+                analysis.report.entries.iter().find(|entry| entry.reference.observation_key == row.fact.key()).unwrap();
+            let field = |key: &str| entry.fields.iter().find(|field| field.key == key).unwrap().value.clone();
+            assert_eq!(field("local_database_id"), point.local_database_id.map(|id| id.to_string()));
+            assert_eq!(field("parent_replica_id"), point.parent_replica_id);
+            assert_eq!(field("role_code"), point.replica_role.map(|role| role.to_string()));
+            assert_eq!(entry.investigation, culprit_core::t!("view.replication.mssql.hyperscale.investigate"));
+            assert_eq!(entry.verify, culprit_core::t!("view.replication.mssql.hyperscale.verify"));
+            assert!(entry.conditions.is_empty() && entry.session.is_none());
+        }
+        if !records.is_empty() {
+            fixture.remove_first_row(TelemetryStream::ReplicationSamples);
+            let capture = fixture.read_families(FAMILY).await;
+            let missing = collected_resources::replication(&capture).unwrap();
+            assert!(!missing.report.read_complete);
+            assert_eq!(missing.report.native_rows, 4);
+            assert_eq!(missing.report.observed_rows, 3);
+            assert_eq!(missing.context.source, source);
+        }
+    }
+}

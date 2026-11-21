@@ -111,7 +111,8 @@ async fn captured_scan(
             })
             .await
         }
-        LocalCapturedAnalysis::PageServerReads(_)
+        LocalCapturedAnalysis::Replication(_)
+        | LocalCapturedAnalysis::PageServerReads(_)
         | LocalCapturedAnalysis::Blocking(_)
         | LocalCapturedAnalysis::SessionCensus(_) => Err(DeliveryProblem::InvalidContract.error()),
     }

@@ -1,3 +1,4 @@
+mod replication;
 mod rowgroups_backup;
 mod suspect_pages;
 mod table_full_text;
@@ -213,3 +214,5 @@ mod session_census;
 mod instance_resources;
 
 mod group_replication;
+
+mod galera;

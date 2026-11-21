@@ -23,6 +23,8 @@ pub struct InstanceResourceGroup {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct InstanceResourceReport {
+    /// A separate processor-source point, never merged into the resource point's clock or populations.
+    pub process_cpu: Option<Box<ProcessCpuReport>>,
     pub context: Option<ObservationReadContext>,
     pub native_source: Option<StateSourceCoverage>,
     pub source_state: SourceState,
@@ -34,4 +36,18 @@ pub struct InstanceResourceReport {
     pub summary: String,
     pub limitations: Vec<String>,
     pub groups: Vec<InstanceResourceGroup>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct ProcessCpuReport {
+    pub context: Option<ObservationReadContext>,
+    pub native_source: Option<StateSourceCoverage>,
+    pub source_state: SourceState,
+    pub read_complete: Option<bool>,
+    pub observed_at: Option<String>,
+    pub title: String,
+    pub summary: String,
+    pub limitations: Vec<String>,
+    pub fields: Vec<InstanceResourceField>,
 }

@@ -9,7 +9,16 @@ pub fn replication(capture: &EvidenceCapture) -> Result<CollectedReplicationAnal
         let selected = input.replication()?;
         rows.extend(selected.into_iter().cloned());
     }
-    let snapshot = ReplicationSnapshot::from_source(capture.source(), rows).map_err(|_| invalid())?;
-    let report = culprit_checks::replication::explain(&snapshot, capture.is_read_complete()).map_err(|_| invalid())?;
+    let report = explain_read(capture.source(), rows, capture.is_read_complete())?;
     Ok(CollectedReplicationAnalysis { context: crate::collected_context::from_capture(capture), report })
+}
+
+/// The same original-source interpretation serves local authenticated files and warehouse captures.
+pub(crate) fn explain_read(
+    source: &CollectionDescription,
+    rows: Vec<ReplicationObservation>,
+    read_complete: bool,
+) -> Result<culprit_core::ReplicationReport> {
+    let snapshot = ReplicationSnapshot::from_source(source, rows).map_err(|_| invalid())?;
+    culprit_checks::replication::explain(&snapshot, read_complete).map_err(|_| invalid())
 }

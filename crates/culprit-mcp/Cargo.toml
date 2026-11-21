@@ -22,3 +22,5 @@ tokio.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
+culprit-checks.workspace = true
+culprit-collector = { workspace = true, features = ["test-support"] }

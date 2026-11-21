@@ -440,6 +440,9 @@ impl Out {
         for group in report.group_replication.as_deref().unwrap_or_default() {
             println!("\n{}", observations::group_replication(group));
         }
+        for group in report.galera.as_deref().unwrap_or_default() {
+            println!("\n{}", observations::galera(group));
+        }
         for memory in report.table_memory.as_deref().unwrap_or_default() {
             println!("\n{}", observations::table_memory(memory));
         }
@@ -792,6 +795,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "engine_limitations": s.server.engine.spec().limitations(),
         "table_memory": report.table_memory.as_ref().map(|reports|reports.iter().map(observations::compact_table_memory).collect::<Vec<_>>()),
         "group_replication": report.group_replication.as_ref().map(|reports|reports.iter().map(observations::compact_group_replication).collect::<Vec<_>>()),
+        "galera": report.galera.as_ref().map(|reports|reports.iter().map(observations::compact_galera).collect::<Vec<_>>()),
         "performance_counters": report.performance_counters,
         "suspect_pages": report.suspect_pages.as_deref().map(observations::compact_suspect_pages),
         "notes": s.notes,
@@ -839,6 +843,9 @@ pub(super) fn markdown_report(report: &Report) -> String {
     }
     for group in report.group_replication.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::group_replication(group)));
+    }
+    for group in report.galera.as_deref().unwrap_or_default() {
+        out.push_str(&markdown_text_block(&observations::galera(group)));
     }
     for memory in report.table_memory.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::table_memory(memory)));

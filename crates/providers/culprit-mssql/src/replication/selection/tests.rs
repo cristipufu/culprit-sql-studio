@@ -22,6 +22,7 @@ async fn native_platform_selects_the_same_bounded_ag_and_geo_families_without_er
         let read = read_selected(&mut reader, edition, 10).await.unwrap();
         let (records, coverage) = read.into_records(true, None);
         assert_eq!(reader.calls.len(), expected_queries);
+        assert!(reader.calls.iter().all(|call| !call.sql.contains("sys.dm_hs_database_replicas")));
         assert_eq!(coverage.len(), if edition == 8 { 2 } else { 1 });
         assert!(coverage.iter().all(|source| source.state == SourceState::Collected && source.complete_scope));
         assert_eq!(

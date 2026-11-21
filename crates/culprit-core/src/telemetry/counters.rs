@@ -1,6 +1,11 @@
 //! A native scalar counter carries its meaning separately from its name and current value.
 use super::*;
+mod process_cpu;
 mod ratios;
+pub use process_cpu::{
+    MAX_MSSQL_PROCESSOR_OBSERVATIONS, MSSQL_PROCESS_CPU_COUNTERS, MSSQL_PROCESS_CPU_KIND, MSSQL_PROCESS_CPU_OBJECT,
+    MssqlProcessCpuPoint,
+};
 pub use ratios::{CounterRatioGap, CounterRatioIssue, CounterRatioKind, CounterRatioSupport, NativeCounterRatio};
 
 /// The existing generic set ceiling also bounds each native performance-counter acquisition.

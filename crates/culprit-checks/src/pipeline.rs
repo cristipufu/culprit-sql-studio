@@ -28,6 +28,7 @@ mod connection_outcomes;
 mod counter_ratios;
 mod database_properties;
 mod full_text_populations;
+mod galera;
 mod group_replication;
 mod hyperscale_log_components;
 mod instance_resources;
@@ -298,6 +299,7 @@ impl Pipeline {
         let tempdb_metadata_memory = tempdb_metadata_memory::explain(&mut snapshot);
         let table_memory = table_memory::explain(&mut snapshot);
         let group_replication = group_replication::explain(&mut snapshot);
+        let galera = galera::explain(&mut snapshot);
         let full_text_populations = full_text_populations::explain(&mut snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
         let suspect_pages = suspect_pages::explain(&mut snapshot);
@@ -435,6 +437,7 @@ impl Pipeline {
             tempdb_metadata_memory,
             table_memory,
             group_replication,
+            galera,
             full_text_populations,
             database_properties,
             suspect_pages,

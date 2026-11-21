@@ -10,13 +10,14 @@ pub(crate) struct SelectedRead {
 }
 
 pub(crate) enum Part {
-    Observed { selection: Selection, facts: Vec<ReplicationFact>, complete: bool },
+    Observed { selection: Selection, facts: Vec<ReplicationFact>, complete: bool, limited: bool },
     Unavailable { selection: Selection, error: Error },
+    NotApplicable { selection: Selection },
 }
 
 impl Part {
     pub(super) fn observed(selection: Selection, facts: Vec<ReplicationFact>) -> Self {
-        Self::Observed { selection, complete: scope_complete(selection, &facts), facts }
+        Self::Observed { selection, complete: scope_complete(selection, &facts), facts, limited: false }
     }
 }
 
@@ -25,11 +26,24 @@ impl Selection {
         match self {
             Self::AvailabilityGroup => AVAILABILITY_SOURCE,
             Self::GeoLinks => GEO_SOURCE,
+            Self::Hyperscale => MSSQL_HYPERSCALE_REPLICAS_SOURCE,
         }
     }
 }
 
 impl SelectedRead {
+    pub(crate) fn remaining(&self, limit: usize) -> usize {
+        limit.saturating_sub(
+            self.parts
+                .iter()
+                .map(|part| match part {
+                    Part::Observed { facts, .. } => facts.len(),
+                    _ => 0,
+                })
+                .sum::<usize>(),
+        )
+    }
+
     pub(crate) fn into_records(
         self,
         qualified: bool,
@@ -49,7 +63,7 @@ impl SelectedRead {
         let mut sources = Vec::new();
         for part in self.parts {
             match part {
-                Part::Observed { selection, facts, complete } => {
+                Part::Observed { selection, facts, complete, limited } => {
                     let source = selection.source();
                     let (qualified, qualification_error) = match authority {
                         ReadAuthority::Collector => (true, None),
@@ -57,12 +71,18 @@ impl SelectedRead {
                     };
                     let mut coverage =
                         StateSourceCoverage::observed(source.into(), facts.len() as u32, complete && qualified);
+                    if limited {
+                        coverage.stopped = Some(CollectionStop::RowLimit);
+                    }
                     if !qualified {
                         coverage.error_code = qualification_error;
                     }
                     sources.push(coverage);
                     records
                         .extend(facts.into_iter().map(|fact| ReplicationObservation { source: source.into(), fact }));
+                }
+                Part::NotApplicable { selection } => {
+                    sources.push(StateSourceCoverage::not_applicable(selection.source().into()));
                 }
                 Part::Unavailable { selection, error } => {
                     sources.push(StateSourceCoverage::unavailable(selection.source().into(), error.code, None))
@@ -106,9 +126,10 @@ fn selections(edition: i64) -> Result<&'static [Selection]> {
 
 fn scope_complete(selection: Selection, facts: &[ReplicationFact]) -> bool {
     if facts.is_empty() {
-        return true;
+        return selection != Selection::Hyperscale;
     }
     match selection {
+        Selection::Hyperscale => false,
         Selection::GeoLinks => facts.iter().all(direction_known),
         Selection::AvailabilityGroup => {
             // Secondary-side visibility is local, not a complete partner inventory. Even a primary cannot

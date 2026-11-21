@@ -249,6 +249,7 @@ enum Analysis {
     FullTextPopulations,
     TableMemory,
     GroupReplication,
+    Galera,
     BackupHistory,
     Tuning,
 }
@@ -287,6 +288,7 @@ impl Analysis {
             | Self::FullTextPopulations
             | Self::TableMemory
             | Self::GroupReplication
+            | Self::Galera
             | Self::BackupHistory
             | Self::TempdbMetadataMemory
             | Self::InstanceResources
@@ -489,6 +491,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::GroupReplication) => {
             let analysis = culprit_engine::collected_resources::group_replication(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::group_replication(&analysis.report))?;
+        }
+        Some(Analysis::Galera) => {
+            let analysis = culprit_engine::collected_resources::galera(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::galera(&analysis.report))?;
         }
         Some(Analysis::TableMemory) => {
             let analysis = culprit_engine::collected_resources::table_memory(&capture)?;

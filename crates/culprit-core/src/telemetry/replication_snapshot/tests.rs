@@ -30,6 +30,7 @@ fn point(source: &str) -> ReplicationObservation {
 
 fn snapshot() -> ReplicationSnapshot {
     ReplicationSnapshot {
+        mssql_scope: None,
         context: ObservationReadContext::collector(
             SystemTime::UNIX_EPOCH,
             SystemTime::UNIX_EPOCH + Duration::from_secs(1),

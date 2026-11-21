@@ -106,6 +106,26 @@ impl OutboxCaptureReader {
         let boundary = self.projection_boundary.clone();
         let lookup = CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
         match request.analysis.read_plan() {
+            LocalCaptureReadPlan::Replication => {
+                delivery
+                    .with_completed_snapshot(
+                        lookup,
+                        SnapshotDataset::Replication,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        move |capture| {
+                            let result = explain_replication(capture)
+                                .map(|read| LocalCapturedAnalysis::Replication(Box::new(read)));
+                            #[cfg(test)]
+                            if let Some(boundary) = boundary {
+                                boundary()?;
+                            }
+                            result
+                        },
+                    )
+                    .await
+            }
             LocalCaptureReadPlan::QueryHistory => {
                 delivery
                     .with_completed_query_history(lookup, self.budget, request.operation, permit, move |capture| {
@@ -243,6 +263,32 @@ fn explain_page_server_reads(capture: CompletedQueryHistory) -> Result<LocalPage
         collected_from,
         collected_until,
         bytes_read,
+    })
+}
+
+fn explain_replication(capture: CompletedSnapshot) -> Result<LocalReplication> {
+    let source = capture.source().clone();
+    let rows = capture
+        .records()
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let TelemetryRecord::Replication(point) = &row.record else { return Err(invalid()) };
+            Ok((point.clone(), capture.reference(index)?))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let report = crate::collected_resources::explain_replication_read(
+        &source,
+        rows.iter().map(|(row, _)| row.clone()).collect(),
+        true,
+    )?;
+    Ok(LocalReplication {
+        source,
+        rows,
+        report: Box::new(report),
+        collected_from: capture.collected_from().into(),
+        collected_until: capture.collected_until().into(),
+        bytes_read: capture.bytes_read(),
     })
 }
 

@@ -972,7 +972,7 @@
         "table": "orders"
       }
     ],
-    "format": 37,
+    "format": 38,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -3693,7 +3693,8 @@
         "scope": "node",
         "source": "yb_terminated_queries (node 3d2d9e10555b4ae2a683a8402505e416)",
         "visibility": "Complete monitoring privilege for this database"
-      }
+      },
+      "galera": []
     },
     "options": {
       "collect_memory_failures": false,

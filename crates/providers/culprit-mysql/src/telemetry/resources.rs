@@ -43,7 +43,8 @@ async fn identify<R: OwnedRead>(reader: &mut R) -> Result<(instance::Identity, V
     if collections.is_empty() {
         return Err(unsupported());
     }
-    let row = crate::native::one(reader, "SELECT @@GLOBAL.server_uuid AS server_uuid", vec![]).await?;
+    let sql = instance::configuration_query(platform.flavor, &platform.version).ok_or_else(unsupported)?;
+    let row = crate::native::one(reader, sql, vec![]).await?;
     let identity = platform.identify(reader, &row).await?;
     Ok((identity, collections, platform.observed_at))
 }

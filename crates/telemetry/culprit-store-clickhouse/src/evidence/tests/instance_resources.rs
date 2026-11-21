@@ -3,7 +3,12 @@ use std::sync::atomic::Ordering;
 use test_support::InstanceResourceCase;
 
 async fn collected(case: InstanceResourceCase) -> (Fixture, CollectionDescription, Vec<TelemetryRecord>) {
-    let (source, rows) = test_support::instance_resource_evidence(case);
+    collected_original(test_support::instance_resource_evidence(case)).await
+}
+
+async fn collected_original(
+    (source, rows): (CollectionDescription, Vec<TelemetryRecord>),
+) -> (Fixture, CollectionDescription, Vec<TelemetryRecord>) {
     let catalog = Arc::new(SchemaCatalog::new().unwrap());
     let recovery =
         test_support::collected_resource_recovery("clickhouse:test", catalog.digest(), source.clone(), rows.clone())
@@ -96,5 +101,42 @@ async fn changed_point_clock_population_flag_exact_value_or_null_cannot_borrow_a
             "{pointer}"
         );
         assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+    }
+}
+
+#[tokio::test]
+async fn process_cpu_counter_sets_replay_original_nullable_totals_source_clock_and_process_without_recovery() {
+    for case in test_support::ProcessCpuCase::ALL {
+        let (fixture, source, rows) = collected_original(test_support::instance_resource_cpu_evidence(case)).await;
+        fixture.replies(vec![fixture.rows.clone()]);
+        let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        let capture = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
+            .await
+            .unwrap();
+        test_support::assert_operational_capture(&capture, &source, &rows);
+        assert!(capture.is_read_complete());
+        assert_eq!(capture.source(), &source);
+        let context = NativeReadContext::from_snapshot(&source).unwrap();
+        let mut points = 0;
+        for row in capture.records() {
+            if let TelemetryRecord::Operational(observation) = &row.row().record
+                && let OperationalFact::CounterSet(sample) = &observation.fact
+            {
+                let point = MssqlProcessCpuPoint::from_original(sample, &context).unwrap();
+                assert_eq!(point.observed_at(), "2020-01-01T12:00:00.5Z");
+                if case == test_support::ProcessCpuCase::Null {
+                    assert!(point.user_ms().is_none() && point.kernel_ms().is_none());
+                }
+                if case == test_support::ProcessCpuCase::Exact {
+                    assert_eq!(point.user_ms(), Some("9007199254740993"));
+                }
+                points += 1;
+            }
+        }
+        assert_eq!(points, usize::from(case != test_support::ProcessCpuCase::Denied));
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+        assert_eq!(capture.metrics().recovery_objects, 0);
     }
 }

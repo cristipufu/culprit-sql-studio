@@ -9,7 +9,8 @@
     "sequences": [],
     "multixacts": [],
     "sqlite": null,
-    "cluster": null
+    "cluster": null,
+    "galera": []
   },
   "sources": [
     {
@@ -38,7 +39,7 @@
       "reason": null
     }
   ],
-  "format": 37,
+  "format": 38,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",

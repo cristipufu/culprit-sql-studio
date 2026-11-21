@@ -535,3 +535,5 @@ mod boxed_query_history;
 mod vendor_conformance;
 
 mod group_replication;
+
+mod galera;

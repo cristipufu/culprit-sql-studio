@@ -311,6 +311,13 @@ pub struct CollectedGroupReplicationAnalysis {
     pub report: Box<crate::GroupReplicationReport>,
 }
 
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedGaleraAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::GaleraReport>,
+}
+
 #[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export)]
 pub struct CollectedFullTextPopulationAnalysis {

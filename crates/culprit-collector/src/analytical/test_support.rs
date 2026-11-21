@@ -1061,10 +1061,15 @@ mod qualification;
 pub use qualification::{QualificationFixture, QualificationFixtureCase};
 
 mod instance_resources;
-pub use instance_resources::{InstanceResourceCase, instance_resource_evidence};
+pub use instance_resources::{
+    InstanceResourceCase, ProcessCpuCase, instance_resource_cpu_evidence, instance_resource_evidence,
+};
 
 mod boxed_query_history;
 pub use boxed_query_history::boxed_query_history_evidence;
 
 mod group_replication;
 pub use group_replication::{GroupReplicationCase, group_replication_evidence};
+
+mod galera;
+pub use galera::{GaleraCase, galera_evidence};

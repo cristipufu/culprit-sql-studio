@@ -1,4 +1,2086 @@
 {
+  "cpu_denied": {
+    "read": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "observation": {
+        "grant_rows": 0,
+        "grant_waiters": 0,
+        "io_waits": {
+          "longest_wait_ms": null,
+          "observed_rows": 0,
+          "population_rows": 0,
+          "unknown_durations": 0,
+          "unknown_types": 0
+        },
+        "memory": {
+          "physical_used_kib": "9007199254740993",
+          "process_physical_low": false,
+          "process_rows": 1,
+          "process_virtual_low": false,
+          "system_available_kib": "0",
+          "system_low": false,
+          "system_rows": 1,
+          "system_total_kib": null,
+          "unknown_process_flags": 0,
+          "unknown_system_flags": 0,
+          "virtual_available_kib": null,
+          "virtual_committed_kib": "0"
+        },
+        "observed_at": "2020-01-01T12:00:00.0000000Z",
+        "pending_io": {
+          "completion_pending": "0",
+          "observed_rows": 0,
+          "os_pending": "0",
+          "unknown_flags": 0
+        },
+        "schedulers": {
+          "failed_worker_creations": "0",
+          "observed_rows": 2,
+          "population_rows": 2,
+          "runnable_tasks": "0",
+          "unknown_values": 0,
+          "worker_queue": "0"
+        }
+      },
+      "read_complete": true,
+      "source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      }
+    },
+    "report": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "groups": [
+        {
+          "fields": [
+            {
+              "key": "scheduler_population_rows",
+              "label": "Sampled native scheduler rows",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_rows",
+              "label": "Sampled visible online schedulers",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_unknowns",
+              "label": "Sampled schedulers with unknown values",
+              "value": "0"
+            },
+            {
+              "key": "runnable_tasks",
+              "label": "Runnable tasks on sampled visible online schedulers",
+              "value": "0"
+            },
+            {
+              "key": "worker_queue",
+              "label": "Tasks queued for workers on sampled schedulers",
+              "value": "0"
+            },
+            {
+              "key": "failed_worker_creations",
+              "label": "Sampled schedulers reporting failed worker creation",
+              "value": "0"
+            }
+          ],
+          "key": "schedulers",
+          "title": "Visible online schedulers"
+        },
+        {
+          "fields": [
+            {
+              "key": "process_rows",
+              "label": "Native process-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "process_unknowns",
+              "label": "Process-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "process_physical_low",
+              "label": "Process low-physical-memory notification (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "process_virtual_low",
+              "label": "Process low-virtual-memory condition (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "physical_used_kib",
+              "label": "Process working set including tracked large pages (KiB)",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "virtual_committed_kib",
+              "label": "Committed virtual address space (KiB)",
+              "value": "0"
+            },
+            {
+              "key": "virtual_available_kib",
+              "label": "Available virtual address space (KiB)",
+              "value": null
+            }
+          ],
+          "key": "process-memory",
+          "title": "Database process memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "system_rows",
+              "label": "Native operating-system-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "system_unknowns",
+              "label": "Operating-system-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "system_low",
+              "label": "Operating-system low-memory signal (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "system_total_kib",
+              "label": "Physical memory available to the operating system (KiB)",
+              "value": null
+            },
+            {
+              "key": "system_available_kib",
+              "label": "Currently available physical memory (KiB)",
+              "value": "0"
+            }
+          ],
+          "key": "system-memory",
+          "title": "Operating-system memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "grant_rows",
+              "label": "Sampled native execution-grant rows",
+              "value": "0"
+            },
+            {
+              "key": "grant_waiters",
+              "label": "Waiting memory grants in sampled rows",
+              "value": "0"
+            }
+          ],
+          "key": "grant-waiters",
+          "title": "Execution memory grants"
+        },
+        {
+          "fields": [
+            {
+              "key": "pending_io_rows",
+              "label": "Sampled pending-I/O rows",
+              "value": "0"
+            },
+            {
+              "key": "pending_io_unknowns",
+              "label": "Sampled I/O rows with unknown completion state",
+              "value": "0"
+            },
+            {
+              "key": "os_pending",
+              "label": "Sampled I/O requests pending at the operating system",
+              "value": "0"
+            },
+            {
+              "key": "completion_pending",
+              "label": "Sampled OS-completed requests awaiting database completion",
+              "value": "0"
+            }
+          ],
+          "key": "pending-io",
+          "title": "Pending I/O completion"
+        },
+        {
+          "fields": [
+            {
+              "key": "io_wait_population_rows",
+              "label": "Sampled native waiting-task rows",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknown_types",
+              "label": "Sampled tasks with unknown wait types",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_rows",
+              "label": "Sampled tasks with a supported I/O-related wait",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknowns",
+              "label": "Sampled tasks with unknown wait durations",
+              "value": "0"
+            },
+            {
+              "key": "longest_wait_ms",
+              "label": "Maximum sampled I/O-related task wait, including signal wait (ms)",
+              "value": null
+            }
+          ],
+          "key": "io-waits",
+          "title": "Current I/O-related task waits"
+        }
+      ],
+      "limitations": [
+        "Process memory and operating-system memory have separate native scopes. These facts do not measure the selected database’s resource use.",
+        "The native clock marks this read. The DMV populations can change during acquisition; this is not an atomic snapshot or an interval measurement.",
+        "Attribution requires independent evidence of the affected statement and the resource it waited for.",
+        "The maximum task wait covers the source’s fixed I/O-related wait types and includes signal wait. It is not storage service time."
+      ],
+      "native_populations_complete": true,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": {
+        "context": {
+          "context": {
+            "database_writable": null,
+            "observed_from": "2020-01-01T11:59:59Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "partition": {
+              "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+              "kind": "instance-local",
+              "member": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              }
+            },
+            "target": {
+              "identity": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              },
+              "scope": "shared"
+            }
+          },
+          "kind": "native"
+        },
+        "fields": [],
+        "limitations": [
+          "These cumulative milliseconds cover all threads in the observed SQL Server process.",
+          "Recent CPU use requires another qualified point for the same process. A CPU percentage also requires a verified capacity denominator.",
+          "CPU totals remain unknown when the native process identity or values were not retained."
+        ],
+        "native_source": {
+          "complete_scope": false,
+          "error_code": "permission_denied",
+          "records": 0,
+          "source": "processor topology",
+          "state": "unavailable",
+          "stopped": null
+        },
+        "observed_at": null,
+        "read_complete": true,
+        "source_state": "unavailable",
+        "summary": "Native process CPU totals are unavailable.",
+        "title": "Native process CPU totals"
+      },
+      "read_complete": true,
+      "source_state": "collected",
+      "summary": "Native shared-instance resource facts were recorded.",
+      "title": "Instance resource point"
+    }
+  },
+  "cpu_exact": {
+    "read": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "observation": {
+        "grant_rows": 0,
+        "grant_waiters": 0,
+        "io_waits": {
+          "longest_wait_ms": null,
+          "observed_rows": 0,
+          "population_rows": 0,
+          "unknown_durations": 0,
+          "unknown_types": 0
+        },
+        "memory": {
+          "physical_used_kib": "9007199254740993",
+          "process_physical_low": false,
+          "process_rows": 1,
+          "process_virtual_low": false,
+          "system_available_kib": "0",
+          "system_low": false,
+          "system_rows": 1,
+          "system_total_kib": null,
+          "unknown_process_flags": 0,
+          "unknown_system_flags": 0,
+          "virtual_available_kib": null,
+          "virtual_committed_kib": "0"
+        },
+        "observed_at": "2020-01-01T12:00:00.0000000Z",
+        "pending_io": {
+          "completion_pending": "0",
+          "observed_rows": 0,
+          "os_pending": "0",
+          "unknown_flags": 0
+        },
+        "schedulers": {
+          "failed_worker_creations": "0",
+          "observed_rows": 2,
+          "population_rows": 2,
+          "runnable_tasks": "0",
+          "unknown_values": 0,
+          "worker_queue": "0"
+        }
+      },
+      "read_complete": true,
+      "source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      }
+    },
+    "report": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "groups": [
+        {
+          "fields": [
+            {
+              "key": "scheduler_population_rows",
+              "label": "Sampled native scheduler rows",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_rows",
+              "label": "Sampled visible online schedulers",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_unknowns",
+              "label": "Sampled schedulers with unknown values",
+              "value": "0"
+            },
+            {
+              "key": "runnable_tasks",
+              "label": "Runnable tasks on sampled visible online schedulers",
+              "value": "0"
+            },
+            {
+              "key": "worker_queue",
+              "label": "Tasks queued for workers on sampled schedulers",
+              "value": "0"
+            },
+            {
+              "key": "failed_worker_creations",
+              "label": "Sampled schedulers reporting failed worker creation",
+              "value": "0"
+            }
+          ],
+          "key": "schedulers",
+          "title": "Visible online schedulers"
+        },
+        {
+          "fields": [
+            {
+              "key": "process_rows",
+              "label": "Native process-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "process_unknowns",
+              "label": "Process-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "process_physical_low",
+              "label": "Process low-physical-memory notification (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "process_virtual_low",
+              "label": "Process low-virtual-memory condition (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "physical_used_kib",
+              "label": "Process working set including tracked large pages (KiB)",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "virtual_committed_kib",
+              "label": "Committed virtual address space (KiB)",
+              "value": "0"
+            },
+            {
+              "key": "virtual_available_kib",
+              "label": "Available virtual address space (KiB)",
+              "value": null
+            }
+          ],
+          "key": "process-memory",
+          "title": "Database process memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "system_rows",
+              "label": "Native operating-system-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "system_unknowns",
+              "label": "Operating-system-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "system_low",
+              "label": "Operating-system low-memory signal (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "system_total_kib",
+              "label": "Physical memory available to the operating system (KiB)",
+              "value": null
+            },
+            {
+              "key": "system_available_kib",
+              "label": "Currently available physical memory (KiB)",
+              "value": "0"
+            }
+          ],
+          "key": "system-memory",
+          "title": "Operating-system memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "grant_rows",
+              "label": "Sampled native execution-grant rows",
+              "value": "0"
+            },
+            {
+              "key": "grant_waiters",
+              "label": "Waiting memory grants in sampled rows",
+              "value": "0"
+            }
+          ],
+          "key": "grant-waiters",
+          "title": "Execution memory grants"
+        },
+        {
+          "fields": [
+            {
+              "key": "pending_io_rows",
+              "label": "Sampled pending-I/O rows",
+              "value": "0"
+            },
+            {
+              "key": "pending_io_unknowns",
+              "label": "Sampled I/O rows with unknown completion state",
+              "value": "0"
+            },
+            {
+              "key": "os_pending",
+              "label": "Sampled I/O requests pending at the operating system",
+              "value": "0"
+            },
+            {
+              "key": "completion_pending",
+              "label": "Sampled OS-completed requests awaiting database completion",
+              "value": "0"
+            }
+          ],
+          "key": "pending-io",
+          "title": "Pending I/O completion"
+        },
+        {
+          "fields": [
+            {
+              "key": "io_wait_population_rows",
+              "label": "Sampled native waiting-task rows",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknown_types",
+              "label": "Sampled tasks with unknown wait types",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_rows",
+              "label": "Sampled tasks with a supported I/O-related wait",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknowns",
+              "label": "Sampled tasks with unknown wait durations",
+              "value": "0"
+            },
+            {
+              "key": "longest_wait_ms",
+              "label": "Maximum sampled I/O-related task wait, including signal wait (ms)",
+              "value": null
+            }
+          ],
+          "key": "io-waits",
+          "title": "Current I/O-related task waits"
+        }
+      ],
+      "limitations": [
+        "Process memory and operating-system memory have separate native scopes. These facts do not measure the selected database’s resource use.",
+        "The native clock marks this read. The DMV populations can change during acquisition; this is not an atomic snapshot or an interval measurement.",
+        "Attribution requires independent evidence of the affected statement and the resource it waited for.",
+        "The maximum task wait covers the source’s fixed I/O-related wait types and includes signal wait. It is not storage service time."
+      ],
+      "native_populations_complete": true,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": {
+        "context": {
+          "context": {
+            "database_writable": null,
+            "observed_from": "2020-01-01T11:59:59Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "partition": {
+              "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+              "kind": "instance-local",
+              "member": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              }
+            },
+            "target": {
+              "identity": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              },
+              "scope": "shared"
+            }
+          },
+          "kind": "native"
+        },
+        "fields": [
+          {
+            "key": "process_id",
+            "label": "Native process ID",
+            "value": "42"
+          },
+          {
+            "key": "user_time_ms",
+            "label": "User-mode CPU time (ms)",
+            "value": "9007199254740993"
+          },
+          {
+            "key": "kernel_time_ms",
+            "label": "Kernel-mode CPU time (ms)",
+            "value": "0"
+          },
+          {
+            "key": "started_ticks",
+            "label": "Process start (machine milliseconds)",
+            "value": "100"
+          },
+          {
+            "key": "sampled_ticks",
+            "label": "Sample (machine milliseconds)",
+            "value": "500"
+          }
+        ],
+        "limitations": [
+          "These cumulative milliseconds cover all threads in the observed SQL Server process.",
+          "Recent CPU use requires another qualified point for the same process. A CPU percentage also requires a verified capacity denominator."
+        ],
+        "native_source": {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 4,
+          "source": "processor topology",
+          "state": "collected",
+          "stopped": null
+        },
+        "observed_at": "2020-01-01T12:00:00.5Z",
+        "read_complete": true,
+        "source_state": "collected",
+        "summary": "The engine recorded native process CPU evidence at this point.",
+        "title": "Native process CPU totals"
+      },
+      "read_complete": true,
+      "source_state": "collected",
+      "summary": "Native shared-instance resource facts were recorded.",
+      "title": "Instance resource point"
+    }
+  },
+  "cpu_null": {
+    "read": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "observation": {
+        "grant_rows": 0,
+        "grant_waiters": 0,
+        "io_waits": {
+          "longest_wait_ms": null,
+          "observed_rows": 0,
+          "population_rows": 0,
+          "unknown_durations": 0,
+          "unknown_types": 0
+        },
+        "memory": {
+          "physical_used_kib": "9007199254740993",
+          "process_physical_low": false,
+          "process_rows": 1,
+          "process_virtual_low": false,
+          "system_available_kib": "0",
+          "system_low": false,
+          "system_rows": 1,
+          "system_total_kib": null,
+          "unknown_process_flags": 0,
+          "unknown_system_flags": 0,
+          "virtual_available_kib": null,
+          "virtual_committed_kib": "0"
+        },
+        "observed_at": "2020-01-01T12:00:00.0000000Z",
+        "pending_io": {
+          "completion_pending": "0",
+          "observed_rows": 0,
+          "os_pending": "0",
+          "unknown_flags": 0
+        },
+        "schedulers": {
+          "failed_worker_creations": "0",
+          "observed_rows": 2,
+          "population_rows": 2,
+          "runnable_tasks": "0",
+          "unknown_values": 0,
+          "worker_queue": "0"
+        }
+      },
+      "read_complete": true,
+      "source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      }
+    },
+    "report": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "groups": [
+        {
+          "fields": [
+            {
+              "key": "scheduler_population_rows",
+              "label": "Sampled native scheduler rows",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_rows",
+              "label": "Sampled visible online schedulers",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_unknowns",
+              "label": "Sampled schedulers with unknown values",
+              "value": "0"
+            },
+            {
+              "key": "runnable_tasks",
+              "label": "Runnable tasks on sampled visible online schedulers",
+              "value": "0"
+            },
+            {
+              "key": "worker_queue",
+              "label": "Tasks queued for workers on sampled schedulers",
+              "value": "0"
+            },
+            {
+              "key": "failed_worker_creations",
+              "label": "Sampled schedulers reporting failed worker creation",
+              "value": "0"
+            }
+          ],
+          "key": "schedulers",
+          "title": "Visible online schedulers"
+        },
+        {
+          "fields": [
+            {
+              "key": "process_rows",
+              "label": "Native process-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "process_unknowns",
+              "label": "Process-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "process_physical_low",
+              "label": "Process low-physical-memory notification (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "process_virtual_low",
+              "label": "Process low-virtual-memory condition (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "physical_used_kib",
+              "label": "Process working set including tracked large pages (KiB)",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "virtual_committed_kib",
+              "label": "Committed virtual address space (KiB)",
+              "value": "0"
+            },
+            {
+              "key": "virtual_available_kib",
+              "label": "Available virtual address space (KiB)",
+              "value": null
+            }
+          ],
+          "key": "process-memory",
+          "title": "Database process memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "system_rows",
+              "label": "Native operating-system-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "system_unknowns",
+              "label": "Operating-system-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "system_low",
+              "label": "Operating-system low-memory signal (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "system_total_kib",
+              "label": "Physical memory available to the operating system (KiB)",
+              "value": null
+            },
+            {
+              "key": "system_available_kib",
+              "label": "Currently available physical memory (KiB)",
+              "value": "0"
+            }
+          ],
+          "key": "system-memory",
+          "title": "Operating-system memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "grant_rows",
+              "label": "Sampled native execution-grant rows",
+              "value": "0"
+            },
+            {
+              "key": "grant_waiters",
+              "label": "Waiting memory grants in sampled rows",
+              "value": "0"
+            }
+          ],
+          "key": "grant-waiters",
+          "title": "Execution memory grants"
+        },
+        {
+          "fields": [
+            {
+              "key": "pending_io_rows",
+              "label": "Sampled pending-I/O rows",
+              "value": "0"
+            },
+            {
+              "key": "pending_io_unknowns",
+              "label": "Sampled I/O rows with unknown completion state",
+              "value": "0"
+            },
+            {
+              "key": "os_pending",
+              "label": "Sampled I/O requests pending at the operating system",
+              "value": "0"
+            },
+            {
+              "key": "completion_pending",
+              "label": "Sampled OS-completed requests awaiting database completion",
+              "value": "0"
+            }
+          ],
+          "key": "pending-io",
+          "title": "Pending I/O completion"
+        },
+        {
+          "fields": [
+            {
+              "key": "io_wait_population_rows",
+              "label": "Sampled native waiting-task rows",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknown_types",
+              "label": "Sampled tasks with unknown wait types",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_rows",
+              "label": "Sampled tasks with a supported I/O-related wait",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknowns",
+              "label": "Sampled tasks with unknown wait durations",
+              "value": "0"
+            },
+            {
+              "key": "longest_wait_ms",
+              "label": "Maximum sampled I/O-related task wait, including signal wait (ms)",
+              "value": null
+            }
+          ],
+          "key": "io-waits",
+          "title": "Current I/O-related task waits"
+        }
+      ],
+      "limitations": [
+        "Process memory and operating-system memory have separate native scopes. These facts do not measure the selected database’s resource use.",
+        "The native clock marks this read. The DMV populations can change during acquisition; this is not an atomic snapshot or an interval measurement.",
+        "Attribution requires independent evidence of the affected statement and the resource it waited for.",
+        "The maximum task wait covers the source’s fixed I/O-related wait types and includes signal wait. It is not storage service time."
+      ],
+      "native_populations_complete": true,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": {
+        "context": {
+          "context": {
+            "database_writable": null,
+            "observed_from": "2020-01-01T11:59:59Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "partition": {
+              "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+              "kind": "instance-local",
+              "member": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              }
+            },
+            "target": {
+              "identity": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              },
+              "scope": "shared"
+            }
+          },
+          "kind": "native"
+        },
+        "fields": [
+          {
+            "key": "process_id",
+            "label": "Native process ID",
+            "value": "42"
+          },
+          {
+            "key": "user_time_ms",
+            "label": "User-mode CPU time (ms)",
+            "value": null
+          },
+          {
+            "key": "kernel_time_ms",
+            "label": "Kernel-mode CPU time (ms)",
+            "value": null
+          },
+          {
+            "key": "started_ticks",
+            "label": "Process start (machine milliseconds)",
+            "value": "100"
+          },
+          {
+            "key": "sampled_ticks",
+            "label": "Sample (machine milliseconds)",
+            "value": "500"
+          }
+        ],
+        "limitations": [
+          "These cumulative milliseconds cover all threads in the observed SQL Server process.",
+          "Recent CPU use requires another qualified point for the same process. A CPU percentage also requires a verified capacity denominator.",
+          "CPU totals remain unknown when the native process identity or values were not retained."
+        ],
+        "native_source": {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 4,
+          "source": "processor topology",
+          "state": "collected",
+          "stopped": null
+        },
+        "observed_at": "2020-01-01T12:00:00.5Z",
+        "read_complete": true,
+        "source_state": "collected",
+        "summary": "Native process CPU totals are unavailable.",
+        "title": "Native process CPU totals"
+      },
+      "read_complete": true,
+      "source_state": "collected",
+      "summary": "Native shared-instance resource facts were recorded.",
+      "title": "Instance resource point"
+    }
+  },
+  "cpu_partial": {
+    "read": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "observation": {
+        "grant_rows": 0,
+        "grant_waiters": 0,
+        "io_waits": {
+          "longest_wait_ms": null,
+          "observed_rows": 0,
+          "population_rows": 0,
+          "unknown_durations": 0,
+          "unknown_types": 0
+        },
+        "memory": {
+          "physical_used_kib": "9007199254740993",
+          "process_physical_low": false,
+          "process_rows": 1,
+          "process_virtual_low": false,
+          "system_available_kib": "0",
+          "system_low": false,
+          "system_rows": 1,
+          "system_total_kib": null,
+          "unknown_process_flags": 0,
+          "unknown_system_flags": 0,
+          "virtual_available_kib": null,
+          "virtual_committed_kib": "0"
+        },
+        "observed_at": "2020-01-01T12:00:00.0000000Z",
+        "pending_io": {
+          "completion_pending": "0",
+          "observed_rows": 0,
+          "os_pending": "0",
+          "unknown_flags": 0
+        },
+        "schedulers": {
+          "failed_worker_creations": "0",
+          "observed_rows": 2,
+          "population_rows": 2,
+          "runnable_tasks": "0",
+          "unknown_values": 0,
+          "worker_queue": "0"
+        }
+      },
+      "read_complete": true,
+      "source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      }
+    },
+    "report": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "groups": [
+        {
+          "fields": [
+            {
+              "key": "scheduler_population_rows",
+              "label": "Sampled native scheduler rows",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_rows",
+              "label": "Sampled visible online schedulers",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_unknowns",
+              "label": "Sampled schedulers with unknown values",
+              "value": "0"
+            },
+            {
+              "key": "runnable_tasks",
+              "label": "Runnable tasks on sampled visible online schedulers",
+              "value": "0"
+            },
+            {
+              "key": "worker_queue",
+              "label": "Tasks queued for workers on sampled schedulers",
+              "value": "0"
+            },
+            {
+              "key": "failed_worker_creations",
+              "label": "Sampled schedulers reporting failed worker creation",
+              "value": "0"
+            }
+          ],
+          "key": "schedulers",
+          "title": "Visible online schedulers"
+        },
+        {
+          "fields": [
+            {
+              "key": "process_rows",
+              "label": "Native process-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "process_unknowns",
+              "label": "Process-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "process_physical_low",
+              "label": "Process low-physical-memory notification (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "process_virtual_low",
+              "label": "Process low-virtual-memory condition (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "physical_used_kib",
+              "label": "Process working set including tracked large pages (KiB)",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "virtual_committed_kib",
+              "label": "Committed virtual address space (KiB)",
+              "value": "0"
+            },
+            {
+              "key": "virtual_available_kib",
+              "label": "Available virtual address space (KiB)",
+              "value": null
+            }
+          ],
+          "key": "process-memory",
+          "title": "Database process memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "system_rows",
+              "label": "Native operating-system-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "system_unknowns",
+              "label": "Operating-system-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "system_low",
+              "label": "Operating-system low-memory signal (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "system_total_kib",
+              "label": "Physical memory available to the operating system (KiB)",
+              "value": null
+            },
+            {
+              "key": "system_available_kib",
+              "label": "Currently available physical memory (KiB)",
+              "value": "0"
+            }
+          ],
+          "key": "system-memory",
+          "title": "Operating-system memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "grant_rows",
+              "label": "Sampled native execution-grant rows",
+              "value": "0"
+            },
+            {
+              "key": "grant_waiters",
+              "label": "Waiting memory grants in sampled rows",
+              "value": "0"
+            }
+          ],
+          "key": "grant-waiters",
+          "title": "Execution memory grants"
+        },
+        {
+          "fields": [
+            {
+              "key": "pending_io_rows",
+              "label": "Sampled pending-I/O rows",
+              "value": "0"
+            },
+            {
+              "key": "pending_io_unknowns",
+              "label": "Sampled I/O rows with unknown completion state",
+              "value": "0"
+            },
+            {
+              "key": "os_pending",
+              "label": "Sampled I/O requests pending at the operating system",
+              "value": "0"
+            },
+            {
+              "key": "completion_pending",
+              "label": "Sampled OS-completed requests awaiting database completion",
+              "value": "0"
+            }
+          ],
+          "key": "pending-io",
+          "title": "Pending I/O completion"
+        },
+        {
+          "fields": [
+            {
+              "key": "io_wait_population_rows",
+              "label": "Sampled native waiting-task rows",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknown_types",
+              "label": "Sampled tasks with unknown wait types",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_rows",
+              "label": "Sampled tasks with a supported I/O-related wait",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknowns",
+              "label": "Sampled tasks with unknown wait durations",
+              "value": "0"
+            },
+            {
+              "key": "longest_wait_ms",
+              "label": "Maximum sampled I/O-related task wait, including signal wait (ms)",
+              "value": null
+            }
+          ],
+          "key": "io-waits",
+          "title": "Current I/O-related task waits"
+        }
+      ],
+      "limitations": [
+        "Process memory and operating-system memory have separate native scopes. These facts do not measure the selected database’s resource use.",
+        "The native clock marks this read. The DMV populations can change during acquisition; this is not an atomic snapshot or an interval measurement.",
+        "Attribution requires independent evidence of the affected statement and the resource it waited for.",
+        "The maximum task wait covers the source’s fixed I/O-related wait types and includes signal wait. It is not storage service time."
+      ],
+      "native_populations_complete": true,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": {
+        "context": {
+          "context": {
+            "database_writable": null,
+            "observed_from": "2020-01-01T11:59:59Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "partition": {
+              "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+              "kind": "instance-local",
+              "member": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              }
+            },
+            "target": {
+              "identity": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              },
+              "scope": "shared"
+            }
+          },
+          "kind": "native"
+        },
+        "fields": [
+          {
+            "key": "process_id",
+            "label": "Native process ID",
+            "value": "42"
+          },
+          {
+            "key": "user_time_ms",
+            "label": "User-mode CPU time (ms)",
+            "value": "9007199254740993"
+          },
+          {
+            "key": "kernel_time_ms",
+            "label": "Kernel-mode CPU time (ms)",
+            "value": "0"
+          },
+          {
+            "key": "started_ticks",
+            "label": "Process start (machine milliseconds)",
+            "value": "100"
+          },
+          {
+            "key": "sampled_ticks",
+            "label": "Sample (machine milliseconds)",
+            "value": "500"
+          }
+        ],
+        "limitations": [
+          "These cumulative milliseconds cover all threads in the observed SQL Server process.",
+          "Recent CPU use requires another qualified point for the same process. A CPU percentage also requires a verified capacity denominator.",
+          "The original processor source or retained body is partial; missing values remain unknown."
+        ],
+        "native_source": {
+          "complete_scope": false,
+          "error_code": null,
+          "records": 4,
+          "source": "processor topology",
+          "state": "partial",
+          "stopped": null
+        },
+        "observed_at": "2020-01-01T12:00:00.5Z",
+        "read_complete": true,
+        "source_state": "partial",
+        "summary": "The engine recorded native process CPU evidence at this point.",
+        "title": "Native process CPU totals"
+      },
+      "read_complete": true,
+      "source_state": "collected",
+      "summary": "Native shared-instance resource facts were recorded.",
+      "title": "Instance resource point"
+    }
+  },
+  "cpu_zero": {
+    "read": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "observation": {
+        "grant_rows": 0,
+        "grant_waiters": 0,
+        "io_waits": {
+          "longest_wait_ms": null,
+          "observed_rows": 0,
+          "population_rows": 0,
+          "unknown_durations": 0,
+          "unknown_types": 0
+        },
+        "memory": {
+          "physical_used_kib": "9007199254740993",
+          "process_physical_low": false,
+          "process_rows": 1,
+          "process_virtual_low": false,
+          "system_available_kib": "0",
+          "system_low": false,
+          "system_rows": 1,
+          "system_total_kib": null,
+          "unknown_process_flags": 0,
+          "unknown_system_flags": 0,
+          "virtual_available_kib": null,
+          "virtual_committed_kib": "0"
+        },
+        "observed_at": "2020-01-01T12:00:00.0000000Z",
+        "pending_io": {
+          "completion_pending": "0",
+          "observed_rows": 0,
+          "os_pending": "0",
+          "unknown_flags": 0
+        },
+        "schedulers": {
+          "failed_worker_creations": "0",
+          "observed_rows": 2,
+          "population_rows": 2,
+          "runnable_tasks": "0",
+          "unknown_values": 0,
+          "worker_queue": "0"
+        }
+      },
+      "read_complete": true,
+      "source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      }
+    },
+    "report": {
+      "context": {
+        "context": {
+          "database_writable": null,
+          "observed_from": "2020-01-01T11:59:59Z",
+          "observed_until": "2020-01-01T12:00:01Z",
+          "partition": {
+            "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+            "kind": "instance-local",
+            "member": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            }
+          },
+          "target": {
+            "identity": {
+              "engine": "mssql",
+              "kind": "instance",
+              "namespace": {
+                "id": "native-instance-namespace",
+                "qualifiers": {}
+              },
+              "native": {
+                "id": "native-instance-a",
+                "qualifiers": {}
+              }
+            },
+            "scope": "shared"
+          }
+        },
+        "kind": "native"
+      },
+      "groups": [
+        {
+          "fields": [
+            {
+              "key": "scheduler_population_rows",
+              "label": "Sampled native scheduler rows",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_rows",
+              "label": "Sampled visible online schedulers",
+              "value": "2"
+            },
+            {
+              "key": "scheduler_unknowns",
+              "label": "Sampled schedulers with unknown values",
+              "value": "0"
+            },
+            {
+              "key": "runnable_tasks",
+              "label": "Runnable tasks on sampled visible online schedulers",
+              "value": "0"
+            },
+            {
+              "key": "worker_queue",
+              "label": "Tasks queued for workers on sampled schedulers",
+              "value": "0"
+            },
+            {
+              "key": "failed_worker_creations",
+              "label": "Sampled schedulers reporting failed worker creation",
+              "value": "0"
+            }
+          ],
+          "key": "schedulers",
+          "title": "Visible online schedulers"
+        },
+        {
+          "fields": [
+            {
+              "key": "process_rows",
+              "label": "Native process-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "process_unknowns",
+              "label": "Process-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "process_physical_low",
+              "label": "Process low-physical-memory notification (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "process_virtual_low",
+              "label": "Process low-virtual-memory condition (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "physical_used_kib",
+              "label": "Process working set including tracked large pages (KiB)",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "virtual_committed_kib",
+              "label": "Committed virtual address space (KiB)",
+              "value": "0"
+            },
+            {
+              "key": "virtual_available_kib",
+              "label": "Available virtual address space (KiB)",
+              "value": null
+            }
+          ],
+          "key": "process-memory",
+          "title": "Database process memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "system_rows",
+              "label": "Native operating-system-memory rows",
+              "value": "1"
+            },
+            {
+              "key": "system_unknowns",
+              "label": "Operating-system-memory rows with unknown flags",
+              "value": "0"
+            },
+            {
+              "key": "system_low",
+              "label": "Operating-system low-memory signal (0/1)",
+              "value": "0"
+            },
+            {
+              "key": "system_total_kib",
+              "label": "Physical memory available to the operating system (KiB)",
+              "value": null
+            },
+            {
+              "key": "system_available_kib",
+              "label": "Currently available physical memory (KiB)",
+              "value": "0"
+            }
+          ],
+          "key": "system-memory",
+          "title": "Operating-system memory"
+        },
+        {
+          "fields": [
+            {
+              "key": "grant_rows",
+              "label": "Sampled native execution-grant rows",
+              "value": "0"
+            },
+            {
+              "key": "grant_waiters",
+              "label": "Waiting memory grants in sampled rows",
+              "value": "0"
+            }
+          ],
+          "key": "grant-waiters",
+          "title": "Execution memory grants"
+        },
+        {
+          "fields": [
+            {
+              "key": "pending_io_rows",
+              "label": "Sampled pending-I/O rows",
+              "value": "0"
+            },
+            {
+              "key": "pending_io_unknowns",
+              "label": "Sampled I/O rows with unknown completion state",
+              "value": "0"
+            },
+            {
+              "key": "os_pending",
+              "label": "Sampled I/O requests pending at the operating system",
+              "value": "0"
+            },
+            {
+              "key": "completion_pending",
+              "label": "Sampled OS-completed requests awaiting database completion",
+              "value": "0"
+            }
+          ],
+          "key": "pending-io",
+          "title": "Pending I/O completion"
+        },
+        {
+          "fields": [
+            {
+              "key": "io_wait_population_rows",
+              "label": "Sampled native waiting-task rows",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknown_types",
+              "label": "Sampled tasks with unknown wait types",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_rows",
+              "label": "Sampled tasks with a supported I/O-related wait",
+              "value": "0"
+            },
+            {
+              "key": "io_wait_unknowns",
+              "label": "Sampled tasks with unknown wait durations",
+              "value": "0"
+            },
+            {
+              "key": "longest_wait_ms",
+              "label": "Maximum sampled I/O-related task wait, including signal wait (ms)",
+              "value": null
+            }
+          ],
+          "key": "io-waits",
+          "title": "Current I/O-related task waits"
+        }
+      ],
+      "limitations": [
+        "Process memory and operating-system memory have separate native scopes. These facts do not measure the selected database’s resource use.",
+        "The native clock marks this read. The DMV populations can change during acquisition; this is not an atomic snapshot or an interval measurement.",
+        "Attribution requires independent evidence of the affected statement and the resource it waited for.",
+        "The maximum task wait covers the source’s fixed I/O-related wait types and includes signal wait. It is not storage service time."
+      ],
+      "native_populations_complete": true,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "instance-resources",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": {
+        "context": {
+          "context": {
+            "database_writable": null,
+            "observed_from": "2020-01-01T11:59:59Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "partition": {
+              "epoch": "089d919f632b04db1aba87f58ddc5de0321a3daafc1ae7fb54eee99070430377",
+              "kind": "instance-local",
+              "member": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              }
+            },
+            "target": {
+              "identity": {
+                "engine": "mssql",
+                "kind": "instance",
+                "namespace": {
+                  "id": "native-instance-namespace",
+                  "qualifiers": {}
+                },
+                "native": {
+                  "id": "native-instance-a",
+                  "qualifiers": {}
+                }
+              },
+              "scope": "shared"
+            }
+          },
+          "kind": "native"
+        },
+        "fields": [
+          {
+            "key": "process_id",
+            "label": "Native process ID",
+            "value": "42"
+          },
+          {
+            "key": "user_time_ms",
+            "label": "User-mode CPU time (ms)",
+            "value": "0"
+          },
+          {
+            "key": "kernel_time_ms",
+            "label": "Kernel-mode CPU time (ms)",
+            "value": "0"
+          },
+          {
+            "key": "started_ticks",
+            "label": "Process start (machine milliseconds)",
+            "value": "100"
+          },
+          {
+            "key": "sampled_ticks",
+            "label": "Sample (machine milliseconds)",
+            "value": "500"
+          }
+        ],
+        "limitations": [
+          "These cumulative milliseconds cover all threads in the observed SQL Server process.",
+          "Recent CPU use requires another qualified point for the same process. A CPU percentage also requires a verified capacity denominator."
+        ],
+        "native_source": {
+          "complete_scope": true,
+          "error_code": null,
+          "records": 4,
+          "source": "processor topology",
+          "state": "collected",
+          "stopped": null
+        },
+        "observed_at": "2020-01-01T12:00:00.5Z",
+        "read_complete": true,
+        "source_state": "collected",
+        "summary": "The engine recorded native process CPU evidence at this point.",
+        "title": "Native process CPU totals"
+      },
+      "read_complete": true,
+      "source_state": "collected",
+      "summary": "Native shared-instance resource facts were recorded.",
+      "title": "Instance resource point"
+    }
+  },
   "denied": {
     "read": {
       "context": {
@@ -108,6 +2190,7 @@
         "stopped": null
       },
       "observed_at": null,
+      "process_cpu": null,
       "read_complete": true,
       "source_state": "unavailable",
       "summary": "No native instance resource point is available.",
@@ -444,6 +2527,7 @@
         "stopped": null
       },
       "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": null,
       "read_complete": true,
       "source_state": "collected",
       "summary": "Native shared-instance resource facts were recorded.",
@@ -780,6 +2864,7 @@
         "stopped": null
       },
       "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": null,
       "read_complete": true,
       "source_state": "collected",
       "summary": "Native shared-instance resource facts were recorded.",
@@ -1117,6 +3202,7 @@
         "stopped": null
       },
       "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": null,
       "read_complete": true,
       "source_state": "partial",
       "summary": "Some native instance populations or values are incomplete.",
@@ -1454,6 +3540,7 @@
         "stopped": null
       },
       "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": null,
       "read_complete": true,
       "source_state": "partial",
       "summary": "Some native instance populations or values are incomplete.",
@@ -1790,6 +3877,7 @@
         "stopped": null
       },
       "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": null,
       "read_complete": true,
       "source_state": "collected",
       "summary": "Native shared-instance resource facts were recorded.",
@@ -2126,6 +4214,7 @@
         "stopped": null
       },
       "observed_at": "2020-01-01T12:00:00.0000000Z",
+      "process_cpu": null,
       "read_complete": true,
       "source_state": "collected",
       "summary": "Native shared-instance resource facts were recorded.",

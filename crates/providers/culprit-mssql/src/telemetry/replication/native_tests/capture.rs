@@ -21,7 +21,7 @@ pub(super) async fn open(fixture: &OwnedSourceFixture, budget: CollectionBudget)
         budget,
     )
     .await?;
-    Ok(Reader { io, host: "127.0.0.1".into(), port: fixture.port, owner: None })
+    Ok(Reader { io, host: "127.0.0.1".into(), port: fixture.port, owner: None, topology: None })
 }
 
 pub(super) async fn capture(fixture: &OwnedSourceFixture, budget: &CollectionBudget) -> Result<Capture> {

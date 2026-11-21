@@ -14,6 +14,7 @@ pub(crate) enum CapturedScanEvidence {
     TempdbMetadataMemory(Box<CapturedOperationalRead>),
     TableMemory(Box<CapturedOperationalRead>),
     GroupReplication(Box<CapturedOperationalRead>),
+    Galera(Box<CapturedOperationalRead>),
     FullTextPopulations(Box<CapturedOperationalRead>),
     DatabasePerformanceCounters(Box<CapturedOperationalRead>),
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
@@ -27,6 +28,11 @@ impl CapturedScanEvidence {
     pub(crate) fn group_replication(read: Box<CapturedOperationalRead>) -> Result<Self> {
         culprit_checks::group_replication::explain_captured(&read)?;
         Ok(Self::GroupReplication(read))
+    }
+
+    pub(crate) fn galera(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::galera::explain_captured(&read)?;
+        Ok(Self::Galera(read))
     }
 
     pub(crate) fn table_memory(read: Box<CapturedOperationalRead>) -> Result<Self> {
@@ -92,6 +98,10 @@ impl CapturedScanEvidence {
                     &mut snapshot.operations.group_replication,
                     read,
                 )?;
+            }
+            Self::Galera(read) => {
+                // Exact saved connection authorizes this historical attachment; no current route/member join.
+                culprit_core::telemetry::append_recorded_operational_read(&mut snapshot.operations.galera, read)?;
             }
             Self::TableMemory(read) => {
                 // Saved-connection admission does not establish a match to current scan tables or native members.

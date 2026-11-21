@@ -354,11 +354,12 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
             assert!(values.iter().all(|value| value.value.is_some() && value.value_in_use.is_some()));
         }
     }
-    let topology = crate::processors::read(&mut operations).await.unwrap();
+    let topology = crate::processors::read(&mut operations, false).await.unwrap();
     assert!(topology.application().0.is_some_and(|processors| processors > 0.0));
     assert!(topology.application().1.is_some_and(|nodes| nodes > 0.0));
-    assert_eq!(topology.observations().len(), 3);
-    assert!(topology.observations().iter().all(|row| row.is_valid() && matches!(&row.fact, culprit_core::telemetry::OperationalFact::Counter(value) if value.scope == culprit_core::MeasurementScope::Server)));
+    let topology_observations = topology.observations().unwrap();
+    assert_eq!(topology_observations.len(), 3);
+    assert!(topology_observations.iter().all(|row| row.is_valid() && matches!(&row.fact, culprit_core::telemetry::OperationalFact::Counter(value) if value.scope == culprit_core::MeasurementScope::Server)));
     let cache = crate::cache_summary::read(&mut operations).await.unwrap();
     assert!(cache.application().total_plans > 0.0, "the fixture has compiled its own native workload");
     assert_eq!(cache.observations().len(), 6);

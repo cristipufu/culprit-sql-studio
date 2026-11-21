@@ -1,10 +1,5 @@
-use crate::{
-    connect::Flavor,
-    probe::Probe,
-    rows::{query, query_with},
-    sources, vars,
-};
-use culprit_core::operations::{ClusterHealth, OperationalCounter, OperationalCounterKind, SequenceCapacity};
+use crate::{connect::Flavor, probe::Probe, rows::query_with, sources, vars};
+use culprit_core::operations::{OperationalCounter, OperationalCounterKind, SequenceCapacity};
 use culprit_core::{Coverage, FileScope, Snapshot};
 use mysql_async::Value;
 
@@ -62,11 +57,10 @@ pub async fn collect(conn: &mut impl crate::read::QueryRead, probe: &Probe, snap
                 culprit_core::message!("provider.mysql.operations.galera_off"),
             );
         }
-        if enabled && let Some(rows) = coverage.read(&sources::CLUSTER_HEALTH, query(conn,
-            "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_ready','wsrep_connected','wsrep_cluster_status','wsrep_local_state_comment','wsrep_flow_control_paused')").await) {
-            let read = |name: &str| rows.iter().find(|r| r.string("variable_name").eq_ignore_ascii_case(name)).and_then(|r| r.text("value"));
-            let flag = |name: &str| read(name).map(|v| matches!(v.to_ascii_uppercase().as_str(),"ON"|"1"|"TRUE"));
-            snapshot.operations.cluster = Some(ClusterHealth { ready: flag("wsrep_ready"), connected: flag("wsrep_connected"), primary_component: read("wsrep_cluster_status").map(|v| v.eq_ignore_ascii_case("Primary")), local_state: read("wsrep_local_state_comment"), flow_control_paused: read("wsrep_flow_control_paused").and_then(|v| v.parse().ok()) });
+        if enabled
+            && let Some(cluster) = coverage.read(&sources::CLUSTER_HEALTH, crate::native::galera::scan(conn).await)
+        {
+            snapshot.operations.cluster = Some(cluster);
         }
     } else {
         coverage.not_applicable(

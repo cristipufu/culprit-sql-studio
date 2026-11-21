@@ -50,6 +50,7 @@ fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
         LocalSnapshotReport::Cdc(report) => cdc::value(analysis, report),
         LocalSnapshotReport::TableMemory(report) => table_memory::value(analysis, report)?,
         LocalSnapshotReport::GroupReplication(report) => group_replication::value(analysis, report),
+        LocalSnapshotReport::Galera(report) => galera::value(analysis, report),
         LocalSnapshotReport::ColumnstoreRowgroups(report) => columnstore_rowgroups::value(analysis, report),
         LocalSnapshotReport::FullTextPopulations(report) => full_text_populations::value(analysis, report),
         LocalSnapshotReport::BackupHistory(report) => backup_history::value(analysis, report),
@@ -471,3 +472,5 @@ fn qualified_grant_request<'a>(
 mod tests;
 
 mod group_replication;
+
+mod galera;

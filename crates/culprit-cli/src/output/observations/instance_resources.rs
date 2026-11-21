@@ -31,6 +31,31 @@ pub(crate) fn instance_resources(report: &InstanceResourceReport) -> String {
                     text.push_str(&t!("view.counter_ratios.cli.metric", label = &field.label, value = value));
                 }
             }
+            if let Some(cpu) = &report.process_cpu {
+                text.push('\n');
+                text.push_str(&render_summary(
+                    Summary {
+                        title: &cpu.title,
+                        summary: &cpu.summary,
+                        source: SourceQualification::Single { state: Some(cpu.source_state), reason: None },
+                        limitations: &cpu.limitations,
+                    },
+                    |text| {
+                        if let Some(at) = &cpu.observed_at {
+                            text.push('\n');
+                            text.push_str(&t!("view.instance_resources.observed_at", at = at));
+                        }
+                        for field in &cpu.fields {
+                            let value = field.value.as_ref().map_or_else(
+                                || t!("view.database_properties.unknown"),
+                                |value| format::digits(value.clone()),
+                            );
+                            text.push('\n');
+                            text.push_str(&t!("view.counter_ratios.cli.metric", label = &field.label, value = value));
+                        }
+                    },
+                ));
+            }
         },
     )
 }

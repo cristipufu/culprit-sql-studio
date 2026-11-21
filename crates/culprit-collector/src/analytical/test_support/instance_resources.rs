@@ -1,6 +1,82 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessCpuCase {
+    Exact,
+    Zero,
+    Null,
+    Partial,
+    Denied,
+}
+impl ProcessCpuCase {
+    pub const ALL: [Self; 5] = [Self::Exact, Self::Zero, Self::Null, Self::Partial, Self::Denied];
+}
+
+/// Manufactured canonical evidence. It proves original replay semantics, never native CPU or cost qualification.
+pub fn instance_resource_cpu_evidence(case: ProcessCpuCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (mut source, mut rows) = instance_resource_evidence(InstanceResourceCase::Exact);
+    let epoch = digest(b"canonical-cpu-process");
+    let SourcePartition::InstanceLocal { epoch: source_epoch, .. } = &mut source.partition else { panic!() };
+    *source_epoch = Some(epoch.clone());
+    let CollectionTarget::Shared(owner) = &source.target else { panic!() };
+    let mut sample: NativeCounterSet = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/process-cpu.sample.json"
+    )))
+    .unwrap();
+    sample.identity.qualifiers.insert("instance_id".into(), owner.telemetry_id().unwrap());
+    sample.identity.qualifiers.insert("instance_epoch".into(), epoch.clone());
+    for counter in &mut sample.counters {
+        counter.reset = culprit_core::ResetMarker::Generation(epoch.clone());
+        if case == ProcessCpuCase::Zero {
+            counter.value = MeasurementValue::Integer("0".into());
+        }
+    }
+    if case == ProcessCpuCase::Null {
+        sample.counters.clear();
+    }
+    let coverage = if case == ProcessCpuCase::Denied {
+        StateSourceCoverage::unavailable(
+            culprit_core::source_id::PROCESSOR_TOPOLOGY.into(),
+            culprit_core::ErrorCode::PermissionDenied,
+            None,
+        )
+    } else {
+        for (key, name, value) in [
+            ("host-logical-processors", "cpu_count", 64),
+            ("visible-online-user-schedulers", "online_schedulers", 8),
+            ("visible-online-numa-nodes", "numa_nodes", 2),
+        ] {
+            rows.push(TelemetryRecord::Operational(OperationalObservation {
+                source: culprit_core::source_id::PROCESSOR_TOPOLOGY.into(),
+                key: key.into(),
+                fact: OperationalFact::Counter(NativeCounterSample::gauge(
+                    key,
+                    value,
+                    CounterUnit::Count,
+                    culprit_core::MeasurementScope::Server,
+                    MSSQL_PROCESS_CPU_OBJECT,
+                    name,
+                )),
+            }));
+        }
+        rows.push(TelemetryRecord::Operational(
+            OperationalObservation::from_counters(culprit_core::source_id::PROCESSOR_TOPOLOGY, sample).unwrap(),
+        ));
+        StateSourceCoverage::observed(
+            culprit_core::source_id::PROCESSOR_TOPOLOGY.into(),
+            4,
+            case != ProcessCpuCase::Partial,
+        )
+    };
+    let SourceObservation::Snapshot(header) = &mut source.observation else { panic!() };
+    header.records = rows.len() as u32;
+    header.sources.push(coverage);
+    assert!(source.partition_is_consistent());
+    (source, rows)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstanceResourceCase {
     Exact,
     Zero,

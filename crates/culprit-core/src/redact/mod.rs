@@ -327,6 +327,11 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             reason: crate::message!("view.group_replication.sharing_withheld"),
         };
     }
+    for recorded in &mut s.operations.galera {
+        *recorded = crate::telemetry::RecordedOperationalRead::Unavailable {
+            reason: crate::message!("view.galera.sharing_withheld"),
+        };
+    }
     for recorded in &mut s.operations.table_memory {
         *recorded = crate::telemetry::RecordedOperationalRead::Unavailable {
             reason: crate::message!("view.table_memory.sharing_withheld"),

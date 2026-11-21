@@ -8,6 +8,9 @@ pub const MAX_REPLICATION_OBSERVATIONS: usize = CollectionBudget::upper_limits()
 #[ts(export)]
 pub struct ReplicationSnapshot {
     pub context: ObservationReadContext,
+    /// Native selected-MSSQL header authority; absent for scans/other providers and never reconstructed from rows.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub mssql_scope: Option<Box<MssqlReplicationScope>>,
     pub sources: Vec<StateSourceCoverage>,
     pub observations: Vec<ReplicationObservation>,
 }
@@ -20,6 +23,7 @@ impl ReplicationSnapshot {
         }
         let snapshot = Self {
             context: ObservationReadContext::Native { context: Box::new(NativeReadContext::from_snapshot(source)?) },
+            mssql_scope: mssql_replication_scope(source)?.cloned().map(Box::new),
             sources: native.sources.clone(),
             observations,
         };
@@ -39,6 +43,13 @@ impl ReplicationSnapshot {
         {
             return false;
         }
+        if self
+            .mssql_scope
+            .as_deref()
+            .is_some_and(|scope| self.context.native().is_none_or(|context| !scope.is_valid_for(context)))
+        {
+            return false;
+        }
         let mut sources = BTreeMap::new();
         let mut declared = 0u64;
         for source in &self.sources {
@@ -46,6 +57,11 @@ impl ReplicationSnapshot {
                 return false;
             }
             if self.context.native().is_some_and(|context| !context.partition.is_qualified()) && source.complete_scope {
+                return false;
+            }
+            if source.source == MSSQL_HYPERSCALE_REPLICAS_SOURCE
+                && (source.complete_scope || (source.records > 0 && self.mssql_scope.is_none()))
+            {
                 return false;
             }
             declared += u64::from(source.records);
@@ -61,6 +77,14 @@ impl ReplicationSnapshot {
                 || !keys.insert((&row.source, row.fact.key()))
             {
                 return false;
+            }
+            if let ReplicationFact::HyperscaleReplica(point) = &row.fact {
+                let (Some(scope), Some(context)) = (self.mssql_scope.as_deref(), self.context.native()) else {
+                    return false;
+                };
+                if source.complete_scope || !point.fits_read(scope, context) {
+                    return false;
+                }
             }
             *observed += 1;
         }

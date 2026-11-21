@@ -210,6 +210,7 @@ impl OperationalFact {
             | Self::MssqlColumnstoreRowgroup(_)
             | Self::MssqlTableMemory(_)
             | Self::MysqlGroupReplication(_)
+            | Self::MariadbGalera(_)
             | Self::MssqlFullTextPopulation(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::ConfiguredLogRateLimits(_)

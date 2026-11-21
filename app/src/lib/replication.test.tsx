@@ -76,3 +76,20 @@ test("the existing replica summary remains beside collapsed native detail", () =
   expect(html).toContain(view.title);
   expect(html).not.toContain("replication-fields");
 });
+
+
+test("Hyperscale topology retains all native roles and nullable parent meaning without a health badge", () => {
+  const view = replicationReport("mssql_hyperscale");
+  expect(view.state_rows).toBe(0);
+  expect(view.sources.every((source) => source.state === "partial")).toBe(true);
+  const fields = replicationFields(view);
+  expect(fields.filter((field) => field.key === "role_code").map((field) => field.value).sort()).toEqual(["0", "1", "2", "3"]);
+  expect(fields.filter((field) => field.key === "parent_replica_id" && field.value != null)).toHaveLength(1);
+  const html = renderToStaticMarkup(<HealthTab pressure={null} resources={[]} report={replicationOnlyReport(view)} engineLabel="SQL Server" />);
+  expect(html).toContain(view.summary);
+  expect(html).not.toContain("sig-dot good");
+  const nulls = replicationReport("mssql_hyperscale_nulls");
+  expect(replicationFields(nulls).filter((field) => field.key === "parent_replica_id").every((field) => field.value == null)).toBe(true);
+  const native = renderToStaticMarkup(<ReplicationFields fields={replicationFields(nulls)} />);
+  expect(native).toContain(t("ui.memory_failures.not_reported"));
+});

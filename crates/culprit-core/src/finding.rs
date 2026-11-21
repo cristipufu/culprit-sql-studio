@@ -400,6 +400,9 @@ pub struct Report {
     pub group_replication: Option<Vec<crate::GroupReplicationReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub galera: Option<Vec<crate::GaleraReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub full_text_populations: Option<Vec<crate::FullTextPopulationReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

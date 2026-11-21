@@ -40,6 +40,7 @@ fn data(rows: Vec<ReplicationObservation>) -> Box<Report> {
     let mut data: Box<Report> =
         serde_json::from_str(include_str!("../../../../fixtures/mysql-demo.report.json")).unwrap();
     data.snapshot.pressure.as_mut().unwrap().replication = Some(Box::new(ReplicationSnapshot {
+        mssql_scope: None,
         context: ObservationReadContext::collector(
             SystemTime::UNIX_EPOCH,
             SystemTime::UNIX_EPOCH + Duration::from_secs(1),

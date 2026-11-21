@@ -458,9 +458,18 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         focus: Box<CacheEntryMemoryFocus>,
     },
+    MssqlReplication {
+        snapshot: StateSnapshotDescription,
+        scope: Box<MssqlReplicationScope>,
+        database_writable: bool,
+    },
     GroupReplication {
         snapshot: StateSnapshotDescription,
         metadata: Box<MysqlGroupReplicationMetadata>,
+    },
+    Galera {
+        snapshot: StateSnapshotDescription,
+        metadata: Box<MariadbGaleraMetadata>,
     },
     TableMemory {
         snapshot: StateSnapshotDescription,
@@ -574,7 +583,9 @@ impl SourceObservation {
                 TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters)
             }
             Self::TableMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::TableMemory),
+            Self::MssqlReplication { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Replication),
             Self::GroupReplication { .. } => TelemetryCollection::Snapshot(SnapshotDataset::GroupReplication),
+            Self::Galera { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Galera),
             Self::ColumnstoreRowgroups { .. } => TelemetryCollection::Snapshot(SnapshotDataset::ColumnstoreRowgroups),
             Self::FullTextPopulations { .. } => TelemetryCollection::Snapshot(SnapshotDataset::FullTextPopulations),
             Self::PageWaitTargets { .. } | Self::FocusedPageWait { .. } => {
@@ -643,7 +654,9 @@ impl SourceObservation {
             | Self::BackupHistory { .. }
             | Self::SuspectPages { .. }
             | Self::DatabasePerformanceCounters { .. }
+            | Self::MssqlReplication { .. }
             | Self::GroupReplication { .. }
+            | Self::Galera { .. }
             | Self::Snapshot(_)
             | Self::PagedSnapshot(_) => TelemetryRange::Current,
         })
@@ -682,9 +695,19 @@ impl SourceObservation {
             Self::MysqlEvents { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::Activity(snapshot) => snapshot.is_valid(),
             Self::FocusedBlocking { snapshot, result } => result.is_valid_header(snapshot),
+            Self::MssqlReplication { snapshot, scope, .. } => {
+                snapshot.is_valid()
+                    && snapshot.dataset == SnapshotDataset::Replication
+                    && scope.is_valid()
+                    && snapshot
+                        .sources
+                        .iter()
+                        .all(|source| source.source != MSSQL_HYPERSCALE_REPLICAS_SOURCE || !source.complete_scope)
+            }
             Self::GroupReplication { snapshot, metadata } => {
                 group_replication_header_is_valid(snapshot) && metadata.is_valid()
             }
+            Self::Galera { snapshot, metadata } => galera_header_is_valid(snapshot) && metadata.is_valid(),
             Self::TableMemory { snapshot, target, metadata, .. } => {
                 table_memory_header_is_valid(snapshot) && target.is_valid() && metadata.is_valid()
             }
@@ -798,7 +821,9 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::MssqlReplication { snapshot, .. }
             | Self::GroupReplication { snapshot, .. }
+            | Self::Galera { snapshot, .. }
             | Self::FullTextPopulations { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => Some(snapshot),
             _ => None,
@@ -824,7 +849,9 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::MssqlReplication { snapshot, .. }
             | Self::GroupReplication { snapshot, .. }
+            | Self::Galera { snapshot, .. }
             | Self::FullTextPopulations { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => snapshot.accepts(stream, source),
             Self::Diagnostics(_) => stream == TelemetryStream::OperationalSamples && source == DIAGNOSTICS_SOURCE,
@@ -863,6 +890,7 @@ impl SourceObservation {
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
             | Self::GroupReplication { snapshot, .. }
+            | Self::Galera { snapshot, .. }
             | Self::FullTextPopulations { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
@@ -871,7 +899,7 @@ impl SourceObservation {
                 count(TelemetryStream::OperationalSamples) == u64::from(description.records)
                     && count(TelemetryStream::DiagnosticCheckpoints) == u64::from(description.checkpoint_records)
             }
-            Self::Snapshot(snapshot) | Self::SourceRead { snapshot, .. } => {
+            Self::Snapshot(snapshot) | Self::SourceRead { snapshot, .. } | Self::MssqlReplication { snapshot, .. } => {
                 count(snapshot.dataset.stream()) == u64::from(snapshot.records)
             }
             Self::PagedSnapshot(_) | Self::PagedSourceRead { .. } => false,
@@ -1194,7 +1222,9 @@ impl CollectionDescription {
         if let (
             SourceObservation::Snapshot(snapshot)
             | SourceObservation::BackupHistory { snapshot, .. }
+            | SourceObservation::MssqlReplication { snapshot, .. }
             | SourceObservation::GroupReplication { snapshot, .. }
+            | SourceObservation::Galera { snapshot, .. }
             | SourceObservation::SuspectPages { snapshot, .. }
             | SourceObservation::DatabasePerformanceCounters { snapshot, .. },
             CollectionSelection::Snapshot { dataset },

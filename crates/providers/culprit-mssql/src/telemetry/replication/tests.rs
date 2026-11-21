@@ -62,6 +62,9 @@ fn source(edition: i64, data: Vec<ReadResult<Vec<Rec>>>) -> ReplicationSource<Fa
         replies.push(Ok(vec![pressure()]));
     }
     replies.extend(data);
+    if edition == 5 {
+        replies.push(Ok(vec![crate::replication::hyperscale::tests::metadata("General Purpose", AFTER)]));
+    }
     replies.extend(recheck(edition, AFTER));
     replies.extend(recheck(edition, FINAL));
     ReplicationSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap()
@@ -139,11 +142,11 @@ async fn azure_geo_uses_its_original_member_and_pressure_guard_without_ag_sql_or
     row.source = "another-native-family".into();
     assert!(ExportedRecord::new(&description, &capture, wrong_source).is_err());
     let mut wrong_dataset = description.clone();
-    let SourceObservation::Snapshot(snapshot) = &mut wrong_dataset.observation else { panic!() };
+    let SourceObservation::MssqlReplication { snapshot, .. } = &mut wrong_dataset.observation else { panic!() };
     snapshot.dataset = SnapshotDataset::WaitCounters;
     assert!(ExportedRecord::new(&wrong_dataset, &capture, rows[0].clone()).is_err());
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
-    assert_eq!(source.query_count(), 6);
+    assert_eq!(source.query_count(), 7);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
 
@@ -195,7 +198,13 @@ async fn changed_native_generations_or_roles_refuse_the_frame_without_a_fresh_fa
         );
         *after.last_mut().unwrap() = Ok(vec![changed]);
         replies.extend(after);
-        let mut reader = Reader { io: FakeRead::new(replies), host: "fixture.invalid".into(), port: 1433, owner: None };
+        let mut reader = Reader {
+            io: FakeRead::new(replies),
+            host: "fixture.invalid".into(),
+            port: 1433,
+            owner: None,
+            topology: None,
+        };
         let error = reader.observe(&request()).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged, "{field}");
         assert_eq!(reader.io.calls.len(), 8);
@@ -240,6 +249,7 @@ async fn caller_query_budget_stops_replication_without_post_read_native_work() {
             host: "fixture.invalid".into(),
             port: 1433,
             owner: None,
+            topology: None,
         };
         let error = reader.observe(&request()).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::QueryLimit);
@@ -261,7 +271,7 @@ async fn cancelled_native_reads_never_publish_a_partial_frame_or_start_a_second_
             SourceShutdown::Quiescent
         };
         let shutdown = io.shutdown;
-        let mut reader = Reader { io, host: "fixture.invalid".into(), port: 1433, owner: None };
+        let mut reader = Reader { io, host: "fixture.invalid".into(), port: 1433, owner: None, topology: None };
         let error = reader.observe(&request()).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), stop);
         assert_eq!(reader.io.calls.len(), 5);
@@ -280,7 +290,8 @@ async fn missing_native_owner_information_retains_positive_rows_only_with_partia
     let mut after = recheck(3, AFTER);
     after[1] = Err(ReadError::Source(Error::new(ErrorCode::PermissionDenied, "controlled epoch permission")));
     replies.extend(after);
-    let mut reader = Reader { io: FakeRead::new(replies), host: "fixture.invalid".into(), port: 1433, owner: None };
+    let mut reader =
+        Reader { io: FakeRead::new(replies), host: "fixture.invalid".into(), port: 1433, owner: None, topology: None };
     let captured = reader.observe(&request()).await.unwrap();
     assert_eq!(captured.records.len(), 2);
     assert!(!captured.description.partition.is_qualified());
@@ -289,4 +300,116 @@ async fn missing_native_owner_information_retains_positive_rows_only_with_partia
     assert_eq!(snapshot.sources[0].error_code, Some(ErrorCode::PermissionDenied));
     assert!(!snapshot.sources[0].complete_scope);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn selected_hyperscale_topology_reuses_original_header_and_final_witness_within_declared_total_budget() {
+    use crate::replication::hyperscale::tests::{metadata, topology};
+    let mut replies = authority(5, BEFORE);
+    replies.push(Ok(vec![pressure()]));
+    replies.push(Ok(vec![geo()]));
+    replies.push(Ok(vec![metadata("Hyperscale", "2020-01-01T06:01:59Z")]));
+    replies.push(Ok(vec![topology(1)]));
+    replies.extend(recheck(5, AFTER));
+    replies.extend(recheck(5, FINAL));
+    replies.push(Ok(vec![metadata("Hyperscale", "2020-01-01T06:02:03Z")]));
+    let mut source =
+        ReplicationSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+    assert_eq!(source.query_count(), 0);
+    let original = source.describe().await.unwrap();
+    let SourceObservation::MssqlReplication { scope, database_writable, .. } = &original.observation else { panic!() };
+    assert_eq!(scope.database_id, 7);
+    assert!(*database_writable);
+    let rows = drain(&mut source).await;
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| matches!(row, TelemetryRecord::Replication(point) if point.fits_source(&original))));
+    let point = rows
+        .iter()
+        .find_map(|row| match row {
+            TelemetryRecord::Replication(ReplicationObservation {
+                fact: ReplicationFact::HyperscaleReplica(point),
+                ..
+            }) => Some(point),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(point.parent_replica_id.as_deref(), Some(scope.replica_id.as_str()));
+    let snapshot = ReplicationSnapshot::from_source(
+        &original,
+        rows.iter()
+            .map(|row| {
+                let TelemetryRecord::Replication(row) = row else { panic!() };
+                row.clone()
+            })
+            .collect(),
+    )
+    .unwrap();
+    assert!(snapshot.is_valid());
+    assert_eq!(snapshot.sources[1].state, SourceState::Partial);
+    assert!(!snapshot.sources[1].complete_scope);
+    assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+    assert_eq!(source.query_count(), 9);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    let bounded = bounded_budget(&CollectionBudget::upper_limits());
+    assert_eq!(bounded.max_queries, 13);
+    assert_eq!(crate::read::ReadSession::budget_after_setup(bounded).unwrap().max_queries, 12);
+}
+#[tokio::test]
+async fn topology_final_role_or_scope_drift_refuses_completion_without_new_read_or_healing() {
+    use crate::replication::hyperscale::tests::{metadata, topology};
+    for changed in ["observer_replica_id", "selected_database_id", "updateability", "observed_at"] {
+        let mut replies = authority(5, BEFORE);
+        replies.push(Ok(vec![pressure()]));
+        replies.push(Ok(vec![]));
+        replies.push(Ok(vec![metadata("Hyperscale", "2020-01-01T06:01:59Z")]));
+        replies.push(Ok(vec![topology(1)]));
+        replies.extend(recheck(5, AFTER));
+        replies.extend(recheck(5, FINAL));
+        let value = match changed {
+            "selected_database_id" => Val::Int(8),
+            "updateability" => Val::Text("READ_ONLY".into()),
+            "observed_at" => Val::Text(BEFORE.into()),
+            _ => Val::Text("11111111-1111-1111-1111-111111111111".into()),
+        };
+        replies.push(Ok(vec![replace(&metadata("Hyperscale", "2020-01-01T06:02:03Z"), &[(changed, value)])]));
+        let mut source =
+            ReplicationSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+        source.describe().await.unwrap();
+        drain(&mut source).await;
+        assert!(source.finish().await.is_err(), "{changed}");
+        assert_eq!(source.query_count(), 9);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn selected_topology_intersects_stricter_total_query_caps_and_keeps_final_native_proof_mandatory() {
+    use crate::replication::hyperscale::tests::{metadata, topology};
+    for total in [9, 10] {
+        let mut replies = authority(5, BEFORE);
+        replies.push(Ok(vec![pressure()]));
+        replies.push(Ok(vec![geo()]));
+        replies.push(Ok(vec![metadata("Hyperscale", "2020-01-01T06:01:59Z")]));
+        replies.push(Ok(vec![topology(1)]));
+        replies.extend(recheck(5, AFTER));
+        replies.extend(recheck(5, FINAL));
+        replies.push(Ok(vec![metadata("Hyperscale", "2020-01-01T06:02:03Z")]));
+        let mut request = request();
+        request.budget.max_queries = total;
+        request.budget = bounded_budget(&request.budget);
+        let reader_budget = ReadSession::budget_after_setup(request.budget.clone()).unwrap();
+        assert_eq!(reader_budget.max_queries, total - 1);
+        let io = FakeRead::new(replies).with_query_limit(reader_budget.max_queries);
+        let mut source = ReplicationSource::with_io(io, &request, "fixture.invalid".into(), 1433).unwrap();
+        source.describe().await.unwrap();
+        drain(&mut source).await;
+        if total == 9 {
+            assert_eq!(CollectionStop::from_error(&source.finish().await.err().unwrap()), CollectionStop::QueryLimit);
+            assert_eq!(source.query_count(), 8);
+        } else {
+            assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+            assert_eq!(source.query_count(), 9);
+        }
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
 }

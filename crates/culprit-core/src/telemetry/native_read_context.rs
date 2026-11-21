@@ -69,7 +69,8 @@ impl NativeReadContext {
             observed_from: snapshot.observed_from.clone(),
             observed_until: snapshot.observed_until.clone(),
             database_writable: match &source.observation {
-                SourceObservation::SuspectPages { database_writable, .. }
+                SourceObservation::MssqlReplication { database_writable, .. }
+                | SourceObservation::SuspectPages { database_writable, .. }
                 | SourceObservation::DatabasePerformanceCounters { database_writable, .. }
                 | SourceObservation::BackupHistory { database_writable, .. }
                 | SourceObservation::ColumnstoreRowgroups { database_writable, .. }

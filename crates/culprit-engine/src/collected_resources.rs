@@ -66,6 +66,7 @@ pub use current_request_work::current_request_work;
 mod jobs;
 pub use jobs::jobs;
 mod replication;
+pub(crate) use replication::explain_read as explain_replication_read;
 pub use replication::replication;
 mod configured_log_rates;
 mod connection_outcomes;
@@ -172,3 +173,6 @@ pub use storage::storage;
 
 mod group_replication;
 pub use group_replication::group_replication;
+
+mod galera;
+pub use galera::galera;

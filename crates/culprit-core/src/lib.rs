@@ -30,7 +30,9 @@ pub use counter_ratio_report::{CounterRatioEntry, CounterRatioReport};
 pub mod completed_spill_report;
 mod configured_log_rate_report;
 mod instance_resource_report;
-pub use instance_resource_report::{InstanceResourceField, InstanceResourceGroup, InstanceResourceReport};
+pub use instance_resource_report::{
+    InstanceResourceField, InstanceResourceGroup, InstanceResourceReport, ProcessCpuReport,
+};
 mod table_full_text_report;
 pub use table_full_text_report::{TableFullTextEntry, TableFullTextReport};
 mod suspect_page_history_report;
@@ -264,3 +266,6 @@ pub use recipe_qualification::*;
 
 mod group_replication_report;
 pub use group_replication_report::{GroupReplicationOrigin, GroupReplicationReport};
+
+mod galera_report;
+pub use galera_report::{GaleraOrigin, GaleraReport};
