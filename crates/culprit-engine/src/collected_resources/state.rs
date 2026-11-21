@@ -211,7 +211,7 @@ fn native_state(
             }
             (TelemetryRecord::Setting(row), EvidenceFamily::SettingObservations) if row.is_valid() => &row.source,
             (TelemetryRecord::WaitCounter(row), EvidenceFamily::WaitCounterSamples)
-                if row.is_valid_for(capture.source().target.engine()) =>
+                if row.is_valid_for(capture.source().target.engine()) && row.fits_source(capture.source()) =>
             {
                 &row.source
             }

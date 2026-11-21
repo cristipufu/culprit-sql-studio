@@ -334,6 +334,10 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.plan-cache-summary", PlanCacheSummary).baseline().version(2),
     state!("mssql.missing-indexes", MissingIndexes).version(2),
     state!("mssql.tuning", Tuning).bounded(state::tuning_budget).version(3),
+    state!("mssql.pool-wait-counters", WaitCounters)
+        .shared(&[RecipeSubject::Shared(SharedResourceKind::Pool)])
+        .on_editions(&[crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE])
+        .bounded(state::pool_current_budget),
     state!("mssql.wait-counters", WaitCounters).baseline().version(2),
     Registration::database(
         "mssql.replication",

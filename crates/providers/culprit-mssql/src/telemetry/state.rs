@@ -14,6 +14,8 @@ const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
 #[cfg(test)]
 mod database_counters;
 mod local_point;
+mod pool_current;
+pub(super) use pool_current::bounded_budget as pool_current_budget;
 mod numa_nodes;
 pub(super) use numa_nodes::bounded_budget as numa_nodes_budget;
 mod pool_settings;
@@ -26,7 +28,9 @@ pub(super) use settings::bounded_budget as settings_budget;
 pub(super) use tuning::bounded_budget as tuning_budget;
 
 fn native_budget(request: &CollectionRequest) -> CollectionBudget {
-    if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::NumaNodes }) {
+    if pool_current::selected(request) {
+        pool_current_budget(&request.budget)
+    } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::NumaNodes }) {
         numa_nodes_budget(&request.budget)
     } else if pool_settings::selected(request) {
         pool_settings_budget(&request.budget)
@@ -90,14 +94,16 @@ impl<R: NativeRead> StateSource<R> {
         subject::validate_dataset(&request.subject, dataset)?;
         let database_authority = subject::DatabaseAuthority::for_source(dataset, &request.subject)?;
         let mut request = request.clone();
-        if matches!(
-            dataset,
-            SnapshotDataset::NumaNodes
-                | SnapshotDataset::Tuning
-                | SnapshotDataset::Settings
-                | SnapshotDataset::DatabasePerformanceCounters
-                | SnapshotDataset::SuspectPages
-        ) {
+        if pool_current::selected(&request)
+            || matches!(
+                dataset,
+                SnapshotDataset::NumaNodes
+                    | SnapshotDataset::Tuning
+                    | SnapshotDataset::Settings
+                    | SnapshotDataset::DatabasePerformanceCounters
+                    | SnapshotDataset::SuspectPages
+            )
+        {
             request.budget = native_budget(&request);
             request.budget.validate()?;
         }
@@ -226,7 +232,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         self.progress = Progress::Failed;
         let dataset = pool_settings::dataset(&self.request.selection)?;
         let shared = subject::is_shared(&self.request.subject)?;
-        let families = if pool_settings::selected(&self.request) {
+        let families = if pool_current::selected(&self.request) {
+            vec![point::Family::WaitCounters]
+        } else if pool_settings::selected(&self.request) {
             vec![point::Family::PoolSettings]
         } else if shared {
             point::shared_families(dataset)?
@@ -238,7 +246,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         } else {
             crate::database_identity::log_rates::Detail::Identity
         };
-        let read = if pool_settings::selected(&self.request) {
+        let read = if pool_current::selected(&self.request) {
+            pool_current::subject(&mut self.io, &self.request.subject).await?
+        } else if pool_settings::selected(&self.request) {
             pool_settings::read_subject(&mut self.io, &self.request.subject, &self.host, self.port).await?
         } else {
             subject::read_detail(
@@ -312,7 +322,16 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                 Err(error) => source_failure(CONFIGURED_LOG_RATES_SOURCE.into(), error)?,
             });
         }
-        let (observed_until, final_metadata_visible) = self.clock().await?;
+        let closing =
+            pool_current::closing(self.identity.as_ref().ok_or_else(invalid_data)?, &mut self.io, &observed_from)
+                .await?;
+        let (observed_until, final_metadata_visible, pool_authority) = match closing {
+            Some((at, visible, authority)) => (at, visible, Some(authority)),
+            None => {
+                let (at, visible) = self.clock().await?;
+                (at, visible, None)
+            }
+        };
         if !final_metadata_visible {
             for (source, family) in sources.iter_mut().zip(&families) {
                 if family.requires_metadata()
@@ -334,7 +353,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         let description = CollectionDescription {
             partition: self.identity.as_ref().ok_or_else(invalid_data)?.partition()?,
             target,
-            source: if dataset == SnapshotDataset::NumaNodes {
+            source: if pool_current::selected(&self.request) {
+                MSSQL_POOL_CURRENT_SOURCE
+            } else if dataset == SnapshotDataset::NumaNodes {
                 MSSQL_NUMA_NODES_SOURCE
             } else if pool_settings::selected(&self.request) {
                 MSSQL_POOL_SETTINGS_SOURCE
@@ -416,6 +437,12 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                 self.pool_settings_point.clone(),
             )?,
         };
+        let mut description = description;
+        if let Some(authority) = pool_authority {
+            let snapshot = description.observation.snapshot().ok_or_else(invalid_data)?.clone();
+            description.observation = SourceObservation::MssqlPoolCurrent { snapshot, authority: Box::new(authority) };
+            mssql_pool_current_authority(&description)?;
+        }
         if !description.matches_request(&self.request) {
             return Err(invalid_data());
         }

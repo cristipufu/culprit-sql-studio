@@ -357,3 +357,4 @@ mod query_wait_fragments;
 mod runtime_fragments;
 
 mod indexed_views;
+mod pool_wait_counters;

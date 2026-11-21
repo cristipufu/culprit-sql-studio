@@ -15,6 +15,7 @@ mod pool_settings;
 mod replication;
 mod session_census;
 mod snapshots;
+mod wait_counters;
 
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 pub(crate) const LOCAL_CAPTURE_TOOL: &str = "analyze_capture";
@@ -91,6 +92,7 @@ impl CulpritMcp {
             LocalCapturedAnalysis::SessionCensus(analysis) => session_census::captured(&analysis)?,
             LocalCapturedAnalysis::Replication(analysis) => replication::captured(&analysis)?,
             LocalCapturedAnalysis::PoolSettings(analysis) => pool_settings::captured(&analysis)?,
+            LocalCapturedAnalysis::WaitCounters(analysis) => wait_counters::captured(&analysis)?,
         };
         json_size(&value, MAX_OUTPUT_BYTES).map_err(|error| match error {
             JsonSizeError::LimitExceeded => DeliveryProblem::Capacity.error(),

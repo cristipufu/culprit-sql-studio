@@ -6,6 +6,9 @@ pub(super) fn redact(mut read: Box<WaitCounterSnapshot>, engine: Engine) -> Resu
     if !read.is_valid_for(engine) {
         return Err(CollectionStop::InvalidPage.error());
     }
+    if read.pool_current.is_some() {
+        return Err(CollectionStop::InvalidPage.error());
+    }
     if let Some(ObservationReadContext::Native { context }) = &mut read.context {
         redact_read_context(context);
     }

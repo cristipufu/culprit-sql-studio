@@ -52,7 +52,7 @@ pub use counter_ratios::{CounterRatioCase, counter_ratio_evidence};
 pub use resource_io::{
     collected_resource_recovery, rbio_wait_evidence, resource_io_evidence, resource_role_evidence_cases,
 };
-pub use wait_counters::{WaitCounterCase, wait_counter_evidence};
+pub use wait_counters::{PoolWaitCounterCase, WaitCounterCase, pool_wait_counter_evidence, wait_counter_evidence};
 mod activity;
 mod session_census;
 pub use session_census::{SessionCensusCase, session_census_evidence};

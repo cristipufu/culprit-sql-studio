@@ -425,6 +425,7 @@ async fn native_resource_discovery_derives_its_routes_from_registrations_and_obs
         vec![
             TelemetryCollection::ResourceHistory,
             TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures),
+            TelemetryCollection::Snapshot(SnapshotDataset::WaitCounters),
             TelemetryCollection::Snapshot(SnapshotDataset::Settings)
         ]
     );
@@ -689,4 +690,20 @@ fn numa_node_recipe_is_one_explicit_shared_instance_profile_with_setup_inside_it
         ordinary.selector,
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Operational))
     );
+}
+
+#[test]
+fn pool_current_wait_recipe_is_closed_bounded_unqualified_and_distinct_from_database_baseline() {
+    let all = declarations();
+    let recipe = all.iter().find(|recipe| recipe.id == "mssql.pool-wait-counters").unwrap();
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, vec![RecipeSubject::Shared(SharedResourceKind::Pool)]);
+    assert_eq!(recipe.budget.max_queries, 8);
+    assert_eq!(recipe.budget.max_snapshot_rows, 500);
+    assert_eq!(recipe.budget.statement_timeout_ms, 1000);
+    assert_eq!(recipe.budget.total_timeout_ms, 5000);
+    let database = all.iter().find(|recipe| recipe.id == "mssql.wait-counters").unwrap();
+    assert_eq!(database.subjects, vec![RecipeSubject::Database]);
 }

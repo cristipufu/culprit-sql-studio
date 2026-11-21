@@ -19,7 +19,8 @@ async fn raw_counters_keep_idle_types_exact_integers_scope_and_unknown_reset_evi
     let native = vec![row("WRITELOG", 9_007_199_254_740_993), row("SLEEP_TASK", 10), row("NEW_NATIVE_WAIT", 20)];
     for database in [true, false] {
         let mut reader = FakeRead::new(vec![Ok(native.clone())]);
-        let counters = read(&mut reader, database, 500).await.map_err(crate::read::ReadError::into_error).unwrap();
+        let scope = if database { Scope::Database } else { Scope::Server };
+        let counters = read(&mut reader, scope, 500).await.map_err(crate::read::ReadError::into_error).unwrap();
         assert_eq!(counters.len(), 3);
         assert_eq!(counters[0].wait_time_ms, "9007199254740993");
         assert_eq!(counters[0].reset, ResetMarker::Unknown);
@@ -43,7 +44,7 @@ async fn malformed_missing_approximate_negative_or_duplicate_native_values_canno
     invalid.push(vec![replace(&base, &[("wait_type", Val::Text("".into()))])]);
     for rows in invalid {
         let mut reader = FakeRead::new(vec![Ok(rows)]);
-        assert!(read(&mut reader, true, 500).await.is_err());
+        assert!(read(&mut reader, Scope::Database, 500).await.is_err());
     }
 }
 
@@ -53,15 +54,15 @@ async fn deltas_subtract_exact_counters_before_converting_to_display_numbers() {
         Ok(vec![row("WRITELOG", 9_007_199_254_740_992)]),
         Ok(vec![row("WRITELOG", 9_007_199_254_740_993)]),
     ]);
-    let before = read(&mut reader, true, 500).await.map_err(crate::read::ReadError::into_error).unwrap();
-    let after = read(&mut reader, true, 500).await.map_err(crate::read::ReadError::into_error).unwrap();
+    let before = read(&mut reader, Scope::Database, 500).await.map_err(crate::read::ReadError::into_error).unwrap();
+    let after = read(&mut reader, Scope::Database, 500).await.map_err(crate::read::ReadError::into_error).unwrap();
     assert_eq!(deltas(&before, &after).unwrap()["WRITELOG"], (1.0, 0.0, 0.0));
 }
 
 #[tokio::test]
 async fn missing_or_regressing_counters_including_idle_waits_invalidate_the_short_sample() {
     let mut reader = FakeRead::new(vec![Ok(vec![row("WRITELOG", 10), row("SLEEP_TASK", 50)])]);
-    let before = read(&mut reader, true, 500).await.map_err(crate::read::ReadError::into_error).unwrap();
+    let before = read(&mut reader, Scope::Database, 500).await.map_err(crate::read::ReadError::into_error).unwrap();
     let mut absent = before.clone();
     absent.pop();
     assert!(deltas(&before, &absent).is_err());
@@ -128,7 +129,7 @@ fn categorises_wait_types() {
 #[tokio::test]
 async fn the_output_subtype_reuses_one_native_read_and_preserves_independent_network_subtotals() {
     let mut reader = FakeRead::new(vec![Ok(vec![row("ASYNC_NETWORK_IO", 100), row("NET_WAIT", 200)])]);
-    let records = read(&mut reader, false, 16).await.unwrap();
+    let records = read(&mut reader, Scope::Server, 16).await.unwrap();
     assert_eq!(records[0].mechanism, Some(WaitMechanism::ClientResultOutput));
     assert_eq!(records[0].wait_type, "ASYNC_NETWORK_IO");
     assert_eq!(records[0].wait_time_ms, "100");
@@ -166,7 +167,7 @@ async fn each_native_rbio_mechanism_keeps_raw_counter_identity_and_a_separate_sc
     native.push(row("WRITELOG", 100));
     native.push(row("RBIO_RG_FUTURE_COMPONENT", 200));
     let mut io = FakeRead::new(vec![Ok(native)]);
-    let records = read(&mut io, true, 500).await.unwrap();
+    let records = read(&mut io, Scope::Database, 500).await.unwrap();
     let display = categories(&totals(&records));
     for name in names {
         let raw = records.iter().find(|raw| raw.wait_type == name).unwrap();
@@ -184,4 +185,28 @@ async fn each_native_rbio_mechanism_keeps_raw_counter_identity_and_a_separate_sc
             .any(|row| row.category == "Other" && row.wait_type.as_deref() == Some("RBIO_RG_FUTURE_COMPONENT"))
     );
     assert_eq!(io.calls.len(), 1);
+}
+
+#[tokio::test]
+async fn pool_waits_share_the_exact_decoder_with_parameterized_lookahead_and_no_zero_limit_dispatch() {
+    let mut reader = FakeRead::new(vec![Ok(vec![row("WRITELOG", 10)])]);
+    let counters = read(&mut reader, Scope::ElasticPool, 2).await.unwrap();
+    assert_eq!(counters[0].scope, MeasurementScope::Pool);
+    assert_eq!(counters[0].reset, ResetMarker::Unknown);
+    assert_eq!(reader.calls[0].limit, 3);
+    assert!(matches!(reader.calls[0].parameters[0], crate::read::Parameter::Integer(3)));
+    assert!(
+        reader.calls[0].sql.contains("TOP (@P1)")
+            && reader.calls[0].sql.contains("ORDER BY wait_type")
+            && reader.calls[0].sql.contains("/* culprit */")
+    );
+    let mut reader = FakeRead::new(vec![Ok(vec![row("WRITELOG", 10), row("OTHER", 10), row("SLEEP_TASK", 10)])]);
+    assert!(matches!(
+        read(&mut reader, Scope::ElasticPool, 2).await,
+        Err(crate::read::ReadError::Stopped(culprit_core::telemetry::CollectionStop::RowLimit))
+    ));
+    assert_eq!(reader.calls.len(), 1);
+    let mut reader = FakeRead::new(vec![]);
+    assert!(read(&mut reader, Scope::ElasticPool, 0).await.is_err());
+    assert!(reader.calls.is_empty());
 }

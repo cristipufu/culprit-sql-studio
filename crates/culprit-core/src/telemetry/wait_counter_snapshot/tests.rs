@@ -17,6 +17,7 @@ fn row() -> WaitCounterObservation {
 }
 fn read() -> WaitCounterSnapshot {
     WaitCounterSnapshot {
+        pool_current: None,
         context: Some(
             ObservationReadContext::collector(SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH + Duration::from_secs(1))
                 .unwrap(),

@@ -125,3 +125,5 @@ mod jobs;
 mod pool_settings;
 
 mod managed_instance_resources;
+
+mod pool_wait_counters;

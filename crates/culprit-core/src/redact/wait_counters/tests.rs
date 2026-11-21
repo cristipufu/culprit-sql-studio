@@ -14,6 +14,7 @@ fn read() -> Box<WaitCounterSnapshot> {
         max_wait_time_ms: "7".into(),
     };
     Box::new(WaitCounterSnapshot {
+        pool_current: None,
         context: Some(ObservationReadContext::Collector {
             observed_from: "2020-01-01T00:00:00.000000001Z".into(),
             observed_until: "2020-01-01T00:00:00.000000002Z".into(),

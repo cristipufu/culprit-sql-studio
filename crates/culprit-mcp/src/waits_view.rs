@@ -28,6 +28,7 @@ mod statement_work;
 pub(crate) mod suspect_pages;
 pub(crate) mod table_memory;
 pub(crate) mod task_space;
+pub(crate) mod wait_counters;
 
 #[cfg(test)]
 mod compiler_admission_tests;
@@ -123,6 +124,7 @@ pub fn report(report: &Report) -> Value {
     page_server_reads::attach(&mut response, report);
     connection_outcomes::attach(&mut response, report);
     counter_ratios::attach(&mut response, report);
+    wait_counters::attach(&mut response, report);
     performance_counters::attach(&mut response, report);
     table_memory::attach(&mut response, report);
     index_configuration::attach(&mut response, report);

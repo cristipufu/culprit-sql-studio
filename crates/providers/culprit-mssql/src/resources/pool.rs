@@ -6,6 +6,8 @@ use super::*;
 use crate::read::one;
 use culprit_core::{Engine, source_id};
 
+mod current;
+pub(crate) use current::CurrentContext;
 mod settings;
 pub(crate) use settings::{Context as SettingsContext, read as read_settings};
 

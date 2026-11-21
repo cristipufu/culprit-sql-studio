@@ -892,7 +892,8 @@ impl TelemetryRecord {
                     && row.fact.native_plan_proofs_match(source)
             }
             Self::WaitCounter(row) => {
-                row.is_valid_for(source.target.engine())
+                row.fits_source(source)
+                    && row.is_valid_for(source.target.engine())
                     && source.observation.accepts_snapshot_record(TelemetryStream::WaitCounterSamples, &row.source)
             }
             Self::Replication(row) => {
@@ -1247,3 +1248,5 @@ mod read_connections;
 pub use read_connections::*;
 mod read_connection_accounting;
 pub use read_connection_accounting::{ReadConnectionAttemptRecorder, ReadConnectionPhaseGuard, ReadConnectionRecorder};
+mod pool_current;
+pub use pool_current::*;

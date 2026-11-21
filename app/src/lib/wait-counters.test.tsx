@@ -96,6 +96,7 @@ test("Health keeps raw wait evidence visible when its exact explanation is unava
   data.snapshot.pressure = partial<Pressure>({
     signals: [],
     wait_counters: {
+      pool_current: null,
       context: view.context,
       sources: [{ source: "waits", state: "partial", records: 10, complete_scope: false, error_code: null, stopped: null }],
       observations: view.entries.map((entry) => entry.observation), read_complete: false,
@@ -122,4 +123,26 @@ test("Health preserves the wait source marker after sharing has withheld the ori
   expect(html).not.toContain(t("ui.health.empty"));
   expect(html).not.toContain("9007199254740993");
   expect(html).not.toContain("<article");
+});
+
+test("pool scope and native-tier refusal stay folded in shared wait details and unavailable never becomes Health empty", () => {
+  const view = report();
+  const entry = view.entries[0];
+  if (!entry) throw new Error("The fixture must contain an observed wait");
+  entry.observation.scope = "pool";
+  entry.metrics.push({ key: "scope", label: t("view.wait_counters.metric.scope"), value: 0, unit: "text", text: t("view.wait_counters.scope.pool") });
+  view.limitations = [t("view.pool_waits.scope", { tier: "General Purpose" }), t("view.pool_waits.original")];
+  const html = renderToStaticMarkup(<WaitCounters report={view} />);
+  expect(html).toContain(t("view.wait_counters.scope.pool"));
+  expect(html).toContain(t("view.pool_waits.scope", { tier: "General Purpose" }));
+  expect(html).toContain(t("view.pool_waits.original"));
+  expect(html).not.toContain("<details open");
+  const denied = { ...view, entries: [], native_rows: 0, observed_rows: 0, presented_rows: 0,
+    sources: [{ source: "waits", state: "unavailable" as const, reason: t("view.pool_waits.tier_unqualified", { tier: "Hyperscale" }) }],
+    summary: t("view.wait_counters.summary.partial"), limitations: [t("view.pool_waits.tier_unqualified", { tier: "Hyperscale" }), t("view.pool_waits.original")] };
+  const data = waitOnlyHealthReport(); data.wait_counters = denied;
+  const health = renderHealth(data);
+  expect(health).toContain(t("view.pool_waits.tier_unqualified", { tier: "Hyperscale" }));
+  expect(health).not.toContain(t("view.wait_counters.summary.empty"));
+  expect(health).not.toContain(t("ui.health.empty"));
 });

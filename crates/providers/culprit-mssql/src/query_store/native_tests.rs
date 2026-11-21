@@ -386,7 +386,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     assert_eq!(operations.close().await, SourceShutdown::Quiescent);
     let mut wait_reader =
         crate::read::ReadSession::new(pool.clone(), culprit_core::telemetry::CollectionBudget::default());
-    let native_waits = crate::waits::read(&mut wait_reader, false, crate::waits::MAX_WAIT_TYPES)
+    let native_waits = crate::waits::read(&mut wait_reader, crate::waits::Scope::Server, crate::waits::MAX_WAIT_TYPES)
         .await
         .map_err(crate::read::ReadError::into_error)
         .unwrap();

@@ -69,6 +69,14 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
+        if matches!(self.observation, SourceObservation::MssqlPoolCurrent { .. }) {
+            return mssql_pool_current_authority(self).is_ok_and(|authority| authority.is_some());
+        }
+        if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::WaitCounters)
+            && matches!(&self.target, CollectionTarget::Shared(pool) if pool.engine == crate::Engine::Mssql && pool.kind == SharedResourceKind::Pool)
+        {
+            return false;
+        }
         if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::NumaNodes) {
             return numa_node_header_is_valid(self);
         }

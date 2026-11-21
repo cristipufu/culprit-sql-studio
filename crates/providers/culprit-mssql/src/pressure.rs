@@ -214,7 +214,7 @@ fn wait_snapshot(
             Vec::new(),
         ),
     };
-    WaitCounterSnapshot { context, sources: vec![source], observations, read_complete: true }
+    WaitCounterSnapshot { pool_current: None, context, sources: vec![source], observations, read_complete: true }
 }
 
 /// Every projection uses one native wait snapshot, published only after its owner confirms close.
@@ -224,8 +224,9 @@ async fn history(pool: std::sync::Arc<crate::conn::Pool>, azure: bool) -> Histor
 }
 
 async fn history_from<R: NativeRead>(reader: &mut R, azure: bool) -> HistoryRead {
+    let scope = if azure { waits::Scope::Database } else { waits::Scope::Server };
     let from = SystemTime::now();
-    let waits = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error);
+    let waits = waits::read(reader, scope, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error);
     let until = SystemTime::now();
     // Only acquisition is timed here. No later pooled Probe supplies a native clock, reset or member.
     let wait_context = culprit_core::telemetry::ObservationReadContext::collector(from, until).ok();
@@ -357,12 +358,13 @@ pub(crate) async fn sample<R: NativeRead>(
     azure: bool,
     seconds: u32,
 ) -> culprit_core::Result<WaitSample> {
+    let scope = if azure { waits::Scope::Database } else { waits::Scope::Server };
     let started = Instant::now();
     let taken_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let first = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error)?;
+    let first = waits::read(reader, scope, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error)?;
     let counters_before = crate::performance::read(reader, crate::performance::MAX_COUNTERS).await?;
     tokio::time::sleep(Duration::from_secs(u64::from(seconds))).await;
-    let second = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error)?;
+    let second = waits::read(reader, scope, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error)?;
     let counters_after = crate::performance::read(reader, crate::performance::MAX_COUNTERS).await?;
     let elapsed = started.elapsed().as_secs_f64().max(1.0);
 

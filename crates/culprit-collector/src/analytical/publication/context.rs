@@ -74,6 +74,9 @@ enum PublicObservation<'a> {
         #[serde(flatten)]
         context: FocusedRequestContext<'a>,
     },
+    MssqlPoolCurrentContext {
+        snapshot: &'a StateSnapshotDescription,
+    },
     MssqlPoolSettingsContext {
         snapshot: &'a StateSnapshotDescription,
     },
@@ -232,6 +235,7 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::MssqlAgentJobs { snapshot, metadata } => {
             PublicObservation::MssqlAgentJobs { snapshot, metadata }
         }
+        SourceObservation::MssqlPoolCurrent { snapshot, .. } => PublicObservation::MssqlPoolCurrentContext { snapshot },
         SourceObservation::MssqlPoolSettings { snapshot, .. } => {
             PublicObservation::MssqlPoolSettingsContext { snapshot }
         }

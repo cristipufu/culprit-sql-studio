@@ -43,7 +43,7 @@ pub use local_captures::{
     LocalActivityRead, LocalBlockingAnalysis, LocalCaptureAnalysisKind, LocalCaptureReader, LocalCaptureRequest,
     LocalCaptureTask, LocalCapturedAnalysis, LocalHyperscaleLogComponents, LocalMemoryClerks, LocalOperationalCapture,
     LocalPageServerReads, LocalPoolSettings, LocalQueryWaitFragments, LocalReplication, LocalRuntimeFragments,
-    LocalSessionCensus, LocalSnapshotAnalysis, LocalSnapshotReport, LocalSourceOverhead,
+    LocalSessionCensus, LocalSnapshotAnalysis, LocalSnapshotReport, LocalSourceOverhead, LocalWaitCounters,
 };
 pub mod marks;
 #[cfg(feature = "postgres")]

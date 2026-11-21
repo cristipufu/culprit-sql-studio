@@ -172,6 +172,26 @@ impl OutboxCaptureReader {
                     )
                     .await
             }
+            LocalCaptureReadPlan::WaitCounters => {
+                delivery
+                    .with_completed_snapshot(
+                        lookup,
+                        SnapshotDataset::WaitCounters,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        move |capture| {
+                            let result = explain_wait_counters(capture)
+                                .map(|read| LocalCapturedAnalysis::WaitCounters(Box::new(read)));
+                            #[cfg(test)]
+                            if let Some(boundary) = boundary {
+                                boundary()?;
+                            }
+                            result
+                        },
+                    )
+                    .await
+            }
             LocalCaptureReadPlan::Replication => {
                 delivery
                     .with_completed_snapshot(
@@ -468,4 +488,27 @@ fn explain_history(
         }
         _ => Err(DeliveryProblem::UnsupportedSchema.error()),
     }
+}
+
+fn explain_wait_counters(capture: CompletedSnapshot) -> Result<LocalWaitCounters> {
+    let rows = capture
+        .records()
+        .iter()
+        .enumerate()
+        .map(|(index, record)| {
+            let TelemetryRecord::WaitCounter(row) = &record.record else { return Err(invalid()) };
+            Ok((row.clone(), capture.reference(index)?))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let (rows, references) = rows.into_iter().unzip();
+    let read = Box::new(WaitCounterSnapshot::from_source(capture.source(), rows, capture.is_read_complete())?);
+    let report = Box::new(culprit_checks::wait_counters::explain(&read, capture.source().target.engine())?);
+    Ok(LocalWaitCounters {
+        read,
+        report,
+        references,
+        collected_from: capture.collected_from().into(),
+        collected_until: capture.collected_until().into(),
+        bytes_read: capture.bytes_read(),
+    })
 }

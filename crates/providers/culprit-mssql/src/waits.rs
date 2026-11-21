@@ -13,18 +13,48 @@ pub(crate) fn mechanism(wait_type: &str) -> Option<WaitMechanism> {
 pub(crate) type WaitTotals = HashMap<String, (f64, f64, f64)>;
 pub(crate) const MAX_WAIT_TYPES: usize = 4096;
 
+#[derive(Clone, Copy)]
+pub(crate) enum Scope {
+    Database,
+    Server,
+    ElasticPool,
+}
+impl Scope {
+    fn measurement(self) -> MeasurementScope {
+        match self {
+            Self::Database => MeasurementScope::Database,
+            Self::Server => MeasurementScope::Server,
+            Self::ElasticPool => MeasurementScope::Pool,
+        }
+    }
+}
 pub(crate) async fn read<R: NativeRead>(
     reader: &mut R,
-    database_scope: bool,
+    scope: Scope,
     limit: usize,
 ) -> ReadResult<Vec<WaitCounterObservation>> {
-    let view = if database_scope { "sys.dm_db_wait_stats" } else { "sys.dm_os_wait_stats" };
+    let pool = matches!(scope, Scope::ElasticPool);
+    if pool && limit == 0 {
+        return Err(crate::read::ReadError::Stopped(culprit_core::telemetry::CollectionStop::RowLimit));
+    }
+    let view = if matches!(scope, Scope::Database) { "sys.dm_db_wait_stats" } else { "sys.dm_os_wait_stats" };
+    let top = if pool { "/* culprit */ TOP (@P1) " } else { "" };
+    let order = if pool { "ORDER BY wait_type " } else { "" };
     let sql = format!(
-        "SELECT wait_type, waiting_tasks_count, wait_time_ms, signal_wait_time_ms, max_wait_time_ms FROM {view}
+        "SELECT {top}wait_type, waiting_tasks_count, wait_time_ms, signal_wait_time_ms, max_wait_time_ms FROM {view}
 WHERE waiting_tasks_count > 0 OR wait_time_ms > 0 OR signal_wait_time_ms > 0 OR max_wait_time_ms > 0
-OPTION (MAXDOP 1)"
+{order}OPTION (MAXDOP 1)"
     );
-    let rows = reader.query(&sql, vec![], limit).await?;
+    let (parameters, row_limit) = if pool {
+        let lookahead = limit.min(MAX_WAIT_TYPES) + 1;
+        (vec![crate::read::Parameter::Integer(lookahead as i64)], lookahead)
+    } else {
+        (vec![], limit)
+    };
+    let rows = reader.query(&sql, parameters, row_limit).await?;
+    if matches!(scope, Scope::ElasticPool) && rows.len() > limit.min(MAX_WAIT_TYPES) {
+        return Err(crate::read::ReadError::Stopped(culprit_core::telemetry::CollectionStop::RowLimit));
+    }
     let mut seen = BTreeSet::new();
     rows.iter()
         .map(|row| {
@@ -32,7 +62,7 @@ OPTION (MAXDOP 1)"
                 mechanism: mechanism(&text(row, "wait_type")?),
                 source: source_id::WAITS.into(),
                 wait_type: text(row, "wait_type")?,
-                scope: if database_scope { MeasurementScope::Database } else { MeasurementScope::Server },
+                scope: scope.measurement(),
                 // SQLPERF can reset waits independently of server/database startup; the view exposes no reset generation.
                 reset: ResetMarker::Unknown,
                 waiting_tasks_count: integer(row, "waiting_tasks_count")?.to_string(),

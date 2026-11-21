@@ -67,6 +67,7 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
         ),
         case("storage", super::storage_evidence(super::StorageCase::Exact)),
         case("pool_settings", super::pool_settings_evidence(super::PoolSettingsCase::Exact)),
+        case("wait_counters", super::pool_wait_counter_evidence(super::PoolWaitCounterCase::GeneralPurpose)),
         case("replication", super::replication_evidence(super::ReplicationCase::MssqlHyperscale)),
         case("group_replication", super::group_replication_evidence(super::GroupReplicationCase::Queued)),
         case("galera", super::galera_evidence(super::GaleraCase::Queued)),

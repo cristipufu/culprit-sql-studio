@@ -184,6 +184,25 @@ impl Family {
             let layout = tuning_layout.ok_or_else(crate::read::invalid_data)?.as_ref().map_err(Clone::clone)?;
             return Ok(if layout.available(kind)? { Availability::Available } else { Availability::NotApplicable });
         }
+        if matches!(self, Self::WaitCounters)
+            && let Some(super::subject::Identity::PoolCurrent(context)) = owner
+        {
+            match context.point.scope_qualification() {
+                MssqlPoolScopeQualification::Qualified => {}
+                MssqlPoolScopeQualification::UnqualifiedTier => {
+                    return Err(culprit_core::Error::new(
+                        culprit_core::ErrorCode::Unsupported,
+                        culprit_core::t!("view.pool_waits.scope_unqualified"),
+                    ));
+                }
+                MssqlPoolScopeQualification::VisibilityUnavailable => {
+                    return Err(culprit_core::Error::new(
+                        culprit_core::ErrorCode::PermissionDenied,
+                        culprit_core::t!("view.pool_waits.visibility_unavailable"),
+                    ));
+                }
+            }
+        }
         Ok(match self {
             // This capture profile is Azure SQL primary-only; it has no msdb suspect-page source.
             Self::Operation(native::Kind::SuspectPages) => Availability::NotApplicable,
@@ -424,12 +443,20 @@ impl Family {
             Self::VersionStore => vec![TelemetryRecord::Operational(crate::version_store::observation(
                 crate::version_store::read(reader).await?,
             ))],
-            Self::WaitCounters => crate::waits::read(reader, true, limit)
-                .await
-                .map_err(ReadError::into_error)?
-                .into_iter()
-                .map(TelemetryRecord::WaitCounter)
-                .collect(),
+            Self::WaitCounters => crate::waits::read(
+                reader,
+                if matches!(owner, Some(super::subject::Identity::PoolCurrent(_))) {
+                    crate::waits::Scope::ElasticPool
+                } else {
+                    crate::waits::Scope::Database
+                },
+                limit,
+            )
+            .await
+            .map_err(ReadError::into_error)?
+            .into_iter()
+            .map(TelemetryRecord::WaitCounter)
+            .collect(),
         };
         Ok(ReadOutcome::Observed(Records::complete(records)))
     }

@@ -43,3 +43,37 @@ fn unavailable_and_empty_are_distinct_and_inconsistent_signal_never_becomes_reso
     assert!(text.contains(&t!("view.wait_counters.issue.signal_exceeds_total")));
     assert!(text.contains(&t!("view.wait_counters.unknown")));
 }
+
+#[test]
+fn pool_native_corpus_keeps_shared_scope_unqualified_tiers_and_exact_counts_in_bounded_cli_text() {
+    use culprit_collector::analytical::test_support::{PoolWaitCounterCase, pool_wait_counter_evidence};
+    for case in PoolWaitCounterCase::ALL {
+        let (source, records) = pool_wait_counter_evidence(case);
+        let rows = records
+            .into_iter()
+            .map(|row| {
+                let TelemetryRecord::WaitCounter(row) = row else { panic!() };
+                row
+            })
+            .collect();
+        let read = WaitCounterSnapshot::from_source(&source, rows, true).unwrap();
+        let report = culprit_checks::wait_counters::explain(&read, source.target.engine()).unwrap();
+        let text = wait_counters(&report);
+        for limitation in &report.limitations {
+            assert!(text.contains(limitation));
+        }
+        if !report.entries.is_empty() {
+            assert!(text.contains("9007199254740993"));
+            assert!(report.entries[0].metrics.iter().any(
+                |metric| metric.text.as_deref() == Some(culprit_core::t!("view.wait_counters.scope.pool").as_str())
+            ));
+        }
+        if report.sources[0].state == culprit_core::SourceState::Unavailable {
+            assert!(!text.contains(&t!("view.wait_counters.summary.empty")));
+        }
+        for private in ["logical_database_guid", "physical_database_guid", "11111111-1111-1111-1111-111111111111"] {
+            assert!(!text.contains(private));
+        }
+        assert!(text.chars().count() < 16_384);
+    }
+}

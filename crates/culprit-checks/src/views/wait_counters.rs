@@ -11,6 +11,10 @@ pub fn explain_snapshot(snapshot: &Snapshot) -> Result<Option<WaitCounterReport>
     let Some(read) = snapshot.pressure.as_ref().and_then(|pressure| pressure.wait_counters.as_deref()) else {
         return Ok(None);
     };
+    // The original pool authority remains shared history. A later database scan cannot rebind it.
+    if read.pool_current.is_some() {
+        return explain(read, Engine::Mssql).map(Some);
+    }
     let comparison = read
         .context
         .as_ref()
@@ -54,6 +58,24 @@ pub fn explain(read: &WaitCounterSnapshot, engine: Engine) -> Result<WaitCounter
         Some(ObservationReadContext::Native { .. }) => t!("view.wait_counters.limit.native_clock"),
         None => t!("view.wait_counters.limit.clock_unavailable"),
     });
+    if let Some(authority) = &read.pool_current {
+        let tier = authority
+            .before
+            .native_tier
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| t!("view.database_properties.unknown"));
+        limitations.push(match authority.before.scope_qualification() {
+            culprit_core::telemetry::MssqlPoolScopeQualification::Qualified => t!("view.pool_waits.scope", tier = tier),
+            culprit_core::telemetry::MssqlPoolScopeQualification::UnqualifiedTier => {
+                t!("view.pool_waits.tier_unqualified", tier = tier)
+            }
+            culprit_core::telemetry::MssqlPoolScopeQualification::VisibilityUnavailable => {
+                t!("view.pool_waits.visibility_unavailable")
+            }
+        });
+        limitations.push(t!("view.pool_waits.original"));
+    }
     if !read.read_complete {
         limitations.push(t!("view.wait_counters.limit.read"));
     }

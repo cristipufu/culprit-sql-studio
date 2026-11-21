@@ -462,6 +462,10 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         focus: Box<CacheEntryMemoryFocus>,
     },
+    MssqlPoolCurrent {
+        snapshot: StateSnapshotDescription,
+        authority: Box<MssqlPoolCurrentAuthority>,
+    },
     MssqlPoolSettings {
         snapshot: StateSnapshotDescription,
         membership: Box<MssqlPoolSettingsMembership>,
@@ -591,6 +595,7 @@ impl SourceObservation {
                 TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters)
             }
             Self::TableMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::TableMemory),
+            Self::MssqlPoolCurrent { .. } => TelemetryCollection::Snapshot(SnapshotDataset::WaitCounters),
             Self::MssqlPoolSettings { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Settings),
             Self::MssqlReplication { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Replication),
             Self::GroupReplication { .. } => TelemetryCollection::Snapshot(SnapshotDataset::GroupReplication),
@@ -666,6 +671,7 @@ impl SourceObservation {
             | Self::BackupHistory { .. }
             | Self::SuspectPages { .. }
             | Self::DatabasePerformanceCounters { .. }
+            | Self::MssqlPoolCurrent { .. }
             | Self::MssqlPoolSettings { .. }
             | Self::MssqlReplication { .. }
             | Self::GroupReplication { .. }
@@ -735,6 +741,7 @@ impl SourceObservation {
             Self::MysqlEvents { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::Activity(snapshot) => snapshot.is_valid(),
             Self::FocusedBlocking { snapshot, result } => result.is_valid_header(snapshot),
+            Self::MssqlPoolCurrent { snapshot, authority } => authority.matches_snapshot(snapshot),
             Self::MssqlPoolSettings { snapshot, membership } => membership.matches_snapshot(snapshot),
             Self::MssqlReplication { snapshot, scope, .. } => {
                 snapshot.is_valid()
@@ -864,6 +871,7 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::MssqlPoolCurrent { snapshot, .. }
             | Self::MssqlPoolSettings { snapshot, .. }
             | Self::MssqlReplication { snapshot, .. }
             | Self::GroupReplication { snapshot, .. }
@@ -893,6 +901,7 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::MssqlPoolCurrent { snapshot, .. }
             | Self::MssqlPoolSettings { snapshot, .. }
             | Self::MssqlReplication { snapshot, .. }
             | Self::GroupReplication { snapshot, .. }
@@ -950,6 +959,7 @@ impl SourceObservation {
             Self::Snapshot(snapshot)
             | Self::SourceRead { snapshot, .. }
             | Self::MssqlReplication { snapshot, .. }
+            | Self::MssqlPoolCurrent { snapshot, .. }
             | Self::MssqlPoolSettings { snapshot, .. } => {
                 count(snapshot.dataset.stream()) == u64::from(snapshot.records)
             }
@@ -1272,6 +1282,7 @@ impl CollectionDescription {
         }
         if let (
             SourceObservation::Snapshot(snapshot)
+            | SourceObservation::MssqlPoolCurrent { snapshot, .. }
             | SourceObservation::BackupHistory { snapshot, .. }
             | SourceObservation::MssqlReplication { snapshot, .. }
             | SourceObservation::GroupReplication { snapshot, .. }

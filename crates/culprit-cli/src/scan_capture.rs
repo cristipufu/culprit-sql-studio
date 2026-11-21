@@ -182,7 +182,8 @@ fn captured_action<'a>(
             args.query_log.as_deref(),
             captured,
         )),
-        LocalCapturedAnalysis::Replication(_)
+        LocalCapturedAnalysis::WaitCounters(_)
+        | LocalCapturedAnalysis::Replication(_)
         | LocalCapturedAnalysis::PageServerReads(_)
         | LocalCapturedAnalysis::QueryWaitFragments(_)
         | LocalCapturedAnalysis::RuntimeFragments(_)

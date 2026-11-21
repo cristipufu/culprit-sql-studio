@@ -12354,5 +12354,10 @@
   "view.indexed_views.user_scans": "Native user scans",
   "view.indexed_views.user_seeks": "Native user seeks",
   "view.indexed_views.user_updates": "Native user update operations",
-  "view.indexed_views.verify": "Before changing an indexed view, verify its current native object identity, definition, required SET options and the original query plans; these retained totals alone do not justify keeping or dropping an index."
+  "view.indexed_views.verify": "Before changing an indexed view, verify its current native object identity, definition, required SET options and the original query plans; these retained totals alone do not justify keeping or dropping an index.",
+  "view.pool_waits.scope": "These cumulative wait counters describe the anchor database’s {tier} elastic pool. Attribution to an individual database is unavailable.",
+  "view.pool_waits.original": "The native membership and visibility points bracket this acquisition. Earlier pool membership, compute/process continuity and the counters’ reset times remain unknown.",
+  "view.pool_waits.tier_unqualified": "The observed native tier is {tier}. Culprit cannot establish whole-pool wait scope for this tier, so pool wait counters remain unavailable.",
+  "view.pool_waits.visibility_unavailable": "The anchor’s server-performance visibility was not established. Pool wait counters remain unavailable; this does not establish an empty pool.",
+  "view.pool_waits.scope_unqualified": "Native tier evidence does not establish whole-pool wait scope."
 }

@@ -17,6 +17,8 @@ mod blocking;
 pub use blocking::{LocalActivityRead, LocalBlockingAnalysis};
 mod replication;
 pub use replication::LocalReplication;
+mod wait_counters;
+pub use wait_counters::LocalWaitCounters;
 mod pool_settings;
 pub use pool_settings::LocalPoolSettings;
 mod source_overhead;
@@ -57,6 +59,7 @@ pub enum LocalCaptureAnalysisKind {
     GroupReplication,
     Replication,
     PoolSettings,
+    WaitCounters,
     Galera,
     BackupHistory,
     RequestMemory,
@@ -99,6 +102,7 @@ impl LocalCaptureAnalysisKind {
         Self::GroupReplication,
         Self::Replication,
         Self::PoolSettings,
+        Self::WaitCounters,
         Self::Galera,
         Self::BackupHistory,
         Self::RequestMemory,
@@ -124,6 +128,7 @@ impl LocalCaptureAnalysisKind {
             Self::QueryWaitFragments => QueryHistory(culprit_collector::outbox::QueryHistoryReadKind::Waits),
             Self::Replication => LocalCaptureReadPlan::Replication,
             Self::PoolSettings => LocalCaptureReadPlan::PoolSettings,
+            Self::WaitCounters => LocalCaptureReadPlan::WaitCounters,
             Self::ManagedInstanceResources => LocalCaptureReadPlan::ManagedInstanceResources,
             Self::Blocking => Blocking,
             Self::SessionCensus => Activity,
@@ -170,6 +175,7 @@ enum LocalCaptureReadPlan {
     ManagedInstanceResources,
     Replication,
     PoolSettings,
+    WaitCounters,
     Activity,
     QueryHistory(culprit_collector::outbox::QueryHistoryReadKind),
     Snapshot(&'static [culprit_core::telemetry::SnapshotDataset]),
@@ -201,6 +207,7 @@ pub enum LocalCapturedAnalysis {
     SessionCensus(Box<LocalSessionCensus>),
     Replication(Box<LocalReplication>),
     PoolSettings(Box<LocalPoolSettings>),
+    WaitCounters(Box<LocalWaitCounters>),
 }
 impl LocalCapturedAnalysis {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
@@ -216,6 +223,7 @@ impl LocalCapturedAnalysis {
             Self::SessionCensus(_) => LocalCaptureAnalysisKind::SessionCensus,
             Self::Replication(_) => LocalCaptureAnalysisKind::Replication,
             Self::PoolSettings(_) => LocalCaptureAnalysisKind::PoolSettings,
+            Self::WaitCounters(_) => LocalCaptureAnalysisKind::WaitCounters,
             Self::ManagedInstanceResources(_) => LocalCaptureAnalysisKind::ManagedInstanceResources,
         }
     }

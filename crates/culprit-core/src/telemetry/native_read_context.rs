@@ -69,6 +69,7 @@ impl NativeReadContext {
             observed_from: snapshot.observed_from.clone(),
             observed_until: snapshot.observed_until.clone(),
             database_writable: match &source.observation {
+                SourceObservation::MssqlPoolCurrent { authority, .. } => Some(authority.before.database_writable),
                 SourceObservation::MssqlPoolSettings { membership, .. } => Some(membership.database_writable),
                 SourceObservation::MssqlReplication { database_writable, .. }
                 | SourceObservation::SuspectPages { database_writable, .. }

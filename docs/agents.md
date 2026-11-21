@@ -69,7 +69,7 @@ culprit mcp --connection shop-staging --evidence-outbox /path/to/outbox
 ```
 
 `analyze_capture` takes `connection`, `observation_id` and a closed `analysis` choice. It supports `source_overhead`, `page_server_reads`,
-`memory_clerks`, `hyperscale_log_components`, `performance_counters`, `database_properties`, `instance_resources`,
+`memory_clerks`, `hyperscale_log_components`, `performance_counters`, `wait_counters`, `database_properties`, `instance_resources`,
 `index_configuration`, `indexed_views`, `compilation`,
 `configured_log_rates`, `connection_outcomes`, `jobs`, `request_memory`, `task_space`, `current_request_work`,
 `statement_work`, `maintenance_progress`, `completed_spills`, `storage`, `blocking` and `session_census`.
@@ -93,6 +93,10 @@ retain their historical native lifetimes, not current compiler ownership or a st
 `indexed_views` reads the same original Indexes catalog as table-index analysis. It keeps view indexes separate,
 including their native usage and partition configuration. Missing usage is not measured zero; retained totals alone
 do not justify dropping an index. Current scan metadata and earlier authenticated captures remain independent.
+
+`wait_counters` preserves the original native scope. Qualified elastic-pool captures describe the pool through its
+original anchor and membership points; they do not identify one database as the cause. Unsupported tiers or missing
+visibility remain unavailable. Counter reset times and compute continuity remain unknown.
 
 For `blocking`, select the focused closure capture. The same worker authenticates its exact original Activity
 capture from the retained receipt, with one cumulative row, byte and deadline allowance for both inputs. A missing,
