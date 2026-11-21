@@ -39,6 +39,7 @@ mod jobs;
 mod maintenance_progress;
 mod memory_clerks;
 mod numa_nodes;
+mod operational_reports;
 mod page_server_reads;
 mod performance_counters;
 mod pool_settings;
@@ -287,50 +288,7 @@ impl Pipeline {
         for step in &self.prepare {
             step.prepare(&mut snapshot);
         }
-        let memory_failures = explained_memory_failures(&mut snapshot);
-        let native_failures = explained_native_failures(&mut snapshot);
-        let request_memory = explained_request_memory(&mut snapshot);
-        let session_memory = explained_session_memory(&mut snapshot);
-        let page_waits = explained_page_waits(&mut snapshot);
-        let task_space = explained_task_space(&mut snapshot);
-        let query_compilation = explained_compilation(&mut snapshot);
-        let compiler_admission = compiler_admission::explain(&mut snapshot);
-        let source_acquisitions = crate::source_overhead::explain_snapshot(&snapshot);
-        let provider_acquisition = crate::provider_acquisition::explain_snapshot(&snapshot);
-        let performance_counters = performance_counters::explain(&mut snapshot);
-        let counter_ratios = counter_ratios::explain(&mut snapshot);
-        let wait_counters = wait_counters::explain(&mut snapshot);
-        let maintenance_progress = maintenance_progress::explain(&mut snapshot);
-        let replication = replication::explain(&mut snapshot);
-        let connection_outcomes = connection_outcomes::explain(&mut snapshot);
-        let configured_log_rates = configured_log_rates::explain(&mut snapshot);
-        let hyperscale_log_components = hyperscale_log_components::explain(&mut snapshot);
-        let memory_clerks = memory_clerks::explain(&mut snapshot);
-        let tempdb_metadata_memory = tempdb_metadata_memory::explain(&mut snapshot);
-        let managed_instance_resources = managed_instance_resources::explain(&snapshot);
-        let table_memory = table_memory::explain(&mut snapshot);
-        let group_replication = group_replication::explain(&mut snapshot);
-        let galera = galera::explain(&mut snapshot);
-        let full_text_populations = full_text_populations::explain(&mut snapshot);
-        let cdc = change_capture::cdc(&snapshot);
-        let change_feed = change_capture::change_feed(&snapshot);
-        let database_properties = database_properties::explain(&mut snapshot);
-        let pool_settings = pool_settings::explain(&snapshot);
-        let suspect_pages = suspect_pages::explain(&mut snapshot);
-        let table_full_text = table_full_text::explain(&mut snapshot);
-        let table_temporal = table_temporal::explain(&mut snapshot);
-        let index_configuration = index_configuration::explain(&mut snapshot);
-        let indexed_views = indexed_views::explain(&mut snapshot);
-        let storage = storage::explain(&mut snapshot);
-        let instance_resources = instance_resources::explain(&mut snapshot);
-        let numa_nodes = numa_nodes::explain(&snapshot);
-        let jobs = jobs::explain(&mut snapshot);
-        let statement_work = statement_work::explain(&mut snapshot);
-        let page_server_reads = page_server_reads::explain(&mut snapshot);
-        let query_wait_fragments = query_wait_fragments::explain(&snapshot);
-        let runtime_fragments = query_runtime_fragments::explain(&snapshot);
-        let completed_spills = completed_spills::explain(&mut snapshot);
-        let cleanup = cleanup::explain(&mut snapshot);
+        let operational = operational_reports::OperationalReports::explain(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
         let mut assessments = Vec::new();
@@ -425,13 +383,13 @@ impl Pipeline {
             }
         }
         Report {
-            table_full_text,
-            table_temporal,
-            index_configuration,
-            indexed_views,
-            storage,
-            instance_resources,
-            numa_nodes,
+            table_full_text: operational.table_full_text,
+            table_temporal: operational.table_temporal,
+            index_configuration: operational.index_configuration,
+            indexed_views: operational.indexed_views,
+            storage: operational.storage,
+            instance_resources: operational.instance_resources,
+            numa_nodes: operational.numa_nodes,
             snapshot,
             findings,
             locked,
@@ -440,43 +398,43 @@ impl Pipeline {
             refinement,
             provenance,
             evidence,
-            memory_failures,
-            native_failures,
-            request_memory,
-            session_memory,
-            page_waits,
-            task_space,
-            query_compilation,
-            compiler_admission,
-            counter_ratios,
-            source_acquisitions,
-            provider_acquisition,
-            performance_counters,
-            wait_counters,
-            maintenance_progress,
-            jobs,
-            replication,
-            connection_outcomes,
-            configured_log_rates,
-            hyperscale_log_components,
-            memory_clerks,
-            tempdb_metadata_memory,
-            managed_instance_resources,
-            table_memory,
-            group_replication,
-            galera,
-            full_text_populations,
-            cdc,
-            change_feed,
-            database_properties,
-            pool_settings,
-            suspect_pages,
-            statement_work,
-            page_server_reads,
-            query_wait_fragments,
-            runtime_fragments,
-            completed_spills,
-            cleanup,
+            memory_failures: operational.memory_failures,
+            native_failures: operational.native_failures,
+            request_memory: operational.request_memory,
+            session_memory: operational.session_memory,
+            page_waits: operational.page_waits,
+            task_space: operational.task_space,
+            query_compilation: operational.query_compilation,
+            compiler_admission: operational.compiler_admission,
+            counter_ratios: operational.counter_ratios,
+            source_acquisitions: operational.source_acquisitions,
+            provider_acquisition: operational.provider_acquisition,
+            performance_counters: operational.performance_counters,
+            wait_counters: operational.wait_counters,
+            maintenance_progress: operational.maintenance_progress,
+            jobs: operational.jobs,
+            replication: operational.replication,
+            connection_outcomes: operational.connection_outcomes,
+            configured_log_rates: operational.configured_log_rates,
+            hyperscale_log_components: operational.hyperscale_log_components,
+            memory_clerks: operational.memory_clerks,
+            tempdb_metadata_memory: operational.tempdb_metadata_memory,
+            managed_instance_resources: operational.managed_instance_resources,
+            table_memory: operational.table_memory,
+            group_replication: operational.group_replication,
+            galera: operational.galera,
+            full_text_populations: operational.full_text_populations,
+            cdc: operational.cdc,
+            change_feed: operational.change_feed,
+            database_properties: operational.database_properties,
+            pool_settings: operational.pool_settings,
+            suspect_pages: operational.suspect_pages,
+            statement_work: operational.statement_work,
+            page_server_reads: operational.page_server_reads,
+            query_wait_fragments: operational.query_wait_fragments,
+            runtime_fragments: operational.runtime_fragments,
+            completed_spills: operational.completed_spills,
+            cleanup: operational.cleanup,
         }
     }
 }
