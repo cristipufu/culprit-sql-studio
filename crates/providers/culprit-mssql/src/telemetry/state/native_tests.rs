@@ -105,6 +105,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     let mut counter_sources = BTreeSet::new();
     let mut instance_points = 0;
     let mut process_cpu_points = 0;
+    let mut native_governor_kinds = BTreeSet::new();
     let mut tempdb_log_points = 0;
     let mut tempdb_data_points = 0;
     let mut tempdb_metadata_features = 0;
@@ -126,6 +127,24 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
                     OperationalFact::CounterSet(set) => {
                         assert_eq!(set.scope, MeasurementScope::Server);
                         assert!(set.is_valid());
+                        if source == crate::sources::PERFORMANCE_COUNTERS.name && resource_governor_counter_set(&set) {
+                            let metadata = MssqlResourceGovernorCounterSet::from_sample(&set).unwrap().context();
+                            assert!(resource_governor_fits_source(&set, &description));
+                            assert!(
+                                metadata.native_pool_id.is_some(),
+                                "the owned native pool identity must be measured"
+                            );
+                            if metadata.kind == MssqlResourceGovernorCounterKind::WorkloadGroup {
+                                assert!(
+                                    metadata.native_group_id.is_some(),
+                                    "the owned native group identity must be measured"
+                                );
+                            }
+                            assert!(
+                                set.counters.iter().all(|counter| counter.reset == culprit_core::ResetMarker::Unknown)
+                            );
+                            native_governor_kinds.insert(metadata.kind);
+                        }
                         if source == crate::sources::PROCESSOR_TOPOLOGY.name {
                             let cpu = MssqlProcessCpuPoint::from_original(&set, &context).unwrap();
                             assert!(
@@ -201,6 +220,14 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert_eq!(member.source_shutdown(), SourceShutdown::Quiescent);
+    assert_eq!(
+        native_governor_kinds,
+        BTreeSet::from([
+            MssqlResourceGovernorCounterKind::WorkloadGroup,
+            MssqlResourceGovernorCounterKind::ResourcePool
+        ]),
+        "both native populations must be observed; this is not a zero-demand or cost proof"
+    );
 
     let probe = member.pool.observe(|reader| Box::pin(crate::probe::run(reader))).await.unwrap();
     let not_requested = crate::resource_counters::collect(member.pool.clone(), &probe, false).await;

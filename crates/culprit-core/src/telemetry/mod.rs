@@ -352,6 +352,14 @@ impl CollectionRequest {
         self.subject.validate()?;
         self.budget.validate()?;
         match &self.selection {
+            CollectionSelection::ResourcePoolSettings => {
+                if !matches!(&self.subject, CollectionSubject::Database)
+                    && !matches!(&self.subject, CollectionSubject::Shared { resource }
+                        if resource.engine == crate::Engine::Mssql && resource.kind == SharedResourceKind::Pool)
+                {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
             CollectionSelection::SourceRead { focus, execution } => {
                 self.subject.require_database()?;
                 if !focus.is_valid() || !execution.matches_target(&focus.target) {
@@ -785,6 +793,11 @@ impl TelemetryRecord {
                     (_, OperationalFact::CounterSet(sample)) if database_performance_candidate(sample) => {
                         accepted && database_performance_sample_fits_source(sample, source)
                     }
+                    (_, OperationalFact::CounterSet(sample)) if resource_governor_candidate(sample) => {
+                        accepted
+                            && row.source == crate::source_id::PERFORMANCE_COUNTERS
+                            && resource_governor_fits_source(sample, source)
+                    }
                     (_, OperationalFact::CounterSet(sample))
                         if sample.identity.qualifiers.get("kind").map(String::as_str)
                             == Some(MSSQL_PROCESS_CPU_KIND) =>
@@ -865,6 +878,7 @@ impl TelemetryRecord {
             }
             Self::Setting(row) => {
                 source.observation.accepts_snapshot_record(TelemetryStream::SettingObservations, &row.source)
+                    && row.fits_source(source)
             }
             Self::Tuning(row) => {
                 row.fact.redact(source.target.engine());

@@ -1,5 +1,6 @@
 //! Native-shaped census facts without a live/native-cost or current-owner qualification claim.
 use super::*;
+mod groups;
 mod postgres;
 
 #[derive(Clone, Copy, Debug)]
@@ -12,9 +13,13 @@ pub enum SessionCensusCase {
     Unavailable,
     Empty,
     PostgresSharedLabels,
+    GroupedClients,
+    ContradictoryMars,
+    GroupUnknownTotals,
+    NativeSignedElapsed,
 }
 impl SessionCensusCase {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 12] = [
         Self::Idle,
         Self::Dormant,
         Self::Mars,
@@ -23,6 +28,10 @@ impl SessionCensusCase {
         Self::Unavailable,
         Self::Empty,
         Self::PostgresSharedLabels,
+        Self::GroupedClients,
+        Self::ContradictoryMars,
+        Self::GroupUnknownTotals,
+        Self::NativeSignedElapsed,
     ];
 }
 
@@ -40,6 +49,7 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
     native.session_database_id = Some("7".into());
     native.session_database_name = Some("db".into());
     native.request_database_id = None;
+    native.elapsed_ms = Some("600000".into());
     match case {
         SessionCensusCase::Idle | SessionCensusCase::Partial => (),
         SessionCensusCase::Dormant => {
@@ -56,6 +66,7 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
             native.session_database_id = Some("0".into());
             native.session_database_name = None;
             native.login_established = false;
+            native.elapsed_ms = None;
             native.times.login_without_offset = row.key.session.generation.clone();
             native.times.last_request_start_without_offset = None;
             native.times.last_request_end_without_offset = None;
@@ -78,12 +89,19 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
             context.client_process_id = None;
             let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
             native.native_state = "future-native-state".into();
+            native.elapsed_ms = None;
             native.session_database_id = None;
             native.session_database_name = None;
             native.times.last_request_start_without_offset = None;
             native.times.last_request_end_without_offset = None;
         }
         SessionCensusCase::Unavailable | SessionCensusCase::Empty => read.observations.clear(),
+        SessionCensusCase::GroupedClients
+        | SessionCensusCase::ContradictoryMars
+        | SessionCensusCase::GroupUnknownTotals
+        | SessionCensusCase::NativeSignedElapsed => {
+            groups::apply(&mut read, case);
+        }
         SessionCensusCase::PostgresSharedLabels => unreachable!(),
     }
     let SourceObservation::Activity(header) = &mut read.source.observation else { panic!() };

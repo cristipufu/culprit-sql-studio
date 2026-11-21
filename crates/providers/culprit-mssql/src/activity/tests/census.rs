@@ -11,6 +11,7 @@ fn census_row(id: i64, request: Option<i64>, native_state: &str) -> Rec {
         ("client_interface_name", Val::Text("owned driver library".into())),
         ("host_process_id", Val::Int(0)),
         ("client_version", Val::Null),
+        ("session_elapsed_ms", Val::Int(123456)),
         (
             "request_connection_id",
             if request.is_some() { Val::Text("a8a44410-5033-4db1-9e90-79354ab31702".into()) } else { Val::Null },
@@ -66,6 +67,9 @@ async fn quiet_user_sessions_keep_library_lifetimes_and_exact_counters_without_a
     assert!(context.login_age_ms.is_some());
     let SessionNativeContext::Mssql(native) = context.native.as_deref().unwrap();
     assert!(native.tds_protocol_version.is_none() && native.request_connection_id.is_none());
+    assert_eq!(native.elapsed_ms.as_deref(), Some("123456"));
+    assert_ne!(native.elapsed_ms, context.login_age_ms);
+    assert!(reader.io.calls[0].sql.contains("s.total_elapsed_time AS session_elapsed_ms"));
     assert_eq!(native.session_database_id.as_deref(), Some("7"));
     assert_eq!(native.session_database_name.as_deref(), Some("shop"));
     assert!(native.request_database_id.is_none());
@@ -241,5 +245,50 @@ fn malformed_or_incoherent_native_database_metadata_is_rejected_by_the_same_deco
     ] {
         let row = replace(&census_row(55, None, "Sleeping"), &changes);
         assert!(rows::record(&row).is_err());
+    }
+}
+
+#[tokio::test]
+async fn same_session_projection_preserves_signed_native_elapsed_zero_unknown_and_range_without_an_extra_query() {
+    for (value, expected) in [
+        (Val::Null, None),
+        (Val::Int(0), Some("0")),
+        (Val::Int(i32::MAX.into()), Some("2147483647")),
+        (Val::Int(-1), Some("-1")),
+        (Val::Int(i32::MIN.into()), Some("-2147483648")),
+    ] {
+        let row = replace(&census_row(55, None, "Sleeping"), &[("session_elapsed_ms", value)]);
+        let mut reader = reader(vec![Ok(vec![row])], IdentityDetail::Endpoint);
+        let result = crate::live::collect_from(&mut reader).await;
+        assert_eq!(reader.io.closed, 1);
+        let live = result.unwrap();
+        let context = live.activity_census.as_ref().unwrap().observations[0].session_context.as_ref().unwrap();
+        let SessionNativeContext::Mssql(native) = context.native.as_deref().unwrap();
+        assert_eq!(native.elapsed_ms.as_deref(), expected);
+        assert_eq!(reader.query_count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn malformed_or_missing_native_elapsed_is_refused_and_the_original_source_owner_is_closed() {
+    for value in
+        [Some(Val::Int(i64::from(i32::MIN) - 1)), Some(Val::Int(i64::from(i32::MAX) + 1)), Some(Val::Float(1.5)), None]
+    {
+        let row = census_row(55, None, "Sleeping");
+        let row = if let Some(value) = value {
+            replace(&row, &[("session_elapsed_ms", value)])
+        } else {
+            Rec::of(
+                &row.columns()
+                    .filter(|(name, _)| *name != "session_elapsed_ms")
+                    .map(|(name, value)| (name, value.clone()))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let mut reader = reader(vec![Ok(vec![row])], IdentityDetail::Endpoint);
+        let result = crate::live::collect_from(&mut reader).await;
+        assert_eq!(reader.io.closed, 1);
+        assert!(result.is_err());
+        assert_eq!(reader.query_count(), 1);
     }
 }

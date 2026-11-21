@@ -8,6 +8,75 @@ use culprit_core::{MeasurementScope, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
 
 #[tokio::test]
+async fn original_governor_counters_keep_native_group_pool_ids_without_database_ownership_or_cooked_rates() {
+    use test_support::{ResourceGovernorCounterCase as Case, resource_governor_counter_evidence};
+    for case in Case::ALL {
+        let (source, rows) = resource_governor_counter_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        test_support::assert_operational_capture(&capture, &source, &rows);
+        let analysis = collected_resources::performance_counters(&capture).unwrap();
+        let report = analysis.report;
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(report.population, culprit_core::PerformanceCounterPopulation::SharedServer);
+        assert!(report.database.is_none() && report.native_database_id.is_none());
+        let governed = report.entries.iter().filter(|entry| entry.resource_governor.is_some()).collect::<Vec<_>>();
+        if matches!(case, Case::Denied | Case::NoRows) {
+            assert!(governed.is_empty());
+        } else {
+            assert_eq!(governed.len(), 7);
+            assert!(report.entries[0].resource_governor.is_some());
+            for entry in governed {
+                let metadata = entry.resource_governor.as_ref().unwrap();
+                assert_eq!(entry.scope, MeasurementScope::Server);
+                assert_eq!(entry.reset, culprit_core::ResetMarker::Unknown);
+                assert_eq!(metadata.native_pool_id.as_deref(), if case == Case::Unmapped { None } else { Some("2") });
+                if metadata.kind == MssqlResourceGovernorCounterKind::WorkloadGroup {
+                    assert_eq!(
+                        metadata.native_group_id.as_deref(),
+                        if case == Case::Unmapped { None } else { Some("3") }
+                    );
+                } else {
+                    assert!(metadata.native_group_id.is_none());
+                }
+                if case == Case::UnknownNativeType {
+                    assert_eq!(entry.availability, culprit_core::PerformanceCounterAvailability::UnknownNativeType);
+                }
+            }
+            assert_eq!(report.native_counter_rows, Some(18));
+        }
+        if matches!(case, Case::Partial | Case::Unmapped | Case::NoRows) {
+            assert_eq!(report.source_state, Some(SourceState::Partial));
+        }
+        assert_eq!(fixture.recovery_object_reads(), opened);
+    }
+}
+
+#[tokio::test]
+async fn missing_governor_body_keeps_original_native_counts_and_never_falls_back_to_current_metadata() {
+    let (source, rows) =
+        test_support::resource_governor_counter_evidence(test_support::ResourceGovernorCounterCase::Exact);
+    let fixture = Fixture::new(source.clone(), rows).await;
+    fixture.remove_row(TelemetryStream::OperationalSamples, 2);
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(!capture.is_read_complete());
+    let report = collected_resources::performance_counters(&capture).unwrap().report;
+    assert_eq!(report.native_observations, Some(3));
+    assert_eq!(report.observed_observations, 2);
+    assert_eq!(report.native_counter_rows, None);
+    assert_eq!(report.observed_counter_rows, 14);
+    assert_eq!(report.source_state, Some(SourceState::Partial));
+    assert_eq!(report.read_complete, Some(false));
+    assert!(report.entries.iter().all(|entry| {
+        entry
+            .resource_governor
+            .as_ref()
+            .is_none_or(|context| context.kind != MssqlResourceGovernorCounterKind::WorkloadGroup)
+    }));
+}
+
+#[tokio::test]
 async fn authentic_shared_counter_captures_use_the_pure_report_with_exact_native_rows_and_no_extra_recovery_reads() {
     for case in PerformanceCounterCase::ALL {
         let (source, records) = test_support::performance_counter_evidence(case);

@@ -3,11 +3,16 @@ import type { CounterNature } from "./CounterNature";
 import type { CounterUnit } from "./CounterUnit";
 import type { MeasurementScope } from "./MeasurementScope";
 import type { Metric } from "./Metric";
+import type { MssqlResourceGovernorCounterContext } from "./MssqlResourceGovernorCounterContext";
 import type { PerformanceCounterAvailability } from "./PerformanceCounterAvailability";
 import type { PerformanceCounterFamily } from "./PerformanceCounterFamily";
 import type { ResetMarker } from "./ResetMarker";
 
-export type PerformanceCounterEntry = { observation_key: string, counter_key: string, field: string, family: PerformanceCounterFamily, family_label: string, availability: PerformanceCounterAvailability, native_object: string, native_name: string, native_instance: string | null, native_type: string | null, observed_at: string | null, scope: MeasurementScope, nature: CounterNature, unit: CounterUnit, reset: ResetMarker, 
+export type PerformanceCounterEntry = { 
+/**
+ * Native Resource Governor context only. These are not Azure elastic-pool or database/query identities.
+ */
+resource_governor: MssqlResourceGovernorCounterContext | null, observation_key: string, counter_key: string, field: string, family: PerformanceCounterFamily, family_label: string, availability: PerformanceCounterAvailability, native_object: string, native_name: string, native_instance: string | null, native_type: string | null, observed_at: string | null, scope: MeasurementScope, nature: CounterNature, unit: CounterUnit, reset: ResetMarker, 
 /**
  * Exact signed native text is preserved even when it cannot authorize a measurement.
  */

@@ -193,6 +193,7 @@ async fn capture_idle(
             || native.session_database_name.as_deref()
                 != read.source.target.database().map(|database| database.database.as_str())
             || native.request_database_id.is_some()
+            || native.elapsed_ms.as_deref().is_none_or(|value| value.parse::<u32>().is_err())
             || row.statement_identity.is_some()
         {
             return Err(invalid_data());

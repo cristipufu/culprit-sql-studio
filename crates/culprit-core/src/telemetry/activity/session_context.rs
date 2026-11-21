@@ -54,6 +54,10 @@ pub struct MssqlSessionContext {
     /// The native 1900-01-01 prelogin sentinel cannot identify an established session generation.
     pub login_established: bool,
     pub tds_protocol_version: Option<String>,
+    /// Signed native sys.dm_exec_sessions.total_elapsed_time, in milliseconds since session establishment.
+    /// Negative values remain raw facts but cannot supply a nonnegative age. This is not request work or CPU.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub elapsed_ms: Option<String>,
     /// Original sys.dm_exec_sessions database_id, scoped to this native source and point; not a global identity.
     /// A reported zero is retained separately from an unacquired value and supplies no database association.
     pub session_database_id: Option<String>,
@@ -106,6 +110,7 @@ impl ActivitySessionContext {
                     identifier(&context.native_state)
                         && self.lifecycle == MssqlSessionContext::lifecycle_from_native_state(&context.native_state)
                         && context.tds_protocol_version.as_deref().is_none_or(native_integer_code)
+                        && context.elapsed_ms.as_deref().is_none_or(native_integer_code)
                         && context.database_context_is_valid(key.request.is_some())
                         && self.client_process_id.as_deref().is_none_or(native_integer_code)
                         && context.times.is_valid()

@@ -146,7 +146,12 @@ pub(super) fn captured(rows: &[Rec], counters: Vec<NativeCounterSample>, owner: 
         ]),
     };
     culprit_core::Engine::Mssql.spec().performance_counters().ok_or_else(invalid_data)?.validate(&sample)?;
-    Ok(PerformanceRead { sample, native_rows: rows.len() })
+    Ok(PerformanceRead {
+        sample,
+        native_rows: rows.len(),
+        resource_governor: Vec::new(),
+        resource_governor_complete: true,
+    })
 }
 
 #[cfg(test)]

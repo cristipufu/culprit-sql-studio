@@ -51,6 +51,9 @@ pub struct OperationalStats {
     pub database_performance_counters: Option<crate::telemetry::RecordedPerformanceCounters>,
     /// One authenticated selected-table memory original, independent of a later scan's table/member identities.
     pub table_memory: Vec<crate::telemetry::RecordedOperationalRead>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pool_settings: Option<Box<crate::telemetry::RecordedPoolSettingsRead>>,
     /// Independently captured observer/group points never grade the current database or workload.
     pub group_replication: Vec<crate::telemetry::RecordedOperationalRead>,
     /// Independently captured Galera node points never grade the current database or workload.
@@ -201,6 +204,7 @@ impl OperationalStats {
             memory_clerks: _,
             database_performance_counters: _,
             table_memory: _,
+            pool_settings: _,
             group_replication: _,
             galera: _,
             full_text_populations: _,

@@ -16,6 +16,10 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
         ("partial", SessionCensusCase::Partial),
         ("unavailable", SessionCensusCase::Unavailable),
         ("empty", SessionCensusCase::Empty),
+        ("client-groups", SessionCensusCase::GroupedClients),
+        ("group-conflict", SessionCensusCase::ContradictoryMars),
+        ("group-unknown", SessionCensusCase::GroupUnknownTotals),
+        ("signed-elapsed", SessionCensusCase::NativeSignedElapsed),
     ] {
         let (source, rows) = session_census_evidence(case);
         let observations = rows

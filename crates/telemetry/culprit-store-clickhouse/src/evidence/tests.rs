@@ -660,3 +660,5 @@ mod boxed_query_history;
 mod group_replication;
 
 mod galera;
+
+mod pool_settings;

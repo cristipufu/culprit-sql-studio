@@ -1,6 +1,8 @@
 //! Native configuration observations keep scope, pending values and default provenance separate from display.
 use super::*;
 const MAX_SETTING_VALUE_BYTES: usize = 16 * 1024;
+mod pool;
+pub use pool::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

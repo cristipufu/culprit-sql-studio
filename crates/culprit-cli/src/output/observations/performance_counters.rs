@@ -64,6 +64,35 @@ pub(crate) fn performance_counters(report: &PerformanceCounterReport) -> String 
             raw = &entry.raw_value,
             at = entry.observed_at.clone().unwrap_or_else(|| t!("view.performance_counters.unknown"))
         ));
+        if let Some(resource) = &entry.resource_governor {
+            let mut fields =
+                vec![(t!("view.performance_counters.native.governor_pool_id"), resource.native_pool_id.as_deref())];
+            if resource.kind == culprit_core::telemetry::MssqlResourceGovernorCounterKind::WorkloadGroup {
+                fields.insert(
+                    0,
+                    (t!("view.performance_counters.native.governor_group_id"), resource.native_group_id.as_deref()),
+                );
+            }
+            for (label, value) in fields {
+                text.push('\n');
+                text.push_str(&t!(
+                    "view.counter_ratios.cli.metric",
+                    label = label,
+                    value = value
+                        .map(|value| format::digits(value.into()))
+                        .unwrap_or_else(|| t!("view.performance_counters.unknown"))
+                ));
+            }
+            text.push('\n');
+            text.push_str(&t!(
+                "view.counter_ratios.cli.metric",
+                label = t!("view.performance_counters.native.governor_statistics_started"),
+                value = resource
+                    .statistics_started_without_offset
+                    .clone()
+                    .unwrap_or_else(|| t!("view.performance_counters.unknown"))
+            ));
+        }
     }
     if !report.missing_fields.is_empty() {
         text.push('\n');

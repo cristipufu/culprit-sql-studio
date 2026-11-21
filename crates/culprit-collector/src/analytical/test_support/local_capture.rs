@@ -62,6 +62,7 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
                 .runtime,
         ),
         case("storage", super::storage_evidence(super::StorageCase::Exact)),
+        case("pool_settings", super::pool_settings_evidence(super::PoolSettingsCase::Exact)),
         case("replication", super::replication_evidence(super::ReplicationCase::MssqlHyperscale)),
         case("group_replication", super::group_replication_evidence(super::GroupReplicationCase::Queued)),
         case("galera", super::galera_evidence(super::GaleraCase::Queued)),
@@ -105,6 +106,7 @@ impl LocalCaptureFixture {
 
 fn selection(source: &CollectionDescription) -> CollectionSelection {
     match &source.observation {
+        SourceObservation::MssqlPoolSettings { .. } => CollectionSelection::ResourcePoolSettings,
         SourceObservation::Activity(_) => CollectionSelection::Activity,
         SourceObservation::TableMemory { target, .. } => CollectionSelection::TableMemory { target: target.clone() },
         SourceObservation::FullTextPopulations { target, .. } => {

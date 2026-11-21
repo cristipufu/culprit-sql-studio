@@ -23,6 +23,7 @@ import type { MemoryParticipantsReport } from "./MemoryParticipantsReport";
 import type { PageServerReadReport } from "./PageServerReadReport";
 import type { PageWaitReport } from "./PageWaitReport";
 import type { PerformanceCounterReport } from "./PerformanceCounterReport";
+import type { PoolSettingsReport } from "./PoolSettingsReport";
 import type { RefinementDecision } from "./RefinementDecision";
 import type { ReplicationReport } from "./ReplicationReport";
 import type { ReportEvidence } from "./ReportEvidence";
@@ -41,7 +42,7 @@ import type { WaitCounterReport } from "./WaitCounterReport";
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { table_full_text?: TableFullTextReport, instance_resources?: InstanceResourceReport, storage?: StorageReport, performance_counters: Array<PerformanceCounterReport>, memory_clerks?: MemoryClerkReport, tempdb_metadata_memory?: TempdbMetadataMemoryReport, table_memory?: Array<TableMemoryReport>, group_replication?: Array<GroupReplicationReport>, galera?: Array<GaleraReport>, full_text_populations?: Array<FullTextPopulationReport>, database_properties?: DatabasePropertiesReport, suspect_pages?: SuspectPageHistoryReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
+export type Report = { table_full_text?: TableFullTextReport, instance_resources?: InstanceResourceReport, storage?: StorageReport, performance_counters: Array<PerformanceCounterReport>, memory_clerks?: MemoryClerkReport, tempdb_metadata_memory?: TempdbMetadataMemoryReport, table_memory?: Array<TableMemoryReport>, group_replication?: Array<GroupReplicationReport>, galera?: Array<GaleraReport>, full_text_populations?: Array<FullTextPopulationReport>, database_properties?: DatabasePropertiesReport, pool_settings?: PoolSettingsReport, suspect_pages?: SuspectPageHistoryReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */

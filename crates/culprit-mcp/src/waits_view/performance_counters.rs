@@ -32,6 +32,7 @@ pub(crate) fn value(counters: &PerformanceCounterReport) -> Value {
         "entries":counters.entries.iter().take(ENTRY_LIMIT).map(|entry|json!({
             "reference":culprit_core::telemetry::digest(format!("{}:{}",entry.observation_key,entry.counter_key).as_bytes()),
             "field":entry.field,"family":entry.family,"scope":entry.scope,"availability":entry.availability,
+            "resource_governor":entry.resource_governor,
             "observed_at":entry.observed_at,"nature":entry.nature,"unit":entry.unit,"reset":entry.reset,
             "metric":entry.metric,"explanation":entry.explanation,
         })).collect::<Vec<_>>(),"limitations":counters.limitations,

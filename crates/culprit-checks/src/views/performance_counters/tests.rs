@@ -2,6 +2,89 @@ use super::*;
 use culprit_core::{MeasurementScope, PerformanceCounterAvailability, ResetMarker};
 use std::collections::BTreeMap;
 
+#[test]
+fn original_governor_rows_and_request_marker_refuse_another_member_process_or_clock() {
+    let member = SharedResourceIdentity {
+        engine: Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("native-network"),
+        native: NativeIdentity::new("native-instance"),
+    };
+    let epoch = digest(b"native-process");
+    let context = NativeReadContext {
+        target: CollectionTarget::Shared(member.clone()),
+        partition: SourcePartition::InstanceLocal { member: Some(member.clone()), epoch: Some(epoch.clone()) },
+        observed_from: "2020-01-01T12:00:00Z".into(),
+        observed_until: "2020-01-01T12:00:01Z".into(),
+        database_writable: None,
+    };
+    let instance = member.telemetry_id().unwrap();
+    let mut marked = sample();
+    marked.properties.extend([
+        (MSSQL_RESOURCE_GOVERNOR_REQUEST_PROPERTY.into(), "true".into()),
+        ("resource_governor_instance_id".into(), instance.clone()),
+        ("resource_governor_instance_epoch".into(), epoch.clone()),
+        ("resource_governor_native_rows".into(), "1".into()),
+    ]);
+    let name = "same-as-database-label";
+    let mut governed = sample();
+    governed.identity = NativeIdentity::new(digest(name.as_bytes()))
+        .qualified("kind", MSSQL_RESOURCE_GOVERNOR_COUNTER_KIND)
+        .qualified("native_object", "sys.dm_os_performance_counters")
+        .qualified("resource_kind", "workload-group")
+        .qualified("resource_governor_instance_id", instance)
+        .qualified("resource_governor_instance_epoch", epoch);
+    governed.counters.remove(0);
+    governed.counters[0].native_object = "SQLServer:Workload Group Stats".into();
+    governed.counters[0].native_name = "Active requests".into();
+    governed.counters[0].native_instance = Some(name.into());
+    governed.properties.extend([
+        (PERFORMANCE_COUNTER_PROFILE_PROPERTY.into(), MSSQL_RESOURCE_GOVERNOR_COUNTER_PROFILE.into()),
+        (PERFORMANCE_COUNTER_ROWS_PROPERTY.into(), "1".into()),
+        ("resource_name".into(), name.into()),
+        ("group_id".into(), "3".into()),
+        ("pool_id".into(), "2".into()),
+    ]);
+    let coverage = StateSourceCoverage::collected(culprit_core::source_id::PERFORMANCE_COUNTERS.into(), 1);
+    for set in [marked, governed] {
+        let row = OperationalObservation::from_counters(culprit_core::source_id::PERFORMANCE_COUNTERS, set).unwrap();
+        let interpret = |owner: &NativeReadContext| {
+            explain(PerformanceCounterEvidence::Captured {
+                context: owner,
+                coverage: &coverage,
+                observations: &[&row],
+                read_complete: true,
+            })
+        };
+        let report = interpret(&context).unwrap();
+        assert!(report.database.is_none() && report.native_database_id.is_none());
+        for cause in ["member", "process", "clock", "database"] {
+            let mut other = context.clone();
+            match cause {
+                "member" => {
+                    let mut member = member.clone();
+                    member.native.id = "other-native-instance".into();
+                    other.target = CollectionTarget::Shared(member.clone());
+                    let SourcePartition::InstanceLocal { member: slot, .. } = &mut other.partition else { panic!() };
+                    *slot = Some(member);
+                }
+                "process" => {
+                    let SourcePartition::InstanceLocal { epoch, .. } = &mut other.partition else { panic!() };
+                    *epoch = Some(digest(b"other-process"));
+                }
+                "clock" => other.observed_until = "2020-01-01T12:00:00Z".into(),
+                _ => {
+                    other.target =
+                        culprit_core::DatabaseIdentity::server(Engine::Mssql, name, "fixture.invalid", 1433, None)
+                            .into();
+                    other.partition = SourcePartition::Target;
+                }
+            }
+            assert!(interpret(&other).is_err(), "{cause}");
+        }
+    }
+}
+
 fn sample() -> NativeCounterSet {
     let counter = |name: &str, value: &str| NativeCounterSample {
         key: name.into(),

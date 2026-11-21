@@ -25,6 +25,7 @@ pub(in crate::telemetry) fn bounded_budget(requested: &CollectionBudget) -> Coll
 pub(super) fn require_profile(identity: &Identity) -> Result<()> {
     match identity {
         Identity::Database { .. } => Ok(()),
+        Identity::ResourcePoolSettings(owner) if owner.settings_membership(None).is_valid() => Ok(()),
         Identity::LocalDatabase(owner)
             if matches!(owner.activity.edition, 2 | 3 | 4) && owner.activity.major >= MIN_BOXED_MAJOR =>
         {

@@ -32,6 +32,8 @@ pub enum PerformanceCounterAvailability {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct PerformanceCounterEntry {
+    /// Native Resource Governor context only. These are not Azure elastic-pool or database/query identities.
+    pub resource_governor: Option<MssqlResourceGovernorCounterContext>,
     pub observation_key: String,
     pub counter_key: String,
     pub field: String,

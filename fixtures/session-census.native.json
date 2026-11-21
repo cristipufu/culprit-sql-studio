@@ -54,6 +54,7 @@
           "data": {
             "native_state": "sleeping",
             "login_established": true,
+            "elapsed_ms": null,
             "tds_protocol_version": null,
             "times": {
               "login_without_offset": "2020-01-01T11:50:00.0000000",

@@ -6,17 +6,31 @@ use super::*;
 use crate::read::one;
 use culprit_core::{Engine, source_id};
 
-const IDENTITY: &str = r#"SELECT /* culprit */ g.server_name,
+mod settings;
+pub(crate) use settings::{Context as SettingsContext, read as read_settings};
+
+const MEMBERSHIP_FROM: &str =
+    "FROM sys.database_service_objectives s JOIN sys.databases d ON s.database_id=d.database_id WHERE d.name=DB_NAME()";
+fn identity_query(extra_columns: &str) -> String {
+    identity_projection(
+        extra_columns,
+        "membership.elastic_pool_name",
+        &format!(" CROSS JOIN (SELECT s.elastic_pool_name {MEMBERSHIP_FROM}) membership"),
+    )
+}
+fn identity_projection(extra_columns: &str, pool_name: &str, membership_relation: &str) -> String {
+    format!(
+        r#"SELECT /* culprit */ g.server_name,
  CONVERT(varchar(36),g.logical_database_guid) AS incarnation,
  CONVERT(varchar(36),g.physical_database_guid) AS physical_incarnation,
  CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(32)) AS updateability,
- membership.elastic_pool_name AS pool_name,
- g.cpu_limit,g.dtu_limit,CONVERT(varchar(40),SYSUTCDATETIME(),126)+'Z' AS observed_at
-FROM sys.dm_user_db_resource_governance g CROSS JOIN (
- SELECT s.elastic_pool_name FROM sys.database_service_objectives s
- JOIN sys.databases d ON s.database_id=d.database_id WHERE d.name=DB_NAME()
-) membership WHERE g.database_id=DB_ID() AND g.database_name=DB_NAME()
-OPTION(MAXDOP 1)"#;
+ {pool_name} AS pool_name,
+ g.cpu_limit,g.dtu_limit,CONVERT(varchar(40),SYSUTCDATETIME(),126)+'Z' AS observed_at{extra_columns}
+FROM sys.dm_user_db_resource_governance g{membership_relation}
+WHERE g.database_id=DB_ID() AND g.database_name=DB_NAME()
+OPTION(MAXDOP 1)"#
+    )
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Pricing {
@@ -25,13 +39,19 @@ enum Pricing {
     Unknown,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub(crate) struct Context {
     pub identity: SharedResourceIdentity,
-    logical_database: String,
-    physical_database: String,
+    member: NativeIdentity,
     pricing: Pricing,
 }
+// Membership equality excludes the separately checked observation clock.
+impl PartialEq for Context {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity == other.identity && self.member == other.member && self.pricing == other.pricing
+    }
+}
+impl Eq for Context {}
 
 /// Even an unpooled member needs an exact physical route anchor. It is not substituted for pool identity.
 #[derive(Clone, PartialEq, Eq)]
@@ -41,12 +61,15 @@ pub(crate) struct Membership {
 }
 
 pub(crate) async fn identity<R: NativeRead>(io: &mut R) -> Result<(Membership, String)> {
-    let row = one(io, IDENTITY).await?;
-    crate::read::require_primary(crate::read::database_writable(&row)?)?;
-    let observed_at = canonical_time(&text(&row, "observed_at")?)?;
-    let route = NativeIdentity::new(text(&row, "server_name")?)
-        .qualified("logical_database_guid", text(&row, "incarnation")?)
-        .qualified("physical_database_guid", text(&row, "physical_incarnation")?);
+    decode_membership(&one(io, &identity_query("")).await?)
+}
+
+fn decode_membership(row: &Rec) -> Result<(Membership, String)> {
+    crate::read::require_primary(crate::read::database_writable(row)?)?;
+    let observed_at = canonical_time(&text(row, "observed_at")?)?;
+    let route = NativeIdentity::new(text(row, "server_name")?)
+        .qualified("logical_database_guid", text(row, "incarnation")?)
+        .qualified("physical_database_guid", text(row, "physical_incarnation")?);
     if !route.is_valid() {
         return Err(invalid_data());
     }
@@ -59,18 +82,17 @@ pub(crate) async fn identity<R: NativeRead>(io: &mut R) -> Result<(Membership, S
         identity: SharedResourceIdentity {
             engine: Engine::Mssql,
             kind: SharedResourceKind::Pool,
-            namespace: NativeIdentity::new(text(&row, "server_name")?).qualified("kind", "azure-sql-logical-server"),
+            namespace: NativeIdentity::new(text(row, "server_name")?).qualified("kind", "azure-sql-logical-server"),
             native: NativeIdentity::new(pool_name),
         },
-        logical_database: text(&row, "incarnation")?,
-        physical_database: text(&row, "physical_incarnation")?,
-        pricing: match (super::sample::number(&row, "cpu_limit")?, super::sample::number(&row, "dtu_limit")?) {
+        member: route.clone(),
+        pricing: match (super::sample::number(row, "cpu_limit")?, super::sample::number(row, "dtu_limit")?) {
             (Some(_), None) => Pricing::Vcore,
             (None, Some(_)) => Pricing::Dtu,
             _ => Pricing::Unknown,
         },
     };
-    if !context.identity.is_valid() || context.logical_database.is_empty() || context.physical_database.is_empty() {
+    if !context.identity.is_valid() {
         return Err(invalid_data());
     }
     Ok((Membership { pool: Some(context), route }, observed_at))

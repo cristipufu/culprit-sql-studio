@@ -6,14 +6,12 @@ use crate::{
 };
 use culprit_core::{MeasurementScope, ResetMarker, Result, telemetry::*};
 
-pub(super) const COLUMNS: &str = r#",
- i.process_user_time_ms,i.process_kernel_time_ms,i.sqlserver_start_time_ms_ticks AS started_at_ticks,i.ms_ticks,
- CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition,
- CAST(SERVERPROPERTY('ProductMajorVersion') AS nvarchar(16)) AS major,
- CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS server_name,
- CAST(SERVERPROPERTY('MachineName') AS nvarchar(128)) AS machine_name,
- CAST(SERVERPROPERTY('ProcessID') AS int) AS process_id,
- CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at"#;
+pub(super) fn columns() -> String {
+    format!(
+        ",\n i.process_user_time_ms,i.process_kernel_time_ms,{}",
+        instance::point_columns(instance::PointClock::CurrentUtc)
+    )
+}
 
 pub(super) fn decode(row: &Rec) -> Result<Option<NativeCounterSet>> {
     for column in ["major", "server_name", "machine_name", "observed_at"] {

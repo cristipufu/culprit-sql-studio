@@ -17,6 +17,7 @@ fn session_context_fixture(request: bool) -> (ActivityKey, ActivitySessionContex
             native_state: if request { "Running" } else { "Sleeping" }.into(),
             login_established: true,
             tds_protocol_version: None,
+            elapsed_ms: None,
             session_database_id: None,
             session_database_name: None,
             request_database_id: None,
@@ -182,5 +183,34 @@ fn malformed_native_database_ids_or_idle_request_metadata_cannot_gain_a_database
             _ => native.request_database_id = Some("7".into()),
         }
         assert!(!context.is_valid_for(&key, true), "{change}");
+    }
+}
+
+#[test]
+fn native_session_elapsed_is_required_nullable_exact_int_and_independent_of_derived_login_age() {
+    for elapsed in [None, Some("0"), Some("123456"), Some("2147483647"), Some("-1"), Some("-2147483648")] {
+        let (key, mut context) = session_context_fixture(false);
+        let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+        native.elapsed_ms = elapsed.map(str::to_owned);
+        assert!(context.is_valid_for(&key, true));
+        let restored: ActivitySessionContext = serde_json::from_slice(&serde_json::to_vec(&context).unwrap()).unwrap();
+        assert_eq!(restored, context);
+        assert_eq!(restored.login_age_ms.as_deref(), Some("0"));
+        let SessionNativeContext::Mssql(native) = restored.native.as_deref().unwrap();
+        assert_eq!(native.elapsed_ms.as_deref(), elapsed);
+    }
+    let (_, context) = session_context_fixture(false);
+    let mut missing = serde_json::to_value(&context).unwrap();
+    missing["native"]["data"].as_object_mut().unwrap().remove("elapsed_ms");
+    assert!(serde_json::from_value::<ActivitySessionContext>(missing).is_err());
+}
+
+#[test]
+fn malformed_or_out_of_native_range_elapsed_cannot_become_a_groupable_session_fact() {
+    for elapsed in ["01", "1.0", "2147483648", "-2147483649", "18446744073709551615", "unknown"] {
+        let (key, mut context) = session_context_fixture(false);
+        let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+        native.elapsed_ms = Some(elapsed.into());
+        assert!(!context.is_valid_for(&key, true), "{elapsed}");
     }
 }

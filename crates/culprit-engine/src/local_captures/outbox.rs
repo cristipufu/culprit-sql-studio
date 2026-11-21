@@ -106,6 +106,26 @@ impl OutboxCaptureReader {
         let boundary = self.projection_boundary.clone();
         let lookup = CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
         match request.analysis.read_plan() {
+            LocalCaptureReadPlan::PoolSettings => {
+                delivery
+                    .with_completed_snapshot(
+                        lookup,
+                        SnapshotDataset::Settings,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        move |capture| {
+                            let result = explain_pool_settings(capture)
+                                .map(|read| LocalCapturedAnalysis::PoolSettings(Box::new(read)));
+                            #[cfg(test)]
+                            if let Some(boundary) = boundary {
+                                boundary()?;
+                            }
+                            result
+                        },
+                    )
+                    .await
+            }
             LocalCaptureReadPlan::Replication => {
                 delivery
                     .with_completed_snapshot(
@@ -264,6 +284,16 @@ fn explain_page_server_reads(capture: CompletedQueryHistory) -> Result<LocalPage
         collected_until,
         bytes_read,
     })
+}
+
+fn explain_pool_settings(capture: CompletedSnapshot) -> Result<LocalPoolSettings> {
+    let connection = capture.connection().into();
+    let collected_from = capture.collected_from().into();
+    let collected_until = capture.collected_until().into();
+    let bytes_read = capture.bytes_read();
+    let read = Box::new(capture.into_pool_settings_read()?);
+    let report = Box::new(culprit_checks::pool_settings::explain_captured(&read)?);
+    Ok(LocalPoolSettings { connection, read, report, collected_from, collected_until, bytes_read })
 }
 
 fn explain_replication(capture: CompletedSnapshot) -> Result<LocalReplication> {

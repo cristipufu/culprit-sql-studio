@@ -54,6 +54,8 @@ pub enum CollectionSelection {
         until: String,
     },
     Activity,
+    /// Six current native user-resource-pool settings, independent of optional elastic-pool membership.
+    ResourcePoolSettings,
     FocusedBlocking {
         focus: Box<ActivityRequestFocus>,
     },
@@ -116,6 +118,7 @@ impl CollectionSelection {
     pub fn collection(&self) -> TelemetryCollection {
         match self {
             Self::SourceRead { focus, .. } => TelemetryCollection::Snapshot(focus.question.dataset()),
+            Self::ResourcePoolSettings => TelemetryCollection::Snapshot(SnapshotDataset::Settings),
             Self::QueryHistory { .. } => TelemetryCollection::QueryHistory,
             Self::ResourceHistory { .. } => TelemetryCollection::ResourceHistory,
             Self::DeadlockHistory { .. } => TelemetryCollection::DeadlockHistory,
@@ -458,6 +461,10 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         focus: Box<CacheEntryMemoryFocus>,
     },
+    MssqlPoolSettings {
+        snapshot: StateSnapshotDescription,
+        membership: Box<MssqlPoolSettingsMembership>,
+    },
     MssqlReplication {
         snapshot: StateSnapshotDescription,
         scope: Box<MssqlReplicationScope>,
@@ -583,6 +590,7 @@ impl SourceObservation {
                 TelemetryCollection::Snapshot(SnapshotDataset::DatabasePerformanceCounters)
             }
             Self::TableMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::TableMemory),
+            Self::MssqlPoolSettings { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Settings),
             Self::MssqlReplication { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Replication),
             Self::GroupReplication { .. } => TelemetryCollection::Snapshot(SnapshotDataset::GroupReplication),
             Self::Galera { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Galera),
@@ -654,6 +662,7 @@ impl SourceObservation {
             | Self::BackupHistory { .. }
             | Self::SuspectPages { .. }
             | Self::DatabasePerformanceCounters { .. }
+            | Self::MssqlPoolSettings { .. }
             | Self::MssqlReplication { .. }
             | Self::GroupReplication { .. }
             | Self::Galera { .. }
@@ -695,6 +704,7 @@ impl SourceObservation {
             Self::MysqlEvents { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::Activity(snapshot) => snapshot.is_valid(),
             Self::FocusedBlocking { snapshot, result } => result.is_valid_header(snapshot),
+            Self::MssqlPoolSettings { snapshot, membership } => membership.matches_snapshot(snapshot),
             Self::MssqlReplication { snapshot, scope, .. } => {
                 snapshot.is_valid()
                     && snapshot.dataset == SnapshotDataset::Replication
@@ -823,6 +833,7 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::MssqlPoolSettings { snapshot, .. }
             | Self::MssqlReplication { snapshot, .. }
             | Self::GroupReplication { snapshot, .. }
             | Self::Galera { snapshot, .. }
@@ -851,6 +862,7 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::ColumnstoreRowgroups { snapshot, .. }
             | Self::TableMemory { snapshot, .. }
+            | Self::MssqlPoolSettings { snapshot, .. }
             | Self::MssqlReplication { snapshot, .. }
             | Self::GroupReplication { snapshot, .. }
             | Self::Galera { snapshot, .. }
@@ -901,7 +913,10 @@ impl SourceObservation {
                 count(TelemetryStream::OperationalSamples) == u64::from(description.records)
                     && count(TelemetryStream::DiagnosticCheckpoints) == u64::from(description.checkpoint_records)
             }
-            Self::Snapshot(snapshot) | Self::SourceRead { snapshot, .. } | Self::MssqlReplication { snapshot, .. } => {
+            Self::Snapshot(snapshot)
+            | Self::SourceRead { snapshot, .. }
+            | Self::MssqlReplication { snapshot, .. }
+            | Self::MssqlPoolSettings { snapshot, .. } => {
                 count(snapshot.dataset.stream()) == u64::from(snapshot.records)
             }
             Self::PagedSnapshot(_) | Self::PagedSourceRead { .. } => false,
@@ -1235,6 +1250,11 @@ impl CollectionDescription {
             return self.observation.covers_request()
                 && snapshot.dataset == *dataset
                 && snapshot.records <= request.budget.max_snapshot_rows;
+        }
+        if let (SourceObservation::MssqlPoolSettings { snapshot, .. }, CollectionSelection::ResourcePoolSettings) =
+            (&self.observation, &request.selection)
+        {
+            return self.observation.covers_request() && snapshot.records <= request.budget.max_snapshot_rows;
         }
         if let (SourceObservation::PagedSnapshot(snapshot), CollectionSelection::Snapshot { dataset }) =
             (&self.observation, &request.selection)

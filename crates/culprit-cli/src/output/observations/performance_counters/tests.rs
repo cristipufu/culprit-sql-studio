@@ -6,6 +6,58 @@ use culprit_collector::analytical::test_support::{
 };
 use culprit_core::telemetry::*;
 
+#[test]
+fn original_governor_output_keeps_native_ids_local_clock_and_partial_unknown_values_in_the_existing_bound() {
+    use culprit_collector::analytical::test_support::{
+        ResourceGovernorCounterCase as Case, resource_governor_counter_evidence,
+    };
+    for case in Case::ALL {
+        let (source, records) = resource_governor_counter_evidence(case);
+        let coverage = &source.observation.snapshot().unwrap().sources[0];
+        let rows = records
+            .iter()
+            .filter_map(|record| {
+                let TelemetryRecord::Operational(row) = record else { panic!() };
+                (row.source == culprit_core::source_id::PERFORMANCE_COUNTERS).then_some(row)
+            })
+            .collect::<Vec<_>>();
+        let report = culprit_checks::performance_counters::explain_source(&source, coverage, &rows, true).unwrap();
+        let original = serde_json::to_value(&report).unwrap();
+        let text = performance_counters(&report);
+        assert_eq!(serde_json::to_value(&report).unwrap(), original);
+        for limitation in &report.limitations {
+            assert!(text.contains(limitation), "{case:?}");
+        }
+        assert!(!text.contains("resource_governor_instance_epoch"));
+        if matches!(case, Case::Denied | Case::NoRows) {
+            assert!(!text.contains("SQLServer:Workload Group Stats"));
+            continue;
+        }
+        assert!(text.contains(&t!("view.performance_counters.native.governor_group_id")));
+        assert!(text.contains(&t!("view.performance_counters.native.governor_pool_id")));
+        assert!(text.contains(&t!("view.performance_counters.native.governor_statistics_started")));
+        assert!(
+            !text.contains("SQLServer:Memory Manager"),
+            "the five-entry prefix retains requested group and pool context"
+        );
+        if case == Case::Unmapped {
+            assert!(text.contains(&t!("view.performance_counters.unknown")));
+        } else {
+            assert!(text.contains("2019-12-31T22:00:00.0000000"));
+        }
+        if case == Case::Zero {
+            assert!(
+                report
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.resource_governor.is_some())
+                    .all(|entry| entry.raw_value == "0")
+            );
+        }
+        assert!(text.len() < 32 * 1024);
+    }
+}
+
 fn report(case: PerformanceCounterCase, missing: bool) -> PerformanceCounterReport {
     let (source, records) = performance_counter_evidence(case);
     let context = NativeReadContext::from_snapshot(&source).unwrap();

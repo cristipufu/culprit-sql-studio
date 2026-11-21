@@ -161,7 +161,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(activity::bounded_budget)
     .baseline()
-    .version(5),
+    .version(6),
     Registration::database(
         "mssql.page-wait-targets",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)),
@@ -306,7 +306,7 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
-        .version(9),
+        .version(10),
     state!("mssql.memory-failures", MemoryFailures)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance), RecipeSubject::Shared(SharedResourceKind::Pool)])
         .bounded(state::memory_failure_budget)
@@ -326,6 +326,14 @@ const REGISTRATIONS: &[Registration] = &[
     .baseline()
     .version(4),
     state!("mssql.settings", Settings).bounded(state::settings_budget).baseline().version(5),
+    Registration::database(
+        "mssql.resource-pool-settings",
+        RecipeSelector::ResourcePoolSettings,
+        |pool, request, host, port| Ok(Box::new(state::StateSource::new(pool, request, host, port)?)),
+    )
+    .shared(&[RecipeSubject::Database, RecipeSubject::Shared(SharedResourceKind::Pool)])
+    .on_editions(&[5])
+    .bounded(state::pool_settings_budget),
     streamed!("mssql.statement-grants", StatementGrants, grants::Grants).version(2),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations).version(2),
     streamed!("mssql.tables", Tables, tables::Tables).version(5),
@@ -357,10 +365,15 @@ pub(super) fn collections_for(resource: &SharedResourceIdentity, edition: i64) -
     for registration in REGISTRATIONS {
         if registration.subjects.iter().any(|kind| kind.accepts(&subject))
             && (registration.editions.is_empty() || registration.editions.contains(&edition))
-            && let RecipeSelector::Collection(collection) = registration.selector
-            && !collections.contains(&collection)
         {
-            collections.push(collection);
+            let collection = match registration.selector {
+                RecipeSelector::Collection(collection) => collection,
+                RecipeSelector::ResourcePoolSettings => TelemetryCollection::Snapshot(SnapshotDataset::Settings),
+                _ => continue,
+            };
+            if !collections.contains(&collection) {
+                collections.push(collection);
+            }
         }
     }
     collections

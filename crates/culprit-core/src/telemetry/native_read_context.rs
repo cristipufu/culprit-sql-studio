@@ -69,6 +69,7 @@ impl NativeReadContext {
             observed_from: snapshot.observed_from.clone(),
             observed_until: snapshot.observed_until.clone(),
             database_writable: match &source.observation {
+                SourceObservation::MssqlPoolSettings { membership, .. } => Some(membership.database_writable),
                 SourceObservation::MssqlReplication { database_writable, .. }
                 | SourceObservation::SuspectPages { database_writable, .. }
                 | SourceObservation::DatabasePerformanceCounters { database_writable, .. }
@@ -104,6 +105,32 @@ impl NativeReadContext {
         self.is_valid()
             && matches!(self.partition, SourcePartition::InstanceLocal { .. })
             && self.partition.is_qualified()
+    }
+
+    /// Bind a point to this original native instance, epoch and read interval. Endpoint agreement does not
+    /// establish continuous ownership or capacity between reads.
+    pub fn contains_instance_point(
+        &self,
+        engine: crate::Engine,
+        instance_id: &str,
+        epoch: &str,
+        observed_at: &str,
+    ) -> bool {
+        let (
+            CollectionTarget::Shared(owner),
+            SourcePartition::InstanceLocal { member: Some(member), epoch: Some(original_epoch) },
+        ) = (&self.target, &self.partition)
+        else {
+            return false;
+        };
+        self.has_qualified_local_owner()
+            && owner == member
+            && owner.engine == engine
+            && owner.kind == SharedResourceKind::Instance
+            && owner.telemetry_id().is_ok_and(|original| original == instance_id)
+            && original_epoch == epoch
+            && ObservationBounds::new(&self.observed_from, &self.observed_until)
+                .is_some_and(|bounds| bounds.contains(observed_at))
     }
 
     /// Cache identity for one observed native request; it grants neither admission nor incident attribution.

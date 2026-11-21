@@ -42,7 +42,8 @@ pub use local_captures::OutboxCaptureReader;
 pub use local_captures::{
     LocalActivityRead, LocalBlockingAnalysis, LocalCaptureAnalysisKind, LocalCaptureReader, LocalCaptureRequest,
     LocalCaptureTask, LocalCapturedAnalysis, LocalHyperscaleLogComponents, LocalMemoryClerks, LocalOperationalCapture,
-    LocalPageServerReads, LocalReplication, LocalSessionCensus, LocalSnapshotAnalysis, LocalSnapshotReport,
+    LocalPageServerReads, LocalPoolSettings, LocalReplication, LocalSessionCensus, LocalSnapshotAnalysis,
+    LocalSnapshotReport,
 };
 pub mod marks;
 #[cfg(feature = "postgres")]

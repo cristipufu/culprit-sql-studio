@@ -2,7 +2,9 @@
 use super::*;
 use culprit_core::{Engine, MeasurementScope, ResetMarker};
 mod database;
+mod resource_governor;
 pub use database::{DatabasePerformanceCounterCase, database_performance_counter_evidence};
+pub use resource_governor::{ResourceGovernorCounterCase, resource_governor_counter_evidence};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PerformanceCounterCase {

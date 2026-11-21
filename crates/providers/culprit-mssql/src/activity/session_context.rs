@@ -15,7 +15,7 @@ pub(crate) const ESTABLISHED_SESSION_SQL: &str = "s.login_time IS NOT NULL \
 
 pub(super) const COLUMNS: &str = "1 AS session_context_collected,s.database_id AS session_database_id,\
  CASE WHEN s.database_id>0 THEN DB_NAME(s.database_id) END AS session_database_name,s.status AS native_session_state,\
- s.client_interface_name,s.host_process_id,s.client_version,\
+ s.client_interface_name,s.host_process_id,s.client_version,s.total_elapsed_time AS session_elapsed_ms,\
  CONVERT(varchar(36),r.connection_id) AS request_connection_id";
 
 pub(super) fn decode(
@@ -43,6 +43,7 @@ pub(super) fn decode(
             native_state,
             login_established: established,
             tds_protocol_version: optional_signed_integer(row, "client_version")?.map(|native| native.to_string()),
+            elapsed_ms: optional_signed_integer(row, "session_elapsed_ms")?.map(|native| native.to_string()),
             session_database_id: optional_counter(row, "session_database_id")?,
             session_database_name: optional_text(row, "session_database_name")?,
             request_database_id: optional_counter(row, "request_database_id")?,

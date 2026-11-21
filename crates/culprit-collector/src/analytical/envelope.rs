@@ -149,6 +149,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
         | SourceObservation::ColumnstoreRowgroups { snapshot, .. }
         | SourceObservation::FullTextPopulations { snapshot, .. }
         | SourceObservation::TableMemory { snapshot, .. }
+        | SourceObservation::MssqlPoolSettings { snapshot, .. }
         | SourceObservation::MssqlReplication { snapshot, .. }
         | SourceObservation::GroupReplication { snapshot, .. }
         | SourceObservation::Galera { snapshot, .. }

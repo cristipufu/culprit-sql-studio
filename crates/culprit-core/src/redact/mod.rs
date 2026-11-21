@@ -332,6 +332,11 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             reason: crate::message!("view.galera.sharing_withheld"),
         };
     }
+    if let Some(recorded) = &mut s.operations.pool_settings {
+        **recorded = crate::telemetry::RecordedPoolSettingsRead::Unavailable {
+            reason: crate::message!("view.pool_settings.sharing_withheld"),
+        };
+    }
     for recorded in &mut s.operations.table_memory {
         *recorded = crate::telemetry::RecordedOperationalRead::Unavailable {
             reason: crate::message!("view.table_memory.sharing_withheld"),

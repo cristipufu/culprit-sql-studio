@@ -155,3 +155,5 @@ mod tests {
 pub use views::group_replication;
 
 pub use views::galera;
+
+pub use views::pool_settings;

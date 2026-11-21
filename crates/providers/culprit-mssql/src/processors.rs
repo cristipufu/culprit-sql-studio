@@ -4,7 +4,7 @@ use culprit_core::{Coverage, MeasurementScope, Result, telemetry::*};
 
 mod cpu;
 fn topology_sql(include_process_cpu: bool) -> String {
-    let cpu = if include_process_cpu { cpu::COLUMNS } else { "" };
+    let cpu = if include_process_cpu { cpu::columns() } else { String::new() };
     format!(
         r#"SELECT /* culprit */ i.cpu_count AS host_processors,s.online_schedulers,s.numa_nodes{cpu}
  FROM sys.dm_os_sys_info i CROSS JOIN (

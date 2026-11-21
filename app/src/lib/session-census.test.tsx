@@ -71,3 +71,60 @@ test("partial or unavailable census remains an explicit gap and native client te
   expect(unavailable).toContain(t("ui.dashboard.status.unavailable"));
   expect(unavailable).not.toContain("<article");
 });
+
+test("observed client groups share Rust session deduplication and exact session-age totals in a folded disclosure", () => {
+  const { report } = sessionCensusCase("client-groups");
+  const group = report.client_groups.entries[0]!;
+  expect(report.client_groups.grouped_sessions).toBe(2);
+  expect(group.observed_sessions).toBe(2);
+  expect(group.observed_requests).toBe(3);
+  expect(group.fields.find((field) => field.key === "session_age_ms")!.value).toBe("900000");
+  expect(group.fields.find((field) => field.key === "session_logical_reads")!.value).toBe("9007199254741000");
+  const html = renderToStaticMarkup(<SessionCensus report={report} />);
+  expect(html).toContain(report.client_groups.title);
+  expect(html).toContain(report.client_groups.summary);
+  expect(html).toContain("9007199254741000");
+  for (const limitation of report.client_groups.limitations) expect(html).toContain(limitation);
+  expect(html).not.toContain("<details open");
+});
+
+test("conflicting MARS sessions and unknown totals remain explicit alongside the unchanged native population", () => {
+  for (const name of ["group-conflict", "group-unknown"] as const) {
+    const { report } = sessionCensusCase(name);
+    const groups = report.client_groups;
+    const html = renderToStaticMarkup(<SessionCensus report={report} />);
+    expect(html).toContain(groups.summary);
+    expect(report.entries.length).toBe(2);
+    if (name === "group-conflict") {
+      expect(groups.ungrouped_sessions).toBe(1);
+      expect(groups.entries.length).toBe(0);
+    } else {
+      expect(groups.grouped_sessions).toBe(2);
+      expect(groups.entries[0]!.fields.find((field) => field.key === "session_age_ms")!.value).toBeNull();
+      expect(groups.entries[0]!.fields.find((field) => field.key === "session_writes")!.value).toBe("0");
+      expect(html).toContain(t("ui.memory_failures.not_reported"));
+    }
+  }
+});
+
+test("client-group labels remain text-only and do not create a SQL, session or owner action", () => {
+  const { report } = sessionCensusCase("client-groups");
+  report.client_groups.entries[0]!.fields.find((field) => field.key === "application")!.value = "<img src=x onerror=alert(1)>";
+  const html = renderToStaticMarkup(<SessionCensus report={report} />);
+  expect(html).toContain("&lt;img");
+  expect(html).not.toContain("<img");
+  expect(html).not.toContain("<button");
+  expect(html).not.toContain("sig-dot");
+});
+
+test("negative native session elapsed remains a point value while only its grouped age is unavailable", () => {
+  const { report } = sessionCensusCase("signed-elapsed");
+  const group = report.client_groups.entries[0]!;
+  expect(group.observed_sessions).toBe(2);
+  expect(group.observed_requests).toBe(3);
+  expect(group.fields.find((field) => field.key === "session_age_ms")!.value).toBeNull();
+  expect(group.fields.find((field) => field.key === "session_logical_reads")!.value).toBe("9007199254741000");
+  const html = renderToStaticMarkup(<SessionCensus report={report} />);
+  expect(html).toContain(t("view.session_census.groups.limit.elapsed"));
+  expect(html).toContain(">-1<");
+});

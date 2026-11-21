@@ -45,4 +45,39 @@ pub struct SessionCensusReport {
     pub summary: String,
     pub limitations: Vec<String>,
     pub entries: Vec<SessionCensusEntry>,
+    pub client_groups: SessionCensusClientGroups,
+}
+
+/// Exact labels from one native session population. Equality is grouping, never authenticated application ownership.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[ts(export)]
+pub struct SessionClientGroupKey {
+    pub database_id: String,
+    pub database_name: Option<String>,
+    pub host: Option<String>,
+    pub application: Option<String>,
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct SessionCensusClientGroup {
+    pub key: SessionClientGroupKey,
+    pub observed_sessions: u32,
+    pub observed_requests: u32,
+    pub limitations: Vec<String>,
+    pub fields: Vec<SessionCensusField>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct SessionCensusClientGroups {
+    pub title: String,
+    pub summary: String,
+    pub limitations: Vec<String>,
+    pub grouped_sessions: u32,
+    pub ungrouped_sessions: u32,
+    pub available_groups: u32,
+    pub entries_limited: bool,
+    pub entries: Vec<SessionCensusClientGroup>,
 }

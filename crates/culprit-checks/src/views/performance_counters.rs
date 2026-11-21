@@ -119,7 +119,8 @@ fn captured(
                 return Err(invalid());
             }
             let OperationalFact::CounterSet(sample) = &row.fact else { return Err(invalid()) };
-            if profile.observed_at(sample)?.is_some_and(|at| !bounds.contains(at))
+            if resource_governor_candidate(sample) && !MssqlResourceGovernorCounterSet::fits_context(sample, context)
+                || profile.observed_at(sample)?.is_some_and(|at| !bounds.contains(at))
                 || sample.ratios.iter().any(|ratio| ratio.observed_at.as_deref().is_some_and(|at| !bounds.contains(at)))
             {
                 return Err(invalid());
@@ -186,12 +187,19 @@ fn render(
         }
     }
     // Missing bodies do not establish how many DMV rows the missing aggregate originally contained.
-    if samples.is_empty() && source.is_none_or(|source| source.state != SourceState::Empty) {
+    if read_complete == Some(false)
+        || samples.is_empty() && source.is_none_or(|source| source.state != SourceState::Empty)
+    {
         native_rows = None;
     }
     let observed = samples.iter().map(|sample| sample.counters.len() + sample.ratio_gaps.len()).sum::<usize>();
     let mut entries = Vec::new();
-    for sample in samples {
+    for sample in samples
+        .iter()
+        .copied()
+        .filter(|sample| resource_governor_counter_set(sample))
+        .chain(samples.iter().copied().filter(|sample| !resource_governor_counter_set(sample)))
+    {
         if sample.properties.get(PERFORMANCE_COUNTER_WITHHELD_PROPERTY).is_some_and(|value| value == "true") {
             continue;
         }
@@ -231,6 +239,13 @@ fn render(
     }
     if samples.iter().any(|sample| !profile.declares_selection(sample)) {
         limitations.push(t!("view.performance_counters.limit.selection"));
+    }
+    if samples.iter().any(|sample| resource_governor_candidate(sample)) {
+        limitations.push(t!("view.performance_counters.limit.resource_governor"));
+        limitations.push(t!("view.performance_counters.limit.governor_clock"));
+        if samples.iter().any(|sample| resource_governor_requested_rows(sample).is_ok_and(|rows| rows == Some(0))) {
+            limitations.push(t!("view.performance_counters.limit.governor_unavailable"));
+        }
     }
     if samples.iter().any(|sample| !withheld && profile.observed_at(sample).ok().flatten().is_none()) {
         limitations.push(t!("view.performance_counters.limit.clock"));

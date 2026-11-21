@@ -30,6 +30,7 @@ pub(super) fn record(
     let native = match stream {
         TelemetryStream::ResourceSamples => Decoded::Record(Box::new(resources(values)?)),
         TelemetryStream::WaitCounterSamples => Decoded::Record(Box::new(wait_counter(values)?)),
+        TelemetryStream::SettingObservations => Decoded::Record(Box::new(setting(values)?)),
         TelemetryStream::ActivityObservations => activity(values, &payloads)?,
         TelemetryStream::OperationalSamples
         | TelemetryStream::ObjectDefinitions
@@ -195,4 +196,17 @@ fn optional_text<'a>(values: &'a Map<String, Value>, key: &str) -> Result<Option
 }
 fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()
+}
+
+fn setting(values: &Map<String, Value>) -> Result<TelemetryRecord> {
+    serde_json::from_value(json!({"stream":TelemetryStream::SettingObservations,"data":{
+        "source":text(values,"NativeSource")?,"namespace":text(values,"SettingNamespace")?,"name":text(values,"SettingName")?,
+        "scope":text(values,"MeasurementScope")?,"nature":text(values,"SettingNature")?,
+        "value":optional_text(values,"ConfiguredValue")?,"value_in_use":optional_text(values,"ActiveValue")?,
+        "value_for_secondary":optional_text(values,"SecondaryValue")?,"unit":optional_text(values,"NativeUnit")?,
+        "native_context":optional_text(values,"NativeContext")?,"native_source":optional_text(values,"NativeValueSource")?,
+        "pending_restart":values.get("PendingRestart").ok_or_else(invalid)?,
+        "native_is_default":values.get("NativeIsDefault").ok_or_else(invalid)?,
+        "default_value":optional_text(values,"DefaultValue")?,"default_source":text(values,"DefaultSource")?
+    }})).map_err(|_|invalid())
 }

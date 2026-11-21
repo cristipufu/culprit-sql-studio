@@ -37,6 +37,7 @@ mod maintenance_progress;
 mod memory_clerks;
 mod page_server_reads;
 mod performance_counters;
+mod pool_settings;
 mod recorded_operational;
 mod replication;
 mod runtime_populations;
@@ -302,6 +303,7 @@ impl Pipeline {
         let galera = galera::explain(&mut snapshot);
         let full_text_populations = full_text_populations::explain(&mut snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
+        let pool_settings = pool_settings::explain(&snapshot);
         let suspect_pages = suspect_pages::explain(&mut snapshot);
         let table_full_text = table_full_text::explain(&mut snapshot);
         let storage = storage::explain(&mut snapshot);
@@ -440,6 +442,7 @@ impl Pipeline {
             galera,
             full_text_populations,
             database_properties,
+            pool_settings,
             suspect_pages,
             statement_work,
             page_server_reads,

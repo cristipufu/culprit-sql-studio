@@ -5,11 +5,15 @@ use test_support::PerformanceCounterCase;
 
 async fn collected(case: PerformanceCounterCase) -> (Fixture, CollectionDescription, Vec<TelemetryRecord>) {
     let (source, records) = test_support::performance_counter_evidence(case);
+    let fixture = collected_original(source.clone(), records.clone()).await;
+    (fixture, source, records)
+}
+
+async fn collected_original(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Fixture {
     let catalog = Arc::new(SchemaCatalog::new().unwrap());
     let recovery =
-        test_support::collected_resource_recovery("clickhouse:test", catalog.digest(), source.clone(), records.clone())
-            .await;
-    (Fixture::from_recovery(catalog, Arc::new(recovery), &[TelemetryStream::OperationalSamples]).await, source, records)
+        test_support::collected_resource_recovery("clickhouse:test", catalog.digest(), source, records).await;
+    Fixture::from_recovery(catalog, Arc::new(recovery), &[TelemetryStream::OperationalSamples]).await
 }
 
 #[tokio::test]
@@ -174,6 +178,53 @@ async fn selected_database_counters_restore_only_original_native_database_proof_
             assert_eq!(set.identity.qualifiers["database_guid"], "private-database-guid-canary");
             assert_eq!(set.scope, culprit_core::MeasurementScope::Database);
             assert_eq!(set.counters[0].value.integer(), Some(9_007_199_254_740_993));
+        }
+        assert_eq!(capture.metrics().recovery_objects, 0);
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+    }
+}
+
+#[tokio::test]
+async fn original_governor_sets_roundtrip_native_ids_nullable_context_and_exact_cumulative_values_without_hydration() {
+    use test_support::{ResourceGovernorCounterCase as Case, resource_governor_counter_evidence};
+    for case in Case::ALL {
+        let (source, records) = resource_governor_counter_evidence(case);
+        let fixture = collected_original(source.clone(), records.clone()).await;
+        fixture.replies(vec![fixture.rows.clone()]);
+        let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        let capture = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
+            .await
+            .unwrap();
+        test_support::assert_operational_capture(&capture, &source, &records);
+        assert!(capture.is_read_complete());
+        for (actual, original) in capture.records().iter().zip(&records) {
+            assert_eq!(actual.row(), &ExportedRecord::new(&source, capture.capture(), original.clone()).unwrap());
+        }
+        let sets = capture
+            .records()
+            .iter()
+            .filter_map(|record| {
+                let TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::CounterSet(sample),
+                    ..
+                }) = &record.row().record
+                else {
+                    panic!()
+                };
+                resource_governor_counter_set(sample).then_some(sample.as_ref())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sets.len(), if matches!(case, Case::Denied | Case::NoRows) { 0 } else { 2 });
+        for set in sets {
+            assert!(resource_governor_fits_source(set, &source));
+            let metadata = MssqlResourceGovernorCounterSet::from_sample(set).unwrap().context();
+            assert_eq!(metadata.native_pool_id.as_deref(), if case == Case::Unmapped { None } else { Some("2") });
+            assert!(set.counters.iter().all(|counter| counter.reset == culprit_core::ResetMarker::Unknown));
+            if !matches!(case, Case::Zero | Case::UnknownNativeType) {
+                assert!(set.counters.iter().any(|counter| counter.value.integer() == Some(9_007_199_254_740_993)));
+            }
         }
         assert_eq!(capture.metrics().recovery_objects, 0);
         assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);

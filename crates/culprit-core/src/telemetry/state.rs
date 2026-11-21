@@ -686,6 +686,11 @@ impl OperationalFact {
             Self::DiagnosticRevision(revision) => revision.is_valid(),
             Self::CounterSet(counters) => {
                 counters.is_valid()
+                    && (!resource_governor_candidate(counters)
+                        || crate::Engine::Mssql
+                            .spec()
+                            .performance_counters()
+                            .is_some_and(|profile| profile.validate(counters).is_ok()))
                     && (counters.identity.qualifiers.get("kind").map(String::as_str) != Some(MSSQL_PROCESS_CPU_KIND)
                         || MssqlProcessCpuPoint::from_sample(counters).is_ok())
             }
@@ -762,6 +767,9 @@ impl OperationalObservation {
             && self.fact.is_valid()
             && self.fact.matches_key(&self.key)
             && match &self.fact {
+                OperationalFact::CounterSet(sample) if resource_governor_candidate(sample) => {
+                    self.source == crate::source_id::PERFORMANCE_COUNTERS
+                }
                 OperationalFact::CounterSet(sample)
                     if sample.identity.qualifiers.get("kind").map(String::as_str) == Some(MSSQL_PROCESS_CPU_KIND) =>
                 {

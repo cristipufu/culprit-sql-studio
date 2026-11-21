@@ -157,7 +157,11 @@ async fn discovery_is_bounded_metadata_and_does_not_turn_a_nonpooled_database_in
     assert_eq!(resources.len(), 1);
     assert_eq!(
         resources[0].collections,
-        vec![TelemetryCollection::ResourceHistory, TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures)]
+        vec![
+            TelemetryCollection::ResourceHistory,
+            TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures),
+            TelemetryCollection::Snapshot(SnapshotDataset::Settings)
+        ]
     );
     assert_eq!(reader.calls.len(), 2);
     assert!(reader.calls.iter().all(|call| call.limit <= 2));

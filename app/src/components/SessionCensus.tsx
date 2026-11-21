@@ -1,4 +1,6 @@
+import type { SessionCensusClientGroup } from "../gen/SessionCensusClientGroup";
 import type { SessionCensusEntry } from "../gen/SessionCensusEntry";
+import type { SessionCensusField } from "../gen/SessionCensusField";
 import type { SessionCensusReport } from "../gen/SessionCensusReport";
 import { t } from "../lib/i18n";
 import { activityPresentationKey } from "../lib/live-census";
@@ -18,7 +20,18 @@ export function SessionCensus({ report }: { report: SessionCensusReport }) {
         until: report.context.observed_until,
       })}<br />{t("ui.memory_participants.observed_at", { at: report.observed_at })}</>}
       renderEntry={renderEntry}
-    />
+    >
+      <details>
+        <summary>{report.client_groups.title}</summary>
+        <ObservationList
+          collapseEntries
+          source={report.native_source.source}
+          report={{ ...report.client_groups, sources: report.sources }}
+          scope={t("view.session_census.scope")}
+          renderEntry={renderGroup}
+        />
+      </details>
+    </ObservationList>
   );
 }
 
@@ -29,10 +42,21 @@ function renderEntry(entry: SessionCensusEntry) {
       <p>{entry.state}</p>
       <dl>
         {entry.reference && <NativeValue label={t("ui.completed_spills.capture_reference")} value={<code>{entry.reference.record_id}</code>} />}
-        {entry.fields.map((field) => (
-          <NativeValue key={field.key} label={field.label} value={field.value} />
-        ))}
+        <Fields fields={entry.fields} />
       </dl>
     </article>
   );
+}
+
+function renderGroup(group: SessionCensusClientGroup) {
+  return (
+    <article className="operational-card" key={JSON.stringify(group.key)}>
+      {group.limitations.map((limitation, index) => <p className="muted" key={index}>{limitation}</p>)}
+      <dl><Fields fields={group.fields} /></dl>
+    </article>
+  );
+}
+
+function Fields({ fields }: { fields: SessionCensusField[] }) {
+  return fields.map((field) => <NativeValue key={field.key} label={field.label} value={field.value} />);
 }

@@ -13,6 +13,7 @@ pub(super) enum Identity {
     LocalDatabase(Box<local_source::Context>),
     Instance(instance::Context),
     Pool(pool::Context),
+    ResourcePoolSettings(Box<pool::SettingsContext>),
 }
 impl Identity {
     pub fn target(&self) -> CollectionTarget {
@@ -21,6 +22,7 @@ impl Identity {
             Self::LocalDatabase(context) => context.activity.database.clone().into(),
             Self::Instance(context) => CollectionTarget::Shared(context.identity.clone()),
             Self::Pool(context) => CollectionTarget::Shared(context.identity.clone()),
+            Self::ResourcePoolSettings(context) => context.target.clone(),
         }
     }
     pub fn partition(&self) -> Result<SourcePartition> {
@@ -30,13 +32,15 @@ impl Identity {
                 member: Some(context.identity.clone()),
                 epoch: Some(context.capture_epoch()?),
             },
-            Self::Database { .. } | Self::Pool(_) => SourcePartition::Target,
+            Self::Database { .. } | Self::Pool(_) | Self::ResourcePoolSettings(_) => SourcePartition::Target,
         })
     }
     pub async fn admit<R: NativeRead>(&self, reader: &mut R) -> Result<()> {
         match self {
             Self::LocalDatabase(_) => crate::resources::admit_instance_resources(reader).await,
-            Self::Database { .. } | Self::Pool(_) => crate::resources::admit_resources(reader).await,
+            Self::Database { .. } | Self::Pool(_) | Self::ResourcePoolSettings(_) => {
+                crate::resources::admit_resources(reader).await
+            }
             Self::Instance(_) => return Ok(()),
         }
         .map_err(crate::read::ReadError::into_error)
@@ -52,6 +56,9 @@ impl Identity {
     }
     pub fn confirmed_by(&self, after: &Self, observed_until: &str) -> bool {
         match (self, after) {
+            (Self::ResourcePoolSettings(original), Self::ResourcePoolSettings(after)) => {
+                original.confirmed_by(after, observed_until)
+            }
             (Self::LocalDatabase(original), Self::LocalDatabase(after)) => {
                 require_local_database(after).is_ok()
                     && original.same_source(after)
@@ -63,6 +70,9 @@ impl Identity {
     }
     pub async fn recheck<R: NativeRead>(&self, reader: &mut R, host: &str, port: u16) -> Result<Self> {
         match self {
+            Self::ResourcePoolSettings(original) => {
+                Ok(Self::ResourcePoolSettings(Box::new(original.recheck(reader).await?)))
+            }
             Self::Database { .. } => {
                 let (database, physical) = description::identity(reader, host, port).await?;
                 Ok(Self::Database { database, physical })
@@ -92,6 +102,11 @@ impl DatabaseAuthority {
                 | SnapshotDataset::DatabasePerformanceCounters
                 | SnapshotDataset::SuspectPages
         ) {
+            return Ok(Self::AzureOnly);
+        }
+        if matches!(subject, CollectionSubject::Shared { resource } if resource.kind == SharedResourceKind::Pool)
+            && dataset == SnapshotDataset::Settings
+        {
             return Ok(Self::AzureOnly);
         }
         subject.require_database()?;
@@ -166,7 +181,7 @@ pub(super) fn is_shared(subject: &CollectionSubject) -> Result<bool> {
 pub(super) fn validate_dataset(subject: &CollectionSubject, dataset: SnapshotDataset) -> Result<()> {
     is_shared(subject)?;
     if (matches!(subject, CollectionSubject::Shared { resource } if resource.kind == SharedResourceKind::Pool)
-        && dataset != SnapshotDataset::MemoryFailures)
+        && !matches!(dataset, SnapshotDataset::MemoryFailures | SnapshotDataset::Settings))
         || (dataset == SnapshotDataset::MemoryFailures && matches!(subject, CollectionSubject::Database))
     {
         return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));

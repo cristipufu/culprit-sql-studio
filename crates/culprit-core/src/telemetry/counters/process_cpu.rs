@@ -60,22 +60,12 @@ impl<'a> MssqlProcessCpuPoint<'a> {
 
     pub fn from_original(sample: &'a NativeCounterSet, context: &NativeReadContext) -> Result<Self> {
         let point = Self::from_sample(sample)?;
-        let (
-            CollectionTarget::Shared(owner),
-            SourcePartition::InstanceLocal { member: Some(member), epoch: Some(epoch) },
-        ) = (&context.target, &context.partition)
-        else {
-            return Err(invalid());
-        };
-        if !context.has_qualified_local_owner()
-            || owner != member
-            || owner.engine != crate::Engine::Mssql
-            || owner.kind != SharedResourceKind::Instance
-            || sample.identity.qualifiers["instance_id"] != owner.telemetry_id()?
-            || &sample.identity.qualifiers["instance_epoch"] != epoch
-            || !ObservationBounds::new(&context.observed_from, &context.observed_until)
-                .is_some_and(|bounds| bounds.contains(point.observed_at()))
-        {
+        if !context.contains_instance_point(
+            crate::Engine::Mssql,
+            &sample.identity.qualifiers["instance_id"],
+            &sample.identity.qualifiers["instance_epoch"],
+            point.observed_at(),
+        ) {
             return Err(invalid());
         }
         Ok(point)

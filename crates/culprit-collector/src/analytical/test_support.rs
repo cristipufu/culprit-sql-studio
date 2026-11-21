@@ -36,8 +36,8 @@ pub use tempdb_metadata_memory::{
 mod counter_ratios;
 mod performance_counters;
 pub use performance_counters::{
-    DatabasePerformanceCounterCase, PerformanceCounterCase, database_performance_counter_evidence,
-    performance_counter_evidence,
+    DatabasePerformanceCounterCase, PerformanceCounterCase, ResourceGovernorCounterCase,
+    database_performance_counter_evidence, performance_counter_evidence, resource_governor_counter_evidence,
 };
 mod resource_io;
 mod wait_counters;
@@ -1073,3 +1073,6 @@ pub use group_replication::{GroupReplicationCase, group_replication_evidence};
 
 mod galera;
 pub use galera::{GaleraCase, galera_evidence};
+
+mod pool_settings;
+pub use pool_settings::{PoolSettingsCase, assert_pool_settings_capture, pool_settings_evidence};

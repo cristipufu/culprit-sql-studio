@@ -7,6 +7,11 @@ export type MssqlSessionContext = { native_state: string,
  */
 login_established: boolean, tds_protocol_version: string | null, 
 /**
+ * Signed native sys.dm_exec_sessions.total_elapsed_time, in milliseconds since session establishment.
+ * Negative values remain raw facts but cannot supply a nonnegative age. This is not request work or CPU.
+ */
+elapsed_ms: string | null, 
+/**
  * Original sys.dm_exec_sessions database_id, scoped to this native source and point; not a global identity.
  * A reported zero is retained separately from an unacquired value and supplies no database association.
  */

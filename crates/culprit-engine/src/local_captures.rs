@@ -17,6 +17,8 @@ mod blocking;
 pub use blocking::{LocalActivityRead, LocalBlockingAnalysis};
 mod replication;
 pub use replication::LocalReplication;
+mod pool_settings;
+pub use pool_settings::LocalPoolSettings;
 mod session_census;
 pub use session_census::LocalSessionCensus;
 
@@ -44,6 +46,7 @@ pub enum LocalCaptureAnalysisKind {
     TableMemory,
     GroupReplication,
     Replication,
+    PoolSettings,
     Galera,
     BackupHistory,
     RequestMemory,
@@ -57,7 +60,7 @@ pub enum LocalCaptureAnalysisKind {
     SessionCensus,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 31] = [
         Self::PageServerReads,
         Self::MemoryClerks,
         Self::TempdbMetadataMemory,
@@ -77,6 +80,7 @@ impl LocalCaptureAnalysisKind {
         Self::TableMemory,
         Self::GroupReplication,
         Self::Replication,
+        Self::PoolSettings,
         Self::Galera,
         Self::BackupHistory,
         Self::RequestMemory,
@@ -97,6 +101,7 @@ impl LocalCaptureAnalysisKind {
         match self {
             Self::PageServerReads => QueryHistory,
             Self::Replication => LocalCaptureReadPlan::Replication,
+            Self::PoolSettings => LocalCaptureReadPlan::PoolSettings,
             Self::Blocking => Blocking,
             Self::SessionCensus => Activity,
             Self::MemoryClerks
@@ -136,6 +141,7 @@ impl LocalCaptureAnalysisKind {
 #[cfg(feature = "collector")]
 enum LocalCaptureReadPlan {
     Replication,
+    PoolSettings,
     Activity,
     QueryHistory,
     Snapshot(&'static [culprit_core::telemetry::SnapshotDataset]),
@@ -162,6 +168,7 @@ pub enum LocalCapturedAnalysis {
     Blocking(Box<LocalBlockingAnalysis>),
     SessionCensus(Box<LocalSessionCensus>),
     Replication(Box<LocalReplication>),
+    PoolSettings(Box<LocalPoolSettings>),
 }
 impl LocalCapturedAnalysis {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
@@ -173,6 +180,7 @@ impl LocalCapturedAnalysis {
             Self::Blocking(_) => LocalCaptureAnalysisKind::Blocking,
             Self::SessionCensus(_) => LocalCaptureAnalysisKind::SessionCensus,
             Self::Replication(_) => LocalCaptureAnalysisKind::Replication,
+            Self::PoolSettings(_) => LocalCaptureAnalysisKind::PoolSettings,
         }
     }
 }

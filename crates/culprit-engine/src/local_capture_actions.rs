@@ -4,6 +4,22 @@ use culprit_core::{Report, Result, SnapshotOptions, telemetry::DeliveryProblem};
 use std::path::Path;
 
 impl Workspace {
+    /// An authenticated shared-pool original remains independent of the later scanned database.
+    pub async fn scan_with_captured_pool_settings(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalPoolSettings,
+    ) -> Result<Report> {
+        if captured.connection() != name {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::pool_settings(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
     /// A saved connection authorizes lookup, while the injected reader authenticates the capture's journal owner.
     /// The request's operation includes queueing and local verification; this facade creates no replacement owner.
     pub async fn analyze_local_capture(

@@ -15,11 +15,16 @@ pub(crate) enum CapturedScanEvidence {
     TableMemory(Box<CapturedOperationalRead>),
     GroupReplication(Box<CapturedOperationalRead>),
     Galera(Box<CapturedOperationalRead>),
+    PoolSettings(Box<culprit_core::telemetry::CapturedPoolSettingsRead>),
     FullTextPopulations(Box<CapturedOperationalRead>),
     DatabasePerformanceCounters(Box<CapturedOperationalRead>),
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
 impl CapturedScanEvidence {
+    pub(crate) fn pool_settings(read: Box<culprit_core::telemetry::CapturedPoolSettingsRead>) -> Result<Self> {
+        culprit_checks::pool_settings::explain_captured(&read)?;
+        Ok(Self::PoolSettings(read))
+    }
     pub(crate) fn database_performance_counters(read: Box<CapturedOperationalRead>) -> Result<Self> {
         culprit_checks::performance_counters::explain_database_captured(&read)?;
         Ok(Self::DatabasePerformanceCounters(read))
@@ -61,6 +66,20 @@ impl CapturedScanEvidence {
     }
     pub(crate) fn attach(self, snapshot: &mut Snapshot) -> Result<()> {
         match self {
+            Self::PoolSettings(read) => {
+                culprit_checks::pool_settings::explain_captured(&read)?;
+                if snapshot.operations.pool_settings.as_deref().is_some_and(|original| {
+                    !matches!(
+                        original,
+                        culprit_core::telemetry::RecordedPoolSettingsRead::Captured { read: previous }
+                            if previous.as_ref() == read.as_ref()
+                    )
+                }) {
+                    return Err(DeliveryProblem::Conflict.error());
+                }
+                snapshot.operations.pool_settings =
+                    Some(Box::new(culprit_core::telemetry::RecordedPoolSettingsRead::Captured { read }));
+            }
             #[cfg(feature = "collector")]
             Self::CachedRuntime(read) => {
                 if snapshot.operations.cached_runtime.is_some() {

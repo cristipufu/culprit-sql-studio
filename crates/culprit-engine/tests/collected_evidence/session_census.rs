@@ -34,6 +34,9 @@ async fn original_idle_dormant_mars_unknown_and_source_gaps_reuse_the_same_censu
         assert_eq!(analysis.report.observed_sessions, expected.observed_sessions);
         assert_eq!(analysis.report.observed_requests, expected.observed_requests);
         assert_eq!(analysis.report.entries.len(), expected.entries.len());
+        assert_eq!(analysis.report.client_groups.entries, expected.client_groups.entries);
+        assert_eq!(analysis.report.client_groups.grouped_sessions, expected.client_groups.grouped_sessions);
+        assert_eq!(analysis.report.client_groups.ungrouped_sessions, expected.client_groups.ungrouped_sessions);
         for (actual, expected) in analysis.report.entries.iter().zip(expected.entries) {
             assert_eq!(actual.activity, expected.activity);
             assert_eq!(actual.fields, expected.fields);
@@ -61,6 +64,11 @@ async fn missing_mars_request_body_preserves_original_native_population_and_does
     assert_eq!((analysis.report.observed_sessions, analysis.report.observed_requests), (1, 1));
     assert_eq!(analysis.report.entries.len(), 1);
     assert!(!analysis.report.read_complete);
+    assert_eq!(
+        (analysis.report.client_groups.grouped_sessions, analysis.report.client_groups.ungrouped_sessions),
+        (0, 1)
+    );
+    assert!(analysis.report.client_groups.entries.is_empty());
     assert_eq!(fixture.recovery_object_reads(), opened);
 }
 
@@ -151,6 +159,67 @@ async fn original_native_session_database_facts_survive_replay_without_becoming_
                     assert!(reference.validate_canonical_record(&source, &TelemetryRecord::from(changed)).is_err());
                 }
             }
+        }
+        assert_eq!(fixture.recovery_object_reads(), opened);
+    }
+}
+
+#[tokio::test]
+async fn original_observed_client_groups_keep_exact_native_session_age_and_conflicting_mars_refusal_offline() {
+    for (case, sessions, requests) in [
+        (SessionCensusCase::GroupedClients, 2, 3),
+        (SessionCensusCase::GroupUnknownTotals, 2, 2),
+        (SessionCensusCase::ContradictoryMars, 0, 0),
+        (SessionCensusCase::NativeSignedElapsed, 2, 3),
+    ] {
+        let (source, rows) = test_support::session_census_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+        let analysis = culprit_engine::collected_resources::session_census(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.report.client_groups.grouped_sessions, sessions, "{case:?}");
+        assert_eq!(
+            analysis.report.client_groups.entries.iter().map(|group| group.observed_requests).sum::<u32>(),
+            requests
+        );
+        if let Some(group) = analysis.report.client_groups.entries.first() {
+            let value = |key: &str| group.fields.iter().find(|field| field.key == key).unwrap().value.as_deref();
+            if matches!(case, SessionCensusCase::GroupedClients) {
+                assert_eq!(value("session_age_ms"), Some("900000"));
+                assert_eq!(value("session_logical_reads"), Some("9007199254741000"));
+                assert_eq!(value("session_writes"), Some("5"));
+            } else if matches!(case, SessionCensusCase::NativeSignedElapsed) {
+                assert_eq!(value("session_age_ms"), None);
+                assert_eq!(value("session_logical_reads"), Some("9007199254741000"));
+                assert_eq!(value("session_writes"), Some("5"));
+                assert!(group.limitations.contains(&culprit_core::t!("view.session_census.groups.limit.elapsed")));
+                assert_eq!(
+                    analysis
+                        .report
+                        .entries
+                        .iter()
+                        .filter(|entry| entry
+                            .fields
+                            .iter()
+                            .any(|field| field.key == "session_elapsed_ms" && field.value.as_deref() == Some("-1")))
+                        .count(),
+                    2
+                );
+            } else {
+                assert_eq!(value("session_age_ms"), None);
+                assert_eq!(value("session_logical_reads"), None);
+                assert_eq!(value("session_writes"), Some("0"));
+            }
+        } else {
+            assert_eq!(analysis.report.client_groups.ungrouped_sessions, 1);
+        }
+        for entry in &analysis.report.entries {
+            let original = rows
+                .iter()
+                .find(|record| matches!(record, TelemetryRecord::Activity(row) if row.key == entry.activity))
+                .unwrap();
+            entry.reference.as_ref().unwrap().validate_canonical_record(&source, original).unwrap();
         }
         assert_eq!(fixture.recovery_object_reads(), opened);
     }

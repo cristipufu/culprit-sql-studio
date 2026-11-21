@@ -24,7 +24,7 @@ fn registered_source_versions_include_native_acquisition_policy_revisions() {
             ("mssql.pool-resource-history", 2),
             ("mssql.deadlock-history", 2),
             ("mssql.system-health-deadlocks", 2),
-            ("mssql.activity", 5),
+            ("mssql.activity", 6),
             ("mssql.page-wait-targets", 3),
             ("mssql.page-wait-tasks", 3),
             ("mssql.shared-tempdb-page-wait-targets", 4),
@@ -43,7 +43,7 @@ fn registered_source_versions_include_native_acquisition_policy_revisions() {
             ("mssql.cdc", 2),
             ("mssql.backup-history", 2),
             ("mssql.operational", 8),
-            ("mssql.shared-operational", 9),
+            ("mssql.shared-operational", 10),
             ("mssql.memory-failures", 2),
             ("mssql.plan-cache-summary", 2),
             ("mssql.missing-indexes", 2),
@@ -87,6 +87,7 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
     let from = "2020-01-01T06:00:00Z".to_owned();
     let until = "2020-01-01T07:00:00Z".to_owned();
     match selector {
+        RecipeSelector::ResourcePoolSettings => CollectionSelection::ResourcePoolSettings,
         RecipeSelector::Collection(TelemetryCollection::QueryHistory) => {
             CollectionSelection::QueryHistory { from, until }
         }
@@ -415,7 +416,11 @@ async fn native_resource_discovery_derives_its_routes_from_registrations_and_obs
     };
     assert_eq!(
         collections_for(&pool, crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE),
-        vec![TelemetryCollection::ResourceHistory, TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures)]
+        vec![
+            TelemetryCollection::ResourceHistory,
+            TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures),
+            TelemetryCollection::Snapshot(SnapshotDataset::Settings)
+        ]
     );
 }
 
@@ -599,4 +604,21 @@ fn selected_table_memory_recipe_uses_actual_bounded_factory_and_remains_manual_u
         ..request
     };
     assert!(open(Arc::new(Pool::new(tiberius::Config::new(), None)), &broad, "original.invalid".into(), 1433).is_err());
+}
+
+#[test]
+fn pool_governance_settings_are_one_closed_investigation_recipe_with_a_total_including_setup() {
+    let recipe = declarations().into_iter().find(|recipe| recipe.id == "mssql.resource-pool-settings").unwrap();
+    assert_eq!(recipe.subjects, vec![RecipeSubject::Database, RecipeSubject::Shared(SharedResourceKind::Pool)]);
+    assert_eq!(recipe.selector, RecipeSelector::ResourcePoolSettings);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.budget.max_queries, 9);
+    assert_eq!(crate::read::ReadSession::budget_after_setup(recipe.budget.clone()).unwrap().max_queries, 8);
+    let original =
+        CollectionBudget { max_queries: 7, total_timeout_ms: 1500, statement_timeout_ms: 500, ..Default::default() };
+    let bounded = state::pool_settings_budget(&original);
+    assert_eq!(bounded.max_queries, 7);
+    assert_eq!(bounded.total_timeout_ms, 1500);
+    assert_eq!(bounded.statement_timeout_ms, 500);
 }

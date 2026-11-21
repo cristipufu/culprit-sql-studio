@@ -1352,3 +1352,6 @@ mod hyperscale_replication_tests {
 
 mod galera;
 pub(crate) use galera::{compact as compact_galera, galera};
+
+mod pool_settings;
+pub(crate) use pool_settings::{compact as compact_pool_settings, pool_settings};

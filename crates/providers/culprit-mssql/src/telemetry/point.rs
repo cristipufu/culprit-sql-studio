@@ -28,6 +28,7 @@ pub(super) enum Family {
     Tuning(crate::query_store::tuning::Kind),
     WaitCounters,
     Settings(crate::settings::Kind),
+    PoolSettings,
 }
 pub(super) enum Availability {
     Available,
@@ -42,10 +43,11 @@ pub(super) struct Records {
     pub values: Vec<TelemetryRecord>,
     pub complete_scope: bool,
     pub error_code: Option<culprit_core::ErrorCode>,
+    pub pool_settings_point: Option<MssqlPoolSettingsPoint>,
 }
 impl Records {
     fn complete(values: Vec<TelemetryRecord>) -> Self {
-        Self { values, complete_scope: true, error_code: None }
+        Self { values, complete_scope: true, error_code: None, pool_settings_point: None }
     }
 }
 pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
@@ -155,6 +157,7 @@ impl Family {
             Self::Tuning(kind) => kind.source(),
             Self::WaitCounters => &sources::WAITS,
             Self::Settings(kind) => kind.source(),
+            Self::PoolSettings => &sources::POOL_GOVERNANCE_SETTINGS,
         }
     }
     pub fn requires_metadata(self) -> bool {
@@ -225,6 +228,7 @@ impl Family {
                     values: vec![TelemetryRecord::Operational(row)],
                     complete_scope,
                     error_code: None,
+                    pool_settings_point: None,
                 }));
             }
             Self::MemoryClerks => counter_sets(self.source().name, crate::memory_clerks::read(reader, limit).await?)?,
@@ -239,6 +243,7 @@ impl Family {
                     values: counter_sets(self.source().name, read.counters)?,
                     complete_scope: read.complete_scope,
                     error_code: read.error_code,
+                    pool_settings_point: None,
                 }));
             }
             Self::Schedulers => counter_sets(self.source().name, crate::schedulers::read(reader, limit).await?)?,
@@ -252,7 +257,12 @@ impl Family {
                     .into_iter()
                     .map(|fact| TelemetryRecord::Tuning(TuningObservation { source: kind.source().name.into(), fact }))
                     .collect();
-                return Ok(ReadOutcome::Observed(Records { values, complete_scope, error_code: None }));
+                return Ok(ReadOutcome::Observed(Records {
+                    values,
+                    complete_scope,
+                    error_code: None,
+                    pool_settings_point: None,
+                }));
             }
             Self::MissingIndexes => {
                 let read = crate::missing_indexes::read(reader, limit).await?;
@@ -269,7 +279,12 @@ impl Family {
                         }))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                return Ok(ReadOutcome::Observed(Records { values, complete_scope: error_code.is_none(), error_code }));
+                return Ok(ReadOutcome::Observed(Records {
+                    values,
+                    complete_scope: error_code.is_none(),
+                    error_code,
+                    pool_settings_point: None,
+                }));
             }
             Self::PlanCacheSummary => {
                 if limit < 6 {
@@ -306,6 +321,18 @@ impl Family {
                 };
                 vec![TelemetryRecord::Operational(crate::version_store::persistent::observation(sample))]
             }
+            Self::PoolSettings => {
+                let Some(super::subject::Identity::ResourcePoolSettings(owner)) = owner else {
+                    return Err(crate::read::invalid_data());
+                };
+                let read = crate::resources::pool::read_settings(reader, owner, limit).await?;
+                return Ok(ReadOutcome::Observed(Records {
+                    values: read.values.into_iter().map(TelemetryRecord::Setting).collect(),
+                    complete_scope: true,
+                    error_code: None,
+                    pool_settings_point: Some(read.point),
+                }));
+            }
             Self::Settings(kind) => {
                 let values = match owner {
                     Some(super::subject::Identity::LocalDatabase(context)) => {
@@ -341,11 +368,27 @@ impl Family {
                 let complete_scope = facts.native_rows == profile.database_field_ids.len();
                 let values =
                     crate::performance::observations(facts)?.into_iter().map(TelemetryRecord::Operational).collect();
-                return Ok(ReadOutcome::Observed(Records { values, complete_scope, error_code: None }));
+                return Ok(ReadOutcome::Observed(Records {
+                    values,
+                    complete_scope,
+                    error_code: None,
+                    pool_settings_point: None,
+                }));
             }
             Self::PerformanceCounters => {
-                let facts = crate::performance::read(reader, limit).await?;
-                crate::performance::observations(facts)?.into_iter().map(TelemetryRecord::Operational).collect()
+                let Some(super::subject::Identity::Instance(owner)) = owner else {
+                    return Ok(ReadOutcome::NotApplicable);
+                };
+                let facts = crate::performance::read_for_instance(reader, limit, owner).await?;
+                let complete_scope = facts.resource_governor_complete;
+                let values =
+                    crate::performance::observations(facts)?.into_iter().map(TelemetryRecord::Operational).collect();
+                return Ok(ReadOutcome::Observed(Records {
+                    values,
+                    complete_scope,
+                    error_code: None,
+                    pool_settings_point: None,
+                }));
             }
             Self::Queue(kind) => {
                 let sample = crate::queues::read(reader, kind).await?;
@@ -353,6 +396,7 @@ impl Family {
                     complete_scope: sample.attribution_complete(),
                     error_code: None,
                     values: vec![TelemetryRecord::Operational(crate::queues::observation(sample))],
+                    pool_settings_point: None,
                 }));
             }
             Self::CleanupHorizon => {
@@ -363,6 +407,7 @@ impl Family {
                     complete_scope: horizon.oldest_unattributed_versioning.is_none(),
                     error_code: None,
                     values: vec![TelemetryRecord::Operational(crate::open_transactions::observation(horizon))],
+                    pool_settings_point: None,
                 }));
             }
             Self::VersionStore => vec![TelemetryRecord::Operational(crate::version_store::observation(

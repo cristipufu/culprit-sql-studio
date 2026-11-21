@@ -33,6 +33,7 @@ fn saved_report() -> Report {
         ratios: None,
         entries: (0..12)
             .map(|index| PerformanceCounterEntry {
+                resource_governor: None,
                 observation_key: "private-native-parent".into(),
                 counter_key: format!("private-native-key-{index}"),
                 field: "granted_workspace".into(),

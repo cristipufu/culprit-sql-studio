@@ -39,6 +39,21 @@ pub(super) fn captured(analysis: &LocalSessionCensus) -> Result<Value> {
             "entries_available":report.entries.len(),"entries_presented":entries.len(),
             "entries_omitted":report.entries.len().saturating_sub(entries.len()),
             "entries_limited":report.entries_limited,"entries":entries,
+            "client_groups":{
+                "title":report.client_groups.title,"summary":report.client_groups.summary,
+                "limitations":report.client_groups.limitations,
+                "grouped_sessions":report.client_groups.grouped_sessions,
+                "ungrouped_sessions":report.client_groups.ungrouped_sessions,
+                "groups_available":report.client_groups.available_groups,
+                "entries_limited":report.client_groups.entries_limited,
+                "groups_presented":report.client_groups.entries.len().min(ENTRY_LIMIT),
+                "groups_omitted":report.client_groups.available_groups as usize
+                    - report.client_groups.entries.len().min(ENTRY_LIMIT),
+                "entries":report.client_groups.entries.iter().take(ENTRY_LIMIT).map(|group|json!({
+                    "observed_sessions":group.observed_sessions,"observed_current_requests":group.observed_requests,
+                    "fields":group.fields,"limitations":group.limitations,
+                })).collect::<Vec<_>>(),
+            },
         },
         "collected_from":original.collected_from(),"collected_until":original.collected_until(),
         "local_verification_bytes":original.bytes_read(),

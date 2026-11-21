@@ -28,6 +28,7 @@ pub(in crate::telemetry) async fn read<R: NativeRead>(
         // Complete native table snapshot only. The pure view separately withholds historical completeness.
         complete_scope: true,
         error_code: None,
+        pool_settings_point: None,
     }))
 }
 

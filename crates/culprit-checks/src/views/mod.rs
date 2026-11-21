@@ -55,6 +55,7 @@ pub mod configured_log_rates;
 pub mod database_properties;
 pub mod hyperscale_log_components;
 pub mod memory_clerks;
+pub mod pool_settings;
 pub mod suspect_pages;
 pub mod table_full_text;
 pub mod tempdb_metadata_memory;

@@ -91,6 +91,29 @@ impl CompletedSnapshot {
         Ok(read)
     }
 
+    /// Retain the original Settings stream through the same completed-file/position verifier.
+    pub fn into_pool_settings_read(self) -> Result<culprit_core::telemetry::CapturedPoolSettingsRead> {
+        self.validate_original_positions()?;
+        let observations = self
+            .records
+            .into_iter()
+            .map(|row| match row.record {
+                TelemetryRecord::Setting(value) => Ok(value),
+                _ => Err(DeliveryProblem::UnsupportedSchema.error()),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let read = culprit_core::telemetry::CapturedPoolSettingsRead {
+            origin: self.original,
+            description: self.source,
+            observations,
+            read_complete: true,
+        };
+        if !read.is_valid() {
+            return Err(integrity());
+        }
+        Ok(read)
+    }
+
     /// Retain the whole original Operational dataset, including unrelated source rows and coverage.
     pub fn into_operational_read(self) -> Result<CapturedOperationalRead> {
         if !self

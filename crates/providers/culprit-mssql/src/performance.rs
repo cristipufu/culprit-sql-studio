@@ -12,8 +12,11 @@ mod database;
 #[cfg(test)]
 pub(crate) use database::tests as test_support;
 mod ratios;
+mod resource_governor;
+mod row;
 pub(crate) use database::read_current;
 pub(crate) use ratios::PerformanceRead;
+pub(crate) use resource_governor::read as read_for_instance;
 pub(crate) const MAX_COUNTERS: usize = MAX_NATIVE_COUNTERS;
 const COUNTER_COLUMNS: &str = "RTRIM(object_name) AS native_object, RTRIM(counter_name) AS native_name,\nRTRIM(instance_name) AS native_instance, cntr_value AS value, cntr_type AS native_type";
 #[derive(Clone, Copy)]
@@ -45,9 +48,17 @@ fn specs() -> &'static [PerformanceCounterSpec] {
     culprit_core::Engine::Mssql.spec().performance_counters().map(|profile| profile.fields).unwrap_or_default()
 }
 fn sql() -> String {
+    query(false)
+}
+fn query(governed: bool) -> String {
     // The selector grammar comes only from these fixed specifications, never from a database value or user input.
-    let filter = specs()
-        .iter()
+    let investigation = culprit_core::Engine::Mssql
+        .spec()
+        .performance_counters()
+        .map(|profile| profile.investigation_fields)
+        .unwrap_or_default();
+    let selected = specs().iter().chain(investigation.iter().filter(|_| governed));
+    let filter = selected
         .map(|spec| {
             let family =
                 spec.object_family.map(|family| format!("object_name LIKE N'%{family}%' AND ")).unwrap_or_default();
@@ -63,14 +74,16 @@ fn sql() -> String {
         })
         .collect::<Vec<_>>()
         .join(" OR ");
+    let extra = if governed { resource_governor::columns() } else { String::new() };
+    let relation = if governed { resource_governor::FROM } else { "FROM sys.dm_os_performance_counters" };
     format!(
         "DECLARE @counter_observed_at datetime2(7)=SYSUTCDATETIME();
 /* culprit */ SELECT {COUNTER_COLUMNS},
 CONVERT(nvarchar(40),@counter_observed_at,127)+N'Z' AS counter_observed_at,
 CONVERT(int,SERVERPROPERTY(N'EngineEdition')) AS engine_edition,
 CONVERT(nvarchar(128),DATABASEPROPERTYEX(DB_NAME(),N'Edition')) AS database_edition,
-CONVERT(nvarchar(128),DATABASEPROPERTYEX(DB_NAME(),N'ReplicaID')) AS replica_id
-FROM sys.dm_os_performance_counters WHERE {filter} OPTION(MAXDOP 1)"
+CONVERT(nvarchar(128),DATABASEPROPERTYEX(DB_NAME(),N'ReplicaID')) AS replica_id{extra}
+{relation} WHERE {filter} OPTION(MAXDOP 1)"
     )
 }
 pub(crate) async fn read<R: NativeRead>(reader: &mut R, limit: usize) -> Result<PerformanceRead> {
@@ -92,54 +105,15 @@ fn decode(rows: &[crate::value::Rec], limit: usize, population: Population<'_>) 
     let mut counters = Vec::new();
     let mut rejected = Vec::new();
     for row in rows {
-        let native_object = text(row, "native_object")?;
-        let native_name = text(row, "native_name")?;
-        let instance = optional_text(row, "native_instance")?.ok_or_else(invalid_data)?;
-        let native_instance = (!instance.is_empty()).then_some(instance);
-        let spec =
-            population.field(&native_object, &native_name, native_instance.as_deref()).ok_or_else(invalid_data)?;
-        let identity =
-            serde_json::to_vec(&(&native_object, &native_name, &native_instance)).map_err(|_| invalid_data())?;
-        if !identities.insert(identity.clone()) {
+        let input = row::CounterInput::decode(row)?;
+        let spec = population.field(input.object(), input.name(), input.instance()).ok_or_else(invalid_data)?;
+        if !identities.insert(input.identity().to_owned()) {
             return Err(invalid_data());
         }
-        let key = digest(&identity);
-        let code = i32::try_from(signed_integer(row, "native_type")?).map_err(|_| invalid_data())?;
-        let value = signed_integer(row, "value")?;
-        if value < 0 && spec.ratio.is_some() {
-            rejected.push(culprit_core::telemetry::CounterRatioGap {
-                key,
-                raw_value: value.to_string(),
-                native_object,
-                native_name,
-                native_instance,
-                native_type: code.to_string(),
-            });
-            continue;
+        match input.measurement(spec, population.scope())? {
+            row::CounterMeasurement::Value(counter) => counters.push(counter),
+            row::CounterMeasurement::Rejected(gap) => rejected.push(gap),
         }
-        if value < 0 {
-            return Err(invalid_data());
-        }
-        // These generic Windows native types are documented by sys.dm_os_performance_counters. A name alone
-        // never supplies fraction semantics: unexpected native codes remain exact, unqualified inputs.
-        // https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-performance-counters-transact-sql
-        let (nature, unit) = spec.meaning(code);
-        let counter = NativeCounterSample {
-            key,
-            value: culprit_core::telemetry::MeasurementValue::Integer(value.to_string()),
-            unit,
-            nature,
-            scope: population.scope(),
-            reset: ResetMarker::Unknown,
-            native_object,
-            native_name,
-            native_instance,
-            native_type: Some(code.to_string()),
-        };
-        if !counter.is_valid() {
-            return Err(invalid_data());
-        }
-        counters.push(counter);
     }
     match population {
         Population::Shared => ratios::captured(rows, counters, rejected),
@@ -195,7 +169,10 @@ pub(crate) fn sampled_rates(
         .collect()
 }
 pub(crate) fn observations(read: PerformanceRead) -> Result<Vec<OperationalObservation>> {
-    Ok(vec![OperationalObservation::from_counters(culprit_core::source_id::PERFORMANCE_COUNTERS, read.sample)?])
+    std::iter::once(read.sample)
+        .chain(read.resource_governor)
+        .map(|sample| OperationalObservation::from_counters(culprit_core::source_id::PERFORMANCE_COUNTERS, sample))
+        .collect()
 }
 
 #[cfg(test)]

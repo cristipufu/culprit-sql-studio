@@ -20,6 +20,11 @@ pub(super) fn append(
             _ => return Err(invalid()),
         };
         entries.push(PerformanceCounterEntry {
+            resource_governor: if resource_governor_counter_set(sample) {
+                Some(MssqlResourceGovernorCounterSet::from_sample(sample)?.context())
+            } else {
+                None
+            },
             observation_key: observation_key.clone(),
             counter_key: row.key.clone(),
             field: field.id.into(),
@@ -55,6 +60,7 @@ pub(super) fn append(
         let field =
             profile.field(&gap.native_object, &gap.native_name, gap.native_instance.as_deref()).ok_or_else(invalid)?;
         entries.push(PerformanceCounterEntry {
+            resource_governor: None,
             observation_key: observation_key.clone(),
             counter_key: gap.key.clone(),
             field: field.id.into(),
@@ -169,6 +175,8 @@ fn family_label(family: PerformanceCounterFamily) -> String {
         PerformanceCounterFamily::TemporaryTables => t!("view.performance_counters.family.temporary_tables"),
         PerformanceCounterFamily::TransactionLog => t!("view.performance_counters.family.transaction_log"),
         PerformanceCounterFamily::LocalSsdCache => t!("view.performance_counters.family.local_ssd_cache"),
+        PerformanceCounterFamily::WorkloadGroup => t!("view.performance_counters.family.workload_group"),
+        PerformanceCounterFamily::ResourcePool => t!("view.performance_counters.family.resource_pool"),
     }
 }
 fn explanation(family: PerformanceCounterFamily) -> String {
@@ -181,5 +189,7 @@ fn explanation(family: PerformanceCounterFamily) -> String {
         PerformanceCounterFamily::TemporaryTables => t!("view.performance_counters.explain.temporary_tables"),
         PerformanceCounterFamily::TransactionLog => t!("view.performance_counters.explain.transaction_log"),
         PerformanceCounterFamily::LocalSsdCache => t!("view.performance_counters.explain.local_ssd_cache"),
+        PerformanceCounterFamily::WorkloadGroup => t!("view.performance_counters.explain.workload_group"),
+        PerformanceCounterFamily::ResourcePool => t!("view.performance_counters.explain.resource_pool"),
     }
 }

@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 pub(crate) struct PerformanceRead {
     pub(crate) sample: NativeCounterSet,
     pub(crate) native_rows: usize,
+    pub(crate) resource_governor: Vec<NativeCounterSet>,
+    pub(crate) resource_governor_complete: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,5 +120,10 @@ pub(super) fn captured(
     };
     profile.validate(&sample)?;
     // The native witness is the original raw row count, independently of one aggregate archive observation.
-    Ok(PerformanceRead { sample, native_rows: rows.len() })
+    Ok(PerformanceRead {
+        sample,
+        native_rows: rows.len(),
+        resource_governor: Vec::new(),
+        resource_governor_complete: true,
+    })
 }

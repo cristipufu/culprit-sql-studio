@@ -14,7 +14,9 @@ const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
 #[cfg(test)]
 mod database_counters;
 mod local_point;
+mod pool_settings;
 mod settings;
+pub(super) use pool_settings::bounded_budget as pool_settings_budget;
 pub(super) mod suspect_pages;
 mod tuning;
 pub(super) use local_point::bounded_budget as local_point_budget;
@@ -22,7 +24,9 @@ pub(super) use settings::bounded_budget as settings_budget;
 pub(super) use tuning::bounded_budget as tuning_budget;
 
 fn native_budget(request: &CollectionRequest) -> CollectionBudget {
-    if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::MemoryFailures }) {
+    if pool_settings::selected(request) {
+        pool_settings_budget(&request.budget)
+    } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::MemoryFailures }) {
         memory_failure_budget(&request.budget)
     } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::Tuning }) {
         tuning_budget(&request.budget)
@@ -59,6 +63,7 @@ pub(super) struct StateSource<R = ReadSession> {
     identity: Option<subject::Identity>,
     database_authority: subject::DatabaseAuthority,
     rows: Vec<TelemetryRecord>,
+    pool_settings_point: Option<MssqlPoolSettingsPoint>,
     offset: usize,
     progress: Progress,
 }
@@ -70,9 +75,13 @@ impl StateSource {
 impl<R: NativeRead> StateSource<R> {
     fn with_io(io: R, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         request.validate()?;
-        let CollectionSelection::Snapshot { dataset } = request.selection else {
+        let dataset = pool_settings::dataset(&request.selection)?;
+        if !pool_settings::selected(request)
+            && dataset == SnapshotDataset::Settings
+            && matches!(&request.subject, CollectionSubject::Shared { .. })
+        {
             return Err(invalid_data());
-        };
+        }
         subject::validate_dataset(&request.subject, dataset)?;
         let database_authority = subject::DatabaseAuthority::for_source(dataset, &request.subject)?;
         let mut request = request.clone();
@@ -95,6 +104,7 @@ impl<R: NativeRead> StateSource<R> {
             identity: None,
             database_authority,
             rows: vec![],
+            pool_settings_point: None,
             offset: 0,
             progress: Progress::New,
         })
@@ -146,6 +156,13 @@ impl<R: NativeRead> StateSource<R> {
                     self.identity.as_ref(),
                 )
                 .await;
+            if let Ok(point::ReadOutcome::Observed(batch)) = &result
+                && let Some(point) = &batch.pool_settings_point
+            {
+                if self.pool_settings_point.replace(point.clone()).is_some() {
+                    return Err(invalid_data());
+                }
+            }
             let outcome = record_family(*family, result, remaining, &mut self.rows)?;
             outcomes.push(outcome);
         }
@@ -200,25 +217,33 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             return Err(invalid_data());
         }
         self.progress = Progress::Failed;
-        let CollectionSelection::Snapshot { dataset } = self.request.selection else {
-            return Err(invalid_data());
-        };
+        let dataset = pool_settings::dataset(&self.request.selection)?;
         let shared = subject::is_shared(&self.request.subject)?;
-        let families = if shared { point::shared_families(dataset)? } else { point::families(dataset)? };
+        let families = if pool_settings::selected(&self.request) {
+            vec![point::Family::PoolSettings]
+        } else if shared {
+            point::shared_families(dataset)?
+        } else {
+            point::families(dataset)?
+        };
         let detail = if !shared && dataset == SnapshotDataset::Operational {
             crate::database_identity::log_rates::Detail::ConfiguredLogRates
         } else {
             crate::database_identity::log_rates::Detail::Identity
         };
-        let read = subject::read_detail(
-            &mut self.io,
-            &self.request.subject,
-            &self.host,
-            self.port,
-            detail,
-            self.database_authority,
-        )
-        .await?;
+        let read = if pool_settings::selected(&self.request) {
+            pool_settings::read_subject(&mut self.io, &self.request.subject, &self.host, self.port).await?
+        } else {
+            subject::read_detail(
+                &mut self.io,
+                &self.request.subject,
+                &self.host,
+                self.port,
+                detail,
+                self.database_authority,
+            )
+            .await?
+        };
         if dataset == SnapshotDataset::Settings {
             settings::require_profile(&read.identity)?;
         }
@@ -294,7 +319,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         let description = CollectionDescription {
             partition: self.identity.as_ref().ok_or_else(invalid_data)?.partition()?,
             target,
-            source: if shared {
+            source: if pool_settings::selected(&self.request) {
+                MSSQL_POOL_SETTINGS_SOURCE
+            } else if shared {
                 if dataset == SnapshotDataset::MemoryFailures {
                     "shared-memory-failure-state"
                 } else {
@@ -358,7 +385,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             }
             .into(),
             continuity: SourceContinuity::Unverified,
-            observation: local_point::observation(
+            observation: pool_settings::observation(
                 StateSnapshotDescription {
                     dataset,
                     observed_from,
@@ -367,6 +394,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     sources,
                 },
                 self.identity.as_ref().ok_or_else(invalid_data)?,
+                self.pool_settings_point.clone(),
             )?,
         };
         if !description.matches_request(&self.request) {
@@ -428,7 +456,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             .and_then(|source| source.observation.snapshot())
             .ok_or_else(invalid_data)?
             .observed_until;
-        let confirmed = self.identity.as_ref().ok_or_else(invalid_data)?.confirmed_by(&identity, until);
+        let description = self.description.as_ref().ok_or_else(invalid_data)?;
+        let confirmed = self.identity.as_ref().ok_or_else(invalid_data)?.confirmed_by(&identity, until)
+            && pool_settings::confirmed_by(description, &identity);
         self.progress = Progress::Finished;
         Ok(culprit_core::telemetry::SourceCompletion::verified_if(confirmed))
     }

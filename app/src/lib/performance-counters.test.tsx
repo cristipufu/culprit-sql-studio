@@ -8,6 +8,31 @@ import french from "../../../locales/fr.json" with { type: "json" };
 import german from "../../../locales/de.json" with { type: "json" };
 import { type Catalog, language, registerCatalogs, setLanguage, t } from "./i18n";
 
+test("native group and pool IDs stay folded shared context with a separate unknown-offset statistics clock", () => {
+  const report = performanceCounterReport(1);
+  const entry = report.entries[0]!;
+  const originalClock = entry.observed_at;
+  entry.resource_governor = { kind: "workload-group", native_group_id: "3", native_pool_id: "2", statistics_started_without_offset: "2019-12-31T22:00:00.0000000" };
+  entry.native_instance = "<img src=x onerror=alert(1)>";
+  const html = renderToStaticMarkup(<PerformanceCounters report={report} />);
+  for (const key of ["governor_group_id", "governor_pool_id", "governor_statistics_started"]) expect(html).toContain(t(`view.performance_counters.native.${key}`));
+  expect(html).toContain("2019-12-31T22:00:00.0000000");
+  expect(html).toContain(originalClock!);
+  expect(html).toContain("&lt;img");
+  expect(html).not.toContain("<img");
+  expect(html).not.toContain("<details open");
+  expect(html).not.toContain("sig-dot");
+  expect(report.database).toBeNull();
+  expect(report.native_database_id).toBeNull();
+  entry.resource_governor = { kind: "resource-pool", native_group_id: null, native_pool_id: null, statistics_started_without_offset: null };
+  const unknown = renderToStaticMarkup(<PerformanceCounters report={report} />);
+  expect(unknown).toContain(t("view.performance_counters.native.governor_pool_id"));
+  expect(unknown).not.toContain(t("view.performance_counters.native.governor_group_id"));
+  expect(unknown).toContain(t("view.performance_counters.unknown"));
+  expect(unknown).not.toContain("2019-12-31T22:00:00");
+  expect(entry.observed_at).toBe(originalClock);
+});
+
 test("native performance inputs stay folded, paged and exact without a pressure grade or HTML rendering", () => {
   const report = performanceCounterReport();
   report.entries[0]!.metric.label = "<img src=x onerror=alert(1)>";

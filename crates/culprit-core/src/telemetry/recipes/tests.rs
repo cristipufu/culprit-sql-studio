@@ -165,3 +165,33 @@ fn a_native_provider_catalog_cannot_claim_the_collectors_derived_diagnostic_sour
     assert!(derived.is_valid(), "the descriptor is well formed, but its ownership is not native");
     assert!(!recipe_catalog_is_valid(&[derived]));
 }
+
+#[test]
+fn resource_pool_settings_do_not_overlap_ordinary_database_settings_or_accept_instance_subjects() {
+    let mut recipe = descriptor();
+    recipe.id = "source.resource-pool-settings".into();
+    recipe.selector = RecipeSelector::ResourcePoolSettings;
+    recipe.subjects.push(RecipeSubject::Shared(SharedResourceKind::Pool));
+    let mut request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::ResourcePoolSettings,
+        budget: CollectionBudget::default(),
+    };
+    assert!(request.validate().is_ok() && recipe.accepts(&request));
+    let mut ordinary = descriptor();
+    ordinary.selector = RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Settings));
+    assert!(!ordinary.accepts(&request));
+    assert!(recipe_catalog_is_valid(&[ordinary, recipe.clone()]));
+    request.selection = CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings };
+    assert!(!recipe.accepts(&request));
+    request.selection = CollectionSelection::ResourcePoolSettings;
+    request.subject = CollectionSubject::Shared {
+        resource: SharedResourceIdentity {
+            engine: crate::Engine::Mssql,
+            kind: SharedResourceKind::Instance,
+            namespace: NativeIdentity::new("server"),
+            native: NativeIdentity::new("process"),
+        },
+    };
+    assert!(request.validate().is_err());
+}

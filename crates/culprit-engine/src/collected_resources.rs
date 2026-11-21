@@ -176,3 +176,6 @@ pub use group_replication::group_replication;
 
 mod galera;
 pub use galera::galera;
+
+mod pool_settings;
+pub use pool_settings::pool_settings;

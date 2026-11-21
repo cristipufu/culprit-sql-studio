@@ -2,6 +2,13 @@
 use super::*;
 mod database;
 pub use database::*;
+mod resource_governor;
+pub use resource_governor::{
+    MSSQL_RESOURCE_GOVERNOR_COUNTER_KIND, MSSQL_RESOURCE_GOVERNOR_COUNTER_PROFILE,
+    MSSQL_RESOURCE_GOVERNOR_REQUEST_PROPERTY, MssqlResourceGovernorCounterContext, MssqlResourceGovernorCounterKind,
+    MssqlResourceGovernorCounterSet, resource_governor_candidate, resource_governor_counter_set,
+    resource_governor_fits_source, resource_governor_requested_rows,
+};
 
 /// A saved scan retains the indivisible original or an explicit population-specific evidence gap.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
@@ -47,6 +54,8 @@ pub enum PerformanceCounterFamily {
     TemporaryTables,
     TransactionLog,
     LocalSsdCache,
+    WorkloadGroup,
+    ResourcePool,
 }
 
 pub struct PerformanceCounterSpec {
@@ -78,6 +87,8 @@ pub struct PerformanceCounterProfile {
     pub native_object: &'static str,
     pub selection: &'static str,
     pub fields: &'static [PerformanceCounterSpec],
+    /// Explicit instance investigations only; ordinary/default selection remains `fields`.
+    pub investigation_fields: &'static [PerformanceCounterSpec],
     /// Explicit native descriptors eligible for the separately bound selected-database population.
     pub database_field_ids: &'static [&'static str],
 }
@@ -94,6 +105,9 @@ impl PerformanceCounterProfile {
             })
     }
     pub fn matches(&self, sample: &NativeCounterSet) -> bool {
+        if resource_governor_counter_set(sample) {
+            return true;
+        }
         if database_performance_candidate(sample) {
             return true;
         }
@@ -101,7 +115,22 @@ impl PerformanceCounterProfile {
             && sample.identity.qualifiers.get("native_object").is_some_and(|value| value == self.native_object)
     }
     pub fn field(&self, object: &str, name: &str, instance: Option<&str>) -> Option<&PerformanceCounterSpec> {
-        self.fields.iter().find(|field| field.matches(object, name, instance))
+        self.fields
+            .iter()
+            .find(|field| field.matches(object, name, instance))
+            .or_else(|| self.investigation_field(object, name, instance))
+    }
+    pub fn investigation_field(
+        &self,
+        object: &str,
+        name: &str,
+        instance: Option<&str>,
+    ) -> Option<&PerformanceCounterSpec> {
+        self.investigation_fields.iter().find(|field| {
+            field.native_name == name
+                && field.instances.accepts(instance)
+                && field.object_family.is_some_and(|family| object.ends_with(&format!(":{family}")))
+        })
     }
     pub fn database_fields(&self) -> impl Iterator<Item = &PerformanceCounterSpec> {
         self.fields.iter().filter(|field| self.database_field_ids.contains(&field.id))
@@ -119,14 +148,16 @@ impl PerformanceCounterProfile {
         name: &str,
         instance: Option<&str>,
     ) -> Option<&PerformanceCounterSpec> {
-        if database_performance_candidate(sample) {
+        if resource_governor_counter_set(sample) {
+            self.investigation_field(object, name, instance)
+        } else if database_performance_candidate(sample) {
             if instance == sample.properties.get(DATABASE_PERFORMANCE_NAME_PROPERTY).map(String::as_str) {
                 self.database_field(object, name)
             } else {
                 None
             }
         } else {
-            self.field(object, name, instance)
+            self.fields.iter().find(|field| field.matches(object, name, instance))
         }
     }
 
@@ -139,7 +170,13 @@ impl PerformanceCounterProfile {
         if !sample.is_valid() || !self.matches(sample) || sample.scope != crate::MeasurementScope::Server {
             return Err(CollectionStop::InvalidPage.error());
         }
-        if sample.properties.get(PERFORMANCE_COUNTER_PROFILE_PROPERTY).is_some_and(|value| value != self.selection)
+        let governed = resource_governor_counter_set(sample);
+        if governed {
+            MssqlResourceGovernorCounterSet::from_sample(sample)?;
+        }
+        resource_governor_requested_rows(sample)?;
+        let selection = if governed { MSSQL_RESOURCE_GOVERNOR_COUNTER_PROFILE } else { self.selection };
+        if sample.properties.get(PERFORMANCE_COUNTER_PROFILE_PROPERTY).is_some_and(|value| value != selection)
             || sample.counters.len() + sample.ratio_gaps.len() > MAX_NATIVE_COUNTERS
             || sample.counters.iter().any(|counter| counter.reset != crate::ResetMarker::Unknown)
         {
@@ -149,7 +186,12 @@ impl PerformanceCounterProfile {
         let mut native_rows = std::collections::BTreeSet::new();
         for counter in &sample.counters {
             let field = self
-                .field(&counter.native_object, &counter.native_name, counter.native_instance.as_deref())
+                .field_in_sample(
+                    sample,
+                    &counter.native_object,
+                    &counter.native_name,
+                    counter.native_instance.as_deref(),
+                )
                 .ok_or_else(|| CollectionStop::InvalidPage.error())?;
             let meaning = match counter.native_type.as_deref() {
                 Some(raw) => {
@@ -236,10 +278,11 @@ impl PerformanceCounterProfile {
         Ok(Some(at))
     }
     pub fn declares_selection(&self, sample: &NativeCounterSet) -> bool {
-        sample
-            .properties
-            .get(PERFORMANCE_COUNTER_PROFILE_PROPERTY)
-            .is_some_and(|value| value == self.selection || value == DATABASE_PERFORMANCE_COUNTER_PROFILE)
+        sample.properties.get(PERFORMANCE_COUNTER_PROFILE_PROPERTY).is_some_and(|value| {
+            value == self.selection
+                || value == DATABASE_PERFORMANCE_COUNTER_PROFILE
+                || value == MSSQL_RESOURCE_GOVERNOR_COUNTER_PROFILE
+        })
     }
 }
 

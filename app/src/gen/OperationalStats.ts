@@ -19,6 +19,7 @@ import type { OperationalCounter } from "./OperationalCounter";
 import type { PageWaitSnapshot } from "./PageWaitSnapshot";
 import type { RecordedOperationalRead } from "./RecordedOperationalRead";
 import type { RecordedPerformanceCounters } from "./RecordedPerformanceCounters";
+import type { RecordedPoolSettingsRead } from "./RecordedPoolSettingsRead";
 import type { SequenceCapacity } from "./SequenceCapacity";
 import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
@@ -41,7 +42,7 @@ database_performance_counters?: RecordedPerformanceCounters,
 /**
  * One authenticated selected-table memory original, independent of a later scan's table/member identities.
  */
-table_memory: Array<RecordedOperationalRead>, 
+table_memory: Array<RecordedOperationalRead>, pool_settings?: RecordedPoolSettingsRead, 
 /**
  * Independently captured observer/group points never grade the current database or workload.
  */

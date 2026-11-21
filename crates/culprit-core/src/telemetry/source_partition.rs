@@ -158,6 +158,11 @@ impl CollectionDescription {
         {
             return false;
         }
+        if matches!(self.observation, SourceObservation::MssqlPoolSettings { .. })
+            && mssql_pool_settings_membership(self).is_err()
+        {
+            return false;
+        }
         if matches!(self.observation, SourceObservation::MssqlReplication { .. })
             && mssql_replication_scope(self).is_err()
         {

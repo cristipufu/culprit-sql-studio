@@ -5,6 +5,28 @@ use culprit_core::{Engine, Error, ErrorCode, Result, telemetry::*};
 
 const MIN_SUPPORTED_MAJOR: u32 = 11;
 pub(crate) const SUPPORTED_EDITIONS: &[i64] = &[2, 3, 4, 8];
+
+/// Same-row observer witness for native singleton/counter reads. Callers supply only fixed native clock SQL;
+/// `i` is the existing sys.dm_os_sys_info singleton, never another source or connection.
+pub(crate) enum PointClock {
+    CurrentUtc,
+    PerformanceRead,
+}
+pub(crate) fn point_columns(clock: PointClock) -> String {
+    let clock = match clock {
+        PointClock::CurrentUtc => "SYSUTCDATETIME()",
+        PointClock::PerformanceRead => "@counter_observed_at",
+    };
+    format!(
+        r#"i.sqlserver_start_time_ms_ticks AS started_at_ticks,i.ms_ticks,
+ CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition,
+ CAST(SERVERPROPERTY('ProductMajorVersion') AS nvarchar(16)) AS major,
+ CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS server_name,
+ CAST(SERVERPROPERTY('MachineName') AS nvarchar(128)) AS machine_name,
+ CAST(SERVERPROPERTY('ProcessID') AS int) AS process_id,
+ CONVERT(varchar(40),{clock},127)+'Z' AS observed_at"#
+    )
+}
 pub(crate) fn supports_profile(edition: i64, major: u32) -> bool {
     SUPPORTED_EDITIONS.contains(&edition) && major >= MIN_SUPPORTED_MAJOR
 }

@@ -6,6 +6,67 @@ use culprit_collector::analytical::test_support::{
 use culprit_engine::LocalCaptureAnalysisKind;
 
 #[tokio::test]
+async fn original_governor_context_reaches_bounded_mcp_without_native_labels_new_reads_or_reset_claims() {
+    use culprit_collector::analytical::test_support::{
+        ResourceGovernorCounterCase as Case, resource_governor_counter_evidence,
+    };
+    for case in Case::ALL {
+        let (source, rows) = resource_governor_counter_evidence(case);
+        let expected = source.observation.snapshot().unwrap().sources[0].state;
+        let SourcePartition::InstanceLocal { epoch: Some(epoch), .. } = &source.partition else { panic!() };
+        let epoch = epoch.clone();
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::PerformanceCounters)
+                .await;
+        assert!(!error, "{case:?}: {value}");
+        let report = &value["performance_counters"];
+        assert_eq!(report["population"], "shared-server");
+        assert!(report["database"].is_null() && report["native_database_id"].is_null());
+        assert_eq!(report["source_state"], json!(expected));
+        assert_eq!(report["read_complete"], true);
+        let entries = report["entries"].as_array().unwrap();
+        assert!(entries.len() <= 5);
+        if !matches!(case, Case::Denied | Case::NoRows) {
+            assert_eq!(entries.len(), 5);
+            assert_eq!(entries[0]["resource_governor"]["kind"], "workload-group");
+            assert_eq!(entries[4]["resource_governor"]["kind"], "resource-pool");
+            for entry in entries {
+                assert_eq!(entry["scope"], "server");
+                assert_eq!(entry["reset"], json!(culprit_core::ResetMarker::Unknown));
+                if case == Case::Unmapped {
+                    assert!(entry["resource_governor"]["native_pool_id"].is_null());
+                    assert!(entry["resource_governor"]["statistics_started_without_offset"].is_null());
+                } else {
+                    assert_eq!(entry["resource_governor"]["native_pool_id"], "2");
+                    assert_eq!(
+                        entry["resource_governor"]["statistics_started_without_offset"],
+                        "2019-12-31T22:00:00.0000000"
+                    );
+                }
+            }
+        }
+        let text = value.to_string();
+        for private in [
+            "same-as-database-label",
+            "same-as-elastic-pool-label",
+            "resource_governor_instance_epoch",
+            "resource_governor_instance_id",
+            "manifest_sha256",
+            "payload_sha256",
+            &epoch,
+        ] {
+            assert!(!text.contains(private), "{private}");
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(text.len() < 64 * 1024);
+    }
+}
+
+#[tokio::test]
 async fn every_shared_operational_report_reaches_the_existing_english_mcp_operation_without_native_work() {
     for case in local_snapshot_evidence_cases() {
         let kind: LocalCaptureAnalysisKind = serde_json::from_value(json!(case.analysis)).unwrap();

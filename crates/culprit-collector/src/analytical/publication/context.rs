@@ -65,6 +65,9 @@ enum PublicObservation<'a> {
         #[serde(flatten)]
         context: FocusedRequestContext<'a>,
     },
+    MssqlPoolSettingsContext {
+        snapshot: &'a StateSnapshotDescription,
+    },
     MssqlReplicationContext {
         snapshot: &'a StateSnapshotDescription,
         database_writable: bool,
@@ -210,6 +213,9 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         }
         SourceObservation::MssqlAgentJobs { snapshot, metadata } => {
             PublicObservation::MssqlAgentJobs { snapshot, metadata }
+        }
+        SourceObservation::MssqlPoolSettings { snapshot, .. } => {
+            PublicObservation::MssqlPoolSettingsContext { snapshot }
         }
         SourceObservation::MssqlReplication { snapshot, database_writable, .. } => {
             PublicObservation::MssqlReplicationContext { snapshot, database_writable: *database_writable }
@@ -499,5 +505,22 @@ mod galera_tests {
                 assert!(!text.contains(private));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pool_settings_tests {
+    use super::*;
+    #[test]
+    fn curated_pool_settings_context_keeps_original_coverage_but_withholds_member_guid_scope() {
+        let (source, _) = crate::analytical::test_support::pool_settings_evidence(
+            crate::analytical::test_support::PoolSettingsCase::Exact,
+        );
+        let value = observation(&source.observation).unwrap();
+        assert_eq!(value["kind"], "mssql-pool-settings-context");
+        assert!(value["data"].get("membership").is_none());
+        assert_eq!(value["data"]["snapshot"], serde_json::to_value(source.observation.snapshot().unwrap()).unwrap());
+        assert!(!value.to_string().contains("11111111-1111-1111-1111-111111111111"));
+        assert!(serde_json::from_value::<SourceObservation>(value).is_err());
     }
 }

@@ -2,8 +2,9 @@
 import type { ActivityPopulation } from "./ActivityPopulation";
 import type { MeasurementScope } from "./MeasurementScope";
 import type { NativeReadContext } from "./NativeReadContext";
+import type { SessionCensusClientGroups } from "./SessionCensusClientGroups";
 import type { SessionCensusEntry } from "./SessionCensusEntry";
 import type { SourceOutcome } from "./SourceOutcome";
 import type { StateSourceCoverage } from "./StateSourceCoverage";
 
-export type SessionCensusReport = { context: NativeReadContext, observed_at: string, scope: MeasurementScope, population: ActivityPopulation, native_source: StateSourceCoverage, sources: Array<SourceOutcome>, native_rows: number, observed_rows: number, observed_sessions: number, observed_requests: number, observed_active_sessions: number, observed_blocked_sessions: number, presented_rows: number, read_complete: boolean, entries_limited: boolean, title: string, summary: string, limitations: Array<string>, entries: Array<SessionCensusEntry>, };
+export type SessionCensusReport = { context: NativeReadContext, observed_at: string, scope: MeasurementScope, population: ActivityPopulation, native_source: StateSourceCoverage, sources: Array<SourceOutcome>, native_rows: number, observed_rows: number, observed_sessions: number, observed_requests: number, observed_active_sessions: number, observed_blocked_sessions: number, presented_rows: number, read_complete: boolean, entries_limited: boolean, title: string, summary: string, limitations: Array<string>, entries: Array<SessionCensusEntry>, client_groups: SessionCensusClientGroups, };

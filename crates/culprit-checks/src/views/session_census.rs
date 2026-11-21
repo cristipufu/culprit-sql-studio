@@ -4,6 +4,7 @@ use culprit_core::{
     telemetry::*,
 };
 use std::collections::BTreeSet;
+mod client_groups;
 
 pub const MAX_CENSUS_PRESENTED_ROWS: usize = 256;
 
@@ -91,6 +92,7 @@ pub fn explain_frame(frame: &ActivityFrameEvidence<'_>) -> Result<SessionCensusR
         },
         limitations,
         entries,
+        client_groups: client_groups::explain(frame),
     })
 }
 
@@ -183,6 +185,7 @@ fn entry(row: &ActivityFrameRow<'_>) -> SessionCensusEntry {
     }
     if let Some(native) = native {
         fields.extend([
+            number("session_elapsed_ms", t!("view.session_census.field.session_elapsed"), native.elapsed_ms.as_deref()),
             field(
                 "native_session_state",
                 t!("view.session_census.field.native_state"),

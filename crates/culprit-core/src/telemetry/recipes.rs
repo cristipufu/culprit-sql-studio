@@ -42,6 +42,7 @@ impl CollectionBudget {
 #[ts(export)]
 pub enum RecipeSelector {
     Collection(TelemetryCollection),
+    ResourcePoolSettings,
     FocusedBlocking,
     CacheEntryMemory,
     ColumnstoreRowgroups,
@@ -63,6 +64,8 @@ mod tests;
 impl RecipeSelector {
     pub fn matches(&self, request: &CollectionRequest) -> bool {
         match (self, &request.selection) {
+            (Self::ResourcePoolSettings, CollectionSelection::ResourcePoolSettings) => true,
+            (Self::Collection(_), CollectionSelection::ResourcePoolSettings) => false,
             (Self::FocusedBlocking, CollectionSelection::FocusedBlocking { .. }) => true,
             (Self::Collection(_), CollectionSelection::FocusedBlocking { .. }) => false,
             (Self::PageWaitTasks, CollectionSelection::PageWaitTasks { .. }) => true,

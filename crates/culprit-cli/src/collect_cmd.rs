@@ -233,6 +233,7 @@ enum CollectionChoice {
     GroupReplication,
     Galera,
     Settings,
+    ResourcePoolSettings,
     PlanCacheSummary,
     StatementGrants,
     CurrentRequestMemory,
@@ -276,7 +277,7 @@ impl CollectionChoice {
             Self::Replication => SnapshotDataset::Replication,
             Self::GroupReplication => SnapshotDataset::GroupReplication,
             Self::Galera => SnapshotDataset::Galera,
-            Self::Settings => SnapshotDataset::Settings,
+            Self::Settings | Self::ResourcePoolSettings => SnapshotDataset::Settings,
             Self::PlanCacheSummary => SnapshotDataset::PlanCacheSummary,
             Self::StatementGrants => SnapshotDataset::StatementGrants,
             Self::CurrentRequestMemory => SnapshotDataset::CurrentRequestMemory,
@@ -318,7 +319,11 @@ impl OnceArgs {
                 if self.from.is_some() || self.until.is_some() {
                     return Err(culprit_core::Error::invalid(culprit_core::t!("collection.snapshot_no_window")));
                 }
-                CollectionSelection::Snapshot { dataset }
+                if matches!(collection, CollectionChoice::ResourcePoolSettings) {
+                    CollectionSelection::ResourcePoolSettings
+                } else {
+                    CollectionSelection::Snapshot { dataset }
+                }
             } else {
                 match collection {
                     CollectionChoice::Activity => {
@@ -556,6 +561,7 @@ mod tests {
             ("wait-counters", SnapshotDataset::WaitCounters),
             ("replication", SnapshotDataset::Replication),
             ("settings", SnapshotDataset::Settings),
+            ("resource-pool-settings", SnapshotDataset::Settings),
             ("plan-cache-summary", SnapshotDataset::PlanCacheSummary),
             ("tuning", SnapshotDataset::Tuning),
             ("statement-grants", SnapshotDataset::StatementGrants),
@@ -585,6 +591,12 @@ mod tests {
             let cli = crate::Cli::try_parse_from(base).unwrap();
             let crate::Command::Collect(super::CollectCommand::Once(args)) = cli.command else { panic!("once") };
             assert_eq!(args.request().unwrap().collection(), TelemetryCollection::Snapshot(dataset));
+            if name == "resource-pool-settings" {
+                assert_eq!(
+                    args.request().unwrap().selection,
+                    culprit_core::telemetry::CollectionSelection::ResourcePoolSettings
+                );
+            }
             let cli = crate::Cli::try_parse_from(base.into_iter().chain([
                 "--from",
                 "2020-01-01T00:00:00Z",

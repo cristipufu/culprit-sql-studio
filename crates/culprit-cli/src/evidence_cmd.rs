@@ -250,6 +250,7 @@ enum Analysis {
     TableMemory,
     GroupReplication,
     Galera,
+    PoolSettings,
     BackupHistory,
     Tuning,
 }
@@ -262,6 +263,7 @@ impl Analysis {
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
             Self::Tuning => vec![EvidenceFamily::TuningObservations],
             Self::Replication => vec![EvidenceFamily::ReplicationSamples],
+            Self::PoolSettings => vec![EvidenceFamily::SettingObservations],
             Self::PageServerReads => vec![EvidenceFamily::QueryRuntime],
             Self::Queries => vec![
                 EvidenceFamily::QueryDefinitions,
@@ -491,6 +493,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::GroupReplication) => {
             let analysis = culprit_engine::collected_resources::group_replication(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::group_replication(&analysis.report))?;
+        }
+        Some(Analysis::PoolSettings) => {
+            let analysis = culprit_engine::collected_resources::pool_settings(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::pool_settings(&analysis.report))?;
         }
         Some(Analysis::Galera) => {
             let analysis = culprit_engine::collected_resources::galera(&capture)?;

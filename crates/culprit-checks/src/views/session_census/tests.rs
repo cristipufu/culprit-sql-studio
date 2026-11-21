@@ -1,6 +1,6 @@
 use super::*;
 
-fn recorded() -> ActivityCensusRead {
+pub(super) fn recorded() -> ActivityCensusRead {
     serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/session-census.native.json"

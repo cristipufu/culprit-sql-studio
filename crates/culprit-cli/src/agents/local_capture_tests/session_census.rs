@@ -26,9 +26,31 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
         assert_eq!(report["source"], json!(native.coverage));
         assert_eq!(report["read_complete"], true);
         assert_eq!(report["native_rows"], native.native_rows);
+        let (grouped, requests) = match case {
+            SessionCensusCase::Idle | SessionCensusCase::Partial => (1, 0),
+            SessionCensusCase::Mars => (1, 2),
+            SessionCensusCase::GroupedClients | SessionCensusCase::NativeSignedElapsed => (2, 3),
+            SessionCensusCase::GroupUnknownTotals => (2, 2),
+            _ => (0, 0),
+        };
+        assert_eq!(report["client_groups"]["grouped_sessions"], grouped, "{case:?}");
+        assert_eq!(
+            report["client_groups"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| entry["observed_current_requests"].as_u64().unwrap())
+                .sum::<u64>(),
+            requests
+        );
+        assert_eq!(report["client_groups"]["groups_omitted"], 0);
         let expected = match case {
             SessionCensusCase::Idle | SessionCensusCase::Partial => (Some("7"), Some("db"), None),
-            SessionCensusCase::Mars => (Some("4"), Some("session-default"), Some("7")),
+            SessionCensusCase::Mars
+            | SessionCensusCase::GroupedClients
+            | SessionCensusCase::ContradictoryMars
+            | SessionCensusCase::GroupUnknownTotals
+            | SessionCensusCase::NativeSignedElapsed => (Some("4"), Some("session-default"), Some("7")),
             SessionCensusCase::Dormant => (Some("0"), None, None),
             _ => (None, None, None),
         };
@@ -102,5 +124,8 @@ async fn compact_census_keeps_original_counts_when_entry_display_is_bounded() {
     assert_eq!(report["entries_available"], 7);
     assert_eq!(report["entries_presented"], 5);
     assert_eq!(report["entries_omitted"], 2);
+    assert_eq!(report["client_groups"]["grouped_sessions"], 7);
+    assert_eq!(report["client_groups"]["groups_available"], 1);
+    assert_eq!(report["client_groups"]["entries"][0]["observed_sessions"], 7);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }

@@ -248,6 +248,11 @@ pub const SERVER_SETTINGS: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.server_settings"),
     delivers: &[],
 };
+pub const POOL_GOVERNANCE_SETTINGS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_POOL_SETTINGS_SOURCE,
+    reads: culprit_core::key!("provider.mssql.source.pool_governance_settings"),
+    delivers: &[],
+};
 pub const QUERY_STORE_SETTINGS: Source = Source {
     name: source_id::QUERY_STORE_SETTINGS,
     reads: culprit_core::key!("provider.mssql.source.query_store_settings"),
@@ -513,6 +518,7 @@ pub const ALL: &[Source] = &[
     SCOPED_SETTINGS,
     SERVER_SETTINGS,
     QUERY_STORE_SETTINGS,
+    POOL_GOVERNANCE_SETTINGS,
     PROCESSOR_TOPOLOGY,
     COMPILATION_GATEWAYS,
     COMPILATION_QUEUE,

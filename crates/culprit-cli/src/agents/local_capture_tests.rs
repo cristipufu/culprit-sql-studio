@@ -311,3 +311,5 @@ mod instance_resources;
 mod group_replication;
 
 mod galera;
+
+mod pool_settings;

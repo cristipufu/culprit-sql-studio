@@ -39,6 +39,14 @@ impl Context {
         Ok(value)
     }
 
+    pub(crate) fn from_governance(row: &Rec) -> Result<Self> {
+        let context = Self::decode(row, crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE)?;
+        if context.incarnation.is_none() {
+            return Err(invalid_data());
+        }
+        Ok(context)
+    }
+
     pub(crate) fn from_window(row: &Rec) -> Result<Self> {
         let edition = integer(row, "engine_edition")?;
         let rows = integer(row, "native_identity_rows")?;
@@ -82,10 +90,7 @@ pub(crate) async fn read_azure_detail(
 ) -> Result<GovernanceRead> {
     let rows = reader.query(&azure_query_detail(detail), vec![], 2).await.map_err(ReadError::into_error)?;
     let [row] = rows.as_slice() else { return Err(invalid_data()) };
-    let context = Context::decode(row, crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE)?;
-    if context.incarnation.is_none() {
-        return Err(invalid_data());
-    }
+    let context = Context::from_governance(row)?;
     let configured_log_rates = if detail == log_rates::Detail::ConfiguredLogRates {
         log_rates::decode(row, &context, "configured_log_observed_at")
     } else {

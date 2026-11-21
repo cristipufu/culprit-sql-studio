@@ -20,6 +20,7 @@ export function performanceCounterReport(count = 12): PerformanceCounterReport {
     ratios: null,
     missing_fields: [partial<Metric>({ label: t("view.performance_counters.field.maximum_workspace"), text: t("view.performance_counters.unknown"), key: "maximum_workspace" })],
     entries: Array.from({ length: count }, (_, index) => partial<PerformanceCounterEntry>({
+      resource_governor: null,
       observation_key: "performance-observation", counter_key: `counter-${index}`, field: "granted_workspace", family: "workspace-memory",
       family_label: t("view.performance_counters.family.workspace_memory"), availability: "observed",
       native_object: "SQLServer:Memory Manager", native_name: `native-counter-${index}`, native_instance: null,

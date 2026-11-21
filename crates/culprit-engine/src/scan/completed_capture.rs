@@ -18,6 +18,7 @@ pub enum CompletedCaptureAnalysis {
     TableMemory,
     GroupReplication,
     Galera,
+    PoolSettings,
     FullTextPopulations,
     HyperscaleLogComponents,
 }
@@ -30,6 +31,7 @@ impl CompletedCaptureAnalysis {
             Self::TableMemory => SnapshotDataset::TableMemory,
             Self::GroupReplication => SnapshotDataset::GroupReplication,
             Self::Galera => SnapshotDataset::Galera,
+            Self::PoolSettings => SnapshotDataset::Settings,
             Self::FullTextPopulations => SnapshotDataset::FullTextPopulations,
             Self::HyperscaleLogComponents => SnapshotDataset::HyperscaleLogComponents,
         }
@@ -59,6 +61,9 @@ impl CompletedCaptureScanInput<'_> {
             )
             .await?;
         let read = match self.analysis {
+            CompletedCaptureAnalysis::PoolSettings => {
+                super::CapturedScanEvidence::pool_settings(Box::new(captured.into_pool_settings_read()?))?
+            }
             CompletedCaptureAnalysis::CachedRuntime => {
                 super::CapturedScanEvidence::CachedRuntime(Box::new(captured.into_cached_runtime_read()?))
             }

@@ -28,6 +28,11 @@ export function PerformanceCounters({ report }: { report: PerformanceCounterRepo
           <NativeValue label={t("view.performance_counters.native.type")} value={entry.native_type} />
           <NativeValue label={t("view.performance_counters.native.raw")} value={entry.raw_value} />
           <NativeValue label={t("view.counter_ratios.metric.clock")} value={entry.observed_at} />
+          {entry.resource_governor && <>
+            {entry.resource_governor.kind === "workload-group" && <NativeValue label={t("view.performance_counters.native.governor_group_id")} value={entry.resource_governor.native_group_id} />}
+            <NativeValue label={t("view.performance_counters.native.governor_pool_id")} value={entry.resource_governor.native_pool_id} />
+            <NativeValue label={t("view.performance_counters.native.governor_statistics_started")} value={entry.resource_governor.statistics_started_without_offset} />
+          </>}
         </dl></details>
       </article>} />
     {report.missing_fields.length > 0 && <details className="operational-health"><summary>{t("view.performance_counters.missing", { count: digits(String(report.missing_fields.length)) })}</summary><dl>

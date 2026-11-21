@@ -37,6 +37,8 @@ mod table_full_text_report;
 pub use table_full_text_report::{TableFullTextEntry, TableFullTextReport};
 mod suspect_page_history_report;
 pub use suspect_page_history_report::SuspectPageHistoryReport;
+mod pool_settings_report;
+pub use pool_settings_report::{PoolSettingField, PoolSettingsReport};
 mod database_properties_report;
 mod hyperscale_log_component_report;
 mod memory_clerk_report;
@@ -86,7 +88,10 @@ pub mod operations;
 mod storage_report;
 pub use storage_report::{StorageEntry, StorageField, StorageReport};
 mod session_census_report;
-pub use session_census_report::{SessionCensusEntry, SessionCensusField, SessionCensusReport};
+pub use session_census_report::{
+    SessionCensusClientGroup, SessionCensusClientGroups, SessionCensusEntry, SessionCensusField, SessionCensusReport,
+    SessionClientGroupKey,
+};
 pub mod page_server_read_report;
 pub mod page_wait_report;
 pub mod plan;
