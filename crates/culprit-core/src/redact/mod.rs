@@ -372,6 +372,11 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             reason: crate::message!("view.index_configuration.sharing_withheld"),
         };
     }
+    if s.operations.provider_acquisition.is_some() {
+        s.operations.provider_acquisition = Some(Box::new(crate::RecordedProviderAcquisition::Unavailable {
+            reason: crate::message!("view.provider_acquisition.sharing_withheld"),
+        }));
+    }
     for recorded in &mut s.operations.source_acquisitions {
         *recorded = crate::RecordedSourceAcquisition::Unavailable {
             reason: crate::message!("view.source_overhead.sharing_withheld"),

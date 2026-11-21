@@ -84,13 +84,18 @@ impl Drop for Fixture {
 }
 
 fn fixture(tag: &str) -> Fixture {
+    fixture_with_factory(tag, None)
+}
+
+fn fixture_with_factory(tag: &str, factory: Option<culprit_engine::ProviderFactory>) -> Fixture {
     let dir = std::env::temp_dir().join(format!("culprit-mcp-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let replay = Arc::new(report());
     let ws = Workspace::open_in(&dir).with_provider(
         Engine::Mssql,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(move |_| Ok(Box::new(Replay { report: replay.clone() }))),
+            factory.unwrap_or_else(|| Arc::new(move |_, _context| Ok(Box::new(Replay { report: replay.clone() })))),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -366,3 +371,6 @@ async fn finding_ids_take_either_spelling() {
     assert!(!err, "{b}");
     assert_eq!(a, b);
 }
+
+#[path = "tools/acquisition.rs"]
+mod acquisition;

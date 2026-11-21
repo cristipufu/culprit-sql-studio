@@ -411,3 +411,44 @@ async fn selected_database_counters_reach_the_existing_mcp_analysis_without_nati
         assert_eq!(again, value);
     }
 }
+
+#[tokio::test]
+async fn canonical_file_census_summary_reaches_bounded_local_mcp_with_no_native_factory_or_extra_original_read() {
+    use culprit_collector::analytical::test_support::{StorageCase, storage_evidence};
+    for case in [
+        StorageCase::FileCensusLarge,
+        StorageCase::FileCensusPartial,
+        StorageCase::FileCensusDenied,
+        StorageCase::FileCensusLogDenied,
+    ] {
+        let (source, rows) = storage_evidence(case);
+        let read = StorageRead::from_source(
+            &source,
+            rows.iter()
+                .map(|row| {
+                    let TelemetryRecord::Operational(row) = row else { unreachable!() };
+                    row.clone()
+                })
+                .collect(),
+            true,
+        )
+        .unwrap();
+        let expected = culprit_checks::storage::explain(&read).unwrap();
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::Storage).await;
+        assert!(!error, "{case:?}: {value}");
+        assert_eq!(value["storage"]["file_summary"], serde_json::to_value(&expected.file_summary).unwrap());
+        assert!(value["storage"]["entries"].as_array().unwrap().len() <= 5);
+        assert_eq!(value["local_verification_bytes"], fixture.original_bytes());
+        assert_eq!(value["historical_context"], true);
+        for private in ["fixture.invalid", "file_guid", "manifest_sha256", "payload_sha256"] {
+            assert!(!value.to_string().contains(private), "{private}");
+        }
+        assert!(value.to_string().len() < 64 * 1024);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}

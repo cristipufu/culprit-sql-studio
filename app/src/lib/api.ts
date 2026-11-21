@@ -1,3 +1,7 @@
+import type { ProviderAcquisitionReport } from "../gen/ProviderAcquisitionReport";
+import type { ObservedProbeAttempt } from "../gen/ObservedProbeAttempt";
+import type { ObservedScanAttempt } from "../gen/ObservedScanAttempt";
+import { requireProbe, requireScan } from "./provider-acquisition";
 import { language } from "./i18n";
 import { lazyResource } from "./requests";
 import { discoveryRequests } from "./discovery-requests";
@@ -69,9 +73,9 @@ export interface Api {
   connections(): Promise<ConnectionInfo[]>;
   /** What `input` connects to, read as `engine` wherever the text leaves the engine open. */
   parseConnection(input: string, engine: Engine | null, ssh?: boolean): Promise<ParsedConnection>;
-  testConnection(input: NewConnection, signal?: AbortSignal): Promise<ServerInfo>;
+  testConnection(input: NewConnection, signal?: AbortSignal, acquisition?: (report: ProviderAcquisitionReport) => void): Promise<ServerInfo>;
   setConnectionSettings(name: string, settings: ConnectionSettings): Promise<ConnectionInfo>;
-  testConnectionSettings(name: string, settings: ConnectionSettings, signal?: AbortSignal): Promise<ServerInfo>;
+  testConnectionSettings(name: string, settings: ConnectionSettings, signal?: AbortSignal, acquisition?: (report: ProviderAcquisitionReport) => void): Promise<ServerInfo>;
   addConnection(input: NewConnection): Promise<ConnectionInfo>;
   removeConnection(name: string): Promise<void>;
   renameConnection(old: string, next: string): Promise<ConnectionInfo>;
@@ -79,7 +83,7 @@ export interface Api {
   discoverAws(terms: string[], regions: string[], signal?: AbortSignal): Promise<DiscoveryResult>;
   setPassword(name: string, password: string): Promise<ConnectionInfo>;
   setSsh(name: string, ssh: SshConfig | null): Promise<ConnectionInfo>;
-  testSsh(name: string, ssh: SshConfig | null): Promise<ServerInfo>;
+  testSsh(name: string, ssh: SshConfig | null, signal?: AbortSignal, acquisition?: (report: ProviderAcquisitionReport) => void): Promise<ServerInfo>;
   addDiscovered(items: DiscoveredDatabase[]): Promise<ConnectionInfo[]>;
   importCandidates(source: ImportSource | null): Promise<ImportCandidate[]>;
   importConnections(items: ImportCandidate[]): Promise<ConnectionInfo[]>;
@@ -89,7 +93,7 @@ export interface Api {
   openSignInPage(): Promise<void>;
   latestReport(name: string, windowMinutes: number | null, population: NativeIdentity | null): Promise<Report | null>;
   reportAt(name: string, reportId: string): Promise<Report>;
-  scan(name: string, windowMinutes: number | null, population: NativeIdentity | null): Promise<Report>;
+  scan(name: string, windowMinutes: number | null, population: NativeIdentity | null, acquisition?: (report: ProviderAcquisitionReport) => void): Promise<Report>;
   brief(name: string, reportId: string, findingId: string): Promise<string>;
   explain(name: string, sql: string, mode: ExplainMode, confirmed: boolean): Promise<Plan>;
   queryPlan(name: string, queryId: string, planId: string | null, reportId?: string): Promise<Plan>;
@@ -193,9 +197,13 @@ async function desktopApi(): Promise<Api> {
     setLanguage: (code) => invoke("set_language", { code }),
     connections: () => invoke("connections"),
     parseConnection: (input, engine, ssh = false) => invoke("parse_connection", { input, engine, ssh }),
-    testConnection: (input, signal) => connectionTests("test_connection", { input }, signal),
+    testConnection: async (input, signal, acquisition) => requireProbe(
+      await connectionTests<ObservedProbeAttempt>("test_connection", { input }, signal), acquisition,
+    ),
     setConnectionSettings: (name, settings) => invoke("set_connection_settings", { name, settings }),
-    testConnectionSettings: (name, settings, signal) => connectionTests("test_connection_settings", { name, settings }, signal),
+    testConnectionSettings: async (name, settings, signal, acquisition) => requireProbe(
+      await connectionTests<ObservedProbeAttempt>("test_connection_settings", { name, settings }, signal), acquisition,
+    ),
     addConnection: (input) => invoke("add_connection", { input }),
     removeConnection: (name) => invoke("remove_connection", { name }),
     renameConnection: (old, next) => invoke("rename_connection", { old, new: next }),
@@ -203,7 +211,9 @@ async function desktopApi(): Promise<Api> {
     discoverAws: (terms, regions, signal) => discover("discover_aws", { terms, regions }, signal),
     setPassword: (name, password) => invoke("set_password", { name, password }),
     setSsh: (name, ssh) => invoke("set_ssh", { name, ssh }),
-    testSsh: (name, ssh) => invoke("test_ssh", { name, ssh }),
+    testSsh: async (name, ssh, signal, acquisition) => requireProbe(
+      await connectionTests<ObservedProbeAttempt>("test_ssh", { name, ssh }, signal), acquisition,
+    ),
     addDiscovered: (items) => invoke("add_discovered", { items }),
     importCandidates: (source) => invoke("import_candidates", { source }),
     importConnections: (items) => invoke("import_connections", { items }),
@@ -215,7 +225,9 @@ async function desktopApi(): Promise<Api> {
     openSignInPage: () => invoke("open_sign_in_page"),
     latestReport: (name, windowMinutes, population) => invoke("latest_report", { name, windowMinutes, population }),
     reportAt: (name, reportId) => invoke("report_at", { name, reportId }),
-    scan: (name, windowMinutes, population) => invoke("scan", { name, windowMinutes, population }),
+    scan: async (name, windowMinutes, population, acquisition) => requireScan(
+      await invoke<ObservedScanAttempt>("scan", { name, windowMinutes, population }), acquisition,
+    ),
     brief: (name, reportId, findingId) => invoke("brief", { name, reportId, findingId }),
     explain: (name, sql, mode, confirmed) => invoke("explain", { name, sql, mode, confirmed }),
     queryPlan: (name, queryId, planId, reportId) => invoke("query_plan", { name, queryId, planId, reportId }),

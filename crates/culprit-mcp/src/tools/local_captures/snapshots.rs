@@ -442,6 +442,7 @@ fn storage(analysis: &LocalSnapshotAnalysis, report: &culprit_core::StorageRepor
             })
             .collect(),
     );
+    value["file_summary"] = json!(report.file_summary);
     value["backend_presented_rows"] = json!(report.presented_rows);
     value["entries_limited"] = json!(report.entries_limited || report.entries.len() > ENTRY_LIMIT);
 

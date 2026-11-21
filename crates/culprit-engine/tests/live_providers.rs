@@ -130,7 +130,8 @@ async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
     let workspace = Workspace::open_in(root.path().join("workspace")).with_provider(
         engine,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(move |_| culprit_engine::registry::provider(&spec)),
+            Arc::new(move |_, _context| culprit_engine::registry::provider(&spec)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),

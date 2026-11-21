@@ -549,14 +549,24 @@ fn args<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T> {
     serde_json::from_value(value).map_err(|e| Error::invalid(format!("Invalid arguments: {e}")))
 }
 
-type ToolTask<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>>;
+pub(crate) enum ToolOutput {
+    Value(Value),
+    ProviderScan(culprit_core::ProviderCall<Value>),
+}
+type ToolTask<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<ToolOutput>> + Send + 'a>>;
 
 /// Allocate the selected handler before polling it; unrelated tools retain none of its operation state.
-fn tool_task<'a, F>(factory: impl FnOnce() -> F) -> ToolTask<'a>
+fn tool_task<'a, F>(factory: impl FnOnce() -> F + Send + 'a) -> ToolTask<'a>
 where
     F: std::future::Future<Output = Result<Value>> + Send + 'a,
 {
-    Box::pin(factory())
+    Box::pin(async move { factory().await.map(ToolOutput::Value) })
+}
+fn provider_task<'a, F>(factory: impl FnOnce() -> F + Send + 'a) -> ToolTask<'a>
+where
+    F: std::future::Future<Output = Result<culprit_core::ProviderCall<Value>>> + Send + 'a,
+{
+    Box::pin(async move { factory().await.map(ToolOutput::ProviderScan) })
 }
 
 impl CulpritMcp {
@@ -566,19 +576,22 @@ impl CulpritMcp {
         tool: &'a str,
         value: Value,
         operation: Option<culprit_core::limits::OperationHandle>,
+        provider_observation: Option<culprit_core::ProviderOperationObservation>,
     ) -> ToolTask<'a> {
         match tool {
-            LOCAL_CAPTURE_TOOL => tool_task(|| self.analyze_capture(value, operation)),
-            "scan" => tool_task(|| async move {
+            LOCAL_CAPTURE_TOOL => tool_task(move || self.analyze_capture(value, operation)),
+            "scan" => provider_task(move || async move {
                 let a: ScanArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let defaults = SnapshotOptions::default();
                 let window = window_minutes(a.window.as_deref(), a.window_days)?;
                 let options = defaults.clone().with_window_minutes(window.unwrap_or(defaults.window_in_minutes()));
-                let report = self.ws.scan(&a.connection, &options).await?;
-                Ok(view::findings(&report, None, Severity::Low, 30))
+                let observation =
+                    provider_observation.ok_or_else(|| culprit_core::telemetry::DeliveryProblem::Integrity.error())?;
+                let call = self.ws.scan(&a.connection, &options, observation).await?;
+                Ok(call.map(|report| view::findings(&report, None, Severity::Low, 30)))
             }),
-            "dashboard" => tool_task(|| async move {
+            "dashboard" => tool_task(move || async move {
                 let a: DashboardArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let window = window_minutes(a.window.as_deref(), a.window_days)?;
@@ -589,13 +602,13 @@ impl CulpritMcp {
                 }
                 serde_json::to_value(&dashboard).map_err(|e| Error::internal(e.to_string()))
             }),
-            "query_plan" => tool_task(|| async move {
+            "query_plan" => tool_task(move || async move {
                 let a: QueryPlanArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let plan = self.ws.query_plan(&a.connection, &a.query_id, a.plan_id.as_deref()).await?;
                 Ok(view::plan(&plan))
             }),
-            "plan_insights" => tool_task(|| async move {
+            "plan_insights" => tool_task(move || async move {
                 let a: PlanInsightsArgs = args(value)?;
                 let info = self.allowed(&a.connection)?;
                 let plan = match (a.query_id.as_deref(), a.sql.as_deref()) {
@@ -611,19 +624,19 @@ impl CulpritMcp {
                 };
                 Ok(view::plan_insights(&plan))
             }),
-            "last_actual_plan" => tool_task(|| async move {
+            "last_actual_plan" => tool_task(move || async move {
                 let a: QueryPlanArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let plan = self.ws.last_actual_plan(&a.connection, &a.query_id, a.plan_id.as_deref()).await?;
                 Ok(view::plan(&plan))
             }),
-            "query_progress" => tool_task(|| async move {
+            "query_progress" => tool_task(move || async move {
                 let a: ProgressArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let progress = self.ws.query_progress(&a.connection, &a.session, true).await?;
                 Ok(view::progress(&progress))
             }),
-            "what_changed" => tool_task(|| async move {
+            "what_changed" => tool_task(move || async move {
                 let a: WhatChangedArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let request = culprit_engine::changes::ChangeRequest {
@@ -635,7 +648,7 @@ impl CulpritMcp {
                 };
                 Ok(view::changes(&self.ws.changes(&a.connection, &request).await?))
             }),
-            "events" => tool_task(|| async move {
+            "events" => tool_task(move || async move {
                 let a: EventsArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let request = culprit_engine::EventsRequest {
@@ -646,7 +659,7 @@ impl CulpritMcp {
                 };
                 Ok(view::events(&self.ws.events(&a.connection, &request).await?))
             }),
-            "cloud_metrics" => tool_task(|| async move {
+            "cloud_metrics" => tool_task(move || async move {
                 let a: EventsArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let request = culprit_engine::EventsRequest {
@@ -657,7 +670,7 @@ impl CulpritMcp {
                 };
                 Ok(view::cloud(&self.ws.cloud(&a.connection, &request).await?))
             }),
-            "explain" => tool_task(|| async move {
+            "explain" => tool_task(move || async move {
                 let a: ExplainArgs = args(value)?;
                 let info = self.allowed(&a.connection)?;
                 let statement = sql::single_statement(&a.sql, info.engine)?;
@@ -669,22 +682,22 @@ impl CulpritMcp {
                 };
                 Ok(view::plan(&plan))
             }),
-            "live" => tool_task(|| async move {
+            "live" => tool_task(move || async move {
                 let a: ConnectionArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 Ok(view::live(&self.ws.live(&a.connection).await?))
             }),
-            "blocking" => tool_task(|| async move {
+            "blocking" => tool_task(move || async move {
                 let a: ConnectionArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 Ok(crate::locks::blocking(&self.ws.live(&a.connection).await?))
             }),
-            "deadlocks" => tool_task(|| async move {
+            "deadlocks" => tool_task(move || async move {
                 let a: DeadlocksArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 Ok(crate::locks::deadlocks(&self.ws.deadlocks(&a.connection, a.since_hours.unwrap_or(24.0)).await?))
             }),
-            "waits" => tool_task(|| async move {
+            "waits" => tool_task(move || async move {
                 let a: WaitsArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 if a.now.unwrap_or(false) {
@@ -698,17 +711,17 @@ impl CulpritMcp {
                 })
                 .await
             }),
-            "verify" => tool_task(|| async move {
+            "verify" => tool_task(move || async move {
                 let a: VerifyArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let v = self.ws.verify(&a.connection, &a.finding_ids.unwrap_or_default()).await?;
                 serde_json::to_value(&v).map_err(|e| Error::internal(e.to_string()))
             }),
-            "run_query" => tool_task(|| async move {
+            "run_query" => tool_task(move || async move {
                 let a: SqlArgs = args(value)?;
                 self.run_query(client, &a.connection, &a.sql).await
             }),
-            other => tool_task(|| async move {
+            other => tool_task(move || async move {
                 let server = self.clone();
                 let client = client.to_owned();
                 let tool = other.to_owned();

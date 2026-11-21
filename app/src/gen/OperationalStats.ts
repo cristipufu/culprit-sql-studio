@@ -22,6 +22,7 @@ import type { RecordedManagedInstanceResourceRead } from "./RecordedManagedInsta
 import type { RecordedOperationalRead } from "./RecordedOperationalRead";
 import type { RecordedPerformanceCounters } from "./RecordedPerformanceCounters";
 import type { RecordedPoolSettingsRead } from "./RecordedPoolSettingsRead";
+import type { RecordedProviderAcquisition } from "./RecordedProviderAcquisition";
 import type { RecordedQueryHistoryRead } from "./RecordedQueryHistoryRead";
 import type { RecordedSourceAcquisition } from "./RecordedSourceAcquisition";
 import type { SequenceCapacity } from "./SequenceCapacity";
@@ -42,7 +43,7 @@ indexed_views: MssqlIndexedViewCatalog | null, indexed_view_originals: Array<Rec
 /**
  * Independently sealed, sanitized acquisition history; never current native workload evidence.
  */
-source_acquisitions: Array<RecordedSourceAcquisition>, runtime_fragments?: RecordedQueryHistoryRead, 
+source_acquisitions: Array<RecordedSourceAcquisition>, provider_acquisition?: RecordedProviderAcquisition, runtime_fragments?: RecordedQueryHistoryRead, 
 /**
  * One explicitly selected original wait-history capture; never joined to current scan workload by names.
  */

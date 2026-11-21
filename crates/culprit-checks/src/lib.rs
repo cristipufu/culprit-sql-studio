@@ -164,3 +164,5 @@ pub use views::managed_instance_resources;
 pub use views::index_configuration;
 
 pub use views::indexed_views;
+
+pub use views::provider_acquisition;

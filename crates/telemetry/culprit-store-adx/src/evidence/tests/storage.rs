@@ -12,7 +12,8 @@ async fn collected(case: StorageCase) -> (Fixture, CollectionDescription, Vec<Te
 async fn collected_sealed_restarted_published_storage_keeps_all_original_fields_and_exact_integer_strings() {
     for case in StorageCase::ALL {
         let (fixture, source, rows) = collected(case).await;
-        fixture.replies(if fixture.rows.is_empty() { vec![] } else { vec![fixture.rows.clone()] });
+        let budget = EvidenceReadBudget::default();
+        fixture.replies(fixture.rows.chunks(budget.page_rows as usize).map(|rows| rows.to_vec()).collect());
         let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
         let capture = fixture
             .reader()

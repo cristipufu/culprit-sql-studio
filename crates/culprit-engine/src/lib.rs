@@ -90,7 +90,7 @@ pub use import::{ImportCandidate, ImportSource};
 pub use marks::Mark;
 pub use operation::run_blocking;
 pub use plans::{PlanFormat, parse_plan};
-pub use provider_registration::{ProviderRegistration, RecipeCostVerifier};
+pub use provider_registration::{ProviderConstructionPolicy, ProviderRegistration, RecipeCostVerifier};
 #[cfg(feature = "collector")]
 pub use provider_registration::{RecipeQualificationFactory, RecipeQualificationIssuer};
 #[cfg(feature = "collector")]
@@ -107,7 +107,8 @@ pub use types::{
 };
 
 /// Builds a provider for a connection; lets an embedding app supply its own engine implementation.
-pub type ProviderFactory = Arc<dyn Fn(&ConnectionSpec) -> Result<Box<dyn Provider>> + Send + Sync>;
+pub type ProviderFactory =
+    Arc<dyn Fn(&ConnectionSpec, culprit_core::ProviderReadContext) -> Result<Box<dyn Provider>> + Send + Sync>;
 
 pub struct Workspace {
     paths: Paths,
@@ -349,8 +350,13 @@ impl Workspace {
     }
 
     /// Test the draft security policy with saved credentials, without saving or scanning.
-    pub async fn test_connection_settings(&self, name: &str, settings: &ConnectionSettings) -> Result<ServerInfo> {
-        self.connection_service().test_connection_settings(name, settings).await
+    pub async fn test_connection_settings(
+        &self,
+        name: &str,
+        settings: &ConnectionSettings,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        self.connection_service().test_connection_settings(name, settings, observation).await
     }
 
     pub fn add_connection(&self, new: NewConnection) -> Result<ConnectionInfo> {
@@ -378,8 +384,13 @@ impl Workspace {
     }
 
     /// Test an SSH draft with the saved database credentials, without changing the saved route or scanning.
-    pub async fn test_ssh(&self, name: &str, ssh: Option<SshConfig>) -> Result<ServerInfo> {
-        self.connection_service().test_ssh(name, ssh).await
+    pub async fn test_ssh(
+        &self,
+        name: &str,
+        ssh: Option<SshConfig>,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        self.connection_service().test_ssh(name, ssh, observation).await
     }
 
     /// Rename (re-alias) a connection, carrying its keychain secret and report history along.
@@ -433,64 +444,109 @@ impl Workspace {
         self.connection_service().provider_for(new).await
     }
 
-    pub async fn probe(&self, name: &str) -> Result<ServerInfo> {
-        self.connection_service().probe(name).await
+    pub fn begin_provider_read(
+        &self,
+        kind: culprit_core::ProviderReadKind,
+    ) -> Result<culprit_core::ProviderReadObservation> {
+        culprit_core::ProviderReadObservation::begin(
+            culprit_read::admission::observation_identity()?.observation_id,
+            kind,
+        )
     }
-
-    /// Test an unsaved connection within the observation deadline, after any interactive authentication completes.
-    pub async fn test_connection(&self, new: &NewConnection) -> Result<ServerInfo> {
-        self.connection_service().test_connection(new).await
+    pub async fn probe(
+        &self,
+        name: &str,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        self.connection_service().probe(name, observation).await
     }
-
-    pub async fn scan(&self, name: &str, options: &SnapshotOptions) -> Result<Report> {
-        self.scan_with_log(name, options, None).await
+    pub async fn test_connection(
+        &self,
+        new: &NewConnection,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        self.connection_service().test_connection(new, observation).await
     }
-
-    /// [`Workspace::scan`], reading the statements and their times from `query_log` (a log the application's framework
-    /// already writes) instead of the connection's saved one, when the database keeps no history of its own (SQLite).
+    pub async fn scan(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
+        self.scan_with_log(name, options, None, observation).await
+    }
     pub async fn scan_with_log(
         &self,
         name: &str,
         options: &SnapshotOptions,
         query_log: Option<&std::path::Path>,
-    ) -> Result<Report> {
-        // The owned observation retains provider, snapshot and analysis state. Keep that state off callers'
-        // async frames so nested consumers (verification, MCP and desktop tasks) retain decoding stack space.
-        Box::pin(self.scan_observation(name, options, query_log, None)).await.map(|reports| *reports.requested)
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
+        let call = Box::pin(self.scan_observation(name, options, query_log, None, observation)).await?;
+        Ok(call.map(|reports| reports.requested))
     }
-
-    /// Analyze each native execution population from one provider acquisition and save its own exact report.
-    /// The requested overview is independent of those reports; their execution totals are never pooled.
-    pub async fn scan_populations(&self, name: &str, options: &SnapshotOptions) -> Result<PopulationReports> {
-        Box::pin(self.scan_observation(name, options, None, None)).await
+    pub async fn scan_populations(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<PopulationReports>> {
+        Box::pin(self.scan_observation(name, options, None, None, observation)).await
     }
-
     async fn scan_observation(
         &self,
         name: &str,
         options: &SnapshotOptions,
         query_log: Option<&std::path::Path>,
         captured: Option<scan::CapturedScanEvidence>,
-    ) -> Result<PopulationReports> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<PopulationReports>> {
+        observation.require_kind(culprit_core::ProviderReadKind::Scan)?;
         let saved = self.store.get(name)?.query_log.map(std::path::PathBuf::from);
         let found = if query_log.is_none() && saved.is_none() { self.discover_query_log(name) } else { None };
         let query_log = query_log.or(saved.as_deref()).or(found.as_deref());
         let scan = scan::Scan::begin(self.paths.reports_dir(name), &self.extra_checks);
-        let observed = self.connection_service().observed_provider(name).await?;
-        let provider = observed.provider();
+        let connections = self.connection_service();
+        let mut operation = connections
+            .source_operation_at(
+                culprit_core::telemetry::SourceAdmissionRoute::SavedConnection { name: name.into() },
+                None,
+                observation,
+            )
+            .await?;
+        let opened = connections.normal_provider(name, operation.observation()).await;
+        let provider = match opened {
+            Ok(provider) => provider,
+            Err(error) => {
+                return Ok(operation.finish_call(Err(error), culprit_core::telemetry::SourceShutdown::Quiescent).await);
+            }
+        };
+        operation.native_started();
         let result = async {
-            let snapshots =
-                self.connection_service().forget_rejected(name, provider.snapshot_populations(name, options).await)?;
-            ensure_source_quiet(provider)?;
+            let snapshots = connections.forget_rejected(name, provider.snapshot_populations(name, options).await)?;
+            ensure_source_quiet(provider.as_ref())?;
             let log = query_log.map(|path| scan::QueryLog { path, discovered: found.is_some() });
-            scan.collect_inputs(provider, snapshots, name, options, log).await
+            scan.collect_inputs(provider.as_ref(), snapshots, name, options, log).await
         }
         .await;
-        let mut collected = observed.finish(result).await?;
+        let call = operation.finish_call(result, provider.source_shutdown()).await;
+        drop(provider);
+        let (result, finalization, acquisition) = call.into_parts();
+        let result = result.ok_or_else(|| culprit_core::telemetry::DeliveryProblem::Integrity.error())?;
+        let mut collected = match result {
+            Ok(collected) => collected,
+            Err(error) => return Ok(culprit_core::ProviderCall::completed(Err(error), finalization, acquisition)),
+        };
+        if let Err(error) = &finalization {
+            return Ok(culprit_core::ProviderCall::unmaterialized_after_finalization(error.clone(), acquisition));
+        }
+        if let Some(summary) = &acquisition {
+            collected.attach_provider_acquisition(summary.clone())?;
+        }
         if let Some(captured) = captured {
             collected.attach_captured(captured)?;
         }
-        collected.finish().await
+        Ok(culprit_core::ProviderCall::completed(collected.finish().await, finalization, acquisition))
     }
 
     /// The newest saved report, or the newest one scanned with a window of `window_minutes` when given, read the way a
@@ -912,3 +968,6 @@ pub fn explain_heap_configuration(
 ) -> culprit_core::Result<Option<culprit_core::IndexConfigurationReport>> {
     culprit_checks::index_configuration::explain_heap(snapshot, table)
 }
+
+mod provider_reads;
+pub use provider_reads::{explain_provider_acquisition, project_probe_attempt, project_scan_attempt};

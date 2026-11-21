@@ -34,7 +34,7 @@ async fn both_cli_histories_retain_original_scope_sources_and_clocks_through_off
             "0",
         ])
         .unwrap();
-        let report = scan(&workspace, &parsed).await.unwrap();
+        let report = observed_scan(&workspace, &parsed).await.unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         let (originals, view) = if flag == "--cdc-capture" {
             (&report.snapshot.operations.cdc_history, serde_json::to_value(report.cdc.as_ref().unwrap()).unwrap())
@@ -52,7 +52,12 @@ async fn both_cli_histories_retain_original_scope_sources_and_clocks_through_off
         let path = workspace.paths().reports_dir("local-evidence").join(format!("{}.json", report.snapshot.id));
         let offline = Workspace::open_in(fixture.directory.parent().unwrap().join("offline")).with_provider(
             Engine::Mssql,
-            ProviderRegistration::new(Arc::new(|_| panic!("saved replay opens no native provider")), vec![]).unwrap(),
+            ProviderRegistration::new(
+                Arc::new(|_, _context| panic!("saved replay opens no native provider")),
+                culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
+                vec![],
+            )
+            .unwrap(),
         );
         let saved = offline.analyze_file(&path).unwrap();
         let reopened = if flag == "--cdc-capture" {
@@ -89,7 +94,7 @@ async fn cancelled_history_intake_never_enters_the_normal_scan_factory() {
         .unwrap();
         let cancellation = CollectionCancellation::default();
         cancellation.cancel();
-        let error = captured_scan(
+        let error = observed_captured_scan(
             &workspace,
             &args(&[]).unwrap(),
             &reader,
@@ -113,15 +118,22 @@ fn captured_scan_concrete_controllers_and_completed_outputs_are_bounded_before_n
     // Do not construct a client, read an Outbox or poll a future. These are the actual production bodies,
     // not only the erased wrapper's16 bytes, and include the completion shape carried by each controller.
     let bodies = [
-        storage(|(workspace, args): (&'static Workspace, &'static crate::ScanArgs)| scan_body(workspace, args)),
         storage(
-            |(workspace, args, reader, original, cancel): (
+            |(workspace, args, observation): (
+                &'static Workspace,
+                &'static crate::ScanArgs,
+                culprit_core::ProviderOperationObservation,
+            )| scan_body(workspace, args, observation),
+        ),
+        storage(
+            |(workspace, args, reader, original, cancel, observation): (
                 &'static Workspace,
                 &'static crate::ScanArgs,
                 &'static dyn LocalCaptureReader,
                 CapturedOriginal<'static>,
                 &'static CollectionCancellation,
-            )| captured_scan_body(workspace, args, reader, original, cancel),
+                culprit_core::ProviderOperationObservation,
+            )| captured_scan_body(workspace, args, reader, original, cancel, observation),
         ),
         storage(|(cancel, work): (&'static CollectionCancellation, ScanTask<'static>)| {
             scan_until_cancelled(cancel, move || work)

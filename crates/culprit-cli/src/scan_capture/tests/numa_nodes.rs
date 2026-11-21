@@ -16,7 +16,7 @@ async fn selected_native_node_original_survives_real_cli_save_offline_replay_and
         "0",
     ])
     .unwrap();
-    let report = scan(&workspace, &parsed).await.unwrap();
+    let report = observed_scan(&workspace, &parsed).await.unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let original = &report.snapshot.operations.numa_nodes[0];
     let view = &report.numa_nodes.as_ref().unwrap()[0];
@@ -28,8 +28,12 @@ async fn selected_native_node_original_survives_real_cli_save_offline_replay_and
     let path = workspace.paths().reports_dir("local-evidence").join(format!("{}.json", report.snapshot.id));
     let offline = Workspace::open_in(fixture.directory.parent().unwrap().join("offline")).with_provider(
         Engine::Mssql,
-        ProviderRegistration::new(Arc::new(|_| panic!("source-free replay must not construct a provider")), vec![])
-            .unwrap(),
+        ProviderRegistration::new(
+            Arc::new(|_, _context| panic!("source-free replay must not construct a provider")),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
+            vec![],
+        )
+        .unwrap(),
     );
     let saved = offline.analyze_file(&path).unwrap();
     assert_eq!(&saved.snapshot.operations.numa_nodes[0], original);

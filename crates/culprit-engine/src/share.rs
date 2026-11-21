@@ -117,7 +117,9 @@ impl Workspace {
         if let Some(population) = before.snapshot.workload.as_ref().and_then(|workload| workload.population.clone()) {
             options.workload_population = Some(population);
         }
-        let after = self.scan_populations(name, &options).await?.requested;
+        let observation = self.begin_provider_read(culprit_core::ProviderReadKind::Scan)?;
+        let result = self.scan_populations(name, &options, observation.operation()?).await;
+        let after = observation.finish_call(result).into_result()?.requested;
         let ids = ids.to_vec();
         crate::run_blocking(move || Ok(compare_reports(before.as_ref(), after.as_ref(), &ids))).await
     }

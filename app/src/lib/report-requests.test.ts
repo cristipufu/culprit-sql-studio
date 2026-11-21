@@ -319,3 +319,15 @@ test("Language ownership retires pending cache and native results before backend
   first.reject(new Error("retired English failure")); await english;
   equal(native.visible(), ["current English", false, null], "A returning language revived a retired native result");
 });
+
+
+test("acquisition callbacks follow the same request generation as scan failures and cached reports",async()=>{
+ const first=deferred<Report>(),second=deferred<Report>();
+ let firstObserve:((value:import("../gen/ProviderAcquisitionReport").ProviderAcquisitionReport)=>void)|undefined;
+ let secondObserve:typeof firstObserve;let calls=0;
+ const h=harness(async()=>({latestReport:async()=>null,scan:async(_name,_minutes,_population,observe)=>{if(calls++===0){firstObserve=observe;return first.promise;}secondObserve=observe;return second.promise;}}));
+ h.seed(report("retained-original"));const one=h.requests.scan({name:"a",windowMinutes:60,population:null});await tick();const two=h.requests.scan({name:"a",windowMinutes:60,population:null});await tick();
+ firstObserve?.({kind:"unavailable",reason:"stale-attempt"});first.reject(new Error("stale-failure"));await one;
+ const current={kind:"unavailable" as const,reason:"current-attempt"};secondObserve?.(current);second.reject(new Error("current-failure"));await two;
+ const state=h.read().report;if(state.status!=="ready")throw new Error("cached report preserved");equal(state.report.snapshot.id,"retained-original","failed scan replaced original");equal(state.scanAcquisition,current,"stale acquisition took ownership");equal(state.scanError?.message,"current-failure","wrong failure owner");
+});

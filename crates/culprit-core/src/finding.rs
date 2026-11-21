@@ -407,6 +407,9 @@ pub struct Report {
     #[ts(optional)]
     pub storage: Option<Box<crate::StorageReport>>,
     pub source_acquisitions: Vec<crate::HistoricalSourceOverhead>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub provider_acquisition: Option<Box<crate::ProviderAcquisitionReport>>,
     pub performance_counters: Vec<crate::PerformanceCounterReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

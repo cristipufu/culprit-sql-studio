@@ -1,4 +1,6 @@
 use super::*;
+mod file_summary;
+pub use file_summary::assert_storage_file_summary;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StorageCase {
     Exact,
@@ -10,9 +12,16 @@ pub enum StorageCase {
     SharedTempdbLogUnknown,
     SharedTempdbLogPartial,
     SharedTempdbLogDenied,
+    FileCensus,
+    FileCensusUnknownUsage,
+    FileCensusUnknownBasis,
+    FileCensusPartial,
+    FileCensusDenied,
+    FileCensusLogDenied,
+    FileCensusLarge,
 }
 impl StorageCase {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 16] = [
         Self::Exact,
         Self::ReadOnlyOffline,
         Self::Unknown,
@@ -22,10 +31,29 @@ impl StorageCase {
         Self::SharedTempdbLogUnknown,
         Self::SharedTempdbLogPartial,
         Self::SharedTempdbLogDenied,
+        Self::FileCensus,
+        Self::FileCensusUnknownUsage,
+        Self::FileCensusUnknownBasis,
+        Self::FileCensusPartial,
+        Self::FileCensusDenied,
+        Self::FileCensusLogDenied,
+        Self::FileCensusLarge,
     ];
 }
 /// Native-shaped controlled facts reuse genuine collection/sealing/publication. They are not live qualification.
 pub fn storage_evidence(case: StorageCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    if matches!(
+        case,
+        StorageCase::FileCensus
+            | StorageCase::FileCensusUnknownUsage
+            | StorageCase::FileCensusUnknownBasis
+            | StorageCase::FileCensusPartial
+            | StorageCase::FileCensusDenied
+            | StorageCase::FileCensusLogDenied
+            | StorageCase::FileCensusLarge
+    ) {
+        return file_summary::evidence(case);
+    }
     if matches!(
         case,
         StorageCase::SharedTempdbLog

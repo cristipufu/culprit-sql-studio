@@ -1,8 +1,9 @@
 import type { HistoricalSourceOverhead } from "../gen/HistoricalSourceOverhead";
 import { contextPreview } from "../lib/context-preview";
-import { digits, duration } from "../lib/format";
+import { digits } from "../lib/format";
 import { t } from "../lib/i18n";
 import { ObservationList } from "./ObservationList";
+import { ConnectionWorkDetails, NativeReadDetails, ReadTemplateValues } from "./ReadWorkDetails";
 
 /** Historical capture acquisition only. No current database, native owner or request scope is inferred. */
 export function SourceAcquisitions({ reports }: { reports: HistoricalSourceOverhead[] }) {
@@ -25,25 +26,10 @@ export function SourceAcquisitions({ reports }: { reports: HistoricalSourceOverh
         <p className="muted">{evidence.finished_at == null ? t("view.source_overhead.cli.unfinished", { from: evidence.started_at })
           : t("view.source_overhead.cli.bounds", { from: evidence.started_at, until: evidence.finished_at })}</p>
         {evidence.source_queries != null && <p>{t("view.source_overhead.cli.total", { count: digits(String(evidence.source_queries)) })}</p>}
-        {report.connection_work && <details><summary>{report.connection_work.summary}</summary>
-          {report.connection_work.observations.map((text, index) => <p key={index}>{text}</p>)}
-          {report.connection_work.limitations.map((text, index) => <p className="muted" key={index}>{text}</p>)}
-        </details>}
-        {report.native_interval && <details><summary>{report.native_interval.summary}</summary>
-          {report.native_interval.measurements.map((text, index) => <p key={index}>{text}</p>)}
-          {report.native_interval.limitations.map((text, index) => <p className="muted" key={index}>{text}</p>)}
-        </details>}
+        {report.connection_work && <ConnectionWorkDetails report={report.connection_work}/>}
+        {report.native_interval && <NativeReadDetails report={report.native_interval}/>}
         {evidence.read_metrics && <details><summary>{t("ui.retained_failures.observations")}</summary>
-          {report.template_order.map((index) => {
-            const metric = evidence.read_metrics?.templates[index];
-            return metric && <div key={metric.template_id}>
-              <p>{t("view.source_overhead.cli.template", { id: metric.template_id, elapsed: duration(metric.client_elapsed_ms),
-                completed: digits(String(metric.completed_tasks)), failures: digits(String(metric.failures)) })}</p>
-              <p>{t("view.source_overhead.cli.values", { rows: digits(metric.rows_decoded), bytes: digits(metric.charged_value_bytes),
-                timeouts: digits(String(metric.timeouts)), cancellations: digits(String(metric.cancellations)),
-                unconfirmed: digits(String(metric.unconfirmed_cancellations)) })}</p>
-            </div>;
-          })}
+          <ReadTemplateValues metrics={evidence.read_metrics} order={report.template_order}/>
         </details>}
         <details><summary>{t("ui.memory_failures.limitations")}</summary>
           {report.limitations.map((text, index) => <p className="muted" key={index}>{text}</p>)}

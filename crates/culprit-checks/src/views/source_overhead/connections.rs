@@ -1,8 +1,11 @@
 //! Source acquisition observations describe this capture route, never application connectivity or native cause.
 use culprit_core::{SourceConnectionExplanation, format, t, telemetry::*};
-pub(super) fn explain(work: &ReadConnectionWork) -> SourceConnectionExplanation {
+pub(super) fn explain(work: &ReadConnectionWork, scope: super::WorkScope) -> SourceConnectionExplanation {
     let mut limitations = vec![
-        t!("view.source_overhead.connection.limit.scope"),
+        match scope {
+            super::WorkScope::Capture => t!("view.source_overhead.connection.limit.scope"),
+            super::WorkScope::Provider => t!("view.provider_acquisition.limit.connection"),
+        },
         t!("view.source_overhead.connection.limit.clock"),
         t!("view.source_overhead.connection.limit.phase"),
     ];

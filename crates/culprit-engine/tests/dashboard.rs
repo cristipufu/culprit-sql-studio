@@ -71,7 +71,12 @@ fn fixture(tag: &str, response: Result<LiveState>) -> Fixture {
     let reader = Reader { reads: reads.clone(), response };
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
-        culprit_engine::ProviderRegistration::new(Arc::new(move |_| Ok(Box::new(reader.clone()))), Vec::new()).unwrap(),
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_, _context| Ok(Box::new(reader.clone()))),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
+            Vec::new(),
+        )
+        .unwrap(),
     );
     ws.add_connection(NewConnection {
         name: "replayed".into(),

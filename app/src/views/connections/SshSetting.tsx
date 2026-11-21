@@ -1,3 +1,5 @@
+import type { ProviderAcquisitionReport } from "../../gen/ProviderAcquisitionReport";
+import { ProviderAcquisition } from "../../components/ProviderAcquisition";
 import { Cable, Check, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -32,6 +34,8 @@ type Status = { kind: "idle" } | { kind: "testing" | "saving" } | { kind: "ok"; 
 
 function SshDialog({ connection, onClose }: { connection: ConnectionInfo; onClose: () => void }) {
   const [draft, setDraft] = useState<SshDraft | null>(() => sshDraft(connection.ssh));
+  const [acquisition, setAcquisition] = useState<ProviderAcquisitionReport | null>(null);
+  const abort = useRef<AbortController | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const root = useRef<HTMLFormElement>(null);
   const close = useRef<HTMLButtonElement>(null);
@@ -39,12 +43,22 @@ function SshDialog({ connection, onClose }: { connection: ConnectionInfo; onClos
   const title = useId();
   const saving = status.kind === "saving";
   useFocusTrap(root, true, () => { if (!saving) onClose(); });
-  useEffect(() => { close.current?.focus(); return () => action.current.invalidate(); }, []);
+  useEffect(() => {
+    close.current?.focus();
+    return () => { action.current.invalidate(); abort.current?.abort(); };
+  }, []);
   const test = async () => {
     if (!root.current?.reportValidity()) return;
-    const current = action.current.start(); setStatus({ kind: "testing" });
+    const current = action.current.start();
+    abort.current?.abort();
+    const controller = new AbortController();
+    abort.current = controller;
+    setAcquisition(null);
+    setStatus({ kind: "testing" });
     try {
-      const server = await (await api()).testSsh(connection.name, sshConfig(draft));
+      const server = await (await api()).testSsh(connection.name, sshConfig(draft), controller.signal, (report) => {
+        if (current()) setAcquisition(report);
+      });
       if (current()) setStatus({ kind: "ok", label: `${server.product} · ${server.database}` });
     } catch (error) { if (current()) setStatus({ kind: "error", error: errorMessage(error) }); }
   };
@@ -69,7 +83,14 @@ function SshDialog({ connection, onClose }: { connection: ConnectionInfo; onClos
     }}>
       <header className="ssh-dialog-head"><div><h2 id={title}>{t("ui.ssh_fields.jump_host")}</h2><p>{connection.name}</p></div><button ref={close} type="button" className="icon-btn" disabled={saving} aria-label={t("ui.ssh_setting.close")} onClick={onClose}><X size={17} /></button></header>
       <div className="ssh-endpoint"><span>{t("ui.ssh_setting.database")}</span><span>{connection.display}</span></div>
-      <SshFields value={draft} disabled={saving} onChange={(value) => { action.current.invalidate(); setDraft(value); setStatus({ kind: "idle" }); }} />
+      <SshFields value={draft} disabled={saving} onChange={(value) => {
+        action.current.invalidate();
+        abort.current?.abort();
+        setAcquisition(null);
+        setDraft(value);
+        setStatus({ kind: "idle" });
+      }} />
+      <ProviderAcquisition report={acquisition} />
       {status.kind === "error" && <div className="notice error" role="alert"><div><b>{status.error.message}</b>{status.error.hint && <div>{status.error.hint}</div>}</div></div>}
       {status.kind === "ok" && <div className="ssh-tested"><Check size={14} /> {t("ui.ssh_setting.connected", { server: status.label })}</div>}
       <footer className="ssh-dialog-actions"><button type="button" className="btn" disabled={saving || status.kind === "testing"} onClick={() => void test()}>{status.kind === "testing" ? t("ui.ssh_setting.testing") : t("ui.ssh_setting.test")}</button><span className="spacer" /><button type="button" className="btn ghost" disabled={saving} onClick={onClose}>{t("ui.common.cancel")}</button><button type="submit" className="btn primary" disabled={saving}>{saving ? t("ui.common.saving") : t("ui.ssh_setting.save")}</button></footer>

@@ -109,9 +109,12 @@ fn actual_plural_and_single_saved_scan_futures_keep_original_vectors_and_reports
     }
     type Args = (&'static Workspace, &'static str, &'static SnapshotOptions, CompletedCaptureScanInput<'static>);
     assert!(
-        future_size(|(workspace, name, options, input): Args| workspace
-            .scan_populations_with_completed_capture(name, options, input))
-            <= 4096
+        future_size(|(workspace, name, options, input): Args| workspace.scan_populations_with_completed_capture(
+            name,
+            options,
+            input,
+            culprit_core::ProviderOperationObservation::unobserved()
+        )) <= 4096
     );
     type Plural = (
         &'static Workspace,
@@ -122,7 +125,13 @@ fn actual_plural_and_single_saved_scan_futures_keep_original_vectors_and_reports
     );
     assert!(
         future_size(|(workspace, name, options, inputs, budget): Plural| workspace
-            .scan_populations_with_completed_captures(name, options, inputs, budget))
+            .scan_populations_with_completed_captures(
+                name,
+                options,
+                inputs,
+                budget,
+                culprit_core::ProviderOperationObservation::unobserved()
+            ))
             <= 4096
     );
     assert!(std::mem::size_of::<CompletedOriginal>() <= 4096);

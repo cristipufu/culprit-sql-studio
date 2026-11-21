@@ -20,6 +20,25 @@ pub(crate) fn storage(report: &StorageReport) -> String {
                 presented = format::digits(report.presented_rows.to_string()),
                 printed = format::digits(report.entries.len().min(super::super::BRIEF_FINDING_LIMIT).to_string())
             ));
+            if let Some(summary) = &report.file_summary {
+                text.push_str("\n\n");
+                text.push_str(&summary.title);
+                text.push('\n');
+                text.push_str(&summary.summary);
+                for field in &summary.fields {
+                    text.push('\n');
+                    let value = field
+                        .value
+                        .as_deref()
+                        .map(|value| super::statement::preview_bounded(value, 1024))
+                        .unwrap_or_else(|| t!("ui.memory_failures.not_reported"));
+                    text.push_str(&t!("view.counter_ratios.cli.metric", label = &field.label, value = value));
+                }
+                for qualification in &summary.limitations {
+                    text.push('\n');
+                    text.push_str(qualification);
+                }
+            }
             for entry in report.entries.iter().take(super::super::BRIEF_FINDING_LIMIT) {
                 text.push_str("\n\n");
                 text.push_str(&entry.title);

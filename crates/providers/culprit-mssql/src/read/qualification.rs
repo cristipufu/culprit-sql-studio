@@ -81,15 +81,33 @@ impl Admission {
 
 /// The existing Pool calls this only immediately before its real SET batch.
 pub(crate) struct SetupWork {
-    admission: Arc<Admission>,
+    admission: Option<Arc<Admission>>,
     metrics: crate::read_metrics::Metrics,
+    queries: std::sync::atomic::AtomicU32,
 }
 impl SetupWork {
     fn new(admission: Arc<Admission>) -> Self {
-        Self { admission, metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql) }
+        Self {
+            admission: Some(admission),
+            metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
+            queries: Default::default(),
+        }
+    }
+    pub(crate) fn observation() -> Self {
+        Self {
+            admission: None,
+            metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
+            queries: Default::default(),
+        }
+    }
+    pub(crate) fn snapshot(&self) -> (u32, Option<culprit_core::telemetry::ReadWorkMetrics>) {
+        (self.queries.load(std::sync::atomic::Ordering::Acquire), self.metrics.snapshot())
     }
     pub(crate) fn begin(&self, sql: &str) -> Result<SetupTask<'_>> {
-        self.admission.start().map_err(CollectionStop::error)?;
+        if let Some(admission) = &self.admission {
+            admission.start().map_err(CollectionStop::error)?;
+        }
+        self.queries.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let sql = crate::statement_origin::requested_batch(sql);
         Ok(SetupTask {
             work: self,
@@ -116,8 +134,8 @@ impl SetupTask<'_> {
             &crate::read_metrics::Progress::default(),
             &culprit_core::telemetry::ReadTaskOutcome { failed: !success, unconfirmed: !success, ..Default::default() },
         );
-        if !success {
-            self.work.admission.stop(CollectionStop::CancellationUnconfirmed);
+        if !success && let Some(admission) = &self.work.admission {
+            admission.stop(CollectionStop::CancellationUnconfirmed);
         }
         self.finished = true;
     }

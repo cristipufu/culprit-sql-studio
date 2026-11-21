@@ -1071,15 +1071,15 @@ mod page_server_definitions;
 pub use page_server_definitions::{QueryStoreStatementCase, query_store_statement_evidence_cases};
 
 mod storage;
-pub use storage::{StorageCase, storage_evidence};
+pub use storage::{StorageCase, assert_storage_file_summary, storage_evidence};
 mod qualification;
 pub use qualification::{QualificationFixture, QualificationFixtureCase};
 
 mod instance_resources;
 pub use instance_resources::{
-    InstanceResourceCase, ProcessCpuCase, ProcessCpuIntervalCase, SchedulerCase, instance_resource_cpu_evidence,
-    instance_resource_evidence, instance_resource_scheduler_evidence, process_cpu_interval_evidence,
-    process_cpu_interval_originals,
+    InstanceResourceCase, ProcessCpuCase, ProcessCpuIntervalCase, SchedulerCase, assert_process_cpu_history_capture,
+    instance_resource_cpu_evidence, instance_resource_evidence, instance_resource_scheduler_evidence,
+    process_cpu_interval_evidence, process_cpu_interval_originals,
 };
 
 mod boxed_query_history;

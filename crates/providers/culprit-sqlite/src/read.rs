@@ -38,10 +38,21 @@ pub(crate) struct FileReader {
     path: PathBuf,
     fence: ReadFence,
     worker: Arc<tokio::sync::Semaphore>,
+    observation: culprit_core::ProviderReadContext,
 }
 impl FileReader {
     pub(crate) fn new(path: PathBuf) -> Self {
-        Self { path, fence: ReadFence::default(), worker: Arc::new(tokio::sync::Semaphore::new(1)) }
+        Self {
+            path,
+            fence: ReadFence::default(),
+            worker: Arc::new(tokio::sync::Semaphore::new(1)),
+            observation: culprit_core::ProviderReadContext::unobserved(),
+        }
+    }
+    pub(crate) fn with_read_context(mut self, context: culprit_core::ProviderReadContext) -> Self {
+        context.complete_reader_coverage();
+        self.observation = context;
+        self
     }
     pub(crate) fn shutdown(&self) -> SourceShutdown {
         if self.fence.is_uncertain() { SourceShutdown::Unconfirmed } else { SourceShutdown::Quiescent }
@@ -60,8 +71,9 @@ impl FileReader {
         + Send
         + 'static,
     ) -> Result<T> {
-        self.owned(budget, FileAccounting::new(u32::MAX), move |conn, path, handle, _| operation(conn, path, handle))
-            .await
+        self.observation.partial_reader_coverage(culprit_core::ProviderReadGap::PartialReaderCoverage);
+        let (accounting, observation) = FileAccounting::new(u32::MAX).observed(&self.observation);
+        self.owned(budget, accounting, observation, move |conn, path, handle, _| operation(conn, path, handle)).await
     }
     pub(crate) async fn with_accounting<T: Send + 'static>(
         &self,
@@ -69,12 +81,16 @@ impl FileReader {
         accounting: FileAccounting,
         operation: impl FnOnce(&mut Connection, &std::path::Path, FileAccounting) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        self.owned(budget, accounting, move |conn, path, _, accounting| operation(conn, path, accounting)).await
+        // This caller-supplied recorder may outlive/reuse several file operations. Never register copies as
+        // independent normal readers or pretend its earlier counts belong to this invocation.
+        self.observation.partial_reader_coverage(culprit_core::ProviderReadGap::PartialReaderCoverage);
+        self.owned(budget, accounting, None, move |conn, path, _, accounting| operation(conn, path, accounting)).await
     }
     async fn owned<T: Send + 'static>(
         &self,
         budget: Duration,
         accounting: FileAccounting,
+        observation: Option<culprit_core::ProviderReaderObservation>,
         operation: impl FnOnce(
             &mut Connection,
             &std::path::Path,
@@ -105,7 +121,13 @@ impl FileReader {
         let mut task = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let _capacity = capacity;
+            let observed = accounting.clone();
             let (result, shutdown) = run(&path, handle, interruption, accounting, operation);
+            if let Some(observer) = observation {
+                let (queries, metrics) = observed.snapshot();
+                observer.checkpoint(queries, metrics);
+                observer.finish(shutdown);
+            }
             worker.complete(shutdown);
             result
         });
@@ -163,7 +185,18 @@ fn run<T>(
     if let Err(error) = handle.check() {
         return (Err(error), SourceShutdown::Quiescent);
     }
-    let mut conn = match open(path) {
+    let attempt = accounting.connection_work().map(|work| work.begin());
+    let phase =
+        attempt.as_ref().map(|attempt| attempt.phase(culprit_core::telemetry::ReadConnectionStage::Acquire, None));
+    accounting.publish();
+    let opened = open(path);
+    if let Some(phase) = phase {
+        phase.finish(match &opened {
+            Ok(_) => culprit_core::telemetry::ReadConnectionOutcome::Completed,
+            Err(error) => culprit_core::telemetry::ReadConnectionOutcome::from_error(error),
+        });
+    }
+    let mut conn = match opened {
         Ok(conn) => conn,
         Err(error) => return (Err(error), SourceShutdown::Quiescent),
     };
@@ -193,7 +226,7 @@ fn run<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> PathBuf {
+    pub(super) fn fixture() -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
             "culprit-file-owner-{}-{}.sqlite",
@@ -245,3 +278,6 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+#[cfg(test)]
+mod acquisition_tests;

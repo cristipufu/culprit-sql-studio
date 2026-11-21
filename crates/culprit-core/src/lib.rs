@@ -94,7 +94,7 @@ pub mod model;
 pub mod native_log_analysis;
 pub mod operations;
 mod storage_report;
-pub use storage_report::{StorageEntry, StorageField, StorageReport};
+pub use storage_report::{StorageEntry, StorageField, StorageFileSummary, StorageReport};
 mod session_census_report;
 pub use session_census_report::{
     SessionCensusClientGroup, SessionCensusClientGroups, SessionCensusEntry, SessionCensusField, SessionCensusReport,
@@ -112,6 +112,10 @@ pub mod plan_view;
 pub mod platform;
 pub mod provenance;
 pub mod provider;
+mod provider_acquisition_report;
+pub use provider_acquisition_report::*;
+mod provider_observation;
+pub use provider_observation::*;
 pub mod query_runtime_report;
 pub mod query_store_statement_report;
 pub mod query_temporary_work;

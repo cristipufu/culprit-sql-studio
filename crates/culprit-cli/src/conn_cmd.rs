@@ -150,8 +150,11 @@ pub(crate) async fn run(ws: &Workspace, command: ConnCommand, out: &Out) -> culp
             Ok(0)
         }
         ConnCommand::Test { name } => {
-            let server = ws.probe(&name).await?;
-            out.server(&server);
+            let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Probe)?;
+            let result = ws.probe(&name, observation.operation()?).await;
+            let attempt = culprit_engine::project_probe_attempt(observation.finish_call(result));
+            out.observed_probe(&attempt);
+            attempt.require_connected()?;
             Ok(0)
         }
         ConnCommand::Rename { old, new } => {
@@ -271,17 +274,31 @@ pub(crate) async fn run(ws: &Workspace, command: ConnCommand, out: &Out) -> culp
                     AuthArg::None => AuthKind::None,
                 }),
             };
-            let server = if args.no_test {
+            let attempt = if args.no_test {
                 None
             } else {
                 out.progress(&culprit_core::t!("cli.testing", name = &args.name));
-                Some(ws.test_connection(&new).await?)
+                let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Probe)?;
+                let result = ws.test_connection(&new, observation.operation()?).await;
+                let attempt = culprit_engine::project_probe_attempt(observation.finish_call(result));
+                if let Err(error) = attempt.require_connected() {
+                    out.observed_probe(&attempt);
+                    return Err(error);
+                }
+                Some(attempt)
             };
             let mut info = ws.add_connection(new)?;
             if let Some(log) = args.query_log.as_deref() {
                 info = ws.set_query_log(&info.name, Some(log))?;
             }
-            out.connection_added(&info, server.as_ref());
+            out.connection_added(
+                &info,
+                attempt.as_ref().and_then(|attempt| attempt.require_connected().ok()),
+                attempt.as_ref().map(|attempt| &attempt.acquisition),
+            );
+            if let Some(attempt) = &attempt {
+                out.current_acquisition(&attempt.acquisition);
+            }
             Ok(0)
         }
     }

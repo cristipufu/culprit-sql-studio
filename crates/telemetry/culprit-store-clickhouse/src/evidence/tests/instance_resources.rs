@@ -272,6 +272,7 @@ async fn boxed_cpu_profiles_preserve_all_three_original_families_exact_pool_coun
                 .await
                 .unwrap();
             test_support::assert_operational_capture(&capture, &source, &rows);
+            test_support::assert_process_cpu_history_capture(&capture, case);
             assert!(capture.is_read_complete());
             assert_eq!(capture.source().observation.snapshot().unwrap().dataset, SnapshotDataset::ProcessCpu);
             assert_eq!(capture.source().observation.snapshot().unwrap().sources.len(), 3);

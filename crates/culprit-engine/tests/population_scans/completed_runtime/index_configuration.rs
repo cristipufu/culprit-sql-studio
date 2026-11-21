@@ -8,17 +8,21 @@ async fn original_catalog_configuration_survives_scan_shutdown_and_saved_reanaly
         let dataset = source.observation.snapshot().unwrap().dataset;
         let captured = Captured::from_source("shop", source.clone(), rows).await;
         let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-        let result = workspace
-            .scan_populations_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    analysis: CompletedCaptureAnalysis::IndexConfiguration { dataset },
-                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-                },
-            )
-            .await
-            .unwrap();
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_populations_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        analysis: CompletedCaptureAnalysis::IndexConfiguration { dataset },
+                        ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap();
         let [RecordedOperationalRead::Captured { read }] =
             result.requested.snapshot.operations.index_configuration.as_slice()
         else {
@@ -51,17 +55,21 @@ async fn sharing_withdraws_each_original_catalog_proof_while_scan_configuration_
     let (source, rows) = index_configuration_evidence(IndexConfigurationCase::Mixed);
     let captured = Captured::from_source("shop", source, rows).await;
     let (_home, workspace, _) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let report = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            CompletedCaptureScanInput {
-                analysis: CompletedCaptureAnalysis::IndexConfiguration { dataset: SnapshotDataset::Indexes },
-                ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-            },
-        )
-        .await
-        .unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                CompletedCaptureScanInput {
+                    analysis: CompletedCaptureAnalysis::IndexConfiguration { dataset: SnapshotDataset::Indexes },
+                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                },
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap();
     let snapshot = culprit_core::redact::redact_snapshot(&report.snapshot);
     assert!(matches!(
         snapshot.operations.index_configuration.as_slice(),
@@ -90,16 +98,20 @@ async fn unconfirmed_scan_and_cancelled_original_never_attach_catalog_configurat
         if cause == "cancelled" {
             cancellation.cancel();
         }
-        let result = workspace
-            .scan_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    analysis: CompletedCaptureAnalysis::IndexConfiguration { dataset: SnapshotDataset::Tables },
-                    ..captured.input(&captured.outbox.delivery(), &cancellation)
-                },
-            )
-            .await;
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        analysis: CompletedCaptureAnalysis::IndexConfiguration { dataset: SnapshotDataset::Tables },
+                        ..captured.input(&captured.outbox.delivery(), &cancellation)
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await;
         assert!(result.is_err(), "{cause}");
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
         assert!(workspace.report_history("shop").unwrap().is_empty());

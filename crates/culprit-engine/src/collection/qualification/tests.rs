@@ -6,7 +6,8 @@ use std::{path::Path, sync::Arc};
 
 fn registration(fixture: &QualificationFixture, verifier: bool) -> ProviderRegistration {
     let mut registration = ProviderRegistration::new(
-        Arc::new(|_| Err(Error::internal("ordinary provider must not run during qualification"))),
+        Arc::new(|_, _context| Err(Error::internal("ordinary provider must not run during qualification"))),
+        crate::ProviderConstructionPolicy::DeferredNativeWork,
         vec![fixture.recipe.clone()],
     )
     .unwrap();

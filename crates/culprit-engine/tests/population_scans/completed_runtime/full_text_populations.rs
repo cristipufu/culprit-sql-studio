@@ -27,17 +27,21 @@ async fn completed_full_text_original_attaches_only_after_scan_shutdown_and_repl
         let (source, rows) = full_text_population_evidence(case);
         let captured = Captured::from_source("shop", source.clone(), rows).await;
         let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-        let result = workspace
-            .scan_populations_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    analysis: CompletedCaptureAnalysis::FullTextPopulations,
-                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-                },
-            )
-            .await
-            .unwrap();
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_populations_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        analysis: CompletedCaptureAnalysis::FullTextPopulations,
+                        ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap();
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
         let [RecordedOperationalRead::Captured { read }] =
             result.requested.snapshot.operations.full_text_populations.as_slice()
@@ -106,14 +110,19 @@ async fn sharing_and_wrong_connection_keep_explicit_original_withdrawal_without_
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
     let original = analyze_original(&workspace, &captured).await;
     assert!(
-        workspace
-            .scan_with_captured_full_text_populations("other-connection", &options(), None, original)
-            .await
-            .is_err()
+        crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
+            .scan_with_captured_full_text_populations("other-connection", &options(), None, original, operation)
+            .await)
+        .await
+        .is_err()
     );
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
     let original = analyze_original(&workspace, &captured).await;
-    let report = workspace.scan_with_captured_full_text_populations("shop", &options(), None, original).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_full_text_populations("shop", &options(), None, original, operation).await
+    })
+    .await
+    .unwrap();
     let shared = culprit_core::redact::redact_snapshot(&report.snapshot);
     let replay = culprit_checks::analyze(serde_json::from_slice(&serde_json::to_vec(&shared).unwrap()).unwrap());
     let [report] = replay.full_text_populations.as_deref().unwrap() else { panic!() };

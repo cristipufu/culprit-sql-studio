@@ -27,7 +27,13 @@ async fn foreign_journal_connection_cannot_attach_to_a_scan_even_when_the_curren
     let (home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
     let captured = read("local-evidence", &fixture).await;
     // Existing workspace fixture's saved label is shop, while the local journal's label must remain exact.
-    assert!(workspace.scan_with_captured_source_overhead("shop", &options(), None, *captured).await.is_err());
+    assert!(
+        crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
+            .scan_with_captured_source_overhead("shop", &options(), None, *captured, operation)
+            .await)
+        .await
+        .is_err()
+    );
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
     drop(home);
 }
@@ -45,7 +51,11 @@ async fn sealed_success_and_failure_history_attach_after_shutdown_and_reread_off
         let (_home, workspace, state) = workspace(current, SourceShutdown::Quiescent);
         let captured = read("shop", &fixture).await;
         let expected = captured.original().unwrap().clone();
-        let report = workspace.scan_with_captured_source_overhead("shop", &options(), None, *captured).await.unwrap();
+        let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace.scan_with_captured_source_overhead("shop", &options(), None, *captured, operation).await
+        })
+        .await
+        .unwrap();
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
         assert_eq!(state.factories.load(Ordering::SeqCst), 1);
         let [RecordedSourceAcquisition::Captured { original }] =

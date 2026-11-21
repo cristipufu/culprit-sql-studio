@@ -14,15 +14,19 @@ async fn two_explicit_cpu_originals_share_one_scan_owner_and_survive_offline_rep
     x.analysis = CompletedCaptureAnalysis::ProcessCpu;
     let mut y = second.input(&right, &cancellation);
     y.analysis = CompletedCaptureAnalysis::ProcessCpu;
-    let result = workspace
-        .scan_populations_with_completed_captures(
-            "shop",
-            &options(),
-            vec![x, y],
-            CompletedCaptureBudget { max_rows: 14, ..Default::default() },
-        )
-        .await
-        .unwrap();
+    let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_populations_with_completed_captures(
+                "shop",
+                &options(),
+                vec![x, y],
+                CompletedCaptureBudget { max_rows: 14, ..Default::default() },
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap();
     assert_eq!(state.factories.load(Ordering::SeqCst), 1);
     assert_eq!(state.acquisitions.load(Ordering::SeqCst), 1);
     assert_eq!(state.active.load(Ordering::SeqCst), 0);
@@ -55,15 +59,17 @@ async fn plural_row_or_byte_exhaustion_and_any_pre_cancelled_original_refuse_bef
         let mut y = second.input(&right, &second_c);
         y.analysis = CompletedCaptureAnalysis::ProcessCpu;
         assert!(
-            workspace
+            crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
                 .scan_populations_with_completed_captures(
                     "shop",
                     &options(),
                     vec![x, y],
-                    CompletedCaptureBudget { max_rows: rows, max_bytes: bytes, ..Default::default() }
+                    CompletedCaptureBudget { max_rows: rows, max_bytes: bytes, ..Default::default() },
+                    operation
                 )
-                .await
-                .is_err()
+                .await)
+            .await
+            .is_err()
         );
         assert_eq!(state.factories.load(Ordering::SeqCst), 0);
         assert_eq!(state.acquisitions.load(Ordering::SeqCst), 0);
@@ -85,10 +91,19 @@ async fn conflicting_completed_cpu_attempts_are_rejected_before_any_factory_or_o
         ..original.input(&delivery, &cancellation)
     };
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let error = workspace
-        .scan_with_completed_captures("shop", &options(), vec![first, second], CompletedCaptureBudget::default())
-        .await
-        .unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_captures(
+                "shop",
+                &options(),
+                vec![first, second],
+                CompletedCaptureBudget::default(),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Conflict)));
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
 }
@@ -104,15 +119,19 @@ async fn exact_repeated_originals_remain_idempotent_without_an_invented_two_poin
     let mut second = original.input(&delivery, &cancellation);
     second.analysis = CompletedCaptureAnalysis::ProcessCpu;
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let result = workspace
-        .scan_with_completed_captures(
-            "shop",
-            &options(),
-            vec![first, second],
-            CompletedCaptureBudget { max_rows: 14, ..Default::default() },
-        )
-        .await
-        .unwrap();
+    let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_captures(
+                "shop",
+                &options(),
+                vec![first, second],
+                CompletedCaptureBudget { max_rows: 14, ..Default::default() },
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap();
     assert_eq!(result.snapshot.operations.process_cpu_originals.len(), 1);
     assert!(!result.instance_resources.as_ref().unwrap().process_cpu_interval.as_ref().unwrap().available);
     assert_eq!(state.factories.load(Ordering::SeqCst), 1);
@@ -154,14 +173,18 @@ async fn expired_original_worker_queue_does_not_open_the_native_scan_factory() {
     let mut input = original.input(&delivery, &cancellation);
     input.analysis = CompletedCaptureAnalysis::ProcessCpu;
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let outcome = workspace
-        .scan_with_completed_captures(
-            "shop",
-            &options(),
-            vec![input],
-            CompletedCaptureBudget { timeout: Duration::from_millis(50), ..Default::default() },
-        )
-        .await;
+    let outcome = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_captures(
+                "shop",
+                &options(),
+                vec![input],
+                CompletedCaptureBudget { timeout: Duration::from_millis(50), ..Default::default() },
+                operation,
+            )
+            .await
+    })
+    .await;
     // Release and await the SAME local worker before inspecting failure, even when the facade failed.
     let release_result = release.send(());
     let settled = holding.await.unwrap();

@@ -1,3 +1,4 @@
+import type { ProviderAcquisitionReport } from "../gen/ProviderAcquisitionReport";
 import type { Report } from "../gen/Report";
 import type { NativeIdentity } from "../gen/NativeIdentity";
 import { errorMessage, type Api, type ApiError } from "./api";
@@ -9,13 +10,13 @@ import { reportMatchesSelection, samePopulation, type ReportSelection } from "./
 export type ReportState =
   | { status: "none" }
   | { status: "loading" }
-  | { status: "ready"; report: Report; scanning: boolean; scanError: ApiError | null }
-  | { status: "error"; error: ApiError };
+  | { status: "ready"; report: Report; scanning: boolean; scanError: ApiError | null; scanAcquisition?: ProviderAcquisitionReport | null }
+  | { status: "error"; error: ApiError; acquisition?: ProviderAcquisitionReport | null };
 
 type Context = { active: string | null; windowMinutes: number; workloadPopulation: NativeIdentity | null; report: ReportState; finding: string | null };
 type Update = { report: ReportState; finding?: string | null; selection?: ReportSelection };
 type Client = Pick<Api, "latestReport" | "reportAt" | "scan">;
-type Request = ReportSelection & { current: () => boolean };
+type Request = ReportSelection & { current: () => boolean; acquisition?: ProviderAcquisitionReport };
 type ReadIntent = "open" | "refresh" | "reread";
 
 /** Saved observations keep their original alias on disk; UI actions address the connection's current name. */
@@ -120,7 +121,7 @@ export class ReportRequests {
     const current = this.options.read().report;
     if (current.status === "loading" || (current.status === "ready" && current.scanning && !current.scanError)) return;
     this.options.publish({ report: current.status === "ready"
-      ? { ...current, scanning: true, scanError: null } : { status: "loading" } });
+      ? { ...current, scanning: true, scanError: null, scanAcquisition: null } : { status: "loading" } });
   }
 
   private accept(report: Report, scanning: boolean, name: string): void {
@@ -134,7 +135,9 @@ export class ReportRequests {
     if (!request.current()) return;
     this.scanning();
     if (!request.current()) return;
-    const report = await client.scan(request.name, request.windowMinutes, request.population);
+    const report = await client.scan(request.name, request.windowMinutes, request.population, (acquisition) => {
+      if (request.current()) request.acquisition = acquisition;
+    });
     if (!request.current()) return;
     if (!reportMatchesSelection(report, request)) {
       this.failed(request, { code: "invalid_input", message: t("ui.population_picker.report_scope_mismatch"), hint: null });
@@ -149,8 +152,8 @@ export class ReportRequests {
     if (!request.current()) return;
     const previous = this.options.read().report;
     const report: ReportState = previous.status === "ready"
-      ? { ...previous, scanning: false, scanError: errorMessage(error) }
-      : { status: "error", error: errorMessage(error) };
+      ? { ...previous, scanning: false, scanError: errorMessage(error), scanAcquisition: request.acquisition ?? null }
+      : { status: "error", error: errorMessage(error), acquisition: request.acquisition ?? null };
     this.options.publish({ report });
   }
 }

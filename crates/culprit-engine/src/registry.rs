@@ -41,22 +41,34 @@ pub fn registration(engine: Engine) -> Result<ProviderRegistration> {
         Engine::Mssql => mssql_registration(),
         #[cfg(feature = "postgres")]
         Engine::Postgres => ProviderRegistration::new(
-            Arc::new(|spec| Ok(Box::new(culprit_postgres::PostgresProvider::new(spec)?))),
+            Arc::new(|spec, context| {
+                Ok(Box::new(culprit_postgres::PostgresProvider::new(spec)?.with_read_context(context)?))
+            }),
+            crate::ProviderConstructionPolicy::DeferredNativeWork,
             culprit_postgres::telemetry_recipes(),
         ),
         #[cfg(feature = "yugabyte")]
         Engine::Yugabyte => ProviderRegistration::new(
-            Arc::new(|spec| Ok(Box::new(culprit_yugabyte::YugabyteProvider::new(spec)?))),
+            Arc::new(|spec, context| {
+                Ok(Box::new(culprit_yugabyte::YugabyteProvider::new(spec)?.with_read_context(context)?))
+            }),
+            crate::ProviderConstructionPolicy::DeferredNativeWork,
             culprit_yugabyte::telemetry_recipes(),
         ),
         #[cfg(feature = "mysql")]
         Engine::Mysql => ProviderRegistration::new(
-            Arc::new(|spec| Ok(Box::new(culprit_mysql::MysqlProvider::new(spec)?))),
+            Arc::new(|spec, context| {
+                Ok(Box::new(culprit_mysql::MysqlProvider::new(spec)?.with_read_context(context)?))
+            }),
+            crate::ProviderConstructionPolicy::DeferredNativeWork,
             culprit_mysql::telemetry_recipes(),
         ),
         #[cfg(feature = "sqlite")]
         Engine::Sqlite => ProviderRegistration::new(
-            Arc::new(|spec| Ok(Box::new(culprit_sqlite::SqliteProvider::new(spec)?))),
+            Arc::new(|spec, context| {
+                Ok(Box::new(culprit_sqlite::SqliteProvider::new(spec)?.with_read_context(context)?))
+            }),
+            crate::ProviderConstructionPolicy::DeferredNativeWork,
             culprit_sqlite::telemetry_recipes(),
         ),
         #[allow(unreachable_patterns)]
@@ -67,7 +79,8 @@ pub fn registration(engine: Engine) -> Result<ProviderRegistration> {
 #[cfg(feature = "mssql")]
 fn mssql_registration() -> Result<ProviderRegistration> {
     let registration = ProviderRegistration::new(
-        Arc::new(|spec| Ok(Box::new(culprit_mssql::MssqlProvider::new(spec)?))),
+        Arc::new(|spec, context| Ok(Box::new(culprit_mssql::MssqlProvider::new(spec)?.with_read_context(context)?))),
+        crate::ProviderConstructionPolicy::DeferredNativeWork,
         culprit_mssql::telemetry_recipes(),
     )?;
     #[cfg(feature = "collector")]

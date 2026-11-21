@@ -46,6 +46,10 @@ pub struct SqliteProvider {
 }
 
 impl SqliteProvider {
+    pub fn with_read_context(mut self, context: culprit_core::ProviderReadContext) -> Result<Self> {
+        self.reader = self.reader.with_read_context(context);
+        Ok(self)
+    }
     pub fn new(spec: &ConnectionSpec) -> Result<Self> {
         if spec.ssh.is_some() || spec.transport.is_some() {
             return Err(Error::new(ErrorCode::Unsupported, t!("provider.sqlite.open.no_ssh")));

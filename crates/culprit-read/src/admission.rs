@@ -3,7 +3,7 @@ mod gate;
 use crate::durable_fs;
 use culprit_core::{
     Error, ErrorCode, Result,
-    telemetry::{CollectionAdmissionStatus, CollectionStop},
+    telemetry::{CollectionAdmissionStatus, CollectionStop, SourceAdmissionRoute},
 };
 pub use gate::{SourceGate, SourcePermit};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ pub fn observation_identity() -> Result<culprit_core::telemetry::CaptureIdentity
     Ok(culprit_core::telemetry::CaptureIdentity { observation_id: durable_fs::random_id()?, revision: None })
 }
 
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 const MAX_STATE_BYTES: usize = 16 * 1024;
 const STATE_FILE: &str = "state.json";
 const LOCK_FILE: &str = "owner.lock";
@@ -32,7 +32,7 @@ enum Work {
     Quiet,
     Started {
         observation_id: String,
-        connection: String,
+        route: SourceAdmissionRoute,
     },
 }
 #[derive(Serialize, Deserialize)]
@@ -63,8 +63,8 @@ impl SourceAdmission {
         let journal = tokio::task::spawn_blocking(move || Journal::open(root)).await.map_err(|_| storage())??;
         Ok(Self { journal: Arc::new(Mutex::new(journal)) })
     }
-    pub async fn started(&self, observation_id: String, connection: String) -> Result<()> {
-        if !valid_observation(&observation_id) || connection.is_empty() || connection.len() > 512 {
+    pub async fn started(&self, observation_id: String, route: SourceAdmissionRoute) -> Result<()> {
+        if !valid_observation(&observation_id) || !route.matches_observation(&observation_id) {
             return Err(storage());
         }
         let mut journal = self.journal.clone().lock_owned().await;
@@ -72,7 +72,7 @@ impl SourceAdmission {
             if matches!(journal.work, Work::Started { .. }) {
                 return Err(unconfirmed());
             }
-            journal.write(Work::Started { observation_id, connection })
+            journal.write(Work::Started { observation_id, route })
         })
         .await
         .map_err(|_| storage())?
@@ -158,8 +158,8 @@ fn read(root: &Path) -> Result<Work> {
     if stored.format != FORMAT {
         return Err(storage());
     }
-    if let Work::Started { observation_id, connection } = &stored.work
-        && (!valid_observation(observation_id) || connection.is_empty() || connection.len() > 512)
+    if let Work::Started { observation_id, route } = &stored.work
+        && (!valid_observation(observation_id) || !route.matches_observation(observation_id))
     {
         return Err(storage());
     }
@@ -187,11 +187,11 @@ fn create_directory(path: &Path) -> Result<()> {
 fn status(work: &Work) -> CollectionAdmissionStatus {
     match work {
         Work::Quiet => {
-            CollectionAdmissionStatus { observation_id: None, connection: None, source_quiescence_required: false }
+            CollectionAdmissionStatus { observation_id: None, route: None, source_quiescence_required: false }
         }
-        Work::Started { observation_id, connection } => CollectionAdmissionStatus {
+        Work::Started { observation_id, route } => CollectionAdmissionStatus {
             observation_id: Some(observation_id.clone()),
-            connection: Some(connection.clone()),
+            route: Some(route.clone()),
             source_quiescence_required: true,
         },
     }

@@ -124,12 +124,13 @@ fn workspace_with_incarnation(
     let workspace = Workspace::open_in(fixture.directory.parent().unwrap().join("workspace")).with_provider(
         Engine::Mssql,
         ProviderRegistration::new(
-            Arc::new(move |_| {
+            Arc::new(move |_, _context| {
                 if let Some(pending) = &pending {
                     pending.factories.fetch_add(1, Ordering::SeqCst);
                 }
                 Ok(Box::new(ScanProvider(calls.clone(), pending.clone(), incarnation)) as Box<dyn Provider>)
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             vec![],
         )
         .unwrap(),
@@ -164,7 +165,7 @@ async fn actual_cli_scan_attachment_saves_original_shared_capture_for_offline_de
         "0",
     ])
     .unwrap();
-    let report = scan(&workspace, &parsed).await.unwrap();
+    let report = observed_scan(&workspace, &parsed).await.unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(report.snapshot.options.as_ref().unwrap().window_minutes, 360);
     assert_eq!(report.snapshot.options.as_ref().unwrap().plans, 0);
@@ -187,7 +188,8 @@ async fn actual_cli_scan_attachment_saves_original_shared_capture_for_offline_de
     let no_source = Workspace::open_in(fixture.directory.parent().unwrap().join("offline-workspace")).with_provider(
         Engine::Mssql,
         ProviderRegistration::new(
-            Arc::new(|_| panic!("saved report reanalysis must not construct a provider")),
+            Arc::new(|_, _context| panic!("saved report reanalysis must not construct a provider")),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             vec![],
         )
         .unwrap(),
@@ -217,7 +219,7 @@ async fn a_corrupt_local_capture_refuses_the_cli_action_before_the_normal_scan()
         &fixture.manifest.capture.observation_id,
     ])
     .unwrap();
-    assert!(scan(&workspace, &parsed).await.is_err());
+    assert!(observed_scan(&workspace, &parsed).await.is_err());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(workspace.report_history("local-evidence").unwrap().is_empty());
 }
@@ -315,7 +317,7 @@ async fn simultaneous_local_success_and_cancellation_cannot_enter_the_scan_facto
         result: Mutex::new(Some(LocalCapturedAnalysis::MemoryClerks(original(&workspace, &fixture).await))),
         cancellation_on_completion: cancellation.clone(),
     };
-    let error = captured_scan(
+    let error = observed_captured_scan(
         &workspace,
         &args(&[]).unwrap(),
         &reader,
@@ -342,7 +344,9 @@ async fn cancellation_between_the_local_read_and_dispatch_does_not_construct_the
     let options = SnapshotOptions::default();
     let error = scan_until_cancelled(&cancellation, || {
         constructed = true;
-        workspace.scan_with_captured_memory_clerks("local-evidence", &options, None, captured)
+        crate::scan_capture::tests::observe(&workspace, async |operation| {
+            workspace.scan_with_captured_memory_clerks("local-evidence", &options, None, captured, operation).await
+        })
     })
     .await
     .unwrap_err();
@@ -364,7 +368,7 @@ async fn an_already_ready_signal_precedes_even_an_immediately_ready_local_origin
         cancellation_on_completion: CollectionCancellation::default(),
     };
     let parsed = args(&[]).unwrap();
-    let action = captured_scan(
+    let action = observed_captured_scan(
         &workspace,
         &parsed,
         &reader,
@@ -389,7 +393,7 @@ async fn one_signal_owner_retires_the_same_pending_scan_and_keeps_durable_native
             .unwrap();
     let cancellation = CollectionCancellation::default();
     let parsed = args(&[]).unwrap();
-    let action = captured_scan(
+    let action = observed_captured_scan(
         &workspace,
         &parsed,
         &reader,
@@ -410,7 +414,13 @@ async fn one_signal_owner_retires_the_same_pending_scan_and_keeps_durable_native
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(workspace.collection_admission_status().await.unwrap().source_quiescence_required);
-    assert!(workspace.scan("local-evidence", &SnapshotOptions::default()).await.is_err());
+    assert!(
+        crate::scan_capture::tests::observe(&workspace, async |operation| workspace
+            .scan("local-evidence", &SnapshotOptions::default(), operation)
+            .await)
+        .await
+        .is_err()
+    );
     assert_eq!(pending.factories.load(Ordering::SeqCst), 1, "retirement must not authorize replacement native work");
     assert!(workspace.report_history("local-evidence").unwrap().is_empty());
 }
@@ -441,4 +451,30 @@ async fn a_signal_delivery_error_does_not_replace_the_original_unconfirmed_reade
     .await
     .unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
+}
+
+async fn observed_captured_scan(
+    workspace: &Workspace,
+    args: &crate::ScanArgs,
+    reader: &dyn LocalCaptureReader,
+    original: CapturedOriginal<'_>,
+    cancellation: &CollectionCancellation,
+) -> Result<Box<Report>> {
+    let owner = workspace.begin_provider_read(culprit_core::ProviderReadKind::Scan)?;
+    let result = super::captured_scan(workspace, args, reader, original, cancellation, owner.operation()?).await;
+    owner.finish_call(result).into_result()
+}
+async fn observe<T>(
+    workspace: &Workspace,
+    start: impl std::ops::AsyncFnOnce(culprit_core::ProviderOperationObservation) -> Result<culprit_core::ProviderCall<T>>,
+) -> Result<T> {
+    let owner = workspace.begin_provider_read(culprit_core::ProviderReadKind::Scan)?;
+    let result = start(owner.operation()?).await;
+    owner.finish_call(result).into_result()
+}
+
+async fn observed_scan(workspace: &Workspace, args: &crate::ScanArgs) -> Result<Box<Report>> {
+    let owner = workspace.begin_provider_read(culprit_core::ProviderReadKind::Scan)?;
+    let result = super::scan(workspace, args, owner.operation()?).await;
+    owner.finish_call(result).into_result()
 }

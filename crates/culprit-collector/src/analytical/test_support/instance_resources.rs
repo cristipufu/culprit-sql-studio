@@ -159,4 +159,7 @@ mod schedulers;
 pub use schedulers::{SchedulerCase, instance_resource_scheduler_evidence};
 
 mod process_cpu_profile;
-pub use process_cpu_profile::{ProcessCpuIntervalCase, process_cpu_interval_evidence, process_cpu_interval_originals};
+pub use process_cpu_profile::{
+    ProcessCpuIntervalCase, assert_process_cpu_history_capture, process_cpu_interval_evidence,
+    process_cpu_interval_originals,
+};

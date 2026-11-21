@@ -11,16 +11,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::IndexedViews
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::indexed_views(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Attach sealed sanitized history after normal scan settlement. No current database/member is borrowed.
@@ -30,14 +31,15 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSourceOverhead,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::source_acquisition(captured.into_saved()?)?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     pub async fn scan_with_captured_numa_nodes(
@@ -46,16 +48,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::InstanceResources
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::numa_nodes(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Retain one authenticated catalog original after the ordinary scan settles, independently of current objects.
@@ -65,16 +68,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::IndexConfiguration
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::index_configuration(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Attach the exact selected native runtime original after normal scan shutdown. It cannot replace the
@@ -85,14 +89,15 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalRuntimeFragments,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::runtime_fragments(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Explicit original history stays separate from the later scan's database/member and workload.
@@ -102,7 +107,8 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
@@ -114,9 +120,9 @@ impl Workspace {
             _ => return Err(DeliveryProblem::InvalidContract.error()),
         };
         let evidence = crate::scan::CapturedScanEvidence::change_capture(family, captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Reinterpret one selected original history capture after ordinary scan shutdown. No current query/table,
@@ -127,14 +133,15 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalQueryWaitFragments,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::query_wait_fragments(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// An authenticated shared-pool original remains independent of the later scanned database.
@@ -144,14 +151,15 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalPoolSettings,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::pool_settings(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
     /// A saved connection authorizes lookup, while the injected reader authenticates the capture's journal owner.
     /// The request's operation includes queueing and local verification; this facade creates no replacement owner.
@@ -179,16 +187,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::PerformanceCounters
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::database_performance_counters(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Attach the exact original database capture only after the ordinary native scan has settled.
@@ -198,14 +207,15 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalHyperscaleLogComponents,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::hyperscale_log_components(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
     /// Retain the original selected native table and acquisition interval after the normal scan owner ends.
     /// The saved connection authorizes lookup; no current table-name, database or member association is inferred.
@@ -215,16 +225,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::TableMemory
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::table_memory(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
     pub async fn scan_with_captured_full_text_populations(
         &self,
@@ -232,16 +243,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::FullTextPopulations
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::full_text_populations(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Attach independently scoped original Group Replication evidence without a new native read.
@@ -251,16 +263,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::GroupReplication
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::group_replication(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Attach independently scoped original Group Replication evidence without a new native read.
@@ -270,16 +283,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::Galera
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::galera(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Attach one original shared tempdb read after the normal scan owner ends. Current database identity and
@@ -290,16 +304,17 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalSnapshotAnalysis,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name
             || captured.report().kind() != crate::LocalCaptureAnalysisKind::TempdbMetadataMemory
         {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::tempdb_metadata_memory(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Consume one opaque authenticated result, retaining all original rows for normal persistence/reanalysis.
@@ -310,14 +325,15 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: LocalMemoryClerks,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.original().connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::memory_clerks(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 }
 
@@ -328,13 +344,14 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&Path>,
         captured: crate::LocalManagedInstanceResources,
-    ) -> Result<Report> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
         if captured.connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::managed_instance_resources(captured.into_read())?;
-        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence), observation))
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 }

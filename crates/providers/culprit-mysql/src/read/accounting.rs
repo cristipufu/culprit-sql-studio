@@ -5,15 +5,21 @@ pub(crate) struct Accounting {
     pub(super) deadline: Instant,
     pub(super) queries: Arc<AtomicU32>,
     pub(super) metrics: ReadMetricsRecorder,
+    pub(super) observation: Option<culprit_core::ProviderReaderObserver>,
+    pub(super) connection_work: Option<ReadConnectionRecorder>,
+    connection_generation: Arc<std::sync::atomic::AtomicU64>,
 }
 impl Accounting {
     /// Cancellation remains admitted after an ordinary read budget expires, but its work still appears in cost
     /// diagnostics and query counts. Suppressing cleanup at the limit could leave the database request running.
     pub(crate) fn control_query(&self, sql: &str) -> ControlQuery {
         self.queries.fetch_add(1, Ordering::AcqRel);
+        let template = self.metrics.begin(sql);
+        self.publish();
         ControlQuery {
+            accounting: self.clone(),
             metrics: self.metrics.clone(),
-            template: self.metrics.begin(sql),
+            template,
             started: std::time::Instant::now(),
             progress: ReadProgress::default(),
             finished: false,
@@ -25,7 +31,29 @@ impl Accounting {
             budget,
             queries: Arc::new(AtomicU32::new(0)),
             metrics: ReadMetricsRecorder::new(Engine::Mysql),
+            observation: None,
+            connection_work: None,
+            connection_generation: Default::default(),
         }
+    }
+    pub(super) fn with_statement_timeout(&self, timeout_ms: u32) -> Self {
+        let mut accounting = self.clone();
+        accounting.budget.statement_timeout_ms = timeout_ms;
+        accounting
+    }
+    pub(super) fn snapshot(&self) -> Option<ReadWorkMetrics> {
+        let mut metrics = self.metrics.snapshot()?;
+        metrics.connection_work = self.connection_work.as_ref().and_then(|work| work.snapshot()).map(Box::new);
+        Some(metrics)
+    }
+    pub(super) fn publish(&self) {
+        if let Some(observer) = &self.observation {
+            observer.checkpoint(self.queries.load(Ordering::Acquire), self.snapshot());
+        }
+    }
+    pub(super) fn acquired(&self, attempt: &ReadConnectionAttemptRecorder) {
+        let generation = self.connection_generation.fetch_add(1, Ordering::AcqRel).saturating_add(1);
+        attempt.acquired(generation);
     }
     pub(super) fn remaining(&self) -> Result<Duration> {
         let remaining = self
@@ -42,13 +70,17 @@ impl Accounting {
                 return Err(CollectionStop::QueryLimit.error());
             }
             match self.queries.compare_exchange_weak(queries, queries + 1, Ordering::AcqRel, Ordering::Acquire) {
-                Ok(_) => return Ok(()),
+                Ok(_) => {
+                    self.publish();
+                    return Ok(());
+                }
                 Err(current) => queries = current,
             }
         }
     }
 }
 pub(crate) struct ControlQuery {
+    accounting: Accounting,
     metrics: ReadMetricsRecorder,
     template: Option<String>,
     started: std::time::Instant,
@@ -70,6 +102,7 @@ impl ControlQuery {
             },
         );
         self.finished = true;
+        self.accounting.publish();
     }
 }
 impl Drop for ControlQuery {
@@ -81,6 +114,7 @@ impl Drop for ControlQuery {
                 &self.progress,
                 &ReadTaskOutcome { failed: true, cancelled: true, unconfirmed: true, ..Default::default() },
             );
+            self.accounting.publish();
         }
     }
 }

@@ -75,6 +75,12 @@ impl PostgresProvider {
         Ok(PostgresProvider { connector: Connector::new(spec)?, spec: spec.clone() })
     }
 
+    pub fn with_read_context(mut self, context: culprit_core::ProviderReadContext) -> Result<Self> {
+        context.complete_reader_coverage();
+        self.connector = self.connector.with_read_context(context);
+        Ok(self)
+    }
+
     async fn read_with_limits(&self, sql: &str, limit: usize, limits: connect::SessionLimits) -> Result<ResultSet> {
         let statement = single_statement(sql)?;
         let client = self.connector.connect(limits).await?;

@@ -1467,7 +1467,24 @@ The consistency fingerprint detects changed saved bodies; it supplies no native 
 The app's existing report reads show this history in a folded Health disclosure without collector credentials or
 an Outbox reader. Sharing withdraws the entire original, including its hash, clock, counters and references.
 These historical observations never describe the current scan's acquisition or establish a current DB/member join.
-Ordinary Provider scans and connection tests do not yet expose an acquisition-metrics hook through this route.
+Normal Provider scans and connection tests now carry their own current acquisition observation. The observation
+starts before authentication and the deferred native factory, follows the existing source gate and admission
+journal, and keeps the original call result separate from actual source settlement. Saved scans retain this input
+for source-free reanalysis; failed attempts return the same typed projection directly. This is not an Outbox
+capture, seal or proof of a current database identity. Sharing withdraws the original observation as a whole.
+
+CLI scan/doctor/connection-test output, MCP `scan`, the app scan failure view, connection tests and the existing
+Health disclosure use the same pure projection. Historical attachments remain separate. Reader query admissions,
+setup and connection phases retain their original owners and counts; durations from overlapping readers are not
+added. SQL previews are withheld. Unhooked enrichment/cancellation accounting and SQLite direct statements keep
+coverage partial, so their recorded counts cannot be presented as a complete total. These observations authorize
+no native cost qualification and do not change source SQL, connection counts or budgets.
+
+Embedding factories receive the reader-metrics-only `ProviderReadContext` and explicitly declare
+`ProviderConstructionPolicy::DeferredNativeWork` for this route. An unverified/eager factory is refused before
+invocation. The caller allocates `Workspace::begin_provider_read`, moves its one operation capability into the
+normal scan/probe call and finalizes the returned `ProviderCall` with the same outer observer. Only the existing
+engine `SourceOperation` supplies settlement; provider reader metrics cannot clear source debt.
 
 Terminal failure sealing authenticates only finished manifest bytes. It leaves failure status, native cancellation
 debt, Ready/publication checks and retirement rules unchanged. The writer cannot reopen a finished revision;

@@ -136,6 +136,7 @@ pub struct Connector {
     pub port: u16,
     pub database: Option<String>,
     pub(crate) fence: culprit_read::ReadFence,
+    pub(crate) observation: culprit_core::ProviderReadContext,
 }
 
 impl Connector {
@@ -211,6 +212,7 @@ impl Connector {
             port,
             database: spec.database.clone().filter(|d| !d.is_empty()),
             fence: culprit_read::ReadFence::default(),
+            observation: culprit_core::ProviderReadContext::unobserved(),
         })
     }
 
@@ -232,6 +234,7 @@ impl Connector {
     /// Open a session in `scope`, prepared with the read-only settings. The session is set up before it enters the
     /// application's database, so the setup statements are never counted as the application's workload.
     pub async fn connect(&self, scope: Scope) -> Result<Conn> {
+        self.observation.partial_reader_coverage(culprit_core::ProviderReadGap::UnhookedEnrichment);
         self.fence.ensure_available()?;
         let mut conn = self.open_connection(Bootstrap::DriverManaged).await?;
         let flavor = match self.flavor.get() {

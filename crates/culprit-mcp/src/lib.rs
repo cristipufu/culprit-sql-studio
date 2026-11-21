@@ -80,24 +80,49 @@ impl CulpritMcp {
         cancelled: impl std::future::Future<Output = ()>,
     ) -> CallToolResult {
         culprit_core::i18n::scope_async("en", async {
+            let started = Instant::now();
+            let connection = args.get("connection").and_then(Value::as_str).map(str::to_string);
+            let sql = tools::SQL_TOOLS
+                .contains(&tool)
+                .then(|| args.get("sql").and_then(Value::as_str).map(str::to_string))
+                .flatten();
+            let observation = if tool == "scan" {
+                self.ws.begin_provider_read(culprit_core::ProviderReadKind::Scan).map(Some)
+            } else {
+                Ok(None)
+            };
             let mut guard = self.local_operation(tool);
             let operation =
                 guard.as_ref().map(|guard| guard.as_ref().map(OperationGuard::handle)).map_err(Clone::clone);
             let controlled = guard.as_ref().is_ok_and(Option::is_some);
-            let work = self.handle_started(client, tool, args, operation);
-            tokio::pin!(work);
-            if controlled {
-                tokio::select! {
-                    biased;
-                    _ = cancelled => {
-                        if let Ok(guard) = &mut guard { drop(guard.take()); }
-                        work.await
-                    }
-                    result = &mut work => result,
+            let completed = match observation {
+                Err(error) => CompletedTool::plain(Err(error)),
+                Ok(observation) => {
+                    let provider_operation = observation.as_ref().map(|owner| owner.operation()).transpose();
+                    let result = {
+                        let work = async {
+                            let provider_operation = provider_operation?;
+                            self.handle_started(client, tool, args, operation, provider_operation).await
+                        };
+                        tokio::pin!(work);
+                        if controlled {
+                            tokio::select! {biased;
+                                _=cancelled=>{if let Ok(guard)=&mut guard {drop(guard.take());}work.await},
+                                result=&mut work=>result,
+                            }
+                        } else if observation.is_some() {
+                            tokio::select! {biased;
+                                _=cancelled=>Err(culprit_core::telemetry::CollectionStop::Cancelled.error()),
+                                result=&mut work=>result,
+                            }
+                        } else {
+                            work.await
+                        }
+                    };
+                    complete_tool(observation, result)
                 }
-            } else {
-                work.await
-            }
+            };
+            self.finish_tool(client, tool, connection, sql, started, completed)
         })
         .await
     }
@@ -117,31 +142,38 @@ impl CulpritMcp {
         tool: &str,
         args: JsonObject,
         operation: culprit_core::Result<Option<OperationHandle>>,
+        provider_observation: Option<culprit_core::ProviderOperationObservation>,
+    ) -> culprit_core::Result<tools::ToolOutput> {
+        let operation = operation?;
+        let result = self.dispatch(client, tool, Value::Object(args), operation.clone(), provider_observation).await?;
+        if let Some(operation) = operation {
+            tools::check_local_operation(&operation)?;
+        }
+        Ok(result)
+    }
+    fn finish_tool(
+        &self,
+        client: &str,
+        tool: &str,
+        connection: Option<String>,
+        sql: Option<String>,
+        started: Instant,
+        completed: CompletedTool,
     ) -> CallToolResult {
-        let started = Instant::now();
-        let connection = args.get("connection").and_then(Value::as_str).map(str::to_string);
-        let sql = tools::SQL_TOOLS
-            .contains(&tool)
-            .then(|| args.get("sql").and_then(Value::as_str).map(str::to_string))
-            .flatten();
-        let result = match operation {
-            Ok(operation) => {
-                let result = self.dispatch(client, tool, Value::Object(args), operation.clone()).await;
-                result.and_then(|value| {
-                    if let Some(operation) = operation {
-                        tools::check_local_operation(&operation)?;
-                    }
-                    Ok(value)
-                })
+        let CompletedTool { mut result, acquisition, original_failure } = completed;
+        let acquisition = match acquisition.as_ref().map(serde_json::to_value).transpose() {
+            Ok(acquisition) => acquisition,
+            Err(_) => {
+                result = Err(culprit_core::telemetry::DeliveryProblem::Integrity.error());
+                None
             }
-            Err(error) => Err(error),
         };
         let (outcome, message) = match &result {
             Ok(_) => (AuditOutcome::Ok, None),
-            Err(e) if e.code == culprit_core::ErrorCode::PermissionDenied => {
-                (AuditOutcome::Denied, Some(e.message.clone()))
+            Err(error) if error.code == culprit_core::ErrorCode::PermissionDenied => {
+                (AuditOutcome::Denied, Some(error.message.clone()))
             }
-            Err(e) => (AuditOutcome::Error, Some(e.message.clone())),
+            Err(error) => (AuditOutcome::Error, Some(error.message.clone())),
         };
         let entry = AuditEntry {
             ts: chrono_now(),
@@ -153,12 +185,60 @@ impl CulpritMcp {
             sql,
             message,
         };
-        if let Err(e) = self.ws.audit(&entry) {
-            eprintln!("culprit mcp: could not write the audit log: {}", e.message);
+        if let Err(error) = self.ws.audit(&entry) {
+            eprintln!("culprit mcp: could not write the audit log: {}", error.message);
         }
         match result {
-            Ok(value) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
-            Err(e) => CallToolResult::error(vec![ContentBlock::text(json!({ "error": e }).to_string())]),
+            Ok(mut value) => {
+                if let (Some(report), Some(object)) = (acquisition, value.as_object_mut()) {
+                    object.insert("provider_acquisition".into(), report);
+                }
+                CallToolResult::success(vec![ContentBlock::text(value.to_string())])
+            }
+            Err(error) => {
+                let mut value = json!({"error":error});
+                if let Some(object) = value.as_object_mut() {
+                    if let Some(acquisition) = acquisition {
+                        object.insert("provider_acquisition".into(), acquisition);
+                    }
+                    if let Some(original) = original_failure {
+                        object.insert("original_error".into(), json!(original));
+                    }
+                }
+                CallToolResult::error(vec![ContentBlock::text(value.to_string())])
+            }
+        }
+    }
+}
+
+struct CompletedTool {
+    result: culprit_core::Result<Value>,
+    acquisition: Option<culprit_core::ProviderAcquisitionReport>,
+    original_failure: Option<culprit_core::Error>,
+}
+impl CompletedTool {
+    fn plain(result: culprit_core::Result<Value>) -> Self {
+        Self { result, acquisition: None, original_failure: None }
+    }
+}
+fn complete_tool(
+    observation: Option<culprit_core::ProviderReadObservation>,
+    result: culprit_core::Result<tools::ToolOutput>,
+) -> CompletedTool {
+    match observation {
+        None => CompletedTool::plain(result.and_then(|value| match value {
+            tools::ToolOutput::Value(value) => Ok(value),
+            tools::ToolOutput::ProviderScan(_) => Err(culprit_core::telemetry::DeliveryProblem::Integrity.error()),
+        })),
+        Some(observation) => {
+            let call = result.and_then(|value| match value {
+                tools::ToolOutput::ProviderScan(call) => Ok(call),
+                tools::ToolOutput::Value(_) => Err(culprit_core::telemetry::DeliveryProblem::Integrity.error()),
+            });
+            let attempt = observation.finish_call(call);
+            let acquisition = Some(culprit_engine::explain_provider_acquisition(attempt.acquisition()));
+            let original_failure = attempt.original_failure().cloned();
+            CompletedTool { result: attempt.into_result(), acquisition, original_failure }
         }
     }
 }

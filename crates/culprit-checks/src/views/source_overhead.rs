@@ -7,6 +7,11 @@ use culprit_core::{
 mod connections;
 mod history;
 mod native;
+#[derive(Clone, Copy)]
+pub(super) enum WorkScope {
+    Capture,
+    Provider,
+}
 pub fn explain_snapshot(snapshot: &culprit_core::Snapshot) -> Vec<culprit_core::HistoricalSourceOverhead> {
     history::explain(snapshot)
 }
@@ -21,11 +26,10 @@ pub fn explain_summary(evidence: &culprit_core::SourceOverheadCaptureSummary) ->
     if !evidence.is_valid() {
         return Err(DeliveryProblem::Integrity.error());
     }
-    let connection_work =
-        evidence.read_metrics.as_ref().and_then(|metrics| metrics.connection_work.as_deref()).map(connections::explain);
+    let work = explain_work(evidence.read_metrics.as_ref(), WorkScope::Capture);
     let evidence = evidence.clone();
-    let native_interval =
-        evidence.read_metrics.as_ref().and_then(|metrics| metrics.native_session_work.as_deref()).map(native::explain);
+    let native_interval = work.native_interval;
+    let connection_work = work.connection_work;
     let mut limitations = vec![
         t!("view.source_overhead.limit.client"),
         t!("view.source_overhead.limit.window"),
@@ -40,7 +44,30 @@ pub fn explain_summary(evidence: &culprit_core::SourceOverheadCaptureSummary) ->
     if evidence.status != CollectionStatus::Complete {
         limitations.push(t!("view.source_overhead.limit.incomplete"));
     }
-    let (template_order, summary) = match &evidence.read_metrics {
+    limitations.extend(work.limitations);
+    let template_order = work.template_order;
+    let summary = work.summary;
+    Ok(SourceOverheadReport {
+        connection_work,
+        evidence,
+        template_order,
+        title: t!("view.source_overhead.title"),
+        summary,
+        limitations,
+        native_interval,
+    })
+}
+
+/// Shared leaf formatting only: no source/capture is reconstructed for a normal provider acquisition.
+pub(super) fn explain_work(
+    metrics: Option<&culprit_core::telemetry::ReadWorkSummary>,
+    scope: WorkScope,
+) -> culprit_core::ReadWorkExplanation {
+    let connection_work =
+        metrics.and_then(|metrics| metrics.connection_work.as_deref()).map(|work| connections::explain(work, scope));
+    let native_interval = metrics.and_then(|metrics| metrics.native_session_work.as_deref()).map(native::explain);
+    let mut limitations = vec![];
+    let (template_order, summary) = match metrics {
         None => (vec![], t!("view.source_overhead.summary.not_recorded")),
         Some(metrics) => {
             if metrics.active_tasks > 0 {
@@ -81,15 +108,7 @@ pub fn explain_summary(evidence: &culprit_core::SourceOverheadCaptureSummary) ->
             (order, summary)
         }
     };
-    Ok(SourceOverheadReport {
-        connection_work,
-        evidence,
-        template_order,
-        title: t!("view.source_overhead.title"),
-        summary,
-        limitations,
-        native_interval,
-    })
+    culprit_core::ReadWorkExplanation { summary, template_order, connection_work, native_interval, limitations }
 }
 
 fn validate(evidence: &SourceOverheadEvidence) -> Result<()> {

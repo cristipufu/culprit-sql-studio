@@ -112,3 +112,49 @@ fn explicit_nullable_acquisition_field_and_curated_summary_preserve_codes_withou
     raw.as_object_mut().unwrap().remove("connection_work");
     assert!(serde_json::from_value::<ReadWorkMetrics>(raw).is_err());
 }
+
+#[test]
+fn ledger_progression_completes_pending_phases_and_preserves_original_completed_fields() {
+    let recorder = ReadConnectionRecorder::default();
+    let attempt = recorder.begin();
+    let acquire = attempt.phase(ReadConnectionStage::Acquire, None);
+    let pending = recorder.snapshot().unwrap();
+    attempt.connection_use(ReadConnectionUse::FreshConnection);
+    attempt.acquired(7);
+    acquire.finish(ReadConnectionOutcome::Completed);
+    let acquired = recorder.snapshot().unwrap();
+    assert!(acquired.follows(&pending));
+    assert!(acquired.follows(&acquired));
+    let query = attempt.phase(ReadConnectionStage::FirstQuery, Some(digest(b"original")));
+    let running = recorder.snapshot().unwrap();
+    assert!(running.follows(&acquired));
+    query.finish(ReadConnectionOutcome::Failed { code: crate::ErrorCode::PermissionDenied, native_code: Some(229) });
+    let completed = recorder.snapshot().unwrap();
+    assert!(completed.follows(&running));
+    assert!(!running.follows(&completed));
+    assert!(!pending.follows(&completed));
+}
+#[test]
+fn valid_but_changed_or_disappeared_completed_entries_are_not_recorder_progress() {
+    type Alter = fn(&mut ReadConnectionWork);
+    let original = completed();
+    for (name, alter) in [
+        (
+            "empty",
+            (|work: &mut ReadConnectionWork| {
+                work.attempts.clear();
+                work.attempted = 0;
+            }) as Alter,
+        ),
+        ("generation", |work| work.attempts[0].reader_generation = Some("99".into())),
+        ("classification", |work| work.attempts[0].connection_use = ReadConnectionUse::FreshConnection),
+        ("original outcome", |work| work.attempts[0].phases[1].outcome = ReadConnectionOutcome::Completed),
+        ("elapsed", |work| work.attempts[0].phases[1].client_elapsed_ms = Some(1234.0)),
+        ("template", |work| work.attempts[0].phases[1].template_id = Some(digest(b"foreign"))),
+    ] {
+        let mut changed = original.clone();
+        alter(&mut changed);
+        assert!(changed.is_valid(), "{name}");
+        assert!(!changed.follows(&original), "{name}");
+    }
+}

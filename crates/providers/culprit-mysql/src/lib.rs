@@ -78,6 +78,14 @@ impl MysqlProvider {
         Ok(MysqlProvider { connector: Arc::new(Connector::new(spec)?), spec: spec.clone() })
     }
 
+    pub fn with_read_context(mut self, context: culprit_core::ProviderReadContext) -> Result<Self> {
+        let connector = Arc::get_mut(&mut self.connector)
+            .ok_or_else(|| culprit_core::telemetry::DeliveryProblem::Integrity.error())?;
+        context.complete_reader_coverage();
+        connector.observation = context;
+        Ok(self)
+    }
+
     async fn read(&self, sql: &str, limit: usize) -> Result<ResultSet> {
         let statement = single_statement(sql)?;
         let mut conn = self.connector.connect(Scope::Database).await?;

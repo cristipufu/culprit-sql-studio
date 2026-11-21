@@ -193,11 +193,12 @@ fn workspace(
         .with_provider(
             Engine::Mssql,
             ProviderRegistration::new(
-                Arc::new(move |_| {
+                Arc::new(move |_, _context| {
                     source.factories.fetch_add(1, Ordering::SeqCst);
                     source.active.fetch_add(1, Ordering::SeqCst);
                     Ok(Box::new(NativeProvider(source.clone())) as Box<dyn Provider>)
                 }),
+                culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
                 vec![],
             )
             .unwrap(),
@@ -217,7 +218,11 @@ fn workspace(
 #[tokio::test]
 async fn ordinary_scan_analyzes_all_groups_once_and_keeps_the_default_cache_independent() {
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let report = workspace.scan("shop", &options()).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan("shop", &options(), operation).await
+    })
+    .await
+    .unwrap();
     assert!(report.snapshot.workload.is_none());
     assert_eq!(state.acquisitions.load(Ordering::SeqCst), 1);
     assert_eq!(state.deadlocks.load(Ordering::SeqCst), 1);
@@ -242,7 +247,11 @@ async fn ordinary_scan_analyzes_all_groups_once_and_keeps_the_default_cache_inde
 async fn explicit_selection_acquires_and_publishes_only_the_requested_group() {
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
     let selected = SnapshotOptions { workload_population: Some(NativeIdentity::new("7")), ..options() };
-    let reports = workspace.scan_populations("shop", &selected).await.unwrap();
+    let reports = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_populations("shop", &selected, operation).await
+    })
+    .await
+    .unwrap();
     assert!(reports.populations.is_empty());
     assert_eq!(reports.requested.snapshot.workload.as_ref().unwrap().population, selected.workload_population);
     assert!(workspace.latest_report("shop", None).unwrap().is_none());
@@ -256,7 +265,11 @@ async fn invalid_batch_membership_is_rejected_before_auxiliary_reads_analysis_or
     let mut batch = snapshots();
     batch.populations[1] = batch.populations[0].clone();
     let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
-    let error = workspace.scan_populations("shop", &options()).await.unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_populations("shop", &options(), operation).await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
     assert_eq!(state.deadlocks.load(Ordering::SeqCst), 0);
     assert_eq!(state.events.load(Ordering::SeqCst), 0);
@@ -268,7 +281,11 @@ async fn invalid_batch_membership_is_rejected_before_auxiliary_reads_analysis_or
 #[tokio::test]
 async fn unconfirmed_native_shutdown_cannot_publish_any_population() {
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Unconfirmed);
-    let error = workspace.scan_populations("shop", &options()).await.unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_populations("shop", &options(), operation).await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
     assert!(state.analyzed.lock().unwrap().is_empty());
     assert!(workspace.latest_report("shop", None).unwrap().is_none());
@@ -280,7 +297,11 @@ async fn unconfirmed_native_shutdown_cannot_publish_any_population() {
 async fn exact_report_actions_cannot_export_or_verify_the_default_view_with_the_same_finding_id() {
     use culprit_engine::export::{ExportFormat, ExportOptions};
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let reports = workspace.scan_populations("shop", &options()).await.unwrap();
+    let reports = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_populations("shop", &options(), operation).await
+    })
+    .await
+    .unwrap();
     let selected = reports
         .populations
         .iter()
@@ -313,7 +334,11 @@ async fn a_failed_explicit_group_cannot_borrow_an_application_logs_unpartitioned
     let (home, workspace, _) = workspace(batch, SourceShutdown::Quiescent);
     let selected = SnapshotOptions { workload_population: Some(NativeIdentity::new("7")), ..options() };
     let missing_log = home.path().join("must-not-be-opened.jsonl");
-    let report = workspace.scan_with_log("shop", &selected, Some(&missing_log)).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_log("shop", &selected, Some(&missing_log), operation).await
+    })
+    .await
+    .unwrap();
     assert!(report.snapshot.workload.is_none());
     assert!(!report.snapshot.sources.iter().any(|source| source.source == "query log"));
 }
@@ -333,14 +358,19 @@ async fn a_selected_or_automatic_group_cannot_borrow_another_connections_last_ac
             batch.populations = vec![selected];
         }
         let (_home, workspace, _) = workspace(batch, SourceShutdown::Quiescent);
-        let reports = workspace.scan_populations("shop", &options()).await.unwrap();
+        let reports = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace.scan_populations("shop", &options(), operation).await
+        })
+        .await
+        .unwrap();
         let report = if automatic { reports.requested } else { reports.populations.into_iter().last().unwrap() };
         let workspace = workspace.with_provider(
             Engine::Mssql,
             ProviderRegistration::new(
-                Arc::new(|_| {
+                Arc::new(|_, _context| {
                     panic!("unproven execution scope must be rejected before authentication/provider creation")
                 }),
+                culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
                 vec![],
             )
             .unwrap(),

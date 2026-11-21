@@ -208,7 +208,12 @@ impl StorageRead {
                     }
                     (&space.observed_at, space.database.as_deref())
                 }
-                OperationalFact::MssqlDatabaseFile(file) => (&file.observed_at, Some(file.database.as_str())),
+                OperationalFact::MssqlDatabaseFile(file) => {
+                    if !file.fits_target(&self.target) {
+                        return false;
+                    }
+                    (&file.observed_at, Some(file.database.as_str()))
+                }
                 _ => return false,
             };
             if self.context.native().is_some_and(|context| {
@@ -279,8 +284,12 @@ impl OperationalSpace {
     }
 }
 impl MssqlDatabaseFile {
+    fn fits_target(&self, target: &CollectionTarget) -> bool {
+        target.engine() == crate::Engine::Mssql
+            && target.database().is_some_and(|database| database.database == self.database)
+    }
     pub fn fits_source(&self, source: &CollectionDescription) -> bool {
-        storage_scope_fits_source(source, &self.observed_at, Some(&self.database))
+        self.fits_target(&source.target) && storage_scope_fits_source(source, &self.observed_at, Some(&self.database))
     }
 }
 fn storage_scope_fits_source(source: &CollectionDescription, at: &str, database: Option<&str>) -> bool {

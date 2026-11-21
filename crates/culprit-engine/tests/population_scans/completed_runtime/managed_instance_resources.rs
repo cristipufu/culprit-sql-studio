@@ -6,17 +6,21 @@ async fn selected_original_mi_history_settles_once_and_survives_source_free_save
         let (source, rows) = managed_instance_resource_case(case);
         let captured = Captured::from_source("shop", source.clone(), rows).await;
         let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-        let result = workspace
-            .scan_populations_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    analysis: CompletedCaptureAnalysis::ManagedInstanceResources,
-                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-                },
-            )
-            .await
-            .unwrap();
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_populations_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        analysis: CompletedCaptureAnalysis::ManagedInstanceResources,
+                        ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap();
         let Some(RecordedManagedInstanceResourceRead::Captured { read }) =
             result.requested.snapshot.operations.managed_instance_resources.as_deref()
         else {
@@ -53,16 +57,20 @@ async fn a_foreign_original_receipt_or_connection_is_refused_before_any_scan_fac
     let (source, rows) = managed_instance_resource_case(ManagedInstanceResourceCase::Complete);
     let captured = Captured::from_source("foreign-saved-connection", source, rows).await;
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let result = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            CompletedCaptureScanInput {
-                analysis: CompletedCaptureAnalysis::ManagedInstanceResources,
-                ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-            },
-        )
-        .await;
+    let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                CompletedCaptureScanInput {
+                    analysis: CompletedCaptureAnalysis::ManagedInstanceResources,
+                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                },
+                operation,
+            )
+            .await
+    })
+    .await;
     assert!(result.is_err());
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
 }

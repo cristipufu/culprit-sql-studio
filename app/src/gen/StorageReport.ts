@@ -5,5 +5,6 @@ import type { SourceOutcome } from "./SourceOutcome";
 import type { SourceState } from "./SourceState";
 import type { StateSourceCoverage } from "./StateSourceCoverage";
 import type { StorageEntry } from "./StorageEntry";
+import type { StorageFileSummary } from "./StorageFileSummary";
 
-export type StorageReport = { target: CollectionTarget, context: ObservationReadContext, native_sources: Array<StateSourceCoverage>, sources: Array<SourceOutcome>, source_state: SourceState, read_complete: boolean, native_rows: number, observed_rows: number, presented_rows: number, entries_limited: boolean, title: string, summary: string, limitations: Array<string>, entries: Array<StorageEntry>, };
+export type StorageReport = { target: CollectionTarget, context: ObservationReadContext, native_sources: Array<StateSourceCoverage>, sources: Array<SourceOutcome>, source_state: SourceState, read_complete: boolean, native_rows: number, observed_rows: number, presented_rows: number, entries_limited: boolean, file_summary: StorageFileSummary | null, title: string, summary: string, limitations: Array<string>, entries: Array<StorageEntry>, };

@@ -269,6 +269,7 @@ fn cpu_text(cpu: &culprit_core::ProcessCpuReport) -> String {
                         (entry.title.as_str(), entry.fields.iter().take(CPU_FIELD_LIMIT).map(cpu_field).collect())
                     }),
                 ));
+                append_cpu_qualifications(text, &population.limitations);
             }
         },
     )

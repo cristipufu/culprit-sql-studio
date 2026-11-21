@@ -12,15 +12,35 @@ use crate::{
 
 pub(super) async fn doctor(ws: &Workspace, connection: &str, out: &Out) -> Result<u8> {
     let info = ws.connection(connection)?;
-    let server = ws.probe(connection).await?;
-    let locked = ws.locked_checks(&server);
-    out.doctor(&info, &server, &locked);
+    let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Probe)?;
+    let result = ws.probe(connection, observation.operation()?).await;
+    let attempt = culprit_engine::project_probe_attempt(observation.finish_call(result));
+    let server = match attempt.require_connected() {
+        Ok(server) => server,
+        Err(error) => {
+            out.observed_probe(&attempt);
+            return Err(error);
+        }
+    };
+    let locked = ws.locked_checks(server);
+    out.doctor(&info, server, &locked, Some(&attempt.acquisition));
+    out.current_acquisition(&attempt.acquisition);
     Ok(0)
 }
 
 pub(super) async fn scan(ws: &Workspace, args: ScanArgs, out: &Out) -> Result<u8> {
     out.progress(&t!("cli.scanning", connection = &args.connection));
-    let report = crate::scan_capture::scan(ws, &args).await?;
+    let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Scan)?;
+    let result = crate::scan_capture::scan(ws, &args, observation.operation()?).await;
+    let attempt = observation.finish_call(result);
+    let current = culprit_engine::explain_provider_acquisition(attempt.acquisition());
+    let report = match attempt.into_result() {
+        Ok(report) => report,
+        Err(error) => {
+            out.acquisition_failure(&current, &error);
+            return Err(error);
+        }
+    };
     out.scan(&report, args.full, &ws.paths().reports_dir(&args.connection));
     Ok(fail_code(&report, args.fail_on))
 }

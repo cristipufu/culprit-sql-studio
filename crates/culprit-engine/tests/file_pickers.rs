@@ -108,7 +108,11 @@ async fn a_virtual_tables_logged_statements_belong_to_the_database() {
     let ws = Workspace::open_in(dir.join("home"));
     add_file(&ws, "app", &dir.join("app.db")).unwrap();
     ws.set_query_log("app", Some(&log)).unwrap();
-    let report = ws.scan("app", &SnapshotOptions::default()).await.unwrap();
+    let report = crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+        ws.scan("app", &SnapshotOptions::default(), operation).await
+    })
+    .await
+    .unwrap();
     let workload = report.snapshot.workload.as_ref().unwrap();
     assert_eq!(workload.total_executions, 2.0);
     assert_eq!(workload.total_time_ms, 4.0);
@@ -164,14 +168,22 @@ async fn a_chosen_query_log_is_checked_kept_and_read_by_the_scan() {
         Some(dir.canonicalize().unwrap())
     );
 
-    let report = ws.scan("app", &SnapshotOptions::default()).await.expect("scanned");
+    let report = crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+        ws.scan("app", &SnapshotOptions::default(), operation).await
+    })
+    .await
+    .expect("scanned");
     let w = report.snapshot.workload.as_ref().expect("the log's statements");
     assert_eq!(w.kind(), Some(WorkloadKind::QueryLog));
     assert!(w.queries.iter().any(|q| q.text.contains("\"orders\"")), "{:?}", w.queries);
 
     let info = ws.set_query_log("app", None).expect("removed");
     assert_eq!(info.query_log, None);
-    let report = ws.scan("app", &SnapshotOptions::default()).await.expect("scanned");
+    let report = crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+        ws.scan("app", &SnapshotOptions::default(), operation).await
+    })
+    .await
+    .expect("scanned");
     assert!(report.snapshot.workload.is_none(), "a removed log isn't found again beside the file");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -193,7 +205,11 @@ async fn jsonl_and_ndjson_query_logs_are_auto_discovered_for_sqlite() {
     let info = add_file(&ws, "app", &dir.join("app.db")).expect("added");
     assert!(info.query_log.as_deref().is_some_and(|p| p.ends_with("queries.ndjson")), "{:?}", info.query_log);
 
-    let report = ws.scan("app", &SnapshotOptions::default()).await.expect("scanned");
+    let report = crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+        ws.scan("app", &SnapshotOptions::default(), operation).await
+    })
+    .await
+    .expect("scanned");
     let workload = report.snapshot.workload.as_ref().expect("auto-discovered ndjson workload");
     assert_eq!(workload.kind(), Some(WorkloadKind::QueryLog));
     assert_eq!(workload.total_executions, 2.0);

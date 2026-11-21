@@ -1,7 +1,7 @@
 //! A selected provider owns both native construction and its static declarations. Listing never runs its factory.
 use crate::ProviderFactory;
 use culprit_core::{
-    ComponentVersion, ConnectionSpec, Error, Provider, Result,
+    ComponentVersion, ConnectionSpec, Error, Provider, ProviderOperationObservation, Result,
     telemetry::{
         CollectionDescription, DiagnosticEvidenceRef, ExportedRecord, RecipeCostQualification, RecipeCostReceipt,
         RecipeDescriptor, qualification_component_is_valid, recipe_catalog_is_valid,
@@ -33,6 +33,13 @@ pub type RecipeQualificationIssuer = Arc<
         + Sync,
 >;
 
+/// The normal observed path never invokes an unverified/eager constructor. Configuration work is client-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderConstructionPolicy {
+    Unverified,
+    DeferredNativeWork,
+}
+
 #[derive(Clone)]
 struct QualificationAuthority {
     component: ComponentVersion,
@@ -42,6 +49,7 @@ struct QualificationAuthority {
 #[derive(Clone)]
 pub struct ProviderRegistration {
     factory: ProviderFactory,
+    construction: ProviderConstructionPolicy,
     recipes: Vec<RecipeDescriptor>,
     qualification: Option<QualificationAuthority>,
     #[cfg(feature = "collector")]
@@ -52,12 +60,17 @@ pub struct ProviderRegistration {
 impl ProviderRegistration {
     /// An empty catalog is explicitly undeclared support. Declarations establish neither native availability
     /// nor production cost qualification; the provider retains all native admission and lifetime checks.
-    pub fn new(factory: ProviderFactory, recipes: Vec<RecipeDescriptor>) -> Result<Self> {
+    pub fn new(
+        factory: ProviderFactory,
+        construction: ProviderConstructionPolicy,
+        recipes: Vec<RecipeDescriptor>,
+    ) -> Result<Self> {
         if !recipe_catalog_is_valid(&recipes) {
             return Err(Error::invalid(culprit_core::t!("engine.registry.invalid_recipes")));
         }
         Ok(Self {
             factory,
+            construction,
             recipes,
             qualification: None,
             #[cfg(feature = "collector")]
@@ -97,7 +110,9 @@ impl ProviderRegistration {
         source: &CollectionDescription,
         record: &ExportedRecord,
     ) -> Result<bool> {
-        let Some(authority) = &self.qualification else { return Ok(false) };
+        let Some(authority) = &self.qualification else {
+            return Ok(false);
+        };
         if !receipt.is_valid() || receipt.component != authority.component {
             return Ok(false);
         }
@@ -108,7 +123,9 @@ impl ProviderRegistration {
         else {
             return Ok(false);
         };
-        let RecipeCostQualification::Measured(selected) = &recipe.cost else { return Ok(false) };
+        let RecipeCostQualification::Measured(selected) = &recipe.cost else {
+            return Ok(false);
+        };
         if !receipt.matches_recipe(recipe)
             || receipt.key()? != selected.key()?
             || !source.target.is_valid()
@@ -126,7 +143,9 @@ impl ProviderRegistration {
         source: &CollectionDescription,
         record: &ExportedRecord,
     ) -> Result<bool> {
-        let Some(authority) = &self.qualification else { return Ok(false) };
+        let Some(authority) = &self.qualification else {
+            return Ok(false);
+        };
         let Some(recipe) = self
             .recipes
             .iter()
@@ -191,7 +210,9 @@ impl ProviderRegistration {
     #[cfg(feature = "collector")]
     pub(crate) fn with_installed(mut self, receipts: impl IntoIterator<Item = RecipeCostReceipt>) -> Result<Self> {
         for receipt in receipts {
-            let Some(authority) = &self.qualification else { continue };
+            let Some(authority) = &self.qualification else {
+                continue;
+            };
             if receipt.component != authority.component {
                 continue;
             }
@@ -211,7 +232,26 @@ impl ProviderRegistration {
     }
 
     pub(crate) fn open(&self, spec: &ConnectionSpec) -> Result<Box<dyn Provider>> {
-        (self.factory)(spec)
+        (self.factory)(spec, culprit_core::ProviderReadContext::unobserved())
+    }
+    pub(crate) fn open_observed(
+        &self,
+        spec: &ConnectionSpec,
+        observation: &ProviderOperationObservation,
+    ) -> Result<Box<dyn Provider>> {
+        let span = observation.factory();
+        let result = (|| {
+            if self.construction != ProviderConstructionPolicy::DeferredNativeWork {
+                return Err(Error::new(
+                    culprit_core::ErrorCode::Unsupported,
+                    culprit_core::t!("engine.registry.deferred_native_required"),
+                ));
+            }
+            observation.bind_engine(crate::registry::engine(spec)?);
+            (self.factory)(spec, observation.context())
+        })();
+        span.finish(&result);
+        result
     }
 }
 

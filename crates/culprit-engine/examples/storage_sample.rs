@@ -13,6 +13,13 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
         ("unknown", StorageCase::Unknown),
         ("partial", StorageCase::Partial),
         ("unavailable", StorageCase::Denied),
+        ("file_census", StorageCase::FileCensus),
+        ("file_census_unknown_usage", StorageCase::FileCensusUnknownUsage),
+        ("file_census_unknown_basis", StorageCase::FileCensusUnknownBasis),
+        ("file_census_partial", StorageCase::FileCensusPartial),
+        ("file_census_denied", StorageCase::FileCensusDenied),
+        ("file_census_log_denied", StorageCase::FileCensusLogDenied),
+        ("file_census_large", StorageCase::FileCensusLarge),
     ] {
         let (source, rows) = storage_evidence(case);
         let rows = rows

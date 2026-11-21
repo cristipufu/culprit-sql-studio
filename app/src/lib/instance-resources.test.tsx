@@ -173,3 +173,42 @@ test("native resource-pool originals use the existing folded pagination and reta
   expect(html).not.toContain(t("view.process_cpu.pool.title", { id: "11" }));
   expect(html).toContain(report.process_cpu_interval!.summary);
 });
+
+
+test("Windows same-record other-process CPU keeps exact native inputs, zero and the original unknown window", () => {
+  for (const [name, expected] of [["cpu_profile_exact", "40"], ["cpu_profile_historyzero", "0"], ["cpu_profile_partialhistory", "40"]] as const) {
+    const { report } = instanceResourceCase(name);
+    const cpu = report.process_cpu_originals![1]!;
+    const history = cpu.populations[1]!;
+    const fields = history.entries[0]!.fields;
+    expect(fields.length).toBe(8);
+    expect(fields.find((field) => field.key === "other_process_cpu_percent")!.value).toBe(expected);
+    const html = renderToStaticMarkup(<InstanceResources report={report} />);
+    for (const field of fields) expect(html).toContain(field.label);
+    expect(html).toContain(t("view.process_cpu.limit.native_sample"));
+    expect(html).not.toContain("sig-dot");
+    expect(html).not.toContain("<details open");
+    if (name === "cpu_profile_partialhistory") {
+      expect(cpu.source_state).toBe("partial");
+      expect(history.native_source.complete_scope).toBe(false);
+      expect(html).toContain(t("ui.common.read_partial"));
+    }
+  }
+});
+
+test("unsupported, missing, out-of-range and incompatible scheduler inputs keep other CPU unknown", () => {
+  for (const name of ["cpu_profile_linuxidle", "cpu_profile_unknownplatform", "cpu_profile_historymissingidle", "cpu_profile_historyoutofrange", "cpu_profile_historyincompatible"] as const) {
+    const { report } = instanceResourceCase(name);
+    const fields = report.process_cpu_originals![1]!.populations[1]!.entries[0]!.fields;
+    expect(fields.find((field) => field.key === "other_process_cpu_percent")!.value).toBeNull();
+    const html = renderToStaticMarkup(<InstanceResources report={report} />);
+    expect(html).toContain(t("view.process_cpu.field.other_process_percent"));
+    expect(html).toContain(t("ui.memory_failures.not_reported"));
+    expect(html).toContain(t("view.process_cpu.field.raw_process"));
+    expect(html).toContain(t("view.process_cpu.field.raw_idle"));
+  }
+  const { report } = instanceResourceCase("cpu_profile_historydenied");
+  expect(report.process_cpu_originals![1]!.populations[1]!.entries).toEqual([]);
+  const html = renderToStaticMarkup(<InstanceResources report={report} />);
+  expect(html).toContain(t("ui.dashboard.status.unavailable"));
+});

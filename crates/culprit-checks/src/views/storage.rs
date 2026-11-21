@@ -4,6 +4,7 @@ use culprit_core::{
 };
 pub const MAX_STORAGE_ENTRIES: usize = 256;
 mod allocations;
+mod file_summary;
 mod tempdb_log;
 pub(crate) use allocations::AllocationEvidence;
 
@@ -89,6 +90,7 @@ pub fn explain(read: &StorageRead) -> Result<StorageReport> {
         observed_rows,
         presented_rows: entries.len() as u32,
         entries_limited,
+        file_summary: file_summary::explain(read),
         title: t!("view.storage.title"),
         summary: if observed_rows == 0 {
             t!("view.storage.summary.unavailable")

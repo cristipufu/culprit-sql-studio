@@ -71,14 +71,18 @@ async fn one_completed_component_capture_attaches_once_after_shutdown_and_replay
         let captured = capture(case).await;
         let source = captured.source().clone();
         let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Quiescent);
-        let reports = workspace
-            .scan_populations_with_completed_capture(
-                "shop",
-                &options(),
-                input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
-            )
-            .await
-            .unwrap();
+        let reports = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_populations_with_completed_capture(
+                    "shop",
+                    &options(),
+                    input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap();
         assert_original(&reports.requested, &source);
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
         assert_eq!(state.acquisitions.load(Ordering::SeqCst), 1);
@@ -122,15 +126,19 @@ async fn opaque_component_result_allows_a_known_native_alias_but_not_a_foreign_c
     batch.validate(&options()).unwrap();
     let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
     let original = analyze(&workspace, &captured).await;
-    let report =
-        workspace.scan_with_captured_hyperscale_log_components("shop", &options(), None, original).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_hyperscale_log_components("shop", &options(), None, original, operation).await
+    })
+    .await
+    .unwrap();
     assert_original(&report, captured.source());
     let original = analyze(&workspace, &captured).await;
     assert!(
-        workspace
-            .scan_with_captured_hyperscale_log_components("another-connection", &options(), None, original)
-            .await
-            .is_err()
+        crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
+            .scan_with_captured_hyperscale_log_components("another-connection", &options(), None, original, operation)
+            .await)
+        .await
+        .is_err()
     );
     assert_eq!(state.factories.load(Ordering::SeqCst), 1);
 }
@@ -149,14 +157,16 @@ async fn unproven_or_contradictory_current_database_cannot_receive_historical_co
         }
         let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
         assert!(
-            workspace
+            crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
                 .scan_with_completed_capture(
                     "shop",
                     &options(),
-                    input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default())
+                    input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
+                    operation
                 )
-                .await
-                .is_err(),
+                .await)
+            .await
+            .is_err(),
             "{change}"
         );
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
@@ -183,14 +193,18 @@ async fn an_existing_requested_component_population_is_never_overwritten() {
         .unwrap();
     batch.requested.operations.hyperscale_log_components = Some(Box::new(read));
     let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
-    let error = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Conflict)));
     assert_eq!(state.active.load(Ordering::SeqCst), 0);
     assert!(state.analyzed.lock().unwrap().is_empty());
@@ -216,7 +230,14 @@ async fn component_capture_tamper_connection_cancel_and_local_bounds_refuse_befo
             _ => unreachable!(),
         }
         let connection = if failure == "connection" { "another-saved-connection" } else { "shop" };
-        assert!(workspace.scan_with_completed_capture(connection, &options(), request).await.is_err(), "{failure}");
+        assert!(
+            crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
+                .scan_with_completed_capture(connection, &options(), request, operation)
+                .await)
+            .await
+            .is_err(),
+            "{failure}"
+        );
         assert_eq!(state.factories.load(Ordering::SeqCst), 0);
         assert!(workspace.report_history("shop").unwrap().is_empty());
     }
@@ -225,14 +246,18 @@ async fn component_capture_tamper_connection_cancel_and_local_bounds_refuse_befo
 async fn unconfirmed_native_scan_cannot_publish_the_independent_component_original() {
     let captured = capture(0).await;
     let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Unconfirmed);
-    let error = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
     assert_eq!(state.active.load(Ordering::SeqCst), 0);
     assert!(state.analyzed.lock().unwrap().is_empty());

@@ -62,8 +62,11 @@ async fn original_metadata_scope_survives_unknown_current_identity_save_and_offl
             culprit_engine::LocalSnapshotReport::TempdbMetadataMemory(view) => view.clone(),
             _ => panic!(),
         };
-        let report =
-            workspace.scan_with_captured_tempdb_metadata_memory("shop", &options(), None, original).await.unwrap();
+        let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace.scan_with_captured_tempdb_metadata_memory("shop", &options(), None, original, operation).await
+        })
+        .await
+        .unwrap();
         assert_original(&report, &source);
         assert!(report.snapshot.identity.is_none());
         assert_eq!(report.tempdb_metadata_memory.as_deref(), Some(expected.as_ref()));
@@ -83,11 +86,12 @@ async fn wrong_connection_or_selected_report_kind_refuses_before_any_native_scan
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
     let original = analyze(&workspace, &captured, LocalCaptureAnalysisKind::TempdbMetadataMemory).await;
     assert_eq!(
-        workspace
-            .scan_with_captured_tempdb_metadata_memory("another-connection", &options(), None, original)
-            .await
-            .unwrap_err()
-            .detail,
+        crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
+            .scan_with_captured_tempdb_metadata_memory("another-connection", &options(), None, original, operation)
+            .await)
+        .await
+        .unwrap_err()
+        .detail,
         Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::InvalidContract))
     );
     let (source, rows) = culprit_collector::analytical::test_support::performance_counter_evidence(
@@ -96,11 +100,12 @@ async fn wrong_connection_or_selected_report_kind_refuses_before_any_native_scan
     let wrong = Captured::from_source("shop", source, rows).await;
     let original = analyze(&workspace, &wrong, LocalCaptureAnalysisKind::PerformanceCounters).await;
     assert_eq!(
-        workspace
-            .scan_with_captured_tempdb_metadata_memory("shop", &options(), None, original)
-            .await
-            .unwrap_err()
-            .detail,
+        crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
+            .scan_with_captured_tempdb_metadata_memory("shop", &options(), None, original, operation)
+            .await)
+        .await
+        .unwrap_err()
+        .detail,
         Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::InvalidContract))
     );
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
@@ -132,8 +137,11 @@ async fn conflicting_original_or_unconfirmed_scan_shutdown_cannot_publish_metada
         let (_home, workspace, state) =
             workspace(batch, if conflict { SourceShutdown::Quiescent } else { SourceShutdown::Unconfirmed });
         let original = analyze(&workspace, &captured, LocalCaptureAnalysisKind::TempdbMetadataMemory).await;
-        let error =
-            workspace.scan_with_captured_tempdb_metadata_memory("shop", &options(), None, original).await.unwrap_err();
+        let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace.scan_with_captured_tempdb_metadata_memory("shop", &options(), None, original, operation).await
+        })
+        .await
+        .unwrap_err();
         if conflict {
             assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Conflict)));
         } else {
@@ -151,7 +159,11 @@ async fn sharing_withholds_indivisible_original_receipts_and_preserves_a_repeata
     let captured = Captured::from_source("shop", source, rows).await;
     let (_home, workspace, _) = workspace(snapshots(), SourceShutdown::Quiescent);
     let original = analyze(&workspace, &captured, LocalCaptureAnalysisKind::TempdbMetadataMemory).await;
-    let report = workspace.scan_with_captured_tempdb_metadata_memory("shop", &options(), None, original).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_tempdb_metadata_memory("shop", &options(), None, original, operation).await
+    })
+    .await
+    .unwrap();
     let shared = culprit_core::redact::redact_snapshot(&report.snapshot);
     assert!(shared.operations.tempdb_metadata_memory.is_none());
     assert!(report.snapshot.operations.tempdb_metadata_memory.is_some());

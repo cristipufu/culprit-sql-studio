@@ -6,17 +6,21 @@ async fn original_view_catalog_is_authenticated_once_and_replayed_independently_
         let (source, rows) = indexed_views_evidence(case);
         let captured = Captured::from_source("shop", source.clone(), rows).await;
         let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-        let result = workspace
-            .scan_populations_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    analysis: CompletedCaptureAnalysis::IndexedViews,
-                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-                },
-            )
-            .await
-            .unwrap();
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_populations_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        analysis: CompletedCaptureAnalysis::IndexedViews,
+                        ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap();
         let [RecordedOperationalRead::Captured { read }] =
             result.requested.snapshot.operations.indexed_view_originals.as_slice()
         else {
@@ -44,17 +48,21 @@ async fn sharing_withdraws_original_view_proof_without_rebinding_it_to_the_curre
     let (source, rows) = indexed_views_evidence(IndexedViewsCase::Present);
     let captured = Captured::from_source("shop", source, rows).await;
     let (_home, workspace, _) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let report = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            CompletedCaptureScanInput {
-                analysis: CompletedCaptureAnalysis::IndexedViews,
-                ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-            },
-        )
-        .await
-        .unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                CompletedCaptureScanInput {
+                    analysis: CompletedCaptureAnalysis::IndexedViews,
+                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                },
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap();
     let snapshot = culprit_core::redact::redact_snapshot(&report.snapshot);
     assert!(matches!(
         snapshot.operations.indexed_view_originals.as_slice(),
@@ -83,16 +91,20 @@ async fn cancelled_or_unconfirmed_scan_cannot_persist_a_view_original_or_native_
         if cause == "cancelled" {
             cancellation.cancel();
         }
-        let result = workspace
-            .scan_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    analysis: CompletedCaptureAnalysis::IndexedViews,
-                    ..captured.input(&captured.outbox.delivery(), &cancellation)
-                },
-            )
-            .await;
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        analysis: CompletedCaptureAnalysis::IndexedViews,
+                        ..captured.input(&captured.outbox.delivery(), &cancellation)
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await;
         assert!(result.is_err(), "{cause}");
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
         assert!(workspace.report_history("shop").unwrap().is_empty());

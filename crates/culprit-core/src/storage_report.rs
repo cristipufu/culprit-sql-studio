@@ -19,6 +19,26 @@ pub struct StorageEntry {
     pub explanation: String,
     pub fields: Vec<StorageField>,
 }
+/// One original complete selected-database catalog census, never effective log capacity or host disk space.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct StorageFileSummary {
+    pub database: String,
+    pub source: String,
+    pub source_state: SourceState,
+    pub observed_at: Option<String>,
+    pub native_database_id: Option<String>,
+    pub data_file_count: Option<u32>,
+    pub log_file_count: Option<u32>,
+    pub other_file_count: Option<u32>,
+    pub data_allocated_bytes: Option<String>,
+    pub data_used_bytes: Option<String>,
+    pub log_catalog_allocated_bytes: Option<String>,
+    pub title: String,
+    pub summary: String,
+    pub fields: Vec<StorageField>,
+    pub limitations: Vec<String>,
+}
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct StorageReport {
@@ -32,6 +52,7 @@ pub struct StorageReport {
     pub observed_rows: u32,
     pub presented_rows: u32,
     pub entries_limited: bool,
+    pub file_summary: Option<Box<StorageFileSummary>>,
     pub title: String,
     pub summary: String,
     pub limitations: Vec<String>,

@@ -79,3 +79,5 @@ pub mod managed_instance_resources;
 pub mod index_configuration;
 
 pub mod indexed_views;
+
+pub mod provider_acquisition;

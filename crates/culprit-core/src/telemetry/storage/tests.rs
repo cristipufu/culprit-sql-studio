@@ -243,3 +243,28 @@ fn sparse_and_missing_snapshot_flags_remain_independent_and_never_repair_native_
     file.size_basis = StorageFileSizeBasis::ContainerUsed;
     assert!(file.is_valid());
 }
+
+#[test]
+fn native_database_file_rows_cannot_acquire_foreign_engine_or_shared_target_authority() {
+    let capture = CaptureIdentity { observation_id: "storage-vendor-owner".into(), revision: None };
+    for engine in [crate::Engine::Postgres, crate::Engine::Mysql, crate::Engine::Yugabyte] {
+        let mut read = read();
+        let mut source = snapshot_source();
+        read.target = crate::DatabaseIdentity::server(engine, "sample", "fixture.invalid", 1433, None).into();
+        source.target = read.target.clone();
+        assert!(read.target.is_valid(), "the foreign target is coherent before native-family admission");
+        assert!(!read.is_valid(), "{engine:?}");
+        assert!(
+            ExportedRecord::new(&source, &capture, TelemetryRecord::Operational(rows().remove(1))).is_err(),
+            "{engine:?}"
+        );
+    }
+    let mut read = read();
+    read.target = CollectionTarget::Shared(SharedResourceIdentity {
+        engine: crate::Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("original-machine"),
+        native: NativeIdentity::new("original-instance"),
+    });
+    assert!(!read.is_valid());
+}

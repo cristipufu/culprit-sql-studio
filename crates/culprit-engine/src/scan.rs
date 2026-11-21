@@ -215,6 +215,23 @@ pub(crate) struct CollectedPopulationScan {
 }
 
 impl CollectedPopulationScan {
+    pub(crate) fn attach_provider_acquisition(
+        &mut self,
+        summary: culprit_core::ProviderAcquisitionSummary,
+    ) -> Result<()> {
+        if !summary.is_valid() {
+            return Err(culprit_core::telemetry::DeliveryProblem::Integrity.error());
+        }
+        self.requested.snapshot.operations.provider_acquisition =
+            Some(Box::new(culprit_core::RecordedProviderAcquisition::Available { summary: Box::new(summary.clone()) }));
+        for population in &mut self.populations {
+            population.snapshot.operations.provider_acquisition =
+                Some(Box::new(culprit_core::RecordedProviderAcquisition::Available {
+                    summary: Box::new(summary.clone()),
+                }));
+        }
+        Ok(())
+    }
     /// The caller must settle the scan's native owner before attaching independently captured evidence.
     pub(crate) fn attach_captured(&mut self, evidence: CapturedScanEvidence) -> Result<()> {
         evidence.attach(&mut self.requested.snapshot)
@@ -468,9 +485,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let workspace = crate::Workspace::open_in(root.path());
         let options = SnapshotOptions::default();
-        let scan = workspace.scan("unused", &options);
-        let with_log = workspace.scan_with_log("unused", &options, None);
-        let populations = workspace.scan_populations("unused", &options);
+        let scan = workspace.scan("unused", &options, culprit_core::ProviderOperationObservation::unobserved());
+        let with_log =
+            workspace.scan_with_log("unused", &options, None, culprit_core::ProviderOperationObservation::unobserved());
+        let populations =
+            workspace.scan_populations("unused", &options, culprit_core::ProviderOperationObservation::unobserved());
         let verify = workspace.verify("unused", &[]);
         let verify_at = workspace.verify_at("unused", "report", &[]);
         for bytes in [

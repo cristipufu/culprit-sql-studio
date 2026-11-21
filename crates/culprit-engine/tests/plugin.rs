@@ -34,7 +34,8 @@ fn a_runtime_provider_lists_its_own_recipes_without_a_compiled_provider_or_facto
         cost: RecipeCostQualification::Unqualified,
     };
     let registration = culprit_engine::ProviderRegistration::new(
-        Arc::new(|_| panic!("static declarations must not construct the runtime provider")),
+        Arc::new(|_, _context| panic!("static declarations must not construct the runtime provider")),
+        culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
         vec![declaration.clone()],
     )
     .unwrap();
@@ -57,7 +58,10 @@ async fn retained_native_plans_open_offline_without_borrowing_current_catalog_or
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Yugabyte,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(|_| Err(Error::internal("Opening this saved plan must not resolve a database provider"))),
+            Arc::new(|_, _context| {
+                Err(Error::internal("Opening this saved plan must not resolve a database provider"))
+            }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -284,7 +288,8 @@ async fn a_plugin_hands_the_engines_plan_text_to_the_built_in_parser() {
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(|_| Ok(Box::new(NativeText) as Box<dyn Provider>)),
+            Arc::new(|_, _context| Ok(Box::new(NativeText) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -327,8 +332,12 @@ async fn testing_an_unsaved_connection_uses_its_provider_without_persisting_it()
     let home = temp_home("test-connection");
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
-        culprit_engine::ProviderRegistration::new(Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)), Vec::new())
-            .unwrap(),
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|_, _context| Ok(Box::new(Replay) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
+            Vec::new(),
+        )
+        .unwrap(),
     );
     let new = NewConnection {
         name: "unsaved".into(),
@@ -336,9 +345,25 @@ async fn testing_an_unsaved_connection_uses_its_provider_without_persisting_it()
         auth: Some(AuthKind::None),
         ..Default::default()
     };
-    assert_eq!(ws.test_connection(&new).await.expect("test unsaved connection").engine, Engine::Postgres);
+    assert_eq!(
+        crate::observed::run(&ws, culprit_core::ProviderReadKind::Probe, async |operation| ws
+            .test_connection(&new, operation)
+            .await)
+        .await
+        .expect("test unsaved connection")
+        .engine,
+        Engine::Postgres
+    );
     assert!(ws.connections().unwrap().is_empty());
-    assert_eq!(ws.probe("unsaved").await.unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(
+        crate::observed::run(&ws, culprit_core::ProviderReadKind::Probe, async |operation| ws
+            .probe("unsaved", operation)
+            .await)
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::NotFound
+    );
     let _ = std::fs::remove_dir_all(home);
 }
 
@@ -349,7 +374,8 @@ async fn a_plugged_in_provider_serves_a_full_scan() {
         .with_provider(
             Engine::Postgres,
             culprit_engine::ProviderRegistration::new(
-                Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)),
+                Arc::new(|_, _context| Ok(Box::new(Replay) as Box<dyn Provider>)),
+                culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
                 Vec::new(),
             )
             .unwrap(),
@@ -363,8 +389,20 @@ async fn a_plugged_in_provider_serves_a_full_scan() {
     })
     .expect("save connection");
 
-    assert_eq!(ws.probe("replayed").await.expect("probe").engine, Engine::Postgres);
-    let report = ws.scan("replayed", &SnapshotOptions::default()).await.expect("scan through the plugged-in provider");
+    assert_eq!(
+        crate::observed::run(&ws, culprit_core::ProviderReadKind::Probe, async |operation| ws
+            .probe("replayed", operation)
+            .await)
+        .await
+        .expect("probe")
+        .engine,
+        Engine::Postgres
+    );
+    let report = crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+        ws.scan("replayed", &SnapshotOptions::default(), operation).await
+    })
+    .await
+    .expect("scan through the plugged-in provider");
     assert_eq!(report.snapshot.connection, "replayed");
     assert!(report.findings.iter().any(|f| f.check == "filtered-scan"), "built-in checks ran on the replayed snapshot");
     assert!(report.findings.iter().any(|f| f.id == "acme.marker:demo"), "plugged-in checks ran too");
@@ -381,7 +419,8 @@ async fn a_plan_opened_from_a_report_reads_with_the_reports_catalog() {
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            Arc::new(|_, _context| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -393,7 +432,11 @@ async fn a_plan_opened_from_a_report_reads_with_the_reports_catalog() {
         ..Default::default()
     })
     .expect("save connection");
-    let report = ws.scan("replayed", &SnapshotOptions::default()).await.expect("scan");
+    let report = crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+        ws.scan("replayed", &SnapshotOptions::default(), operation).await
+    })
+    .await
+    .expect("scan");
     let marked = |plan: &Plan| plan.nodes().iter().any(|n| n.props.contains_key(culprit_core::insights::TABLE_INDEXES));
     let q = report
         .snapshot
@@ -414,7 +457,8 @@ async fn advice_and_fetched_plans_follow_the_selected_report_not_the_latest_poin
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            Arc::new(|_, _context| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -468,8 +512,12 @@ async fn reads_run_freely_and_production_writes_need_confirmation() {
     let home = temp_home("run");
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
-        culprit_engine::ProviderRegistration::new(Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)), Vec::new())
-            .unwrap(),
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|_, _context| Ok(Box::new(Replay) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
+            Vec::new(),
+        )
+        .unwrap(),
     );
     for (name, environment) in [("prod", Environment::Production), ("dev", Environment::Development)] {
         ws.add_connection(NewConnection {
@@ -527,7 +575,8 @@ async fn verify_index_compares_baseline_and_hypothetical_plans_and_validates_ddl
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            Arc::new(|_, _context| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),

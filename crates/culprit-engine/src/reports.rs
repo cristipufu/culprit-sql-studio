@@ -110,6 +110,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         hyperscale_log_components: &'a Option<Box<culprit_core::HyperscaleLogComponentReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         cleanup: &'a Option<culprit_core::CleanupReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        provider_acquisition: &'a Option<Box<culprit_core::ProviderAcquisitionReport>>,
     }
     let Report {
         storage,
@@ -137,6 +139,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         compiler_admission,
         counter_ratios,
         source_acquisitions,
+        provider_acquisition,
         performance_counters,
         index_configuration,
         indexed_views,
@@ -190,6 +193,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         compiler_admission,
         counter_ratios,
         source_acquisitions,
+        provider_acquisition,
         performance_counters,
         index_configuration,
         indexed_views,

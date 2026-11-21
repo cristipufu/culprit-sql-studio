@@ -99,7 +99,8 @@ async fn each_scan_compares_escalations_with_the_scan_before() {
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Mssql,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(move |_| Ok(Box::new(Replay(replay.clone())) as Box<dyn Provider>)),
+            Arc::new(move |_, _context| Ok(Box::new(Replay(replay.clone())) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -111,7 +112,13 @@ async fn each_scan_compares_escalations_with_the_scan_before() {
         ..Default::default()
     })
     .expect("save connection");
-    let scan = || async { ws.scan("shop", &SnapshotOptions::default()).await.expect("scan") };
+    let scan = || async {
+        crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+            ws.scan("shop", &SnapshotOptions::default(), operation).await
+        })
+        .await
+        .expect("scan")
+    };
 
     // Without an earlier reading or native reset time, the first scan reports a total as information.
     let first = scan().await;

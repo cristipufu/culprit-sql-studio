@@ -48,6 +48,18 @@ pub enum ReadConnectionOutcome {
     /// The original observation ended without establishing native completion or a confirmed stop.
     Unconfirmed,
 }
+impl ReadConnectionOutcome {
+    /// Preserve only original typed causes/codes; elapsed time or an error message never supplies a stop request.
+    pub fn from_error(error: &crate::Error) -> Self {
+        match error.detail {
+            Some(crate::ErrorDetail::CollectionStopped(CollectionStop::CancellationUnconfirmed)) => Self::Unconfirmed,
+            Some(crate::ErrorDetail::CollectionStopped(reason)) if ReadStopCount::valid_reason(reason) => {
+                Self::Stopped { reason }
+            }
+            _ => Self::Failed { code: error.code, native_code: None },
+        }
+    }
+}
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
@@ -129,6 +141,28 @@ impl ReadConnectionAttempt {
             })
     }
 }
+impl ReadConnectionAttempt {
+    fn follows(&self, before: &Self) -> bool {
+        let acquiring = before.phases.first().is_some_and(|phase| phase.outcome == ReadConnectionOutcome::Pending);
+        self.ordinal == before.ordinal
+            && self.omitted_phases >= before.omitted_phases
+            && (self.connection_use == before.connection_use
+                || (acquiring && before.connection_use == ReadConnectionUse::Unknown))
+            && (self.reader_generation == before.reader_generation || (acquiring && before.reader_generation.is_none()))
+            && self.phases.len() >= before.phases.len()
+            && before.phases.iter().zip(&self.phases).all(|(before, after)| after.follows(before))
+    }
+}
+impl ReadConnectionPhase {
+    fn follows(&self, before: &Self) -> bool {
+        if before.outcome != ReadConnectionOutcome::Pending {
+            return self == before;
+        }
+        self.stage == before.stage
+            && self.template_id == before.template_id
+            && self.client_started_at == before.client_started_at
+    }
+}
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
@@ -165,6 +199,18 @@ impl ReadConnectionWork {
                 .filter(|phase| phase.outcome == ReadConnectionOutcome::Unconfirmed)
                 .count() as u64
                 <= u64::from(self.unconfirmed_phases)
+    }
+    /// Absolute snapshots from one original recorder may append phases/attempts and finish pending phases.
+    /// A completed original phase, acquired generation or known connection-use classification never changes.
+    pub fn follows(&self, before: &Self) -> bool {
+        self.is_valid()
+            && before.is_valid()
+            && self.attempted >= before.attempted
+            && self.omitted_attempts >= before.omitted_attempts
+            && self.omitted_phases >= before.omitted_phases
+            && self.unconfirmed_phases >= before.unconfirmed_phases
+            && self.attempts.len() >= before.attempts.len()
+            && before.attempts.iter().zip(&self.attempts).all(|(before, after)| after.follows(before))
     }
     pub fn has_unconfirmed_work(&self) -> bool {
         self.active_phases > 0 || self.unconfirmed_phases > 0

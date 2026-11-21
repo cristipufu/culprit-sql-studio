@@ -12,7 +12,7 @@ use culprit_engine::{
 };
 use std::{future::Future, path::PathBuf, pin::Pin};
 
-type ScanTask<'a> = Pin<Box<dyn Future<Output = Result<Box<Report>>> + 'a>>;
+type ScanTask<'a> = Pin<Box<dyn Future<Output = Result<culprit_core::ProviderCall<Box<Report>>>> + 'a>>;
 
 #[derive(Args, Default)]
 #[command(group(clap::ArgGroup::new("captured_original")
@@ -70,19 +70,28 @@ impl CapturedScanArgs {
     }
 }
 
-pub(crate) fn scan<'a>(workspace: &'a Workspace, args: &'a crate::ScanArgs) -> ScanTask<'a> {
-    Box::pin(scan_body(workspace, args))
+pub(crate) fn scan<'a>(
+    workspace: &'a Workspace,
+    args: &'a crate::ScanArgs,
+    observation: culprit_core::ProviderOperationObservation,
+) -> ScanTask<'a> {
+    Box::pin(scan_body(workspace, args, observation))
 }
-async fn scan_body(workspace: &Workspace, args: &crate::ScanArgs) -> Result<Box<Report>> {
+async fn scan_body(
+    workspace: &Workspace,
+    args: &crate::ScanArgs,
+    observation: culprit_core::ProviderOperationObservation,
+) -> Result<culprit_core::ProviderCall<Box<Report>>> {
     let options = args.snapshot_options();
     match (&args.captured.evidence_outbox, args.captured.original()?) {
         (None, None) => {
-            boxed_report(workspace.scan_with_log(&args.connection, &options, args.query_log.as_deref())).await
+            boxed_report(workspace.scan_with_log(&args.connection, &options, args.query_log.as_deref(), observation))
+                .await
         }
         (Some(directory), Some(original)) => {
             let reader = OutboxCaptureReader::directory(directory.clone(), CompletedCaptureBudget::default())?;
             let cancellation = CollectionCancellation::default();
-            let action = captured_scan(workspace, args, &reader, original, &cancellation);
+            let action = captured_scan(workspace, args, &reader, original, &cancellation, observation);
             crate::collection_shutdown::run(&cancellation, action).await
         }
         _ => Err(DeliveryProblem::InvalidContract.error()),
@@ -95,8 +104,9 @@ fn captured_scan<'a>(
     reader: &'a dyn LocalCaptureReader,
     original: CapturedOriginal<'a>,
     cancellation: &'a CollectionCancellation,
+    observation: culprit_core::ProviderOperationObservation,
 ) -> ScanTask<'a> {
-    Box::pin(captured_scan_body(workspace, args, reader, original, cancellation))
+    Box::pin(captured_scan_body(workspace, args, reader, original, cancellation, observation))
 }
 async fn captured_scan_body(
     workspace: &Workspace,
@@ -104,11 +114,12 @@ async fn captured_scan_body(
     reader: &dyn LocalCaptureReader,
     original: CapturedOriginal<'_>,
     cancellation: &CollectionCancellation,
-) -> Result<Box<Report>> {
+    observation: culprit_core::ProviderOperationObservation,
+) -> Result<culprit_core::ProviderCall<Box<Report>>> {
     let captured = read(workspace, reader, &args.connection, original, cancellation).await?;
     let options = args.snapshot_options();
     // The owning cancellation check precedes construction, just as for every existing scan action.
-    scan_until_cancelled(cancellation, || captured_action(workspace, args, &options, captured)).await
+    scan_until_cancelled(cancellation, || captured_action(workspace, args, &options, captured, observation)).await
 }
 
 /// Select one future without an all-arm async frame or inline completed reports. No task is detached.
@@ -117,6 +128,7 @@ fn captured_action<'a>(
     args: &'a crate::ScanArgs,
     options: &'a culprit_core::SnapshotOptions,
     captured: LocalCapturedAnalysis,
+    observation: culprit_core::ProviderOperationObservation,
 ) -> ScanTask<'a> {
     match captured {
         LocalCapturedAnalysis::SourceOverhead(captured) => boxed_report(workspace.scan_with_captured_source_overhead(
@@ -124,6 +136,7 @@ fn captured_action<'a>(
             options,
             args.query_log.as_deref(),
             *captured,
+            observation,
         )),
         LocalCapturedAnalysis::ManagedInstanceResources(captured) => {
             boxed_report(workspace.scan_with_captured_managed_instance_resources(
@@ -131,6 +144,7 @@ fn captured_action<'a>(
                 options,
                 args.query_log.as_deref(),
                 *captured,
+                observation,
             ))
         }
         LocalCapturedAnalysis::MemoryClerks(captured) => boxed_report(workspace.scan_with_captured_memory_clerks(
@@ -138,6 +152,7 @@ fn captured_action<'a>(
             options,
             args.query_log.as_deref(),
             captured,
+            observation,
         )),
         LocalCapturedAnalysis::HyperscaleLogComponents(captured) => {
             boxed_report(workspace.scan_with_captured_hyperscale_log_components(
@@ -145,6 +160,7 @@ fn captured_action<'a>(
                 options,
                 args.query_log.as_deref(),
                 captured,
+                observation,
             ))
         }
         LocalCapturedAnalysis::PoolSettings(captured) => boxed_report(workspace.scan_with_captured_pool_settings(
@@ -152,6 +168,7 @@ fn captured_action<'a>(
             options,
             args.query_log.as_deref(),
             *captured,
+            observation,
         )),
         LocalCapturedAnalysis::Snapshot(captured)
             if captured.report().kind() == LocalCaptureAnalysisKind::InstanceResources =>
@@ -161,6 +178,7 @@ fn captured_action<'a>(
                 options,
                 args.query_log.as_deref(),
                 captured,
+                observation,
             ))
         }
         LocalCapturedAnalysis::Snapshot(captured)
@@ -174,6 +192,7 @@ fn captured_action<'a>(
                 options,
                 args.query_log.as_deref(),
                 captured,
+                observation,
             ))
         }
         LocalCapturedAnalysis::Snapshot(captured) => boxed_report(workspace.scan_with_captured_tempdb_metadata_memory(
@@ -181,6 +200,7 @@ fn captured_action<'a>(
             options,
             args.query_log.as_deref(),
             captured,
+            observation,
         )),
         LocalCapturedAnalysis::WaitCounters(_)
         | LocalCapturedAnalysis::Replication(_)
@@ -194,8 +214,8 @@ fn captured_action<'a>(
     }
 }
 /// The selected public scan may return a large Report; only this adapter transports it into CLI ownership.
-fn boxed_report<'a>(work: impl Future<Output = Result<Report>> + 'a) -> ScanTask<'a> {
-    Box::pin(async move { work.await.map(Box::new) })
+fn boxed_report<'a>(work: impl Future<Output = Result<culprit_core::ProviderCall<Box<Report>>>> + 'a) -> ScanTask<'a> {
+    Box::pin(work)
 }
 
 async fn scan_until_cancelled<T, F>(cancellation: &CollectionCancellation, start: impl FnOnce() -> F) -> Result<T>

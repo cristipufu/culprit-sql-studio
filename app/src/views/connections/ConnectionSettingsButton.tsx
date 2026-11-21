@@ -1,3 +1,5 @@
+import type { ProviderAcquisitionReport } from "../../gen/ProviderAcquisitionReport";
+import { ProviderAcquisition } from "../../components/ProviderAcquisition";
 import { Check, KeyRound, Settings2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -32,6 +34,7 @@ type Status = { kind: "idle" } | { kind: "testing" | "saving" } | { kind: "ok"; 
 function ConnectionSettingsDialog({ connection, onClose }: { connection: ConnectionInfo; onClose: () => void }) {
   const initial = useRef<ConnectionSettings>({ environment: connection.environment, security: connection.security?.settings ?? emptySecurity() });
   const [draft, setDraft] = useState<ConnectionSettings>(() => ({ ...initial.current, security: securityDraft(connection.security, connectionSecurityFacts(connection.engine)) }));
+  const [acquisition, setAcquisition] = useState<ProviderAcquisitionReport | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const form = useRef<HTMLFormElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -46,15 +49,18 @@ function ConnectionSettingsDialog({ connection, onClose }: { connection: Connect
   useFocusTrap(form, true, () => { if (!saving) onClose(); });
   useEffect(() => { closeButton.current?.focus(); return () => { action.current.invalidate(); testAbort.current?.abort(); }; }, []);
   const update = (changes: Partial<ConnectionSettings>) => {
-    action.current.invalidate(); testAbort.current?.abort(); setDraft((current) => ({ ...current, ...changes })); setStatus({ kind: "idle" });
+    action.current.invalidate(); testAbort.current?.abort(); setDraft((current) => ({ ...current, ...changes })); setAcquisition(null); setStatus({ kind: "idle" });
   };
   const test = async () => {
     if (!form.current?.reportValidity()) return;
     const owns = action.current.start();
     testAbort.current?.abort(); const controller = new AbortController(); testAbort.current = controller;
+    setAcquisition(null);
     setStatus({ kind: "testing" });
     try {
-      const server = await (await api()).testConnectionSettings(connection.name, draft, controller.signal);
+      const server = await (await api()).testConnectionSettings(connection.name, draft, controller.signal, (report) => {
+        if (owns()) setAcquisition(report);
+      });
       if (owns()) setStatus({ kind: "ok", server: `${server.product} · ${server.database}` });
     } catch (error) { if (owns()) setStatus({ kind: "error", error: errorMessage(error) }); }
   };
@@ -86,6 +92,7 @@ function ConnectionSettingsDialog({ connection, onClose }: { connection: Connect
         <div className="connection-settings-environment"><span id={`${id}-environment`}>{t("ui.new_connection_form.environment")}</span><EnvironmentPicker value={draft.environment} disabled={saving} labelledBy={`${id}-environment`} onChange={(environment) => update({ environment })} /></div>
         {connection.has_secret && <p className="connection-settings-credentials"><KeyRound size={13} aria-hidden />{t("ui.connection_settings.credentials_saved")}</p>}
         <ConnectionSecurityFields engine={connection.engine} info={connection.security} value={draft.security} source={securityChanged ? "custom" : "saved"} disabled={saving} modeRef={mode} onChange={(security) => update({ security })} onError={(error) => setStatus({ kind: "error", error })} />
+        <ProviderAcquisition report={acquisition} />
         <div aria-live="polite">
           {status.kind === "error" && <div className="notice error connection-settings-status" role="alert"><div><b>{status.error.message}</b>{status.error.hint && <div>{status.error.hint}</div>}{status.error.detail === "connection-security" && <button type="button" className="btn small" onClick={() => mode.current?.focus()}>{t("ui.connection_security.configure")}</button>}</div></div>}
           {status.kind === "ok" && <div className="connection-settings-success"><Check size={15} aria-hidden />{t("ui.connection_settings.success", { server: status.server })}</div>}

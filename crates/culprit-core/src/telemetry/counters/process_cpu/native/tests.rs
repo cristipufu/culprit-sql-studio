@@ -186,3 +186,55 @@ fn only_three_declared_cpu_populations_and_exact_instance_scope_accept_original_
     header.sources.push(StateSourceCoverage::collected("foreign".into(), 0));
     assert!(!cpu_profile_header_is_valid(&extra));
 }
+
+#[test]
+fn windows_other_process_cpu_uses_one_original_record_and_keeps_native_inputs_unchanged() {
+    for (process, idle, expected) in
+        [("10", "50", 40), ("10", "90", 0), ("0", "0", 100), ("0", "100", 0), ("100", "0", 0)]
+    {
+        let sample = history("Windows", process, idle);
+        let original = serde_json::to_value(&sample).unwrap();
+        let point = MssqlCpuHistoryPoint::from_original(&sample, &context()).unwrap();
+        assert_eq!(point.other_process_percent(), Some(expected));
+        assert_eq!(point.raw_process(), Some(process));
+        assert_eq!(point.raw_idle(), Some(idle));
+        assert_eq!(point.record_ticks(), "400");
+        assert_eq!(serde_json::to_value(&sample).unwrap(), original);
+        assert!(!sample.properties.contains_key("other_process_cpu_percent"));
+    }
+}
+
+#[test]
+fn other_process_cpu_refuses_missing_unsupported_and_incompatible_inputs_without_clamping() {
+    for (platform, process, idle) in [
+        ("Linux", "10", "0"),
+        ("Unknown", "10", "50"),
+        ("Windows", "60", "50"),
+        ("Windows", "101", "0"),
+        ("Windows", "0", "101"),
+        ("Windows", "-1", "50"),
+        ("Windows", "10", "-1"),
+    ] {
+        let sample = history(platform, process, idle);
+        let point = MssqlCpuHistoryPoint::from_original(&sample, &context()).unwrap();
+        assert_eq!(point.other_process_percent(), None, "{platform}/{process}/{idle}");
+        assert_eq!(point.raw_process(), Some(process));
+        assert_eq!(point.raw_idle(), Some(idle));
+    }
+    for missing in ["process_utilization", "system_idle", "host_platform"] {
+        let mut sample = history("Windows", "10", "50");
+        sample.properties.remove(missing);
+        assert_eq!(MssqlCpuHistoryPoint::from_original(&sample, &context()).unwrap().other_process_percent(), None);
+    }
+    let mut old = history("Windows", "10", "50");
+    old.properties.insert("major".into(), "13".into());
+    assert_eq!(MssqlCpuHistoryPoint::from_sample(&old).unwrap().other_process_percent(), None);
+    assert!(
+        MssqlCpuHistoryPoint::from_original(&pool(), &context()).is_err(),
+        "pool totals are a different native population"
+    );
+    let mut changed_owner = context();
+    let SourcePartition::InstanceLocal { epoch, .. } = &mut changed_owner.partition else { panic!() };
+    *epoch = Some(digest(b"another-native-process"));
+    assert!(MssqlCpuHistoryPoint::from_original(&history("Windows", "10", "50"), &changed_owner).is_err());
+}

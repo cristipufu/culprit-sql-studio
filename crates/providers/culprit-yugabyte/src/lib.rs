@@ -51,6 +51,12 @@ pub struct YugabyteProvider {
 }
 
 impl YugabyteProvider {
+    pub fn with_read_context(mut self, context: culprit_core::ProviderReadContext) -> Result<Self> {
+        context.complete_reader_coverage();
+        self.connector = self.connector.with_read_context(context);
+        self.execution = SqlExecutor::with_connector(&self.spec, self.connector.clone());
+        Ok(self)
+    }
     pub fn new(spec: &ConnectionSpec) -> Result<Self> {
         if spec.engine.is_some_and(|e| e != Engine::Yugabyte) {
             return Err(Error::invalid(t!("provider.yugabyte.error.other_engine")));

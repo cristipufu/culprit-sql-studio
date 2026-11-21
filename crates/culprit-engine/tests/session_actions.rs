@@ -121,11 +121,12 @@ fn workspace(path: &std::path::Path, state: &Arc<State>) -> Workspace {
     Workspace::open_in(path).with_provider(
         Engine::Postgres,
         ProviderRegistration::new(
-            Arc::new(move |spec: &ConnectionSpec| {
+            Arc::new(move |spec: &ConnectionSpec, _context| {
                 state.factories.fetch_add(1, Ordering::SeqCst);
                 state.factory_routes.lock().unwrap().push((spec.host.clone(), spec.environment));
                 Ok(Box::new(NativeAction(state.clone())))
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             vec![],
         )
         .unwrap(),

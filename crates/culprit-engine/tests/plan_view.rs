@@ -143,7 +143,8 @@ async fn workspace_plan_endpoints_project_the_selected_variant_and_execution_sta
     let ws = culprit_engine::Workspace::open_in(&home).with_provider(
         Engine::Mssql,
         culprit_engine::ProviderRegistration::new(
-            std::sync::Arc::new(move |_| Ok(Box::new(reader.clone()))),
+            std::sync::Arc::new(move |_, _context| Ok(Box::new(reader.clone()))),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -209,10 +210,11 @@ fn retained_workspace(
     let workspace = culprit_engine::Workspace::open_in(directory.path()).with_provider(
         Engine::Mssql,
         culprit_engine::ProviderRegistration::new(
-            std::sync::Arc::new(move |_| match &reader {
+            std::sync::Arc::new(move |_, _context| match &reader {
                 Some(reader) => Ok(Box::new(reader.clone())),
                 None => panic!("unverified retained-plan identity must fail before provider creation"),
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -270,7 +272,8 @@ async fn an_engine_without_retained_plans_keeps_its_capability_refusal_without_r
     let workspace = culprit_engine::Workspace::open_in(directory.path()).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            std::sync::Arc::new(|_| panic!("a refused capability cannot create a native provider")),
+            std::sync::Arc::new(|_, _context| panic!("a refused capability cannot create a native provider")),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),

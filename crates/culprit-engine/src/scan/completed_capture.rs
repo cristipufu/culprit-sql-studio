@@ -251,8 +251,11 @@ impl Workspace {
         name: &str,
         options: &SnapshotOptions,
         input: CompletedCaptureScanInput<'_>,
-    ) -> Result<Report> {
-        self.scan_populations_with_completed_capture(name, options, input).await.map(|reports| *reports.requested)
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
+        self.scan_populations_with_completed_capture(name, options, input, observation)
+            .await
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Singular attachment uses the same shared local-read allowance and native scan owner as plural attachment.
@@ -261,9 +264,10 @@ impl Workspace {
         name: &str,
         options: &SnapshotOptions,
         input: CompletedCaptureScanInput<'_>,
-    ) -> Result<PopulationReports> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<PopulationReports>> {
         let budget = input.budget;
-        self.scan_populations_with_completed_captures(name, options, vec![input], budget).await
+        self.scan_populations_with_completed_captures(name, options, vec![input], budget, observation).await
     }
 
     /// Attach explicitly selected originals; no latest lookup, automatic pairing or current-source rebinding.
@@ -273,10 +277,11 @@ impl Workspace {
         options: &SnapshotOptions,
         inputs: Vec<CompletedCaptureScanInput<'_>>,
         budget: CompletedCaptureBudget,
-    ) -> Result<Report> {
-        self.scan_populations_with_completed_captures(name, options, inputs, budget)
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<Box<Report>>> {
+        self.scan_populations_with_completed_captures(name, options, inputs, budget, observation)
             .await
-            .map(|reports| *reports.requested)
+            .map(crate::provider_reads::requested_call)
     }
 
     /// Authenticate every selected original under one absolute local deadline and total row/byte allowance before
@@ -289,7 +294,9 @@ impl Workspace {
         options: &SnapshotOptions,
         inputs: Vec<CompletedCaptureScanInput<'_>>,
         budget: CompletedCaptureBudget,
-    ) -> Result<PopulationReports> {
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<PopulationReports>> {
+        observation.require_kind(culprit_core::ProviderReadKind::Scan)?;
         let started = Instant::now();
         validate_selection(&inputs)?;
         let mut allowance = OriginalReadAllowance::new(budget, started)?;
@@ -309,8 +316,14 @@ impl Workspace {
         if cancellations.iter().any(|cancellation| cancellation.is_cancelled()) {
             return Err(CollectionStop::Cancelled.error());
         }
-        Box::pin(self.scan_observation(name, options, None, Some(super::CapturedScanEvidence::Multiple(originals))))
-            .await
+        Box::pin(self.scan_observation(
+            name,
+            options,
+            None,
+            Some(super::CapturedScanEvidence::Multiple(originals)),
+            observation,
+        ))
+        .await
     }
 }
 

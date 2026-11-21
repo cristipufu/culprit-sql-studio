@@ -256,11 +256,18 @@ pub(crate) struct Pool {
     transport: Option<Arc<dyn ConnectionTransport>>,
     idle: Mutex<Vec<MsClient>>,
     uncertain: culprit_read::ReadFence,
+    pub(crate) observation: culprit_core::ProviderReadContext,
 }
 
 impl Pool {
     pub(crate) fn new(config: Config, transport: Option<Arc<dyn ConnectionTransport>>) -> Self {
-        Pool { config, transport, idle: Mutex::new(Vec::new()), uncertain: culprit_read::ReadFence::default() }
+        Pool {
+            config,
+            transport,
+            idle: Mutex::new(Vec::new()),
+            uncertain: culprit_read::ReadFence::default(),
+            observation: culprit_core::ProviderReadContext::unobserved(),
+        }
     }
 
     pub(crate) async fn connect(&self, kind: SessionKind) -> Result<MsClient> {

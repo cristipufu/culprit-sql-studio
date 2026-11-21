@@ -169,12 +169,13 @@ fn configured(path: &Path, state: &Arc<Boundaries>) -> Workspace {
         Workspace::open_in(path).with_authentication_provider(Arc::new(Credentials(state.clone()))).with_provider(
             Engine::Postgres,
             ProviderRegistration::new(
-                Arc::new(move |spec| {
+                Arc::new(move |spec, _context| {
                     factories.factories.fetch_add(1, Ordering::SeqCst);
                     factories.constructed.lock().unwrap().push(SavedRoute::from(spec));
                     assert_eq!(spec.token.as_deref(), Some("admission-fixture-private-token"));
                     Ok(Box::new(ProviderProbe(factories.clone())))
                 }),
+                crate::ProviderConstructionPolicy::DeferredNativeWork,
                 vec![],
             )
             .unwrap(),

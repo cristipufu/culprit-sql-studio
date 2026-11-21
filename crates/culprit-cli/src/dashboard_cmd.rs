@@ -49,7 +49,19 @@ async fn from_connection(ws: &Workspace, args: &DashboardArgs, out: &Out) -> Res
         let defaults = SnapshotOptions::default();
         let options = defaults.clone().with_window_minutes(window.unwrap_or(defaults.window_in_minutes()));
         out.progress(&culprit_core::t!("cli.scanning", connection = &args.connection));
-        ws.scan(&args.connection, &options).await?;
+        {
+            let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Scan)?;
+            let result = ws.scan(&args.connection, &options, observation.operation()?).await;
+            let attempt = observation.finish_call(result);
+            let current = culprit_engine::explain_provider_acquisition(attempt.acquisition());
+            match attempt.into_result() {
+                Ok(_) => out.current_acquisition(&current),
+                Err(error) => {
+                    out.acquisition_failure(&current, &error);
+                    return Err(error);
+                }
+            }
+        }
     }
     ws.dashboard(&args.connection, window, !args.no_live).await
 }

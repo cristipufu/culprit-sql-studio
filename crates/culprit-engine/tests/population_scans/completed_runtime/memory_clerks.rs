@@ -83,14 +83,18 @@ async fn shared_clerk_originals_attach_after_shutdown_save_and_reanalyze_without
     let captured = capture(false).await;
     let source = captured.source().clone();
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-    let reports = workspace
-        .scan_populations_with_completed_capture(
-            "shop",
-            &options(),
-            input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap();
+    let reports = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_populations_with_completed_capture(
+                "shop",
+                &options(),
+                input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap();
     assert_original(&reports.requested, &source);
     assert_eq!(state.active.load(Ordering::SeqCst), 0);
     assert_eq!(state.acquisitions.load(Ordering::SeqCst), 1);
@@ -117,7 +121,11 @@ async fn opaque_local_result_preserves_historical_shared_scope_when_current_data
     batch.catalog = None;
     let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
     let original = analyze(&workspace, &captured).await;
-    let report = workspace.scan_with_captured_memory_clerks("shop", &options(), None, original).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_memory_clerks("shop", &options(), None, original, operation).await
+    })
+    .await
+    .unwrap();
     assert_original(&report, captured.source());
     assert_eq!(report.memory_clerks.as_ref().unwrap().source_state, Some(SourceState::Partial));
     assert!(report.snapshot.identity.is_none());
@@ -130,14 +138,16 @@ async fn original_journal_connection_is_checked_before_a_scan_provider_is_constr
     let captured = Captured::from_source("another-saved-connection", source, rows).await;
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
     assert!(
-        workspace
+        crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
             .scan_with_completed_capture(
                 "shop",
                 &options(),
-                input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default(),)
+                input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default(),),
+                operation
             )
-            .await
-            .is_err()
+            .await)
+        .await
+        .is_err()
     );
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
     assert!(workspace.report_history("shop").unwrap().is_empty());
@@ -148,8 +158,11 @@ async fn an_opaque_result_cannot_be_reassigned_to_a_different_saved_connection()
     let captured = capture(false).await;
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
     let original = analyze(&workspace, &captured).await;
-    let error =
-        workspace.scan_with_captured_memory_clerks("another-connection", &options(), None, original).await.unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_memory_clerks("another-connection", &options(), None, original, operation).await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::InvalidContract)));
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
 }
@@ -186,14 +199,18 @@ async fn existing_captured_or_live_clerk_evidence_is_not_overwritten_or_merged()
                 .push(set.as_ref().clone());
         }
         let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
-        let error = workspace
-            .scan_with_completed_capture(
-                "shop",
-                &options(),
-                input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
-            )
-            .await
-            .unwrap_err();
+        let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_completed_capture(
+                    "shop",
+                    &options(),
+                    input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Conflict)), "{existing}");
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
         assert!(state.analyzed.lock().unwrap().is_empty());
@@ -220,7 +237,14 @@ async fn corrupt_cancelled_or_oversized_clerk_reads_refuse_before_native_work() 
             "bytes" => request.budget.max_bytes = 1,
             _ => unreachable!(),
         }
-        assert!(workspace.scan_with_completed_capture("shop", &options(), request).await.is_err(), "{refusal}");
+        assert!(
+            crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| workspace
+                .scan_with_completed_capture("shop", &options(), request, operation)
+                .await)
+            .await
+            .is_err(),
+            "{refusal}"
+        );
         assert_eq!(state.factories.load(Ordering::SeqCst), 0, "{refusal}");
         assert!(workspace.report_history("shop").unwrap().is_empty());
     }
@@ -230,14 +254,18 @@ async fn corrupt_cancelled_or_oversized_clerk_reads_refuse_before_native_work() 
 async fn unconfirmed_native_shutdown_cannot_publish_independent_clerk_input() {
     let captured = capture(false).await;
     let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Unconfirmed);
-    let error = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                input(&captured, &captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
     assert_eq!(state.active.load(Ordering::SeqCst), 0);
     assert!(state.analyzed.lock().unwrap().is_empty());

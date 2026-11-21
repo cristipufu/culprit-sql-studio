@@ -611,10 +611,11 @@ impl TestDirectory {
         let ws = Workspace::open_in(self.0.path().join("workspace")).with_provider(
             Engine::Postgres,
             culprit_engine::ProviderRegistration::new(
-                Arc::new(move |_| {
+                Arc::new(move |_, _context| {
                     state.factories.fetch_add(1, Ordering::SeqCst);
                     Ok(Box::new(TestProvider(state.clone())))
                 }),
+                culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
                 Vec::new(),
             )
             .unwrap(),
@@ -986,10 +987,11 @@ async fn standalone_unconfirmed_work_blocks_native_reads_after_workspace_restart
     let restarted = Workspace::open_in(dir.0.path().join("workspace")).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(move |_| {
+            Arc::new(move |_, _context| {
                 provider_state.factories.fetch_add(1, Ordering::SeqCst);
                 Ok(Box::new(TestProvider(provider_state.clone())))
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -1171,10 +1173,11 @@ async fn unconfirmed_native_work_remains_blocked_after_outbox_and_workspace_rest
     let restarted = Workspace::open_in(dir.0.path().join("workspace")).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(move |_| {
+            Arc::new(move |_, _context| {
                 provider_state.factories.fetch_add(1, Ordering::SeqCst);
                 Ok(Box::new(TestProvider(provider_state.clone())))
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -2123,10 +2126,11 @@ async fn fleet_owner_receipt_after_restart_never_calls_an_older_durable_native_d
     let restarted = Workspace::open_in(dir.0.path().join("workspace")).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(move |_| {
+            Arc::new(move |_, _context| {
                 provider.factories.fetch_add(1, Ordering::SeqCst);
                 Ok(Box::new(TestProvider(provider.clone())))
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -2161,7 +2165,7 @@ async fn fleet_owner_receipt_after_restart_never_calls_an_older_durable_native_d
     let remaining_debt = restarted.collection_admission_status().await.unwrap();
     assert!(remaining_debt.source_quiescence_required);
     assert_eq!(remaining_debt.observation_id, previous_debt.observation_id);
-    assert_eq!(remaining_debt.connection, previous_debt.connection);
+    assert_eq!(remaining_debt.route, previous_debt.route);
     let status = outbox.status(10, None).await.unwrap();
     assert_eq!((status.captures, status.source_debts, status.ready), (1, 1, 0));
     assert_eq!(status.entries[0].capture, original.capture);

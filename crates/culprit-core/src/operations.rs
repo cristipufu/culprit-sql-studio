@@ -39,6 +39,9 @@ pub struct OperationalStats {
     pub source_acquisitions: Vec<crate::RecordedSourceAcquisition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub provider_acquisition: Option<Box<crate::RecordedProviderAcquisition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub runtime_fragments: Option<Box<crate::telemetry::RecordedQueryHistoryRead>>,
     /// One explicitly selected original wait-history capture; never joined to current scan workload by names.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -224,6 +227,7 @@ impl OperationalStats {
             indexed_views: _,
             indexed_view_originals: _,
             source_acquisitions: _,
+            provider_acquisition: _,
             process_cpu_originals: _,
             runtime_fragments: _,
             query_wait_fragments: _,

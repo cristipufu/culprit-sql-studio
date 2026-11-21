@@ -1,7 +1,8 @@
+import { ProviderAcquisition } from "./components/ProviderAcquisition";
 import { evidencePresentation } from "./lib/engines";
 import { t, useLanguage } from "./lib/i18n";
 import { AlertCircle } from "lucide-react";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { ScreenshotButton } from "./components/ScreenshotButton";
 import { SignInDialog } from "./components/SignInDialog";
@@ -246,13 +247,19 @@ function Workspace({ view, name }: { view: View; name: string }) {
   if (state.status === "loading" || state.status === "none") return view === "dashboard" ? <DashboardSkeleton /> : <Loading />;
   if (state.status === "error") {
     if (connection?.auth === "password" && (state.error.code === "auth_failed" || !connection.has_secret)) {
-      return <PasswordNeeded connection={connection} message={state.error.message} />;
+      return (
+        <>
+          <PasswordNeeded connection={connection} message={state.error.message} />
+          <ProviderAcquisition report={state.acquisition} />
+        </>
+      );
     }
     return (
       <div className="empty">
         <h3>{t("ui.app.scan_failed", { name })}</h3>
         <p>{state.error.message}</p>
         {state.error.hint && <p className="muted">{state.error.hint}</p>}
+        <ProviderAcquisition report={state.acquisition} />
         <button type="button" className="btn" onClick={() => scan(name)}>
           {t("ui.common.try_again")}
         </button>
@@ -260,16 +267,26 @@ function Workspace({ view, name }: { view: View; name: string }) {
     );
   }
   const report = state.report;
+  let content: ReactNode;
   if (view === "dashboard" && connection) {
-    return (
+    content = (
       <Suspense fallback={<DashboardSkeleton />}>
         <Dashboard key={name} report={report} connection={connection} />
       </Suspense>
     );
+  } else if (view === "queries") {
+    content = <Queries report={report} />;
+  } else if (view === "schema") {
+    content = <Schema report={report} />;
+  } else {
+    content = <Overview report={report} />;
   }
-  if (view === "queries") return <Queries report={report} />;
-  if (view === "schema") return <Schema report={report} />;
-  return <Overview report={report} />;
+  return (
+    <>
+      <ProviderAcquisition report={state.scanError ? state.scanAcquisition : null} />
+      {content}
+    </>
+  );
 }
 
 function Loading() {

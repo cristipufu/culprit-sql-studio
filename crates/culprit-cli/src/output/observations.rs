@@ -1386,3 +1386,6 @@ pub(crate) use index_configuration::{compact_index_configuration, index_configur
 
 mod indexed_views;
 pub(crate) use indexed_views::{compact_indexed_views, indexed_views};
+
+mod provider_acquisition;
+pub(crate) use provider_acquisition::{provider_acquisition, provider_acquisition_brief};

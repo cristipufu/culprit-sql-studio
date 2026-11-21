@@ -135,6 +135,7 @@ fn pool_entry(row: &OperationalObservation) -> Result<InstanceResourceGroup> {
 fn history_entry(row: &OperationalObservation) -> Result<InstanceResourceGroup> {
     let OperationalFact::CounterSet(sample) = &row.fact else { return Err(invalid()) };
     let point = MssqlCpuHistoryPoint::from_sample(sample)?;
+    let other_process = point.other_process_percent().map(|value| value.to_string());
     Ok(InstanceResourceGroup {
         key: row.key.clone(),
         title: t!("view.process_cpu.population.history"),
@@ -144,6 +145,11 @@ fn history_entry(row: &OperationalObservation) -> Result<InstanceResourceGroup> 
             field("host_platform", t!("view.process_cpu.field.platform"), point.platform()),
             field("process_cpu_percent", t!("view.process_cpu.field.native_process_percent"), point.process_percent()),
             field("idle_cpu_percent", t!("view.process_cpu.field.native_idle_percent"), point.idle_percent()),
+            field(
+                "other_process_cpu_percent",
+                t!("view.process_cpu.field.other_process_percent"),
+                other_process.as_deref(),
+            ),
             field("raw_process_utilization", t!("view.process_cpu.field.raw_process"), point.raw_process()),
             field("raw_system_idle", t!("view.process_cpu.field.raw_idle"), point.raw_idle()),
         ],

@@ -52,7 +52,12 @@ impl SourceFactory for AuthenticatedSource<'_> {
         if let Some(admitted) = admitted {
             admitted.window.check_start()?;
         }
-        self.admission.started(self.observation_id.to_owned(), self.name.to_owned()).await?;
+        self.admission
+            .started(
+                self.observation_id.to_owned(),
+                culprit_core::telemetry::SourceAdmissionRoute::SavedConnection { name: self.name.to_owned() },
+            )
+            .await?;
         let connections = self.workspace.connection_service();
         let provider = match &self.selection {
             SourceSelection::Qualification { route, registration } => {

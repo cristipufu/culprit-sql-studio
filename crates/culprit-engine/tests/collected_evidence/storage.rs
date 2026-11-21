@@ -79,6 +79,7 @@ async fn authentic_storage_capture_keeps_exact_quantities_populations_file_meani
         )
         .unwrap();
         let expected = culprit_checks::storage::explain(&read).unwrap();
+        test_support::assert_storage_file_summary(&analysis.report, case);
         assert_eq!(serde_json::to_value(analysis.report).unwrap(), serde_json::to_value(expected).unwrap());
         assert_eq!(fixture.recovery_object_reads(), opened);
     }
@@ -98,4 +99,45 @@ async fn missing_file_body_preserves_original_count_with_no_recovery_hydration_o
     assert_eq!(analysis.report.source_state, SourceState::Partial);
     assert_eq!(analysis.context.source, source);
     assert_eq!(fixture.recovery_object_reads(), opened);
+}
+
+#[tokio::test]
+async fn saved_storage_reanalysis_retains_the_original_census_and_withdraws_it_indivisibly_for_sharing() {
+    let (source, rows) = test_support::storage_evidence(StorageCase::FileCensus);
+    let fixture = Fixture::new(source.clone(), rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let expected = culprit_engine::collected_resources::storage(&capture).unwrap();
+    let mut snapshot: culprit_core::Snapshot =
+        serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/mssql-demo.json")))
+            .unwrap();
+    snapshot.operations.storage = Some(Box::new(
+        StorageRead::from_source(
+            &source,
+            rows.into_iter()
+                .map(|row| {
+                    let TelemetryRecord::Operational(row) = row else { unreachable!() };
+                    row
+                })
+                .collect(),
+            true,
+        )
+        .unwrap(),
+    ));
+    // The fixture attaches one independent original read, not a chart projection from the demo's old sources.
+    snapshot.operations.spaces.clear();
+    let raw = serde_json::to_vec(&snapshot).unwrap();
+    let mut restored: culprit_core::Snapshot = serde_json::from_slice(&raw).unwrap();
+    restored.server.database = "later-scan-database".into();
+    let report = culprit_checks::analyze(restored.clone())
+        .storage
+        .expect("the actual saved-report pipeline reuses the original read");
+    assert_eq!(serde_json::to_value(&report).unwrap(), serde_json::to_value(expected.report).unwrap());
+    assert_eq!(report.target, source.target);
+    let shared = culprit_core::redact::redact_snapshot(&restored);
+    assert!(shared.operations.storage.is_none());
+    assert!(culprit_checks::analyze(shared.clone()).storage.is_none());
+    assert!(
+        shared.sources.iter().any(|source| source.source == culprit_core::source_id::FILE_CAPACITY
+            && source.state == SourceState::Unavailable)
+    );
 }

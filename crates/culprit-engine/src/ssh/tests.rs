@@ -108,10 +108,11 @@ fn static_recipe_listing_never_touches_saved_secrets_tokens_ssh_or_the_provider_
     let factories = Arc::new(AtomicUsize::new(0));
     let factory_calls = factories.clone();
     let registration = crate::ProviderRegistration::new(
-        Arc::new(move |_| {
+        Arc::new(move |_, _context| {
             factory_calls.fetch_add(1, Ordering::SeqCst);
             Err(Error::internal("listing must not construct the provider"))
         }),
+        crate::ProviderConstructionPolicy::DeferredNativeWork,
         vec![],
     )
     .unwrap();
@@ -459,7 +460,7 @@ async fn testing_a_draft_uses_saved_credentials_and_preserves_the_saved_route() 
     let ws = ws.with_provider(
         Engine::Postgres,
         crate::ProviderRegistration::new(
-            Arc::new(move |spec| {
+            Arc::new(move |spec, _context| {
                 assert_eq!(spec.host, "db.internal");
                 assert_eq!(spec.password.as_deref(), Some("private-db-password"));
                 assert_eq!(spec.ssh.as_ref().unwrap().destination, "test-bastion");
@@ -467,12 +468,19 @@ async fn testing_a_draft_uses_saved_credentials_and_preserves_the_saved_route() 
                 observed.fetch_add(1, Ordering::SeqCst);
                 Err(Error::new(ErrorCode::ConnectionFailed, "test provider refused the probe"))
             }),
+            crate::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
     );
     let before = std::fs::read(temp.0.join("connections.toml")).unwrap();
-    assert!(ws.test_ssh("draft", Some(ssh("test-bastion"))).await.is_err());
+    assert!(
+        crate::tests::observe_provider(&ws, culprit_core::ProviderReadKind::Probe, async |operation| ws
+            .test_ssh("draft", Some(ssh("test-bastion")), operation)
+            .await)
+        .await
+        .is_err()
+    );
     assert_eq!(seen.load(Ordering::SeqCst), 1);
     assert_eq!(std::fs::read(temp.0.join("connections.toml")).unwrap(), before);
     assert!(ws.connection("draft").unwrap().ssh.is_none());
@@ -504,11 +512,19 @@ async fn real_openssh_preserves_strict_tls_identity_and_rejects_a_mismatched_hos
         })
         .unwrap();
     }
-    let server = ws.probe("valid").await.unwrap();
+    let server = crate::tests::observe_provider(&ws, culprit_core::ProviderReadKind::Probe, async |operation| {
+        ws.probe("valid", operation).await
+    })
+    .await
+    .unwrap();
     assert_eq!(server.database, "ssh_fixture");
     let result = ws.run_read("valid", "SELECT 42 AS answer", 10).await.unwrap();
     assert_eq!(result.rows[0][0], serde_json::json!(42));
-    let error = ws.probe("mismatch").await.expect_err("The certificate only covers localhost, never its IP");
+    let error = crate::tests::observe_provider(&ws, culprit_core::ProviderReadKind::Probe, async |operation| {
+        ws.probe("mismatch", operation).await
+    })
+    .await
+    .expect_err("The certificate only covers localhost, never its IP");
     assert!(error.message.to_ascii_lowercase().contains("certificate"), "{error:?}");
     assert_eq!(ws.connection("valid").unwrap().host, "localhost");
 }

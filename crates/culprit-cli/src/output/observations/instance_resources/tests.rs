@@ -276,3 +276,30 @@ fn boxed_cpu_cli_bounds_each_original_population_field_without_control_character
     assert!(text.contains(&t!("view.process_cpu.field.raw_idle")));
     assert!(text.len() < 32768);
 }
+
+#[test]
+fn same_record_other_process_cpu_and_both_raw_inputs_fit_the_existing_eight_field_cli_budget() {
+    use culprit_collector::analytical::test_support::{ProcessCpuIntervalCase, process_cpu_interval_originals};
+    for case in ProcessCpuIntervalCase::ALL {
+        let [_, original] = process_cpu_interval_originals(case);
+        let report = culprit_checks::instance_resources::explain_captured(&original).unwrap();
+        let cpu = report.process_cpu.as_ref().unwrap();
+        let text = instance_resources(&report);
+        if case == ProcessCpuIntervalCase::HistoryDenied {
+            assert!(cpu.populations[1].entries.is_empty());
+        } else {
+            let history = &cpu.populations[1].entries[0];
+            assert_eq!(history.fields.len(), 8);
+            for field in &history.fields {
+                assert!(text.contains(&field.label), "{case:?}: {}", field.key);
+            }
+            let expected = case.expected_history_other_percent().map(|value| value.to_string());
+            assert_eq!(
+                history.fields.iter().find(|field| field.key == "other_process_cpu_percent").unwrap().value,
+                expected
+            );
+        }
+        assert!(text.contains(&t!("view.process_cpu.limit.native_sample")));
+        assert!(text.len() < 20_000);
+    }
+}

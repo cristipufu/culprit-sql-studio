@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use culprit_auth::{DeviceCodePrompt, SignInEvent};
 use culprit_core::Verification;
 use culprit_core::{
-    Drift, Error, ErrorCode, ExplainMode, LiveState, Plan, PlanDiff, Report, Result, ResultSet, ServerInfo,
-    SessionActionOutcome, SessionActionRequest, SnapshotOptions,
+    Drift, Error, ErrorCode, ExplainMode, LiveState, Plan, PlanDiff, Report, Result, ResultSet, SessionActionOutcome,
+    SessionActionRequest, SnapshotOptions,
 };
 use culprit_engine::SshConfig;
 use culprit_engine::export::{ExportFile, ExportFormat, ExportOptions};
@@ -77,8 +77,11 @@ async fn test_connection(
     tests: State<'_, ConnectionTests>,
     input: NewConnection,
     request_id: String,
-) -> Result<ServerInfo> {
-    tests.0.run(window.label(), &request_id, ws.test_connection(&input)).await
+) -> Result<culprit_core::ObservedProbeAttempt> {
+    let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Probe)?;
+    let operation = observation.operation()?;
+    let result = tests.0.run(window.label(), &request_id, ws.test_connection(&input, operation)).await;
+    Ok(culprit_engine::project_probe_attempt(observation.finish_call(result)))
 }
 
 #[tauri::command]
@@ -96,8 +99,18 @@ fn cancel_connection_test(window: tauri::WebviewWindow, tests: State<'_, Connect
 }
 
 #[tauri::command]
-async fn test_ssh(ws: Ws<'_>, name: String, ssh: Option<SshConfig>) -> Result<ServerInfo> {
-    ws.test_ssh(&name, ssh).await
+async fn test_ssh(
+    ws: Ws<'_>,
+    window: tauri::WebviewWindow,
+    tests: State<'_, ConnectionTests>,
+    name: String,
+    ssh: Option<SshConfig>,
+    request_id: String,
+) -> Result<culprit_core::ObservedProbeAttempt> {
+    let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Probe)?;
+    let operation = observation.operation()?;
+    let result = tests.0.run(window.label(), &request_id, ws.test_ssh(&name, ssh, operation)).await;
+    Ok(culprit_engine::project_probe_attempt(observation.finish_call(result)))
 }
 
 #[tauri::command]
@@ -128,8 +141,12 @@ async fn test_connection_settings(
     name: String,
     settings: ConnectionSettings,
     request_id: String,
-) -> Result<ServerInfo> {
-    tests.0.run(window.label(), &request_id, ws.test_connection_settings(&name, &settings)).await
+) -> Result<culprit_core::ObservedProbeAttempt> {
+    let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Probe)?;
+    let operation = observation.operation()?;
+    let result =
+        tests.0.run(window.label(), &request_id, ws.test_connection_settings(&name, &settings, operation)).await;
+    Ok(culprit_engine::project_probe_attempt(observation.finish_call(result)))
 }
 
 #[tauri::command]
@@ -283,11 +300,19 @@ async fn scan(
     name: String,
     window_minutes: Option<u32>,
     population: Option<culprit_core::telemetry::NativeIdentity>,
-) -> Result<Report> {
+) -> Result<culprit_core::ObservedScanAttempt> {
     let defaults = SnapshotOptions::default();
     let window = requested_window(window_minutes).unwrap_or(defaults.window_in_minutes());
     let options = SnapshotOptions { workload_population: population, ..defaults.with_window_minutes(window) };
-    ws.scan_populations(&name, &options).await.map(|reports| for_ui(*reports.requested))
+    let observation = ws.begin_provider_read(culprit_core::ProviderReadKind::Scan)?;
+    let result = ws.scan_with_log(&name, &options, None, observation.operation()?).await;
+    let attempt = culprit_engine::project_scan_attempt(observation.finish_call(result));
+    Ok(match attempt {
+        culprit_core::ObservedScanAttempt::Complete { report } => {
+            culprit_core::ObservedScanAttempt::Complete { report: Box::new(for_ui(*report)) }
+        }
+        other => other,
+    })
 }
 
 /// Word what the app reads from now on (findings, notes, plan insights) in `code`, the language the app is shown in.

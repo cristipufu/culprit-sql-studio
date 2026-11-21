@@ -14,52 +14,13 @@ pub(crate) fn source_overhead(report: &SourceOverheadReport) -> String {
         text.push('\n');
         text.push_str(&t!("view.source_overhead.cli.total", count = format::digits(count.to_string())));
     }
-    if let Some(metrics) = &evidence.read_metrics {
-        for index in report.template_order.iter().take(TEMPLATE_LIMIT) {
-            let Some(metric) = metrics.templates.get(*index as usize) else { continue };
-            text.push_str("\n\n");
-            text.push_str(&t!(
-                "view.source_overhead.cli.template",
-                id = &metric.template_id,
-                elapsed = format::duration(metric.client_elapsed_ms),
-                completed = format::digits(metric.completed_tasks.to_string()),
-                failures = format::digits(metric.failures.to_string())
-            ));
-            text.push('\n');
-            text.push_str(&t!(
-                "view.source_overhead.cli.values",
-                rows = format::digits(metric.rows_decoded.clone()),
-                bytes = format::digits(metric.charged_value_bytes.clone()),
-                timeouts = format::digits(metric.timeouts.to_string()),
-                cancellations = format::digits(metric.cancellations.to_string()),
-                unconfirmed = format::digits(metric.unconfirmed_cancellations.to_string())
-            ));
-        }
-        if report.template_order.len() > TEMPLATE_LIMIT {
-            text.push('\n');
-            text.push_str(&t!(
-                "view.source_overhead.cli.presentation",
-                shown = format::digits(TEMPLATE_LIMIT.to_string()),
-                recorded = format::digits(metrics.templates.len().to_string())
-            ));
-        }
-    }
-    if let Some(connection) = &report.connection_work {
-        text.push_str("\n\n");
-        text.push_str(&connection.summary);
-        for line in connection.observations.iter().chain(&connection.limitations) {
-            text.push('\n');
-            text.push_str(line);
-        }
-    }
-    if let Some(native) = &report.native_interval {
-        text.push_str("\n\n");
-        text.push_str(&native.summary);
-        for detail in native.measurements.iter().chain(&native.limitations) {
-            text.push('\n');
-            text.push_str(detail);
-        }
-    }
+    append_work(
+        &mut text,
+        evidence.read_metrics.as_ref(),
+        &report.template_order,
+        report.connection_work.as_ref(),
+        report.native_interval.as_ref(),
+    );
     for limitation in &report.limitations {
         text.push('\n');
         text.push_str(limitation);
@@ -104,3 +65,59 @@ pub(crate) fn historical_source_overhead(reports: &[culprit_core::HistoricalSour
 
 #[cfg(test)]
 mod tests;
+
+/// Shared numerical/connection/native leaf formatting only; no capture or authority is constructed.
+pub(super) fn append_work(
+    text: &mut String,
+    metrics: Option<&culprit_core::telemetry::ReadWorkSummary>,
+    order: &[u32],
+    connection: Option<&culprit_core::SourceConnectionExplanation>,
+    native: Option<&culprit_core::SourceNativeIntervalExplanation>,
+) {
+    if let Some(metrics) = metrics {
+        for index in order.iter().take(TEMPLATE_LIMIT) {
+            let Some(metric) = metrics.templates.get(*index as usize) else { continue };
+            text.push_str("\n\n");
+            text.push_str(&t!(
+                "view.source_overhead.cli.template",
+                id = &metric.template_id,
+                elapsed = format::duration(metric.client_elapsed_ms),
+                completed = format::digits(metric.completed_tasks.to_string()),
+                failures = format::digits(metric.failures.to_string())
+            ));
+            text.push('\n');
+            text.push_str(&t!(
+                "view.source_overhead.cli.values",
+                rows = format::digits(metric.rows_decoded.clone()),
+                bytes = format::digits(metric.charged_value_bytes.clone()),
+                timeouts = format::digits(metric.timeouts.to_string()),
+                cancellations = format::digits(metric.cancellations.to_string()),
+                unconfirmed = format::digits(metric.unconfirmed_cancellations.to_string())
+            ));
+        }
+        if order.len() > TEMPLATE_LIMIT {
+            text.push('\n');
+            text.push_str(&t!(
+                "view.source_overhead.cli.presentation",
+                shown = format::digits(TEMPLATE_LIMIT.to_string()),
+                recorded = format::digits(metrics.templates.len().to_string())
+            ));
+        }
+    }
+    if let Some(connection) = connection {
+        text.push_str("\n\n");
+        text.push_str(&connection.summary);
+        for line in connection.observations.iter().chain(&connection.limitations) {
+            text.push('\n');
+            text.push_str(line);
+        }
+    }
+    if let Some(native) = native {
+        text.push_str("\n\n");
+        text.push_str(&native.summary);
+        for detail in native.measurements.iter().chain(&native.limitations) {
+            text.push('\n');
+            text.push_str(detail);
+        }
+    }
+}

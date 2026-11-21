@@ -50,7 +50,7 @@ async fn real_cli_component_attachment_saves_exact_originals_and_reloads_without
         "0",
     ])
     .unwrap();
-    let report = scan(&workspace, &parsed).await.unwrap();
+    let report = observed_scan(&workspace, &parsed).await.unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let read = report.snapshot.operations.hyperscale_log_components.as_deref().unwrap();
     assert_eq!(read.description, source);
@@ -63,7 +63,12 @@ async fn real_cli_component_attachment_saves_exact_originals_and_reloads_without
     let path = workspace.paths().reports_dir("local-evidence").join(format!("{}.json", report.snapshot.id));
     let offline = Workspace::open_in(fixture.directory.parent().unwrap().join("offline-workspace")).with_provider(
         Engine::Mssql,
-        ProviderRegistration::new(Arc::new(|_| panic!("offline reanalysis opens no provider")), vec![]).unwrap(),
+        ProviderRegistration::new(
+            Arc::new(|_, _context| panic!("offline reanalysis opens no provider")),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
+            vec![],
+        )
+        .unwrap(),
     );
     let reopened = offline.analyze_file(&path).unwrap();
     assert_eq!(reopened.snapshot.operations.hyperscale_log_components.as_deref(), Some(read));
@@ -88,7 +93,8 @@ async fn cancelled_component_read_never_dispatches_the_native_scan() {
     };
     let cancellation = CollectionCancellation::default();
     cancellation.cancel();
-    let error = captured_scan(&workspace, &args(&[]).unwrap(), &reader, selection, &cancellation).await.unwrap_err();
+    let error =
+        observed_captured_scan(&workspace, &args(&[]).unwrap(), &reader, selection, &cancellation).await.unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::Cancelled);
     assert_eq!(pending.factories.load(Ordering::SeqCst), 0);
 }

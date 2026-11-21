@@ -45,10 +45,11 @@ fn server(fixture: &LocalCaptureFixture, native_calls: Arc<AtomicUsize>) -> culp
     let workspace = Workspace::open_in(fixture.directory.parent().unwrap().join("workspace")).with_provider(
         Engine::Mssql,
         ProviderRegistration::new(
-            Arc::new(move |_| {
+            Arc::new(move |_, _context| {
                 native_calls.fetch_add(1, Ordering::SeqCst);
                 Err(Error::internal("offline analysis must not construct a native provider"))
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),

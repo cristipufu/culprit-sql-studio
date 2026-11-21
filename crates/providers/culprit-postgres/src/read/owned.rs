@@ -25,6 +25,7 @@ pub(super) struct ReadTask {
     pub metrics: ReadMetricsRecorder,
     pub template: Option<String>,
     pub fence: culprit_read::ReadFence,
+    pub connection_phase: Option<culprit_core::telemetry::ReadConnectionPhaseGuard>,
 }
 #[derive(Default)]
 struct QueryProgress {
@@ -39,7 +40,7 @@ struct TaskResult {
 }
 impl ReadTask {
     // Kept outside the source future: cleanup continues when the controller retires that future.
-    pub(super) async fn run(self, output: ReadOutput, cancellation: oneshot::Receiver<()>) -> CompletedRead {
+    pub(super) async fn run(mut self, output: ReadOutput, cancellation: oneshot::Receiver<()>) -> CompletedRead {
         let lifetime = match self.fence.start_work() {
             Ok(lifetime) => lifetime,
             Err(error) => return CompletedRead { client: None, result: Err(error.into()), confirmed: false },
@@ -48,6 +49,17 @@ impl ReadTask {
         let started = std::time::Instant::now();
         let settled = self.settle(output, &progress, cancellation).await;
         self.metrics.finish(self.template.as_deref(), started.elapsed(), &progress.counters, &settled.outcome);
+        if let Some(phase) = self.connection_phase.take() {
+            let outcome = if !settled.confirmed {
+                culprit_core::telemetry::ReadConnectionOutcome::Unconfirmed
+            } else {
+                match &settled.result {
+                    Ok(_) => culprit_core::telemetry::ReadConnectionOutcome::Completed,
+                    Err(error) => culprit_core::telemetry::ReadConnectionOutcome::from_error(&error.error),
+                }
+            };
+            phase.finish(outcome);
+        }
         lifetime.complete(if settled.confirmed { SourceShutdown::Quiescent } else { SourceShutdown::Unconfirmed });
         // A delayed CancelRequest must never race a later statement on a reused session.
         let client = (!settled.interrupted && settled.confirmed).then_some(self.client);

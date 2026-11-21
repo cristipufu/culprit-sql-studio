@@ -362,10 +362,38 @@ async fn boxed_cpu_original_pairs_preserve_exact_numerators_rosters_reset_and_ca
         let right = second.read_families(&[EvidenceFamily::OperationalSamples]).await;
         test_support::assert_operational_capture(&left, &a, &ar);
         test_support::assert_operational_capture(&right, &b, &br);
+        test_support::assert_process_cpu_history_capture(&left, case);
+        test_support::assert_process_cpu_history_capture(&right, case);
         let report = culprit_engine::collected_resources::instance_resources(&right).unwrap().report;
         let cpu = report.process_cpu.as_ref().unwrap();
         assert_eq!(cpu.populations.len(), 2);
         assert!(cpu.capture.is_some());
+        let history = &cpu.populations[1];
+        if case == ProcessCpuIntervalCase::HistoryDenied {
+            assert!(history.entries.is_empty());
+        } else {
+            let fields = &history.entries[0].fields;
+            assert_eq!(
+                fields.len(),
+                8,
+                "all retained inputs and the same-record remainder fit the existing consumer cap"
+            );
+            let expected = case.expected_history_other_percent().map(|value| value.to_string());
+            assert_eq!(
+                fields.iter().find(|field| field.key == "other_process_cpu_percent").unwrap().value,
+                expected,
+                "{case:?}"
+            );
+            if case == ProcessCpuIntervalCase::PartialHistory {
+                assert_eq!(cpu.source_state, SourceState::Partial);
+                assert_eq!(history.source_state, SourceState::Partial);
+                assert!(!history.native_source.complete_scope);
+                assert!(
+                    history.read_complete,
+                    "the original body is complete even though native visibility is partial"
+                );
+            }
+        }
         let interval = culprit_engine::collected_resources::process_cpu_interval(&left, &right).unwrap();
         assert_eq!(interval.available, case.comparable(), "{case:?}");
         if case.comparable() {
@@ -490,6 +518,18 @@ fn changed_native_cpu_counter_or_owner_cannot_borrow_an_original_structural_rece
     sample.counters[0].value = MeasurementValue::Integer("2001".into());
     assert!(!changed.is_valid());
     assert!(culprit_checks::instance_resources::compare_cpu_originals(&first, &changed).is_err());
+    for input in ["process_utilization", "system_idle"] {
+        let mut altered = first.clone();
+        let row = altered.observations.iter_mut().find(|row| row.source == MSSQL_CPU_HISTORY_SOURCE).unwrap();
+        let OperationalFact::CounterSet(sample) = &mut row.fact else { panic!() };
+        sample.properties.insert(input.into(), "11".into());
+        assert!(
+            MssqlCpuHistoryPoint::from_sample(sample).is_ok(),
+            "the altered native-shaped row is structurally valid"
+        );
+        assert!(!altered.is_valid(), "changed same-record inputs cannot borrow the original receipt");
+        assert!(culprit_checks::instance_resources::explain_captured(&altered).is_err());
+    }
     let mut foreign = second;
     let SourcePartition::InstanceLocal { epoch, .. } = &mut foreign.description.partition else { panic!() };
     *epoch = Some(digest(b"foreign-process"));
@@ -500,4 +540,29 @@ fn changed_native_cpu_counter_or_owner_cannot_borrow_an_original_structural_rece
 fn replay_cpu_originals(snapshot: &culprit_core::Snapshot) -> Box<culprit_core::InstanceResourceReport> {
     let mut report = culprit_checks::analyze(snapshot.clone());
     report.instance_resources.take().unwrap()
+}
+
+#[tokio::test]
+async fn missing_retained_scheduler_body_does_not_become_zero_or_borrow_native_pool_values() {
+    let [(source, rows), _] = test_support::process_cpu_interval_evidence(test_support::ProcessCpuIntervalCase::Exact);
+    let ordinal = rows
+        .iter()
+        .position(|row| matches!(row, TelemetryRecord::Operational(row) if row.source == MSSQL_CPU_HISTORY_SOURCE))
+        .unwrap();
+    let fixture = Fixture::new(source, rows).await;
+    fixture.remove_row(TelemetryStream::OperationalSamples, ordinal);
+    let opened = fixture.recovery_object_reads();
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(!capture.is_read_complete());
+    let report = culprit_engine::collected_resources::instance_resources(&capture).unwrap().report;
+    let cpu = report.process_cpu.as_ref().unwrap();
+    let history = &cpu.populations[1];
+    assert_eq!(cpu.source_state, SourceState::Partial);
+    assert_eq!(history.native_rows, 1);
+    assert_eq!(history.observed_rows, 0);
+    assert_eq!(cpu.populations[0].entries.len(), 2, "independent pool CPU values remain retained");
+    assert!(history.entries.is_empty());
+    assert_eq!(history.observed_at, None);
+    assert!(!history.read_complete);
+    assert_eq!(fixture.recovery_object_reads(), opened);
 }

@@ -171,14 +171,18 @@ fn assert_captured(report: &culprit_core::Report, original: &Captured) {
 async fn a_ready_original_capture_is_authenticated_before_one_normal_scan_and_survives_saved_report_replay() {
     let captured = Captured::new(false).await;
     let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Quiescent);
-    let report = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap();
     assert_captured(&report, &captured);
     assert_eq!(state.acquisitions.load(Ordering::SeqCst), 1);
     assert_eq!(state.deadlocks.load(Ordering::SeqCst), 1);
@@ -200,14 +204,18 @@ async fn a_ready_original_capture_is_authenticated_before_one_normal_scan_and_su
 async fn the_population_api_attaches_a_partial_native_population_once_without_copying_it_into_execution_groups() {
     let captured = Captured::new(true).await;
     let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Quiescent);
-    let reports = workspace
-        .scan_populations_with_completed_capture(
-            "shop",
-            &options(),
-            captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap();
+    let reports = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_populations_with_completed_capture(
+                "shop",
+                &options(),
+                captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap();
     assert_captured(&reports.requested, &captured);
     let read = reports.requested.snapshot.operations.cached_runtime.as_deref().unwrap();
     assert!(read.read_complete);
@@ -238,14 +246,18 @@ async fn a_proven_native_database_rename_and_endpoint_alias_preserve_the_origina
         snapshot.bind_identity(database);
     }
     let (_home, workspace, _) = workspace(batch, SourceShutdown::Quiescent);
-    let report = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap();
     assert_eq!(report.snapshot.server.database, "renamed-shop");
     assert_captured(&report, &captured);
 }
@@ -273,14 +285,18 @@ async fn unknown_or_conflicting_native_database_authority_refuses_attachment_bef
         }
         let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
         let selected = SnapshotOptions { workload_population: Some(NativeIdentity::new("7")), ..options() };
-        let error = workspace
-            .scan_with_completed_capture(
-                "shop",
-                &selected,
-                captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
-            )
-            .await
-            .unwrap_err();
+        let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_completed_capture(
+                    "shop",
+                    &selected,
+                    captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap_err();
         assert_eq!(
             error.detail,
             Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::InvalidContract)),
@@ -310,14 +326,18 @@ async fn an_existing_requested_read_is_never_overwritten_even_by_the_same_authen
     let mut batch = captured.batch();
     batch.requested.operations.cached_runtime = Some(Box::new(existing));
     let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
-    let error = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Conflict)));
     assert!(workspace.report_history("shop").unwrap().is_empty());
     assert_eq!(state.active.load(Ordering::SeqCst), 0);
@@ -348,20 +368,24 @@ async fn cancellation_tampering_and_local_byte_refusal_cannot_construct_a_scan_p
         } else {
             CompletedCaptureBudget::default()
         };
-        let error = workspace
-            .scan_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    delivery: &delivery,
-                    analysis: CompletedCaptureAnalysis::CachedRuntime,
-                    attempt: &attempt,
-                    budget,
-                    cancellation: &cancellation,
-                },
-            )
-            .await
-            .unwrap_err();
+        let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        delivery: &delivery,
+                        analysis: CompletedCaptureAnalysis::CachedRuntime,
+                        attempt: &attempt,
+                        budget,
+                        cancellation: &cancellation,
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap_err();
         if refusal == "cancelled" {
             assert_eq!(CollectionStop::from_error(&error), CollectionStop::Cancelled);
         }
@@ -376,14 +400,18 @@ async fn cancellation_tampering_and_local_byte_refusal_cannot_construct_a_scan_p
 async fn unconfirmed_scan_shutdown_withholds_the_attached_original_and_all_report_populations() {
     let captured = Captured::new(false).await;
     let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Unconfirmed);
-    let error = workspace
-        .scan_with_completed_capture(
-            "shop",
-            &options(),
-            captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
-        )
-        .await
-        .unwrap_err();
+    let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace
+            .scan_with_completed_capture(
+                "shop",
+                &options(),
+                captured.input(&captured.outbox.delivery(), &CollectionCancellation::default()),
+                operation,
+            )
+            .await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
     assert_eq!(state.active.load(Ordering::SeqCst), 0);
     assert!(state.analyzed.lock().unwrap().is_empty());
@@ -400,8 +428,16 @@ async fn dropping_a_native_scan_future_preserves_existing_ownership_debt_and_nev
     let cancellation = CollectionCancellation::default();
     let selected_options = options();
     {
-        let scanning =
-            workspace.scan_with_completed_capture("shop", &selected_options, captured.input(&delivery, &cancellation));
+        let scanning = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_completed_capture(
+                    "shop",
+                    &selected_options,
+                    captured.input(&delivery, &cancellation),
+                    operation,
+                )
+                .await
+        });
         tokio::pin!(scanning);
         tokio::select! {
             result = &mut scanning => panic!("blocked native fixture completed: {result:?}"),
@@ -422,7 +458,11 @@ async fn ordinary_scans_do_not_read_or_attach_existing_local_captures() {
     let captured = Captured::new(false).await;
     let (_home, workspace, state) = workspace(captured.batch(), SourceShutdown::Quiescent);
     std::fs::write(captured.body(), b"not an exported record\n").unwrap();
-    let report = workspace.scan("shop", &options()).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan("shop", &options(), operation).await
+    })
+    .await
+    .unwrap();
     assert!(report.snapshot.operations.cached_runtime.is_none());
     assert!(report.completed_spills.is_none());
     assert_eq!(state.acquisitions.load(Ordering::SeqCst), 1);

@@ -129,6 +129,15 @@ impl MssqlProvider {
         })
     }
 
+    /// Bind only the factory's current invocation before any provider method; no native work is performed.
+    pub fn with_read_context(mut self, context: culprit_core::ProviderReadContext) -> Result<Self> {
+        let pool = std::sync::Arc::get_mut(&mut self.pool)
+            .ok_or_else(|| culprit_core::telemetry::DeliveryProblem::Integrity.error())?;
+        context.complete_reader_coverage();
+        pool.observation = context;
+        Ok(self)
+    }
+
     /// Explicit cost measurement reuses the same native snapshot reader with its recorded execution context.
     pub fn qualification_source(
         &self,
@@ -138,6 +147,7 @@ impl MssqlProvider {
     }
 
     async fn user_session(&self) -> Result<MsClient> {
+        self.pool.observation.partial_reader_coverage(culprit_core::ProviderReadGap::UnhookedEnrichment);
         self.pool.connect(SessionKind::User).await
     }
 }

@@ -21,10 +21,11 @@ fn recipe(id: &str) -> RecipeDescriptor {
 }
 fn registration(calls: Arc<AtomicUsize>, recipes: Vec<RecipeDescriptor>) -> Result<ProviderRegistration> {
     ProviderRegistration::new(
-        Arc::new(move |_| {
+        Arc::new(move |_, _context| {
             calls.fetch_add(1, Ordering::SeqCst);
             Err(Error::internal("selected provider factory reached"))
         }),
+        crate::ProviderConstructionPolicy::DeferredNativeWork,
         recipes,
     )
 }

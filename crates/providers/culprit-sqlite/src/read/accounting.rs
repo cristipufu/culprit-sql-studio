@@ -10,11 +10,41 @@ pub(crate) struct FileAccounting {
     queries: Arc<AtomicU32>,
     maximum: u32,
     metrics: ReadMetricsRecorder,
+    observer: Option<culprit_core::ProviderReaderObserver>,
+    connection_work: Option<ReadConnectionRecorder>,
 }
 
 impl FileAccounting {
     pub(crate) fn new(maximum: u32) -> Self {
-        Self { queries: Arc::new(AtomicU32::new(0)), maximum, metrics: ReadMetricsRecorder::new(Engine::Sqlite) }
+        Self {
+            queries: Arc::new(AtomicU32::new(0)),
+            maximum,
+            metrics: ReadMetricsRecorder::new(Engine::Sqlite),
+            observer: None,
+            connection_work: None,
+        }
+    }
+    pub(crate) fn observed(
+        mut self,
+        context: &culprit_core::ProviderReadContext,
+    ) -> (Self, Option<culprit_core::ProviderReaderObservation>) {
+        let owner = context.is_observed().then(|| context.reader(Engine::Sqlite));
+        if let Some(owner) = &owner {
+            owner.setup_included();
+            self.observer = Some(owner.observer());
+            self.connection_work = Some(Default::default());
+            self.publish();
+        }
+        (self, owner)
+    }
+    pub(crate) fn connection_work(&self) -> Option<&ReadConnectionRecorder> {
+        self.connection_work.as_ref()
+    }
+    pub(super) fn publish(&self) {
+        if let Some(observer) = &self.observer {
+            let (queries, metrics) = self.snapshot();
+            observer.checkpoint(queries, metrics);
+        }
     }
     pub(crate) fn statement<T>(
         &self,
@@ -34,6 +64,7 @@ impl FileAccounting {
     }
     fn record<T>(&self, sql: &str, progress: &ReadProgress, work: impl FnOnce() -> Result<T>) -> Result<T> {
         let id = self.metrics.begin(sql);
+        self.publish();
         let started = std::time::Instant::now();
         let result = work();
         progress.drained.store(result.is_ok(), Ordering::Relaxed);
@@ -42,10 +73,15 @@ impl FileAccounting {
             _ => ReadTaskOutcome { failed: result.is_err(), ..Default::default() },
         };
         self.metrics.finish(id.as_deref(), started.elapsed(), progress, &outcome);
+        self.publish();
         result
     }
     pub(crate) fn snapshot(&self) -> (u32, Option<ReadWorkMetrics>) {
-        (self.queries.load(Ordering::Relaxed), self.metrics.snapshot())
+        let metrics = self.metrics.snapshot().map(|mut metrics| {
+            metrics.connection_work = self.connection_work.as_ref().and_then(|work| work.snapshot()).map(Box::new);
+            metrics
+        });
+        (self.queries.load(Ordering::Relaxed), metrics)
     }
 }
 

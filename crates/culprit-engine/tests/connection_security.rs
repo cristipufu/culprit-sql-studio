@@ -118,11 +118,12 @@ async fn draft_tests_use_saved_secrets_and_never_persist_even_when_the_provider_
     let ws = Workspace::open_in(&home).with_secrets(Arc::new(Memory::default())).with_provider(
         Engine::Mysql,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(|spec| {
+            Arc::new(|spec, _context| {
                 assert_eq!(spec.password.as_deref(), Some("saved-secret"));
                 assert_eq!(spec.option("ssl-mode"), Some("DISABLED"));
                 Err(Error::new(ErrorCode::ConnectionFailed, "test connection refused"))
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -139,7 +140,11 @@ async fn draft_tests_use_saved_secrets_and_never_persist_even_when_the_provider_
         environment: Environment::Local,
         security: ConnectionSecurity { mode: Some("DISABLED".into()), ..Default::default() },
     };
-    let error = ws.test_connection_settings("imported", &settings).await.unwrap_err();
+    let error = crate::observed::run(&ws, culprit_core::ProviderReadKind::Probe, async |operation| {
+        ws.test_connection_settings("imported", &settings, operation).await
+    })
+    .await
+    .unwrap_err();
     assert_eq!(error.code, ErrorCode::ConnectionFailed);
     assert_eq!(std::fs::read(ws.paths().connections_file()).unwrap(), before);
     assert!(ws.connection("imported").unwrap().has_secret);
@@ -155,11 +160,12 @@ async fn new_connections_test_and_save_the_same_explicit_override() {
     let ws = Workspace::open_in(&home).with_secrets(Arc::new(Memory::default())).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(move |spec| {
+            Arc::new(move |spec, _context| {
                 assert_eq!(spec.option("sslmode"), Some("disable"));
                 assert_eq!(spec.password.as_deref(), Some("draft-secret"));
                 Ok(Box::new(Probe { engine: Engine::Postgres, started: None, released: observed.clone() }))
             }),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -171,11 +177,19 @@ async fn new_connections_test_and_save_the_same_explicit_override() {
         security: Some(ConnectionSecurity { mode: Some("disable".into()), ..Default::default() }),
         ..Default::default()
     };
-    ws.test_connection(&new).await.unwrap();
+    crate::observed::run(&ws, culprit_core::ProviderReadKind::Probe, async |operation| {
+        ws.test_connection(&new, operation).await
+    })
+    .await
+    .unwrap();
     assert!(ws.connections().unwrap().is_empty());
     let saved = ws.add_connection(new).unwrap();
     assert_eq!(saved.security.unwrap().settings.mode.as_deref(), Some("disable"));
-    ws.probe("new").await.unwrap();
+    crate::observed::run(&ws, culprit_core::ProviderReadKind::Probe, async |operation| {
+        ws.probe("new", operation).await
+    })
+    .await
+    .unwrap();
     assert_eq!(released.load(Ordering::SeqCst), 2);
     drop(ws);
     std::fs::remove_dir_all(home).unwrap();
@@ -192,13 +206,14 @@ async fn cancellation_releases_the_draft_provider_without_saving() {
         Workspace::open_in(&home).with_secrets(Arc::new(Memory::default())).with_provider(
             Engine::Postgres,
             culprit_engine::ProviderRegistration::new(
-                Arc::new(move |_| {
+                Arc::new(move |_, _context| {
                     Ok(Box::new(Probe {
                         engine: Engine::Postgres,
                         started: Some(signal.clone()),
                         released: drops.clone(),
                     }))
                 }),
+                culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
                 Vec::new(),
             )
             .unwrap(),
@@ -214,15 +229,19 @@ async fn cancellation_releases_the_draft_provider_without_saving() {
     let before = std::fs::read(ws.paths().connections_file()).unwrap();
     let task_ws = ws.clone();
     let task = tokio::spawn(async move {
-        task_ws
-            .test_connection_settings(
-                "saved",
-                &ConnectionSettings {
-                    environment: Environment::Local,
-                    security: ConnectionSecurity { mode: Some("disable".into()), ..Default::default() },
-                },
-            )
-            .await
+        crate::observed::run(&task_ws, culprit_core::ProviderReadKind::Probe, async |operation| {
+            task_ws
+                .test_connection_settings(
+                    "saved",
+                    &ConnectionSettings {
+                        environment: Environment::Local,
+                        security: ConnectionSecurity { mode: Some("disable".into()), ..Default::default() },
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await
     });
     tokio::time::timeout(std::time::Duration::from_secs(2), started.notified()).await.unwrap();
     task.abort();

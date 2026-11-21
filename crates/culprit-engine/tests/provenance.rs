@@ -168,7 +168,8 @@ async fn scan_keeps_provider_counters_before_history_and_does_not_invent_a_runti
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(|_| Ok(Box::new(ReplicaReplay) as Box<dyn Provider>)),
+            Arc::new(|_, _context| Ok(Box::new(ReplicaReplay) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -180,7 +181,11 @@ async fn scan_keeps_provider_counters_before_history_and_does_not_invent_a_runti
         ..Default::default()
     })
     .unwrap();
-    let report = ws.scan("replayed", &SnapshotOptions::default()).await.unwrap();
+    let report = crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+        ws.scan("replayed", &SnapshotOptions::default(), operation).await
+    })
+    .await
+    .unwrap();
     let source = report.evidence.as_ref().unwrap().collected.as_ref().unwrap();
     assert_eq!(source.indexes[0].reads, Some(123.0));
     assert_eq!(report.analysis_input().indexes[0].reads, None);

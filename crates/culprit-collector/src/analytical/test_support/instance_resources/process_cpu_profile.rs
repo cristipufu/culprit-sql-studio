@@ -15,9 +15,14 @@ pub enum ProcessCpuIntervalCase {
     UnknownPlatform,
     NullTotal,
     Restart,
+    HistoryZero,
+    HistoryIncompatible,
+    HistoryMissingIdle,
+    HistoryOutOfRange,
+    PartialHistory,
 }
 impl ProcessCpuIntervalCase {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 18] = [
         Self::Exact,
         Self::ManyPools,
         Self::Zero,
@@ -31,12 +36,50 @@ impl ProcessCpuIntervalCase {
         Self::UnknownPlatform,
         Self::NullTotal,
         Self::Restart,
+        Self::HistoryZero,
+        Self::HistoryIncompatible,
+        Self::HistoryMissingIdle,
+        Self::HistoryOutOfRange,
+        Self::PartialHistory,
     ];
     pub fn comparable(self) -> bool {
         matches!(
             self,
-            Self::Exact | Self::ManyPools | Self::Zero | Self::HistoryDenied | Self::LinuxIdle | Self::UnknownPlatform
+            Self::Exact
+                | Self::ManyPools
+                | Self::Zero
+                | Self::HistoryDenied
+                | Self::LinuxIdle
+                | Self::UnknownPlatform
+                | Self::HistoryZero
+                | Self::HistoryIncompatible
+                | Self::HistoryMissingIdle
+                | Self::HistoryOutOfRange
+                | Self::PartialHistory
         )
+    }
+    /// Fixed expectations for the controlled native records, independent of the production calculation.
+    pub fn expected_history_other_percent(self) -> Option<u32> {
+        match self {
+            Self::HistoryDenied
+            | Self::LinuxIdle
+            | Self::UnknownPlatform
+            | Self::HistoryIncompatible
+            | Self::HistoryMissingIdle
+            | Self::HistoryOutOfRange => None,
+            Self::HistoryZero => Some(0),
+            _ => Some(40),
+        }
+    }
+    fn history_values(self) -> (Option<&'static str>, Option<&'static str>) {
+        match self {
+            Self::LinuxIdle => (Some("10"), Some("0")),
+            Self::HistoryZero => (Some("10"), Some("90")),
+            Self::HistoryIncompatible => (Some("60"), Some("50")),
+            Self::HistoryMissingIdle => (Some("10"), None),
+            Self::HistoryOutOfRange => (Some("180"), Some("-1")),
+            _ => (Some("10"), Some("50")),
+        }
     }
 }
 pub fn process_cpu_interval_evidence(
@@ -147,10 +190,12 @@ fn point(case: ProcessCpuIntervalCase, later: bool) -> (CollectionDescription, V
             }
             .into(),
         );
-        sample.properties.insert("process_utilization".into(), "10".into());
-        sample
-            .properties
-            .insert("system_idle".into(), if case == ProcessCpuIntervalCase::LinuxIdle { "0" } else { "50" }.into());
+        let (process, idle) = case.history_values();
+        for (name, value) in [("process_utilization", process), ("system_idle", idle)] {
+            if let Some(value) = value {
+                sample.properties.insert(name.into(), value.into());
+            }
+        }
         rows.push(TelemetryRecord::Operational(
             OperationalObservation::from_counters(MSSQL_CPU_HISTORY_SOURCE, sample).unwrap(),
         ));
@@ -174,7 +219,11 @@ fn point(case: ProcessCpuIntervalCase, later: bool) -> (CollectionDescription, V
                 None,
             )
         } else {
-            StateSourceCoverage::collected(MSSQL_CPU_HISTORY_SOURCE.into(), 1)
+            StateSourceCoverage::observed(
+                MSSQL_CPU_HISTORY_SOURCE.into(),
+                1,
+                case != ProcessCpuIntervalCase::PartialHistory,
+            )
         },
     ];
     assert!(source.partition_is_consistent());
@@ -248,4 +297,52 @@ pub fn process_cpu_interval_originals(case: ProcessCpuIntervalCase) -> [Captured
         .collect::<Vec<_>>()
         .try_into()
         .unwrap()
+}
+
+/// Run after original export/receipt validation in SDK and both warehouse replay paths.
+pub fn assert_process_cpu_history_capture(
+    capture: &crate::analytical::evidence::EvidenceCapture,
+    case: ProcessCpuIntervalCase,
+) {
+    assert!(capture.is_read_complete());
+    let coverage = capture
+        .source()
+        .observation
+        .snapshot()
+        .unwrap()
+        .sources
+        .iter()
+        .find(|source| source.source == MSSQL_CPU_HISTORY_SOURCE)
+        .unwrap();
+    let history = capture
+        .records()
+        .iter()
+        .filter_map(|record| {
+            let TelemetryRecord::Operational(row) = &record.row().record else { return None };
+            (row.source == MSSQL_CPU_HISTORY_SOURCE).then_some(row)
+        })
+        .collect::<Vec<_>>();
+    if case == ProcessCpuIntervalCase::HistoryDenied {
+        assert_eq!(coverage.state, culprit_core::SourceState::Unavailable);
+        assert!(history.is_empty());
+        return;
+    }
+    assert_eq!(
+        coverage.state,
+        if case == ProcessCpuIntervalCase::PartialHistory {
+            culprit_core::SourceState::Partial
+        } else {
+            culprit_core::SourceState::Collected
+        }
+    );
+    let [row] = history.as_slice() else { panic!("one original scheduler record") };
+    let OperationalFact::CounterSet(sample) = &row.fact else { panic!() };
+    let context = NativeReadContext::from_snapshot(capture.source()).unwrap();
+    let point = MssqlCpuHistoryPoint::from_original(sample, &context).unwrap();
+    let (process, idle) = case.history_values();
+    assert_eq!(point.raw_process(), process);
+    assert_eq!(point.raw_idle(), idle);
+    assert_eq!(point.other_process_percent(), case.expected_history_other_percent(), "{case:?}");
+    assert!(!sample.properties.contains_key("other_process_cpu_percent"));
+    assert!(sample.counters.is_empty());
 }

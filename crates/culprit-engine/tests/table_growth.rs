@@ -68,7 +68,8 @@ async fn each_scan_keeps_the_sizes_a_scan_a_day_before_read() {
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Mssql,
         culprit_engine::ProviderRegistration::new(
-            Arc::new(move |_| Ok(Box::new(Replay(replay.clone())) as Box<dyn Provider>)),
+            Arc::new(move |_, _context| Ok(Box::new(Replay(replay.clone())) as Box<dyn Provider>)),
+            culprit_engine::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -80,7 +81,13 @@ async fn each_scan_keeps_the_sizes_a_scan_a_day_before_read() {
         ..Default::default()
     })
     .expect("save connection");
-    let scan = || async { ws.scan("shop", &SnapshotOptions::default()).await.expect("scan") };
+    let scan = || async {
+        crate::observed::run(&ws, culprit_core::ProviderReadKind::Scan, async |operation| {
+            ws.scan("shop", &SnapshotOptions::default(), operation).await
+        })
+        .await
+        .expect("scan")
+    };
     let finding = |r: &culprit_core::Report| {
         r.findings.iter().find(|f| f.id == "large-rows:shop.support_tickets").cloned().expect("the large-rows finding")
     };

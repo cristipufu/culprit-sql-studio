@@ -1,3 +1,5 @@
+import type { ProviderAcquisitionReport } from "../../gen/ProviderAcquisitionReport";
+import { ProviderAcquisition } from "../../components/ProviderAcquisition";
 import { Check, Database, FolderOpen } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ConnectionSecurity } from "../../gen/ConnectionSecurity";
@@ -38,6 +40,7 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
   const [parsed, setParsed] = useState<ParsedConnection | null>(null);
   const parsedInput = useRef("");
   const parsedViaSsh = useRef(false);
+  const [acquisition, setAcquisition] = useState<ProviderAcquisitionReport | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
@@ -63,6 +66,7 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
     action.current.invalidate();
     testAbort.current?.abort();
     setTest({ status: "idle" });
+    setAcquisition(null);
     return () => { action.current.invalidate(); testAbort.current?.abort(); };
   }, [input, engine, name, environment, user, password, ssh, security]);
 
@@ -167,6 +171,7 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
     testAbort.current?.abort();
     const controller = new AbortController();
     testAbort.current = controller;
+    setAcquisition(null);
     return { current, signal: controller.signal };
   };
 
@@ -176,7 +181,9 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
     const { current, signal } = startTest();
     setTest({ status: "busy" });
     try {
-      const server = await (await api()).testConnection(request(), signal);
+      const server = await (await api()).testConnection(request(), signal, (report) => {
+        if (current()) setAcquisition(report);
+      });
       if (current()) setTest({ status: "ok", label: `${server.product} · ${server.database}` });
     } catch (e) {
       if (current()) setTest({ status: "error", error: errorMessage(e) });
@@ -192,7 +199,9 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
       const candidate = request();
       const client = await api();
       if (!current()) return;
-      await client.testConnection(candidate, signal);
+      await client.testConnection(candidate, signal, (report) => {
+        if (current()) setAcquisition(report);
+      });
       if (!current()) return;
       setSaving(true);
       const saved = await client.addConnection(candidate);
@@ -317,6 +326,7 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
                 </div>
               </>
             )}
+            {acquisition && <><span /><ProviderAcquisition report={acquisition} /></>}
             {environment === "production" && (
               <>
                 <span />

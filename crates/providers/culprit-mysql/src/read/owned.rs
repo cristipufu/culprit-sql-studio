@@ -101,12 +101,38 @@ impl<O: Operation> Task<O> {
         work.complete(shutdown);
         Reply { peer, result, shutdown }
     }
+    async fn connect(&self, control: bool) -> Result<Conn> {
+        let attempt = self.accounting.connection_work.as_ref().map(|work| work.begin());
+        let phase = attempt.as_ref().map(|attempt| attempt.phase(ReadConnectionStage::Acquire, None));
+        if let Some(attempt) = &attempt {
+            attempt.connection_use(ReadConnectionUse::FreshConnection);
+        }
+        self.accounting.publish();
+        let result = if control {
+            self.connector.connect_for_cancellation().await
+        } else {
+            self.connector.connect_unconfigured().await
+        };
+        if let Some(attempt) = &attempt {
+            if result.is_ok() {
+                self.accounting.acquired(attempt);
+            }
+        }
+        if let Some(phase) = phase {
+            phase.finish(match &result {
+                Ok(_) => ReadConnectionOutcome::Completed,
+                Err(error) => ReadConnectionOutcome::from_error(error),
+            });
+        }
+        self.accounting.publish();
+        result
+    }
     async fn acquire(&self, cancellation: &mut oneshot::Receiver<()>, shutdown: &mut SourceShutdown) -> Result<Peer> {
         // Both raw connections perform handshake only. Every SQL setup statement below is an owned phase.
         // The control route remains owned even if a caller disappears during original-response retirement.
         let connect = async {
-            let client = self.connector.connect_unconfigured().await?;
-            let control = self.connector.connect_for_cancellation().await?;
+            let client = self.connect(false).await?;
+            let control = self.connect(true).await?;
             Ok(Peer { client, control, initialized: false })
         };
         let timeout = self.accounting.remaining()?;
@@ -221,6 +247,7 @@ impl Phase<'_> {
             }
         };
         self.accounting.metrics.finish(template.as_deref(), started_at.elapsed(), progress, &outcome);
+        self.accounting.publish();
         result
     }
     async fn rows(&mut self, client: &mut Conn, request: &Request, output: RowOutput<Rec>) -> Result<Vec<Rec>> {
@@ -296,13 +323,7 @@ impl Operation for Preview {
         let budget = culprit_core::limits::PREVIEW_TIMEOUT + PREVIEW_EXECUTION_GRACE;
         let accounting = phase.accounting;
         let result = {
-            let preview_accounting = Accounting {
-                budget: CollectionBudget {
-                    statement_timeout_ms: budget.as_millis() as u32,
-                    ..accounting.budget.clone()
-                },
-                ..accounting.clone()
-            };
+            let preview_accounting = accounting.with_statement_timeout(budget.as_millis() as u32);
             let mut query_phase = Phase {
                 control: phase.control,
                 cancellation: phase.cancellation,

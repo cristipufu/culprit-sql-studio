@@ -48,6 +48,15 @@ impl Connections<'_> {
         self.selected_registration(registry::engine(spec)?).and_then(|registration| registration.open(spec))
     }
 
+    fn open_provider_observed(
+        &self,
+        spec: &ConnectionSpec,
+        observation: &culprit_core::ProviderOperationObservation,
+    ) -> Result<Box<dyn Provider>> {
+        self.selected_registration(registry::engine(spec)?)
+            .and_then(|registration| registration.open_observed(spec, observation))
+    }
+
     pub(crate) fn selected_registration(&self, engine: Engine) -> Result<ProviderRegistration> {
         match self.providers.iter().find(|(selected, _)| *selected == engine) {
             Some((_, registration)) => Ok(registration.clone()),
@@ -199,19 +208,25 @@ impl Connections<'_> {
         &self,
         name: &str,
         settings: &ConnectionSettings,
-    ) -> Result<ServerInfo> {
-        let stored = self.store.get(name)?;
-        let mut spec = stored.spec();
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        let association = culprit_core::telemetry::SourceAdmissionRoute::SavedConnectionTest {
+            name: name.into(),
+            test: culprit_core::telemetry::ConnectionTestKind::Settings,
+        };
+        self.probe_at(association, observation, self.settings_spec(name, settings)).await
+    }
+    async fn settings_spec(&self, name: &str, settings: &ConnectionSettings) -> Result<ConnectionSpec> {
+        let route = self.saved_route(name)?;
+        self.require_current_route(&route)?;
+        let mut spec = route.stored.spec();
         culprit_core::apply_connection_security(&mut spec, &settings.security)?;
         spec.environment = settings.environment;
         self.ssh.attach(&mut spec)?;
-        self.resolve_secrets(name, &stored, &mut spec).await?;
+        self.resolve_secrets(name, &route.stored, &mut spec).await?;
         self.materialize_certificates(&mut spec)?;
-        let provider = self.open_provider(&spec)?;
-        self.forget_rejected(
-            name,
-            crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, provider.probe()).await,
-        )
+        self.require_current_route(&route)?;
+        Ok(spec)
     }
 
     pub(crate) fn add_connection(&self, new: NewConnection) -> Result<ConnectionInfo> {
@@ -584,6 +599,14 @@ impl Connections<'_> {
         self.require_current_route(route)?;
         Ok(spec)
     }
+    pub(crate) async fn normal_provider(
+        &self,
+        name: &str,
+        observation: &culprit_core::ProviderOperationObservation,
+    ) -> Result<Box<dyn Provider>> {
+        let spec = self.spec_at_route(&self.saved_route(name)?).await?;
+        self.open_provider_observed(&spec, observation)
+    }
     pub(crate) async fn provider_at_route(&self, route: &SavedRoute) -> Result<Box<dyn Provider>> {
         self.open_provider(&self.spec_at_route(route).await?)
     }
@@ -645,37 +668,82 @@ impl Connections<'_> {
         Ok(spec)
     }
 
-    pub(crate) async fn test_ssh(&self, name: &str, ssh: Option<culprit_core::SshConfig>) -> Result<ServerInfo> {
-        let stored = self.store.get(name)?;
-        let provider = self.provider_from_saved(name, &stored, ssh).await?;
-        self.forget_rejected(
-            name,
-            crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, provider.probe()).await,
-        )
+    pub(crate) async fn test_ssh(
+        &self,
+        name: &str,
+        ssh: Option<culprit_core::SshConfig>,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        let association = culprit_core::telemetry::SourceAdmissionRoute::SavedConnectionTest {
+            name: name.into(),
+            test: culprit_core::telemetry::ConnectionTestKind::Ssh,
+        };
+        self.probe_at(association, observation, async {
+            let route = self.saved_route(name)?;
+            self.require_current_route(&route)?;
+            let spec = self.saved_spec(name, &route.stored, ssh).await?;
+            self.require_current_route(&route)?;
+            Ok(spec)
+        })
+        .await
     }
 
-    /// Open a provider for an unsaved connection (used by "Test" before saving).
+    /// Open a provider for an unsaved connection without normal probe/scan observation.
     pub(crate) async fn provider_for(&self, new: &NewConnection) -> Result<Box<dyn Provider>> {
+        self.open_provider(&self.spec_for(new).await?)
+    }
+    async fn spec_for(&self, new: &NewConnection) -> Result<ConnectionSpec> {
         let mut spec = merge(new)?;
         self.ssh.attach(&mut spec)?;
         spec.environment = new.environment;
         self.resolve_token(None, &mut spec).await?;
         self.materialize_certificates(&mut spec)?;
-        self.open_provider(&spec)
+        Ok(spec)
     }
-
-    pub(crate) async fn probe(&self, name: &str) -> Result<ServerInfo> {
-        let observed = self.observed_provider(name).await?;
-        let result = self.forget_rejected(
-            name,
-            crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, observed.provider().probe()).await,
-        );
-        observed.finish(result).await
+    pub(crate) async fn probe(
+        &self,
+        name: &str,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        let association = culprit_core::telemetry::SourceAdmissionRoute::SavedConnection { name: name.into() };
+        self.probe_at(association, observation, async { self.spec_at_route(&self.saved_route(name)?).await }).await
     }
-
-    pub(crate) async fn test_connection(&self, new: &NewConnection) -> Result<ServerInfo> {
-        let provider = self.provider_for(new).await?;
-        crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, provider.probe()).await
+    pub(crate) async fn test_connection(
+        &self,
+        new: &NewConnection,
+        observation: culprit_core::ProviderOperationObservation,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        let invocation_id =
+            observation.observation_id().ok_or_else(|| culprit_core::telemetry::DeliveryProblem::Integrity.error())?;
+        self.probe_at(
+            culprit_core::telemetry::SourceAdmissionRoute::UnsavedConnectionTest { invocation_id },
+            observation,
+            self.spec_for(new),
+        )
+        .await
+    }
+    async fn probe_at(
+        &self,
+        association: culprit_core::telemetry::SourceAdmissionRoute,
+        observation: culprit_core::ProviderOperationObservation,
+        preparation: impl std::future::Future<Output = Result<ConnectionSpec>>,
+    ) -> Result<culprit_core::ProviderCall<ServerInfo>> {
+        observation.require_kind(culprit_core::ProviderReadKind::Probe)?;
+        let mut operation = self.source_operation_at(association.clone(), None, observation).await?;
+        let opened = preparation.await.and_then(|spec| self.open_provider_observed(&spec, operation.observation()));
+        let provider = match opened {
+            Ok(provider) => provider,
+            Err(error) => {
+                return Ok(operation.finish_call(Err(error), culprit_core::telemetry::SourceShutdown::Quiescent).await);
+            }
+        };
+        operation.native_started();
+        let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, provider.probe()).await;
+        let result = match association.saved_connection() {
+            Some(name) => self.forget_rejected(name, result),
+            None => result,
+        };
+        Ok(operation.finish_call(result, provider.source_shutdown()).await)
     }
 
     /// A rejected password may have been changed elsewhere since this process read it: forget the copy so the next

@@ -89,10 +89,11 @@ async fn a_connection_saved_without_a_password_never_sends_one_left_under_its_na
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
         crate::ProviderRegistration::new(
-            Arc::new(move |spec: &ConnectionSpec| {
+            Arc::new(move |spec: &ConnectionSpec, _context| {
                 seen.lock().unwrap().push(spec.password.clone());
                 Ok(Box::new(Sessions(Engine::Postgres, Arc::default())) as Box<dyn Provider>)
             }),
+            crate::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -105,9 +106,15 @@ async fn a_connection_saved_without_a_password_never_sends_one_left_under_its_na
     .unwrap();
     // A password a removed connection named "shop" left behind, for another server.
     ws.secrets.set("shop", "old-server-password").unwrap();
-    let _ = ws.probe("shop").await;
+    let _ = crate::tests::observe_provider(&ws, culprit_core::ProviderReadKind::Probe, async |operation| {
+        ws.probe("shop", operation).await
+    })
+    .await;
     ws.set_password("shop", "new-password").unwrap();
-    let _ = ws.probe("shop").await;
+    let _ = crate::tests::observe_provider(&ws, culprit_core::ProviderReadKind::Probe, async |operation| {
+        ws.probe("shop", operation).await
+    })
+    .await;
     assert_eq!(*sent.lock().unwrap(), vec![None, Some("new-password".to_string())]);
     let _ = std::fs::remove_dir_all(home);
 }
@@ -231,7 +238,10 @@ async fn sessions_are_never_interrupted_on_production() {
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
         crate::ProviderRegistration::new(
-            Arc::new(move |_| Ok(Box::new(Sessions(Engine::Postgres, recorded.clone())) as Box<dyn Provider>)),
+            Arc::new(
+                move |_, _context| Ok(Box::new(Sessions(Engine::Postgres, recorded.clone())) as Box<dyn Provider>),
+            ),
+            crate::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -277,7 +287,10 @@ async fn native_sessions_keep_complete_identity_for_progress_and_actions() {
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Yugabyte,
         crate::ProviderRegistration::new(
-            Arc::new(move |_| Ok(Box::new(Sessions(Engine::Yugabyte, recorded.clone())) as Box<dyn Provider>)),
+            Arc::new(
+                move |_, _context| Ok(Box::new(Sessions(Engine::Yugabyte, recorded.clone())) as Box<dyn Provider>),
+            ),
+            crate::ProviderConstructionPolicy::DeferredNativeWork,
             Vec::new(),
         )
         .unwrap(),
@@ -471,4 +484,16 @@ fn periods_and_pasted_deadlocks_that_cannot_be_read_say_why_in_english() {
         deadlocks::parse_deadlock(&"x".repeat(8 * 1024 * 1024 + 1)).unwrap_err().message,
         "That text is larger than 8 MB; paste one deadlock at a time"
     );
+}
+
+pub(crate) async fn observe_provider<T>(
+    workspace: &crate::Workspace,
+    kind: culprit_core::ProviderReadKind,
+    start: impl std::ops::AsyncFnOnce(
+        culprit_core::ProviderOperationObservation,
+    ) -> culprit_core::Result<culprit_core::ProviderCall<T>>,
+) -> culprit_core::Result<T> {
+    let owner = workspace.begin_provider_read(kind)?;
+    let result = start(owner.operation()?).await;
+    owner.finish_call(result).into_result()
 }

@@ -119,3 +119,39 @@ async fn individual_scheduler_originals_reach_compact_mcp_with_native_null_units
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
+
+#[tokio::test]
+async fn retained_scheduler_cpu_remainder_reaches_compact_mcp_from_original_inputs_without_provider_work() {
+    use culprit_collector::analytical::test_support::{ProcessCpuIntervalCase, process_cpu_interval_evidence};
+    for case in ProcessCpuIntervalCase::ALL {
+        let [(source, rows), _] = process_cpu_interval_evidence(case);
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::InstanceResources)
+                .await;
+        assert!(!error, "{case:?}: {value}");
+        let cpu = &value["instance_resources"]["process_cpu"];
+        let history = &cpu["populations"][1];
+        let entries = history["entries"].as_array().unwrap();
+        if case == ProcessCpuIntervalCase::HistoryDenied {
+            assert!(entries.is_empty());
+        } else {
+            let fields = entries[0]["fields"].as_array().unwrap();
+            assert_eq!(fields.len(), 8);
+            let other = fields.iter().find(|field| field["key"] == "other_process_cpu_percent").unwrap();
+            assert_eq!(other["value"], json!(case.expected_history_other_percent().map(|value| value.to_string())));
+            assert!(fields.iter().any(|field| field["key"] == "raw_system_idle"));
+            assert!(fields.iter().any(|field| field["key"] == "raw_process_utilization"));
+            if case == ProcessCpuIntervalCase::PartialHistory {
+                assert_eq!(history["source_state"], "partial");
+                assert_eq!(history["native_source"]["complete_scope"], false);
+            }
+        }
+        assert!(!cpu.to_string().contains("manifest_sha256"));
+        assert!(!cpu.to_string().contains("instance_epoch"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}

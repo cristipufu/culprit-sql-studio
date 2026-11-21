@@ -111,6 +111,7 @@ pub(crate) struct ReadSession {
     active: Option<JoinHandle<Reply>>,
     streaming: Option<Streaming>,
     accounting: Accounting,
+    observation: Option<culprit_core::ProviderReaderObservation>,
     closed: bool,
 }
 impl ReadSession {
@@ -123,15 +124,14 @@ impl ReadSession {
         Self::new(connector, culprit_read::application_budget(window), scope)
     }
     pub(crate) fn new(connector: Arc<Connector>, budget: CollectionBudget, scope: Scope) -> Self {
-        Self {
-            connector,
-            scope,
-            peer: None,
-            active: None,
-            streaming: None,
-            closed: false,
-            accounting: Accounting::new(budget),
+        let observation = connector.observation.is_observed().then(|| connector.observation.reader(Engine::Mysql));
+        if let Some(observer) = &observation {
+            observer.setup_included();
         }
+        let mut accounting = Accounting::new(budget);
+        accounting.observation = observation.as_ref().map(|owner| owner.observer());
+        accounting.connection_work = observation.as_ref().map(|_| Default::default());
+        Self { connector, scope, peer: None, active: None, streaming: None, closed: false, accounting, observation }
     }
     async fn start(&mut self, request: owned::Request, output: RowOutput<Rec>) -> Result<oneshot::Sender<()>> {
         self.connector.fence.ensure_available()?;
@@ -203,7 +203,7 @@ impl ReadSession {
         self.accounting.queries.load(Ordering::Acquire)
     }
     pub(crate) fn read_metrics(&self) -> Option<ReadWorkMetrics> {
-        self.accounting.metrics.snapshot()
+        self.accounting.snapshot()
     }
     pub(crate) async fn close(&mut self) -> SourceShutdown {
         self.closed = true;
@@ -214,7 +214,12 @@ impl ReadSession {
         if let Some(peer) = self.peer.take() {
             peer.close().await;
         }
-        self.connector.source_shutdown()
+        let shutdown = self.connector.source_shutdown();
+        self.accounting.publish();
+        if let Some(observer) = self.observation.take() {
+            observer.finish(shutdown);
+        }
+        shutdown
     }
 }
 #[async_trait::async_trait]
@@ -261,6 +266,7 @@ impl OwnedRead for ReadSession {
 }
 impl Drop for ReadSession {
     fn drop(&mut self) {
+        self.accounting.publish();
         if self.active.is_some() {
             self.connector.fence.mark_uncertain();
         }
@@ -371,3 +377,6 @@ pub(crate) async fn preview_with_clients(
     .await
     .result
 }
+
+#[cfg(test)]
+mod acquisition_tests;

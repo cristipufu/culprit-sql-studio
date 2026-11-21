@@ -1,8 +1,9 @@
 import type { StorageEntry } from "../gen/StorageEntry";
+import type { StorageFileSummary } from "../gen/StorageFileSummary";
 import type { StorageReport } from "../gen/StorageReport";
 import { t } from "../lib/i18n";
-import { NativeValue } from "./NativeObservationFields";
-import { ObservationList } from "./ObservationList";
+import { NativeValue, nativeTextPreview } from "./NativeObservationFields";
+import { ObservationList, ObservationReadQualifications } from "./ObservationList";
 
 /** Exact values, native populations and file-size meanings come from the shared Rust interpretation. */
 export function StorageEvidence({ report }: { report: StorageReport }) {
@@ -18,7 +19,9 @@ export function StorageEvidence({ report }: { report: StorageReport }) {
         until: bounds.observed_until,
       })}
       renderEntry={renderStorageEntry}
-    />
+    >
+      {report.file_summary && <FileCensus key={JSON.stringify(report.file_summary)} summary={report.file_summary} />}
+    </ObservationList>
   );
 }
 
@@ -36,5 +39,26 @@ function renderStorageEntry(entry: StorageEntry) {
         ))}
       </dl>
     </article>
+  );
+}
+
+/** Counts and independent byte quantities come from the complete original census, before row presentation limits. */
+function FileCensus({ summary }: { summary: StorageFileSummary }) {
+  return (
+    <details className="storage-file-census">
+      <summary>{summary.title}</summary>
+      <p>{summary.summary}</p>
+      <ObservationReadQualifications sources={[{ source: summary.source, state: summary.source_state }]} />
+      <dl>
+        {summary.fields.map((field) => (
+          <NativeValue
+            key={field.key}
+            label={field.label}
+            value={field.value == null ? null : nativeTextPreview(field.value, 512)}
+          />
+        ))}
+      </dl>
+      {summary.limitations.map((limitation, index) => <p className="muted" key={index}>{limitation}</p>)}
+    </details>
   );
 }

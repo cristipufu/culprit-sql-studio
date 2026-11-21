@@ -108,6 +108,10 @@ pub struct ReadSession {
     fence: culprit_read::ReadFence,
     metrics: ReadMetricsRecorder,
     notices: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    observation: Option<culprit_core::ProviderReaderObservation>,
+    connection_work: Option<culprit_core::telemetry::ReadConnectionRecorder>,
+    first_query_attempt: Option<culprit_core::telemetry::ReadConnectionAttemptRecorder>,
+    connection_generation: u64,
 }
 #[derive(Clone, Copy)]
 enum SessionSetup {
@@ -126,6 +130,11 @@ impl ReadSession {
     /// source query, scope, identity and counter interpretation; this never selects PostgreSQL collectors.
     pub fn for_engine(connector: Connector, budget: CollectionBudget, engine: Engine) -> Self {
         let fence = connector.fence.clone();
+        let observation = connector.observation.is_observed().then(|| connector.observation.reader(engine));
+        if let Some(observer) = &observation {
+            observer.setup_included();
+        }
+        let connection_work = observation.as_ref().map(|_| Default::default());
         Self {
             connector,
             client: None,
@@ -142,6 +151,10 @@ impl ReadSession {
             fence,
             metrics: ReadMetricsRecorder::new(engine),
             notices: None,
+            observation,
+            connection_work,
+            first_query_attempt: None,
+            connection_generation: 0,
         }
     }
     /// Normal acquisition keeps its existing native SET batch and per-query retention; only the explicitly
@@ -159,6 +172,11 @@ impl ReadSession {
         reader.setup = SessionSetup::Application(limits);
         reader.application_scope = Some(scope);
         reader
+    }
+    fn observe_work(&self) {
+        if let Some(observer) = &self.observation {
+            observer.checkpoint(self.queries, self.metrics());
+        }
     }
     fn setup_sql(&self) -> String {
         match self.setup {
@@ -237,10 +255,21 @@ impl ReadSession {
     async fn acquire(&mut self) -> Result<Client> {
         let timeout = self.remaining()?;
         self.acquiring = true;
+        let attempt = self.connection_work.as_ref().map(|work| work.begin());
+        let phase =
+            attempt.as_ref().map(|attempt| attempt.phase(culprit_core::telemetry::ReadConnectionStage::Acquire, None));
+        if let Some(attempt) = &attempt {
+            attempt.connection_use(culprit_core::telemetry::ReadConnectionUse::FreshConnection);
+        }
+        self.observe_work();
         let result = tokio::time::timeout(timeout, self.connector.connect_unconfigured()).await;
         self.acquiring = false;
-        match result {
+        let result = match result {
             Ok(result) => result.map(|session| {
+                self.connection_generation = self.connection_generation.saturating_add(1);
+                if let Some(attempt) = &attempt {
+                    attempt.acquired(self.connection_generation);
+                }
                 self.notices = Some(session.notices.clone());
                 session.client
             }),
@@ -248,7 +277,18 @@ impl ReadSession {
                 self.fence.mark_uncertain();
                 Err(CollectionStop::CancellationUnconfirmed.error())
             }
+        };
+        if let Some(phase) = phase {
+            phase.finish(match &result {
+                Ok(_) => culprit_core::telemetry::ReadConnectionOutcome::Completed,
+                Err(error) => culprit_core::telemetry::ReadConnectionOutcome::from_error(error),
+            });
         }
+        if result.is_ok() {
+            self.first_query_attempt = attempt;
+        }
+        self.observe_work();
+        result
     }
     /// Native notices can mean a distributed reader skipped a node. No server-controlled text is retained.
     pub fn notices(&self) -> u64 {
@@ -282,6 +322,13 @@ impl ReadSession {
         self.queries += 1;
         let (owner, cancellation) = tokio::sync::oneshot::channel();
         let template = self.metrics.begin(sql);
+        let connection_phase = self.first_query_attempt.take().map(|attempt| {
+            attempt.phase(
+                culprit_core::telemetry::ReadConnectionStage::FirstQuery,
+                Some(culprit_core::telemetry::digest(sql.as_bytes())),
+            )
+        });
+        self.observe_work();
         self.active = Some(tokio::spawn(
             owned::ReadTask {
                 client,
@@ -290,6 +337,7 @@ impl ReadSession {
                 metrics: self.metrics.clone(),
                 template,
                 fence: self.fence.clone(),
+                connection_phase,
             }
             .run(output, cancellation),
         ));
@@ -424,7 +472,9 @@ impl NativeRead for ReadSession {
         self.queries
     }
     fn metrics(&self) -> Option<ReadWorkMetrics> {
-        self.metrics.snapshot()
+        let mut metrics = self.metrics.snapshot()?;
+        metrics.connection_work = self.connection_work.as_ref().and_then(|work| work.snapshot()).map(Box::new);
+        Some(metrics)
     }
     async fn close(&mut self) -> SourceShutdown {
         self.closed = true;
@@ -436,11 +486,17 @@ impl NativeRead for ReadSession {
             let _ = self.finish_active().await;
         }
         self.client.take();
-        if self.fence.is_uncertain() { SourceShutdown::Unconfirmed } else { SourceShutdown::Quiescent }
+        let shutdown = if self.fence.is_uncertain() { SourceShutdown::Unconfirmed } else { SourceShutdown::Quiescent };
+        self.observe_work();
+        if let Some(observer) = self.observation.take() {
+            observer.finish(shutdown);
+        }
+        shutdown
     }
 }
 impl Drop for ReadSession {
     fn drop(&mut self) {
+        self.observe_work();
         if self.acquiring || self.active.is_some() {
             self.fence.mark_uncertain();
         }
@@ -448,3 +504,6 @@ impl Drop for ReadSession {
         // both the client and SSH/TLS route until protocol completion or an explicitly unconfirmed shutdown.
     }
 }
+
+#[cfg(test)]
+mod acquisition_tests;

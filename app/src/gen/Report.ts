@@ -30,6 +30,7 @@ import type { PageServerReadReport } from "./PageServerReadReport";
 import type { PageWaitReport } from "./PageWaitReport";
 import type { PerformanceCounterReport } from "./PerformanceCounterReport";
 import type { PoolSettingsReport } from "./PoolSettingsReport";
+import type { ProviderAcquisitionReport } from "./ProviderAcquisitionReport";
 import type { QueryRuntimeFragmentReport } from "./QueryRuntimeFragmentReport";
 import type { QueryWaitFragmentReport } from "./QueryWaitFragmentReport";
 import type { RefinementDecision } from "./RefinementDecision";
@@ -55,7 +56,7 @@ export type Report = {
 /**
  * Independent current catalog points and authenticated historical originals remain separate.
  */
-index_configuration: Array<IndexConfigurationReport>, indexed_views: Array<IndexedViewsReport>, numa_nodes?: Array<InstanceResourceReport>, cdc?: Array<CdcReport>, change_feed?: Array<ChangeFeedReport>, runtime_fragments?: QueryRuntimeFragmentReport, query_wait_fragments?: QueryWaitFragmentReport, table_full_text?: TableFullTextReport, table_temporal?: TableTemporalReport, instance_resources?: InstanceResourceReport, storage?: StorageReport, source_acquisitions: Array<HistoricalSourceOverhead>, performance_counters: Array<PerformanceCounterReport>, memory_clerks?: MemoryClerkReport, tempdb_metadata_memory?: TempdbMetadataMemoryReport, table_memory?: Array<TableMemoryReport>, group_replication?: Array<GroupReplicationReport>, galera?: Array<GaleraReport>, full_text_populations?: Array<FullTextPopulationReport>, database_properties?: DatabasePropertiesReport, pool_settings?: PoolSettingsReport, managed_instance_resources?: ManagedInstanceResourceReport, suspect_pages?: SuspectPageHistoryReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
+index_configuration: Array<IndexConfigurationReport>, indexed_views: Array<IndexedViewsReport>, numa_nodes?: Array<InstanceResourceReport>, cdc?: Array<CdcReport>, change_feed?: Array<ChangeFeedReport>, runtime_fragments?: QueryRuntimeFragmentReport, query_wait_fragments?: QueryWaitFragmentReport, table_full_text?: TableFullTextReport, table_temporal?: TableTemporalReport, instance_resources?: InstanceResourceReport, storage?: StorageReport, source_acquisitions: Array<HistoricalSourceOverhead>, provider_acquisition?: ProviderAcquisitionReport, performance_counters: Array<PerformanceCounterReport>, memory_clerks?: MemoryClerkReport, tempdb_metadata_memory?: TempdbMetadataMemoryReport, table_memory?: Array<TableMemoryReport>, group_replication?: Array<GroupReplicationReport>, galera?: Array<GaleraReport>, full_text_populations?: Array<FullTextPopulationReport>, database_properties?: DatabasePropertiesReport, pool_settings?: PoolSettingsReport, managed_instance_resources?: ManagedInstanceResourceReport, suspect_pages?: SuspectPageHistoryReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */

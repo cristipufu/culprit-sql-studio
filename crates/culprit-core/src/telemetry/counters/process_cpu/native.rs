@@ -11,6 +11,7 @@ pub const MSSQL_CPU_POOL_KIND: &str = "sql-server-engine-cpu-pool";
 pub const MSSQL_CPU_POOL_OBJECT: &str = "sys.dm_resource_governor_resource_pools";
 pub const MSSQL_CPU_HISTORY_KIND: &str = "sql-server-process-cpu-history";
 pub const MSSQL_CPU_HISTORY_OBJECT: &str = "sys.dm_os_ring_buffers";
+const FULL_CPU_PERCENT: u32 = 100;
 const COMMON: [&str; 5] = ["observed_at", "started_at_ticks", "sample_ms_ticks", "engine_edition", "major"];
 
 pub fn cpu_pool_candidate(sample: &NativeCounterSet) -> bool {
@@ -217,9 +218,17 @@ impl<'a> MssqlCpuHistoryPoint<'a> {
         }
         percent(self.raw_idle()?)
     }
+    /// Microsoft's Performance Dashboard derives other-process CPU from the same retained Windows record.
+    /// Missing, unsupported or incompatible native percentages establish no remainder or sample window.
+    /// https://github.com/microsoft/tigertoolbox/blob/7b858167fcfb9e55898f70a8a93e80cb881a5ca9/SQL-performance-dashboard-reports/setup.sql#L283-L311
+    pub fn other_process_percent(&self) -> Option<u32> {
+        let process = self.process_percent()?.parse::<u32>().ok()?;
+        let idle = self.idle_percent()?.parse::<u32>().ok()?;
+        FULL_CPU_PERCENT.checked_sub(idle)?.checked_sub(process)
+    }
 }
 fn percent(value: &str) -> Option<&str> {
-    value.parse::<u32>().ok().filter(|value| *value <= 100).map(|_| value)
+    value.parse::<u32>().ok().filter(|value| *value <= FULL_CPU_PERCENT).map(|_| value)
 }
 
 pub fn cpu_profile_header_is_valid(source: &CollectionDescription) -> bool {

@@ -168,6 +168,7 @@ pub(crate) struct ReadSession {
     native_work: session_work::SessionWork,
     admission: Option<Arc<qualification::Admission>>,
     session_setup: Option<qualification::SetupWork>,
+    observation: Option<culprit_core::ProviderReaderObservation>,
 }
 struct StreamingRead {
     _owner: tokio::sync::oneshot::Sender<()>,
@@ -215,6 +216,8 @@ impl ReadSession {
     }
     pub(crate) fn new(pool: Arc<Pool>, budget: CollectionBudget) -> Self {
         let deadline = Instant::now() + Duration::from_millis(budget.total_timeout_ms.into());
+        let observation = pool.observation.is_observed().then(|| pool.observation.reader(culprit_core::Engine::Mssql));
+        let observed = observation.is_some();
         Self {
             pool,
             client: None,
@@ -227,11 +230,23 @@ impl ReadSession {
             metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
             streaming: None,
             connection_generation: 0,
-            connection_work: None,
+            connection_work: observed.then(Default::default),
             first_query_attempt: None,
             native_work: session_work::SessionWork::default(),
             admission: None,
-            session_setup: None,
+            session_setup: observed.then(qualification::SetupWork::observation),
+            observation,
+        }
+    }
+
+    fn observe_work(&self) {
+        let Some(observer) = &self.observation else {
+            return;
+        };
+        observer.checkpoint(self.queries, self.read_metrics());
+        if let Some(setup) = &self.session_setup {
+            let (queries, metrics) = setup.snapshot();
+            observer.setup_checkpoint(queries, metrics);
         }
     }
 
@@ -362,6 +377,7 @@ impl ReadSession {
         let result = result.map_err(|_| ReadError::Stopped(CollectionStop::CancellationUnconfirmed))?;
         let (client, rows) = result?;
         self.client = Some(client);
+        self.observe_work();
         Ok(rows)
     }
 
@@ -384,6 +400,7 @@ impl ReadSession {
             admission.start().map_err(ReadError::Stopped)?;
         }
         self.queries += 1;
+        self.observe_work();
         Ok(remaining)
     }
     async fn acquire(&mut self, timeout: Duration) -> ReadResult<MsClient> {
@@ -445,6 +462,10 @@ impl ReadSession {
         }
         let shutdown = self.pool.source_shutdown();
         self.native_work.close(shutdown, self.connection_generation);
+        self.observe_work();
+        if let Some(observer) = self.observation.take() {
+            observer.finish(shutdown);
+        }
         shutdown
     }
 
@@ -471,6 +492,7 @@ impl ReadSession {
 
 impl Drop for ReadSession {
     fn drop(&mut self) {
+        self.observe_work();
         if self.acquiring || self.active.is_some() || !self.cancellation_confirmed {
             self.pool.mark_uncertain();
         }
@@ -1057,3 +1079,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod acquisition_tests;

@@ -41,6 +41,7 @@ pub struct Connector {
     tls: MakeRustlsConnect,
     transport: Option<Arc<dyn ConnectionTransport>>,
     pub(crate) fence: culprit_read::ReadFence,
+    pub(crate) observation: culprit_core::ProviderReadContext,
     pub host: String,
     pub port: u16,
 }
@@ -59,6 +60,10 @@ impl ObservedSession {
 }
 
 impl Connector {
+    pub fn with_read_context(mut self, context: culprit_core::ProviderReadContext) -> Self {
+        self.observation = context;
+        self
+    }
     pub fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
         if self.fence.is_uncertain() {
             culprit_core::telemetry::SourceShutdown::Unconfirmed
@@ -113,6 +118,7 @@ impl Connector {
         config.ssl_mode(ssl_mode);
         Ok(Connector {
             fence: culprit_read::ReadFence::default(),
+            observation: culprit_core::ProviderReadContext::unobserved(),
             config,
             tls,
             transport: spec.transport.clone(),
@@ -137,11 +143,13 @@ impl Connector {
     }
 
     pub(crate) async fn cancel(&self, token: &tokio_postgres::CancelToken) -> Result<()> {
+        self.observation.partial_reader_coverage(culprit_core::ProviderReadGap::UnhookedCancellation);
         token.cancel_query(self.tls.clone()).await.map_err(map_error)
     }
 
     /// Open a session with Culprit's safety settings applied: read-only by default, bounded statement and lock waits.
     pub async fn connect(&self, limits: SessionLimits) -> Result<Client> {
+        self.observation.partial_reader_coverage(culprit_core::ProviderReadGap::UnhookedEnrichment);
         Ok(self.connect_observed(limits).await?.client)
     }
 

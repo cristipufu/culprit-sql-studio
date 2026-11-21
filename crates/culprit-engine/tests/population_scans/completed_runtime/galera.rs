@@ -41,17 +41,21 @@ async fn native_group_original_attaches_only_after_scan_settlement_and_replays_w
         let (source, rows) = galera_evidence(case);
         let captured = Captured::from_source("shop", source.clone(), rows).await;
         let (_home, workspace, state) = workspace(snapshots(), SourceShutdown::Quiescent);
-        let result = workspace
-            .scan_populations_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    analysis: CompletedCaptureAnalysis::Galera,
-                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-                },
-            )
-            .await
-            .unwrap();
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_populations_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        analysis: CompletedCaptureAnalysis::Galera,
+                        ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap();
         assert_original(&result.requested, &source);
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
         assert_eq!(state.acquisitions.load(Ordering::SeqCst), 1);
@@ -91,7 +95,11 @@ async fn independently_scoped_groups_and_members_coexist_without_borrowing_curre
     let second = Captured::from_source("shop", next.clone(), rows).await;
     let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
     let original = analyze(&workspace, &second).await;
-    let report = workspace.scan_with_captured_galera("shop", &options(), None, original).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_galera("shop", &options(), None, original, operation).await
+    })
+    .await
+    .unwrap();
     let reports = report.galera.as_deref().unwrap();
     assert_eq!(reports.len(), 2);
     assert_eq!(reports[0].original.as_ref().unwrap().context.partition, source.partition);
@@ -112,26 +120,34 @@ async fn wrong_saved_connection_cancelled_original_or_unconfirmed_scan_never_pub
         let result = if cause == "cancelled" {
             let cancellation = CollectionCancellation::default();
             cancellation.cancel();
-            workspace
-                .scan_with_completed_capture(
-                    "shop",
-                    &options(),
-                    CompletedCaptureScanInput {
-                        analysis: CompletedCaptureAnalysis::Galera,
-                        ..captured.input(&captured.outbox.delivery(), &cancellation)
-                    },
-                )
-                .await
+            crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+                workspace
+                    .scan_with_completed_capture(
+                        "shop",
+                        &options(),
+                        CompletedCaptureScanInput {
+                            analysis: CompletedCaptureAnalysis::Galera,
+                            ..captured.input(&captured.outbox.delivery(), &cancellation)
+                        },
+                        operation,
+                    )
+                    .await
+            })
+            .await
         } else {
             let original = analyze(&workspace, &captured).await;
-            workspace
-                .scan_with_captured_galera(
-                    if cause == "connection" { "foreign" } else { "shop" },
-                    &options(),
-                    None,
-                    original,
-                )
-                .await
+            crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+                workspace
+                    .scan_with_captured_galera(
+                        if cause == "connection" { "foreign" } else { "shop" },
+                        &options(),
+                        None,
+                        original,
+                        operation,
+                    )
+                    .await
+            })
+            .await
         };
         assert!(result.is_err(), "{cause}");
         assert_eq!(state.factories.load(Ordering::SeqCst), usize::from(cause == "unconfirmed"));
@@ -145,7 +161,11 @@ async fn sharing_reanalysis_keeps_each_unavailable_original_status_without_nativ
     let captured = Captured::from_source("shop", source, rows).await;
     let (_home, workspace, _) = workspace(snapshots(), SourceShutdown::Quiescent);
     let original = analyze(&workspace, &captured).await;
-    let report = workspace.scan_with_captured_galera("shop", &options(), None, original).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_galera("shop", &options(), None, original, operation).await
+    })
+    .await
+    .unwrap();
     let shared = culprit_core::redact::redact_snapshot(&report.snapshot);
     let replay = culprit_checks::analyze(serde_json::from_slice(&serde_json::to_vec(&shared).unwrap()).unwrap());
     assert_eq!(replay.galera.as_deref().unwrap().len(), 1);

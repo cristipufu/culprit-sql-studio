@@ -88,17 +88,21 @@ async fn scoped_counter_populations_attach_once_after_shutdown_and_replay_after_
         let (source, rows) = database_performance_counter_evidence(case);
         let captured = Captured::from_source("shop", source.clone(), rows).await;
         let (_home, workspace, state) = workspace(with_shared_counters(), SourceShutdown::Quiescent);
-        let reports = workspace
-            .scan_populations_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    analysis: CompletedCaptureAnalysis::DatabasePerformanceCounters,
-                    ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
-                },
-            )
-            .await
-            .unwrap();
+        let reports = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_populations_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        analysis: CompletedCaptureAnalysis::DatabasePerformanceCounters,
+                        ..captured.input(&captured.outbox.delivery(), &CollectionCancellation::default())
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await
+        .unwrap();
         assert_original(&reports.requested, &source);
         assert_eq!(reports.requested.performance_counters.len(), 2);
         let shared = &reports.requested.performance_counters[0];
@@ -171,10 +175,13 @@ async fn saved_connection_association_never_borrows_current_database_route_membe
         batch.validate(&options()).expect("the current native population fixture must remain coherent");
         let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
         let analysis = analyze(&workspace, &captured).await;
-        let report = workspace
-            .scan_with_captured_database_performance_counters("shop", &options(), None, analysis)
-            .await
-            .unwrap_or_else(|error| panic!("{changed}: {error:?}"));
+        let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_captured_database_performance_counters("shop", &options(), None, analysis, operation)
+                .await
+        })
+        .await
+        .unwrap_or_else(|error| panic!("{changed}: {error:?}"));
         assert_original(&report, &source);
         assert_eq!(selected(&report).context.as_ref().unwrap().native().unwrap().partition, source.partition);
         assert_eq!(state.factories.load(Ordering::SeqCst), 1);
@@ -192,14 +199,18 @@ async fn wrong_saved_connection_or_shared_counter_dataset_refuses_before_the_nat
         let captured = Captured::from_source("shop", source, rows).await;
         let (_home, workspace, state) = workspace(with_shared_counters(), SourceShutdown::Quiescent);
         let analysis = analyze(&workspace, &captured).await;
-        let result = workspace
-            .scan_with_captured_database_performance_counters(
-                if wrong == "connection" { "foreign-connection" } else { "shop" },
-                &options(),
-                None,
-                analysis,
-            )
-            .await;
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_captured_database_performance_counters(
+                    if wrong == "connection" { "foreign-connection" } else { "shop" },
+                    &options(),
+                    None,
+                    analysis,
+                    operation,
+                )
+                .await
+        })
+        .await;
         assert!(result.is_err(), "{wrong}");
         assert_eq!(state.factories.load(Ordering::SeqCst), 0);
         assert!(workspace.report_history("shop").unwrap().is_empty());
@@ -220,10 +231,13 @@ async fn conflict_or_unconfirmed_scan_shutdown_cannot_publish_a_counter_attachme
         let (_home, workspace, state) =
             workspace(batch, if conflict { SourceShutdown::Quiescent } else { SourceShutdown::Unconfirmed });
         let analysis = analyze(&workspace, &captured).await;
-        let error = workspace
-            .scan_with_captured_database_performance_counters("shop", &options(), None, analysis)
-            .await
-            .unwrap_err();
+        let error = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_captured_database_performance_counters("shop", &options(), None, analysis, operation)
+                .await
+        })
+        .await
+        .unwrap_err();
         if conflict {
             assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Conflict)));
         } else {
@@ -241,8 +255,11 @@ async fn sharing_keeps_an_independent_typed_database_gap_and_the_shared_populati
     let captured = Captured::from_source("shop", source, rows).await;
     let (_home, workspace, _) = workspace(with_shared_counters(), SourceShutdown::Quiescent);
     let analysis = analyze(&workspace, &captured).await;
-    let report =
-        workspace.scan_with_captured_database_performance_counters("shop", &options(), None, analysis).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_database_performance_counters("shop", &options(), None, analysis, operation).await
+    })
+    .await
+    .unwrap();
     let shared = culprit_core::redact::redact_snapshot(&report.snapshot);
     assert!(matches!(
         shared.operations.database_performance_counters,
@@ -286,19 +303,23 @@ async fn cancelled_local_verification_or_foreign_capture_receipt_cannot_open_the
         } else {
             attempt.manifest_sha256 = Some(digest(b"foreign-original-manifest"));
         }
-        let result = workspace
-            .scan_with_completed_capture(
-                "shop",
-                &options(),
-                CompletedCaptureScanInput {
-                    delivery: &captured.outbox.delivery(),
-                    analysis: CompletedCaptureAnalysis::DatabasePerformanceCounters,
-                    attempt: &attempt,
-                    budget: CompletedCaptureBudget::default(),
-                    cancellation: &cancellation,
-                },
-            )
-            .await;
+        let result = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+            workspace
+                .scan_with_completed_capture(
+                    "shop",
+                    &options(),
+                    CompletedCaptureScanInput {
+                        delivery: &captured.outbox.delivery(),
+                        analysis: CompletedCaptureAnalysis::DatabasePerformanceCounters,
+                        attempt: &attempt,
+                        budget: CompletedCaptureBudget::default(),
+                        cancellation: &cancellation,
+                    },
+                    operation,
+                )
+                .await
+        })
+        .await;
         assert!(result.is_err(), "{cause}");
         assert_eq!(state.factories.load(Ordering::SeqCst), 0);
         assert!(workspace.report_history("shop").unwrap().is_empty());
@@ -335,8 +356,11 @@ async fn saved_common_inputs_replay_independently_of_selected_database_counters_
         .state = SourceState::Partial;
     let (_home, workspace, state) = workspace(batch, SourceShutdown::Quiescent);
     let analysis = analyze(&workspace, &captured).await;
-    let report =
-        workspace.scan_with_captured_database_performance_counters("shop", &options(), None, analysis).await.unwrap();
+    let report = crate::observed::run(&workspace, culprit_core::ProviderReadKind::Scan, async |operation| {
+        workspace.scan_with_captured_database_performance_counters("shop", &options(), None, analysis, operation).await
+    })
+    .await
+    .unwrap();
     let shared = &report.performance_counters[0];
     assert_eq!(shared.source_state, Some(SourceState::Partial));
     assert!(shared.context.is_none(), "scan points cannot borrow the selected capture's original clock or owner");

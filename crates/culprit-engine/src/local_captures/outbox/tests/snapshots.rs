@@ -252,3 +252,32 @@ async fn selected_database_counters_reuse_one_original_local_reader_and_keep_the
         }
     }
 }
+
+#[tokio::test]
+async fn local_storage_file_summary_reuses_one_original_and_keeps_independent_log_failure_and_unknown_quantities() {
+    for case in [
+        StorageCase::FileCensus,
+        StorageCase::FileCensusUnknownUsage,
+        StorageCase::FileCensusUnknownBasis,
+        StorageCase::FileCensusPartial,
+        StorageCase::FileCensusDenied,
+        StorageCase::FileCensusLogDenied,
+        StorageCase::FileCensusLarge,
+    ] {
+        let (source, rows) = storage_evidence(case);
+        let fixture = LocalCaptureFixture::snapshot(source.clone(), rows).await;
+        let bytes = fixture.original_bytes();
+        let result = analyze(
+            &reader(&fixture, CompletedCaptureBudget { max_bytes: bytes, ..Default::default() }),
+            &fixture.manifest.capture.observation_id,
+            LocalCaptureAnalysisKind::Storage,
+        )
+        .await
+        .unwrap();
+        let LocalSnapshotReport::Storage(report) = result.report() else { unreachable!() };
+        assert_storage_file_summary(report, case);
+        assert_eq!(result.original().bytes_read(), bytes);
+        assert_eq!(result.original().read().description, source);
+        assert_eq!(fixture.manifest.source_queries, 0);
+    }
+}
