@@ -9,6 +9,12 @@ pub(crate) fn metadata(visible: bool) -> Rec {
 }
 pub(crate) fn row() -> Rec {
     Rec::of(&[
+        ("configuration_partition_identity_availability", Val::Int(0)),
+        ("configuration_data_compression_availability", Val::Int(0)),
+        ("configuration_data_compression_desc_availability", Val::Int(0)),
+        ("configuration_xml_compression_availability", Val::Int(0)),
+        ("configuration_xml_compression_desc_availability", Val::Int(0)),
+        ("configuration_partitions", Val::Text("[]".into())),
         ("database_id", Val::Int(5)),
         ("object_id", Val::Int(100)),
         ("schema_name", Val::Text("dbo".into())),

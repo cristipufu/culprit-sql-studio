@@ -432,3 +432,5 @@ mod group_replication;
 mod galera;
 
 mod managed_instance_resources;
+
+mod index_configuration;

@@ -627,6 +627,7 @@ fn table(t: &SchemaTable, rows: Option<f64>, data: Option<f64>, index_bytes: f64
         mssql_full_text: None,
         mssql_storage_configuration: None,
         mssql_tracked_by_cdc: None,
+        mssql_heap_configuration: None,
         mssql_temporal_configuration: None,
         in_row_bytes: None,
         lob_bytes: None,
@@ -709,6 +710,7 @@ fn read_indexes(
         let filter = if partial { sql.as_deref().and_then(partial_filter) } else { None };
         let primary = origin == "pk";
         out.push(IndexStat {
+            mssql_configuration: None,
             mssql_columnstore: None,
             docdb: None,
             filter_facts: None,

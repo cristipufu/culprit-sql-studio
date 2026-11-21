@@ -2,6 +2,7 @@ import type { SuspectPageHistoryReport } from "../gen/SuspectPageHistoryReport";
 import type { Report } from "../gen/Report";
 import { t } from "../lib/i18n";
 import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 export function suspectPageHistoryReport(unavailable = false): SuspectPageHistoryReport {
   return partial<SuspectPageHistoryReport>({
@@ -34,7 +35,7 @@ export function suspectPageHistoryReport(unavailable = false): SuspectPageHistor
   });
 }
 export function suspectPageHealthReport(unavailable = false): Report {
-  return partial<Report>({
+  return healthReportFixture({
     snapshot: { id: "suspect-history", server: { engine: "mssql" }, resources: [], pressure: null, sources: [], operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } },
     performance_counters: [],
     suspect_pages: suspectPageHistoryReport(unavailable),

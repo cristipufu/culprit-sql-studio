@@ -33,6 +33,7 @@ import { CounterRatios } from "./CounterRatios";
 import { MemoryClerks } from "./MemoryClerks";
 import { TempdbMetadataMemory } from "./TempdbMetadataMemory";
 import { TableMemory } from "./TableMemory";
+import { IndexConfigurations } from "./IndexConfigurations";
 import { QueryWaitFragments } from "./QueryWaitFragments";
 import { RuntimeFragments } from "./RuntimeFragments";
 import { GroupReplication } from "./GroupReplication";
@@ -184,6 +185,7 @@ export function HealthTab({
   const cdcHistory = changeCaptureHistoryState(report.cdc, report.snapshot.operations.cdc_history.length, CDC_HISTORY_SOURCES, report.snapshot.sources ?? []);
   const changeFeedHistory = changeCaptureHistoryState(report.change_feed, report.snapshot.operations.change_feed_history.length, CHANGE_FEED_HISTORY_SOURCES, report.snapshot.sources ?? []);
   const tableMemory = report.table_memory ?? [];
+  const indexConfiguration = report.index_configuration;
   const queryWaitFragments = report.query_wait_fragments;
   const runtimeFragments = report.runtime_fragments;
   const groupReplication = report.group_replication ?? [];
@@ -216,7 +218,7 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [cdcHistory.present, changeFeedHistory.present, memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, runtimeFragments, queryWaitFragments, tableMemory.length > 0, groupReplication.length > 0, galera.length > 0, fullTextPopulations.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, suspectPages, suspectRecorded, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, managedInstanceResources, managedInstanceResourcesRead, poolSettings, poolSettingsRead, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, runtimeFragments, queryWaitFragments, indexConfiguration.length > 0, tableMemory.length > 0, groupReplication.length > 0, galera.length > 0, fullTextPopulations.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, suspectPages, suspectRecorded, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, managedInstanceResources, managedInstanceResourcesRead, poolSettings, poolSettingsRead, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
   const hasReadIssue = [cdcHistory.issue, changeFeedHistory.issue, memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, suspectIssue, databasePropertiesIssue, memoryClerkIssue, tempdbMetadataIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
@@ -315,6 +317,7 @@ export function HealthTab({
       <ChangeCaptureHistory title={t("view.change_capture.history.change_feed")} reports={changeFeedHistory.reports} unexplained={changeFeedHistory.unexplained} />
       {runtimeFragments && <RuntimeFragments report={runtimeFragments} />}
       {queryWaitFragments && <QueryWaitFragments report={queryWaitFragments} />}
+      <IndexConfigurations key={report.snapshot.id} reports={indexConfiguration} />
       {tableMemory.length > 0 && <TableMemory key={report.snapshot.id} reports={tableMemory} />}
       {groupReplication.length > 0 && <GroupReplication key={report.snapshot.id} reports={groupReplication} />}
       {managedInstanceResources && <ManagedInstanceResources key={managedInstanceResourcesRead?.kind === "captured" ? managedInstanceResourcesRead.read.origin.capture.manifest_sha256 : report.snapshot.id} report={managedInstanceResources} />}

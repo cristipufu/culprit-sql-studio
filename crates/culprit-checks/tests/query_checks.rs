@@ -730,6 +730,7 @@ fn an_unstable_insert_says_what_its_foreign_keys_lock() {
     // A unique key on the columns it sets: another transaction inserting the same order and product holds it.
     let pkey = s.indexes.iter().find(|i| i.name == "order_items_pkey").cloned().expect("demo index");
     s.indexes.push(culprit_core::IndexStat {
+        mssql_configuration: None,
         mssql_columnstore: None,
         filter_facts: None,
         name: "order_items_order_product_key".into(),
@@ -895,6 +896,7 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
     );
     let pkey = keyed.indexes.iter().find(|i| i.name == "order_items_pkey").cloned().expect("demo index");
     keyed.indexes.push(culprit_core::IndexStat {
+        mssql_configuration: None,
         mssql_columnstore: None,
         filter_facts: None,
         name: "order_items_order_product_key".into(),

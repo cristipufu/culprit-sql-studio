@@ -53,6 +53,7 @@ fn native_index() -> MssqlIndexSnapshot {
         primary_key: false,
         disabled: false,
         columns,
+        configuration: None,
         columnstore: Some(Box::new(configuration)),
         filter: None,
         reserved_bytes: None,

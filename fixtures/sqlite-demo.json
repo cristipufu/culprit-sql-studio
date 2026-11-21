@@ -12,7 +12,8 @@
     "cluster": null,
     "galera": [],
     "cdc_history": [],
-    "change_feed_history": []
+    "change_feed_history": [],
+    "index_configuration": []
   },
   "sources": [
     {
@@ -41,7 +42,7 @@
       "reason": null
     }
   ],
-  "format": 44,
+  "format": 45,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",

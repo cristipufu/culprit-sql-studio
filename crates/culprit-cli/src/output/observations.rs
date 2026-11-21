@@ -1379,3 +1379,6 @@ mod managed_instance_resources;
 pub(crate) use managed_instance_resources::{
     compact as compact_managed_instance_resources, managed_instance_resources,
 };
+
+mod index_configuration;
+pub(crate) use index_configuration::{compact_index_configuration, index_configuration};

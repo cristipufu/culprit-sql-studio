@@ -24,8 +24,9 @@ pub(super) fn query(table_query: impl Fn(&str, &str) -> super::temporal::QueryPa
     ));
     let unavailable = super::temporal::expression(table_query(UNAVAILABLE_COLUMNS, ""));
     let temporal = super::temporal::declarations();
-    let parameters = super::temporal::parameters();
-    let arguments = super::temporal::arguments();
+    let parameters = super::temporal::parameters() + &crate::indexes::configuration::parameters(false);
+    let arguments = super::temporal::arguments() + &crate::indexes::configuration::arguments(false);
+    let configuration = crate::indexes::configuration::declarations(false);
     format!(
         r#"DECLARE /* culprit */ @culprit_full_text_metadata int=HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION');
 DECLARE /* culprit */ @culprit_full_text_select int=HAS_PERMS_BY_NAME(N'{CATALOG}',N'OBJECT',N'SELECT');
@@ -39,6 +40,10 @@ DECLARE /* culprit */ @culprit_full_text_availability int=CASE
     OR (name=N'change_tracking_state' AND system_type_id=TYPE_ID(N'char') AND max_length=1)))=6 THEN 0
  ELSE 1 END;
 {temporal}
+DECLARE /* culprit */ @culprit_index_major int=@culprit_temporal_major,
+ @culprit_index_edition int=@culprit_temporal_edition,
+ @culprit_index_metadata int=@culprit_temporal_metadata;
+{configuration}
 DECLARE /* culprit */ @culprit_table_sql nvarchar(max);
 IF @culprit_full_text_availability=0
  SET /* culprit */ @culprit_table_sql={joined};

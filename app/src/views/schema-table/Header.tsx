@@ -6,6 +6,7 @@ import { FullText } from "./FullText";
 import { StorageConfiguration } from "./StorageConfiguration";
 import { TemporalConfiguration } from "./TemporalConfiguration";
 import { CdcEnrollment } from "./CdcEnrollment";
+import { IndexConfiguration } from "./IndexConfiguration";
 import type { Report } from "../../gen/Report";
 import type { TableStat } from "../../gen/TableStat";
 import { copyAndTell } from "../../lib/clipboard";
@@ -128,10 +129,11 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
         <TableSignalFacts report={report} table={table} />
       </div>
       <HypertableChunks key={tableKey(table)} table={table} />
-      <StorageConfiguration key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_storage_configuration])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} />
-      <TemporalConfiguration key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_temporal_configuration])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} report={report.table_temporal} />
-      <CdcEnrollment key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_tracked_by_cdc])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} />
-      {fullText && fullTextEntry && <FullText key={JSON.stringify([snapshot.id, table.schema, table.name, table.mssql_full_text])} report={fullText} entry={fullTextEntry} />}
+      <StorageConfiguration key={JSON.stringify(["storage", snapshot.id, table.schema, table.name, table.mssql_storage_configuration])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} />
+      <TemporalConfiguration key={JSON.stringify(["temporal", snapshot.id, table.schema, table.name, table.mssql_temporal_configuration])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} report={report.table_temporal} />
+      <CdcEnrollment key={JSON.stringify(["cdc", snapshot.id, table.schema, table.name, table.mssql_tracked_by_cdc])} engine={snapshot.server.engine} table={table} sourceState={tableSourceState} />
+      <IndexConfiguration report={report} table={table} />
+      {fullText && fullTextEntry && <FullText key={JSON.stringify(["full-text", snapshot.id, table.schema, table.name, table.mssql_full_text])} report={fullText} entry={fullTextEntry} />}
       {findings.length > 0 && (
         <div className="td-findings">
           {shown.map((f, n) => (

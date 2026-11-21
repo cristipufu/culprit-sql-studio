@@ -4,6 +4,7 @@ import type { Report } from "../gen/Report";
 import type { Metric } from "../gen/Metric";
 import { t } from "../lib/i18n";
 import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 export const EXACT_PERFORMANCE_COUNTER = "9007199254740993 KiB";
 
@@ -33,7 +34,7 @@ export function performanceCounterReport(count = 12): PerformanceCounterReport {
 }
 
 export function performanceCounterHealthReport(view: PerformanceCounterReport | null = performanceCounterReport()): Report {
-  return partial<Report>({
+  return healthReportFixture({
     snapshot: { id: "counter-presentation", server: { engine: "mssql" }, resources: [], pressure: null,
       sources: [{ source: "performance counters", state: view ? "partial" : "unavailable", reason: null }],
       operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } },

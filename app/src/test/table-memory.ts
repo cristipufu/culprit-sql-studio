@@ -1,7 +1,7 @@
 import type { TableMemoryReport } from "../gen/TableMemoryReport";
 import type { Report } from "../gen/Report";
 import { t } from "../lib/i18n";
-import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 /** Presentation-only native facts; Rust owns all evidence and source admission. */
 export function tableMemoryReport(index = 0): TableMemoryReport {
@@ -28,7 +28,7 @@ export function tableMemoryReport(index = 0): TableMemoryReport {
   };
 }
 export function tableMemoryHealthReport(reports: TableMemoryReport[]): Report {
-  return partial<Report>({ table_memory: reports, performance_counters: [],
+  return healthReportFixture({ table_memory: reports, performance_counters: [],
     snapshot: { id: "selected-table-presentation", server: { engine: "mssql" }, pressure: null, resources: [], sources: [],
       operations: { table_memory: [], spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } },
   });

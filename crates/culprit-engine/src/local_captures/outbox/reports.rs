@@ -27,6 +27,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::InstanceResources => Ok(LocalSnapshotReport::InstanceResources(Box::new(
             culprit_checks::instance_resources::explain_captured(read)?,
         ))),
+        LocalCaptureAnalysisKind::IndexConfiguration => Ok(LocalSnapshotReport::IndexConfiguration(Box::new(
+            culprit_checks::index_configuration::explain_captured(read)?,
+        ))),
         LocalCaptureAnalysisKind::TableTemporal => Ok(LocalSnapshotReport::TableTemporal(Box::new(
             crate::collected_resources::table_temporal::from_read(read)?,
         ))),

@@ -36,8 +36,8 @@ fn qualified_table(
     entry(&table.schema, &table.name, None, state).map(Some)
 }
 
-pub fn explain(evidence: super::table_catalog::TableCatalogEvidence<'_>) -> Result<TableFullTextReport> {
-    let context = evidence.validate()?;
+pub fn explain(evidence: super::table_catalog::MssqlCatalogEvidence<'_>) -> Result<TableFullTextReport> {
+    let context = evidence.validate(SnapshotDataset::Tables)?;
     let native = evidence.description.observation.snapshot().ok_or_else(invalid)?;
     let [coverage] = native.sources.as_slice() else { return Err(invalid()) };
     let entries = evidence

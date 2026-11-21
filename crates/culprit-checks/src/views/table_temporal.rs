@@ -1,5 +1,5 @@
 //! The same original configuration interpreter serves retained table rows and saved scan details.
-use super::table_catalog::TableCatalogEvidence;
+use super::table_catalog::MssqlCatalogEvidence;
 use culprit_core::{
     Engine, Result, Snapshot, SourceOutcome, SourceState, TableStat, TableTemporalEntry, TableTemporalField,
     TableTemporalReport, format, key, source_id, t, telemetry::*,
@@ -33,8 +33,8 @@ fn qualified_table(
     }
     entry(&table.schema, &table.name, None, configuration).map(Some)
 }
-pub fn explain(evidence: TableCatalogEvidence<'_>) -> Result<TableTemporalReport> {
-    let context = evidence.validate()?;
+pub fn explain(evidence: MssqlCatalogEvidence<'_>) -> Result<TableTemporalReport> {
+    let context = evidence.validate(SnapshotDataset::Tables)?;
     let native = evidence.description.observation.snapshot().ok_or_else(invalid)?;
     let [coverage] = native.sources.as_slice() else { return Err(invalid()) };
     let entries = evidence

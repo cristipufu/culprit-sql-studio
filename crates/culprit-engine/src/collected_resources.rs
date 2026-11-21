@@ -191,3 +191,6 @@ pub use pool_settings::pool_settings;
 
 mod managed_instance_resources;
 pub use managed_instance_resources::managed_instance_resources;
+
+mod index_configuration;
+pub use index_configuration::index_configuration;

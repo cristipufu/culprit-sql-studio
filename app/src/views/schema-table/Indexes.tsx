@@ -9,6 +9,7 @@ import { t } from "../../lib/i18n";
 import { indexKey, indexUsage, plannedQueryCount } from "../../lib/index-usage";
 import { setState } from "../../lib/store";
 import { ColumnstoreConfiguration } from "./ColumnstoreConfiguration";
+import { IndexConfiguration } from "./IndexConfiguration";
 
 /** Each index: keys, the captured queries that use it, reads and writes, size, and what its counters do and don't show. */
 export function Indexes({ report, table, indexes }: { report: Report; table: TableStat; indexes: IndexStat[] }) {
@@ -164,6 +165,7 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
                     </tr>
                   )}
                   <ColumnstoreConfiguration engine={engine} index={i} sourceState={sourceState} />
+                  <IndexConfiguration report={report} index={i} />
                   {expanded && (
                     <tr className="ix-uses" id={usesId}>
                       <td colSpan={5}>

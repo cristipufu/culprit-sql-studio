@@ -896,3 +896,17 @@ pub fn explain_table_full_text(
 }
 
 pub use local_captures::LocalManagedInstanceResources;
+
+/// One current index's original catalog child, qualified by the same pure interpreter as retained originals.
+pub fn explain_index_configuration(
+    snapshot: &culprit_core::Snapshot,
+    index: &culprit_core::IndexStat,
+) -> culprit_core::Result<Option<culprit_core::IndexConfigurationReport>> {
+    culprit_checks::index_configuration::explain_index(snapshot, index)
+}
+pub fn explain_heap_configuration(
+    snapshot: &culprit_core::Snapshot,
+    table: &culprit_core::TableStat,
+) -> culprit_core::Result<Option<culprit_core::IndexConfigurationReport>> {
+    culprit_checks::index_configuration::explain_heap(snapshot, table)
+}

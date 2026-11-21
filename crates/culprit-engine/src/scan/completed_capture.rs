@@ -17,6 +17,7 @@ pub enum CompletedCaptureAnalysis {
     MemoryClerks,
     DatabasePerformanceCounters,
     TableMemory,
+    IndexConfiguration { dataset: SnapshotDataset },
     GroupReplication,
     Galera,
     PoolSettings,
@@ -32,6 +33,14 @@ impl CompletedCaptureAnalysis {
             Self::CachedRuntime => SnapshotDataset::CachedRuntime,
             Self::MemoryClerks => SnapshotDataset::Operational,
             Self::DatabasePerformanceCounters => SnapshotDataset::DatabasePerformanceCounters,
+            Self::IndexConfiguration { dataset }
+                if matches!(dataset, SnapshotDataset::Indexes | SnapshotDataset::Tables) =>
+            {
+                dataset
+            }
+            Self::IndexConfiguration { .. } => {
+                return Err(culprit_core::telemetry::DeliveryProblem::UnsupportedSchema.error());
+            }
             Self::TableMemory => SnapshotDataset::TableMemory,
             Self::GroupReplication => SnapshotDataset::GroupReplication,
             Self::Galera => SnapshotDataset::Galera,
@@ -101,6 +110,9 @@ impl CompletedCaptureScanInput<'_> {
             }
             CompletedCaptureAnalysis::Galera => {
                 super::CapturedScanEvidence::galera(Box::new(captured.into_operational_read()?))?
+            }
+            CompletedCaptureAnalysis::IndexConfiguration { .. } => {
+                super::CapturedScanEvidence::index_configuration(Box::new(captured.into_operational_read()?))?
             }
             CompletedCaptureAnalysis::TableMemory => {
                 super::CapturedScanEvidence::table_memory(Box::new(captured.into_operational_read()?))?

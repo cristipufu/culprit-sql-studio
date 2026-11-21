@@ -288,3 +288,8 @@ mod managed_instance_resource_report;
 pub use managed_instance_resource_report::{
     ManagedInstanceResourceField, ManagedInstanceResourceInterval, ManagedInstanceResourceReport,
 };
+
+mod index_configuration_report;
+pub use index_configuration_report::{
+    IndexConfigurationEntry, IndexConfigurationField, IndexConfigurationReport, PartitionConfigurationEntry,
+};

@@ -8,6 +8,7 @@ use culprit_core::{Result, telemetry::*};
 pub(super) struct QueryParts {
     pub before_temporal: String,
     pub after_temporal: String,
+    pub companion_expression: String,
 }
 #[derive(Clone, Copy)]
 struct Column {
@@ -75,11 +76,12 @@ pub(super) fn expression(parts: QueryParts) -> String {
         crate::statement_origin::MONITORING_QUERY_MARKER,
         parts.before_temporal
     );
+    let companion = parts.companion_expression;
     let fields = COLUMNS.into_iter().map(Column::expression).collect::<Vec<_>>().join("+N','+");
     // Promote before concatenation: the catalog-only query exceeds nvarchar(4000), even when the assignment
     // target is nvarchar(max). Otherwise SQL Server truncates the intermediate statement before execution.
     format!(
-        "CAST({} AS nvarchar(max))+{fields}+{}",
+        "CAST({} AS nvarchar(max))+{fields}+N','+{companion}+{}",
         crate::catalog_visibility::sql_literal(&before),
         crate::catalog_visibility::sql_literal(&parts.after_temporal)
     )

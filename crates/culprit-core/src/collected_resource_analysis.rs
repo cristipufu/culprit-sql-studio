@@ -352,3 +352,10 @@ pub struct CollectedChangeFeedAnalysis {
     pub context: crate::collected_analysis::CollectedEvidenceContext,
     pub report: Box<crate::ChangeFeedReport>,
 }
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedIndexConfigurationAnalysis {
+    pub context: crate::collected_analysis::CollectedEvidenceContext,
+    pub report: Box<crate::IndexConfigurationReport>,
+}

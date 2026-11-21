@@ -35,6 +35,8 @@ pub struct MssqlTableSnapshot {
     pub is_heap: Option<bool>,
     pub size_source: MssqlTableSizeSource,
     pub full_text: MssqlTableFullText,
+    #[serde(deserialize_with = "required_nullable")]
+    pub heap_configuration: Option<Box<MssqlIndexConfiguration>>,
     pub storage_configuration: MssqlTableStorageConfiguration,
     pub temporal_configuration: MssqlTableTemporalConfiguration,
     /// Current native table enrollment only, not CDC processing progress or retained change history.
@@ -59,6 +61,7 @@ impl MssqlTableSnapshot {
         ];
         self.identity.is_valid()
             && self.full_text.is_valid()
+            && self.heap_configuration.as_ref().is_none_or(|configuration| configuration.is_valid_for_heap(self))
             && self.storage_configuration.is_valid()
             && self.temporal_configuration.is_valid()
             && self.temporal_configuration.history_table_id != Some(self.identity.object_id)

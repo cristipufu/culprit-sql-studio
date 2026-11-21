@@ -1,7 +1,9 @@
 //! Native index metadata and usage remain separate from app display strings and inferred reset clocks.
 use super::*;
 mod columnstore;
+mod configuration;
 pub use columnstore::*;
+pub use configuration::*;
 pub const MAX_MSSQL_INDEX_COLUMNS: usize = 1024;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -71,6 +73,8 @@ pub struct MssqlIndexSnapshot {
     pub disabled: bool,
     pub columns: Vec<MssqlCatalogIndexColumn>,
     pub columnstore: Option<Box<MssqlColumnstoreConfiguration>>,
+    #[serde(deserialize_with = "configuration::required_nullable")]
+    pub configuration: Option<Box<MssqlIndexConfiguration>>,
     pub filter: Option<CatalogExpression>,
     pub reserved_bytes: Option<String>,
     pub usage: MssqlIndexUsage,
@@ -107,6 +111,7 @@ impl MssqlIndexSnapshot {
             })
             && (matches!(self.type_code, 5 | 6) == self.columnstore.is_some())
             && self.columnstore.as_ref().is_none_or(|configuration| configuration.is_valid_for(self))
+            && self.configuration.as_ref().is_none_or(|configuration| configuration.is_valid_for(self))
             && self.filter.as_ref().is_none_or(CatalogExpression::is_valid)
             && self.reserved_bytes.as_deref().is_none_or(valid_counter)
             && match &self.usage {

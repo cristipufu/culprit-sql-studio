@@ -13,7 +13,8 @@
     "cluster": null,
     "galera": [],
     "cdc_history": [],
-    "change_feed_history": []
+    "change_feed_history": [],
+    "index_configuration": []
   },
   "sources": [
     {
@@ -47,7 +48,7 @@
       "reason": null
     }
   ],
-  "format": 44,
+  "format": 45,
   "id": "20261011T115421.485Z",
   "connection": "pg-demo",
   "environment": "local",

@@ -5,11 +5,12 @@ import { type DeepPartial, partial } from "./fixtures";
 export function healthReportFixture(fields: DeepPartial<Report>): Report {
   return partial<Report>({
     performance_counters: [],
+    index_configuration: [],
     ...fields,
     snapshot: {
       ...fields.snapshot,
       operations: {
-        spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null, cdc_history: [], change_feed_history: [],
+        spaces: [], index_configuration: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null, cdc_history: [], change_feed_history: [],
         ...fields.snapshot?.operations,
       },
     },

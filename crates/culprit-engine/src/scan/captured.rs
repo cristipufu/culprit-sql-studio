@@ -8,6 +8,7 @@ use culprit_core::{
 use culprit_core::telemetry::{CachedRuntimeRead, CachedRuntimeReadOrigin};
 
 pub(crate) enum CapturedScanEvidence {
+    IndexConfiguration(Box<CapturedOperationalRead>),
     ChangeCapture {
         family: culprit_core::telemetry::MssqlChangeCaptureFamily,
         read: Box<CapturedOperationalRead>,
@@ -28,6 +29,10 @@ pub(crate) enum CapturedScanEvidence {
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
 impl CapturedScanEvidence {
+    pub(crate) fn index_configuration(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::index_configuration::explain_captured(&read)?;
+        Ok(Self::IndexConfiguration(read))
+    }
     pub(crate) fn change_capture(
         family: culprit_core::telemetry::MssqlChangeCaptureFamily,
         read: Box<CapturedOperationalRead>,
@@ -104,6 +109,13 @@ impl CapturedScanEvidence {
     }
     pub(crate) fn attach(self, snapshot: &mut Snapshot) -> Result<()> {
         match self {
+            Self::IndexConfiguration(read) => {
+                culprit_checks::index_configuration::explain_captured(&read)?;
+                culprit_core::telemetry::append_recorded_operational_read(
+                    &mut snapshot.operations.index_configuration,
+                    read,
+                )?;
+            }
             Self::ChangeCapture { family, read } => {
                 let originals = match family {
                     culprit_core::telemetry::MssqlChangeCaptureFamily::Cdc => &mut snapshot.operations.cdc_history,

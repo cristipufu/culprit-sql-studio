@@ -591,11 +591,15 @@ pub fn table(report: &Report, wanted: &str) -> Result<Value> {
         .indexes
         .iter()
         .filter(|i| mine(&i.schema, &i.table))
-        .map(|i| {
+        .map(|i| -> Result<Value> {
+            let configuration = culprit_engine::explain_index_configuration(s, i)?
+                .as_ref()
+                .map(crate::waits_view::index_configuration::value);
             let used_by = usage.get(&bare(&i.name)).cloned().unwrap_or_default();
-            json!({
+            Ok(json!({
                 "name": i.name,
                 "kind": i.kind,
+                "persisted_configuration":configuration,
                 "columnstore_configuration": columnstore::configuration(s, i),
                 "columns": i.columns,
                 "include": (!i.include.is_empty()).then_some(&i.include),
@@ -608,9 +612,9 @@ pub fn table(report: &Report, wanted: &str) -> Result<Value> {
                 "writes": i.writes,
                 "last_read": i.last_read,
                 "used_by_captured_plans": used_by,
-            })
+            }))
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let foreign_keys: Vec<Value> = s
         .foreign_keys
         .iter()
@@ -666,6 +670,9 @@ pub fn table(report: &Report, wanted: &str) -> Result<Value> {
     }
     if let Some(enrollment) = table_catalog::change_data_capture(s, t) {
         out["change_data_capture"] = enrollment;
+    }
+    if let Some(configuration) = culprit_engine::explain_heap_configuration(s, t)? {
+        out["heap_configuration"] = crate::waits_view::index_configuration::value(&configuration);
     }
     if let Some(temporal) = culprit_engine::explain_table_temporal(s, t)? {
         out["temporal_configuration"] = json!({"fields":temporal.entries[0].fields,"qualification":temporal.qualification,
@@ -963,3 +970,6 @@ mod tests {
 mod table_full_text_tests;
 #[cfg(test)]
 mod table_temporal_tests;
+
+#[cfg(test)]
+mod index_configuration_tests;

@@ -61,6 +61,7 @@ pub struct OperationalStats {
     pub database_performance_counters: Option<crate::telemetry::RecordedPerformanceCounters>,
     /// One authenticated selected-table memory original, independent of a later scan's table/member identities.
     pub table_memory: Vec<crate::telemetry::RecordedOperationalRead>,
+    pub index_configuration: Vec<crate::telemetry::RecordedOperationalRead>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pool_settings: Option<Box<crate::telemetry::RecordedPoolSettingsRead>>,
@@ -220,6 +221,7 @@ impl OperationalStats {
             database_performance_counters: _,
             managed_instance_resources: _,
             table_memory: _,
+            index_configuration: _,
             pool_settings: _,
             group_replication: _,
             galera: _,

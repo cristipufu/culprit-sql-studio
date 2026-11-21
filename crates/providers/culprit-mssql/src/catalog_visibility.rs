@@ -37,3 +37,31 @@ pub(crate) fn availability(
 pub(crate) fn sql_literal(sql: &str) -> String {
     format!("N'{}'", sql.replace('\'', "''"))
 }
+
+/// Fixed optional index/partition column layout, evaluated once per native batch.
+pub(crate) fn index_column_capability(
+    variable: &str,
+    catalog: &str,
+    column: &str,
+    native_type: &str,
+    minimum_major: u32,
+    azure: bool,
+) -> String {
+    let supported = if azure {
+        format!("@culprit_index_major>={minimum_major} OR @culprit_index_edition IN(5,8)")
+    } else {
+        format!("@culprit_index_major>={minimum_major}")
+    };
+    format!(
+        r#"DECLARE /* culprit */ @culprit_{variable} int=CASE
+ WHEN @culprit_index_metadata=0 OR HAS_PERMS_BY_NAME(N'{catalog}',N'OBJECT',N'SELECT')=0 THEN 2
+ WHEN @culprit_index_metadata IS NULL OR @culprit_index_major IS NULL OR @culprit_index_edition IS NULL
+  OR OBJECT_ID(N'{catalog}') IS NULL OR HAS_PERMS_BY_NAME(N'{catalog}',N'OBJECT',N'SELECT') IS NULL THEN 3
+ WHEN NOT({supported}) THEN 1
+ WHEN NOT EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{catalog}') AND name=N'{column}') THEN 1
+ WHEN NOT EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{catalog}') AND name=N'{column}' AND system_type_id=TYPE_ID(N'{native_type}')) THEN 3
+ WHEN HAS_PERMS_BY_NAME(N'{catalog}',N'OBJECT',N'SELECT',N'{column}',N'COLUMN')=0 THEN 2
+ WHEN HAS_PERMS_BY_NAME(N'{catalog}',N'OBJECT',N'SELECT',N'{column}',N'COLUMN')=1 THEN 0
+ ELSE 3 END;"#
+    )
+}

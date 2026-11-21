@@ -32,6 +32,7 @@ mod full_text_populations;
 mod galera;
 mod group_replication;
 mod hyperscale_log_components;
+mod index_configuration;
 mod instance_resources;
 mod jobs;
 mod maintenance_progress;
@@ -314,6 +315,7 @@ impl Pipeline {
         let suspect_pages = suspect_pages::explain(&mut snapshot);
         let table_full_text = table_full_text::explain(&mut snapshot);
         let table_temporal = table_temporal::explain(&mut snapshot);
+        let index_configuration = index_configuration::explain(&mut snapshot);
         let storage = storage::explain(&mut snapshot);
         let instance_resources = instance_resources::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
@@ -419,6 +421,7 @@ impl Pipeline {
         Report {
             table_full_text,
             table_temporal,
+            index_configuration,
             storage,
             instance_resources,
             snapshot,

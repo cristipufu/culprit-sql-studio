@@ -14,6 +14,7 @@ mod completed_spills;
 mod configured_log_rates;
 mod connection_outcomes;
 mod counter_ratios;
+pub(crate) mod index_configuration;
 pub(crate) mod instance_resources;
 mod jobs;
 pub(crate) mod page_server_reads;
@@ -122,6 +123,7 @@ pub fn report(report: &Report) -> Value {
     counter_ratios::attach(&mut response, report);
     performance_counters::attach(&mut response, report);
     table_memory::attach(&mut response, report);
+    index_configuration::attach(&mut response, report);
     query_wait_fragments::attach(&mut response, report);
     change_capture::attach(&mut response, report);
     runtime_fragments::attach(&mut response, report);

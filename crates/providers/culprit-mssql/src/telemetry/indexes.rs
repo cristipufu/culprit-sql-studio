@@ -27,4 +27,8 @@ impl SnapshotRecipe for Indexes {
             fact: OperationalFact::MssqlIndex(Box::new(index)),
         }))
     }
+    fn complete_record_scope(&self, record: &TelemetryRecord) -> bool {
+        matches!(record,TelemetryRecord::Operational(OperationalObservation {fact:OperationalFact::MssqlIndex(value),..})
+            if value.configuration.as_ref().is_none_or(|configuration| configuration.partitions_complete))
+    }
 }

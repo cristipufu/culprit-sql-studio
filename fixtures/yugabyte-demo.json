@@ -2576,9 +2576,10 @@
     },
     "galera": [],
     "cdc_history": [],
-    "change_feed_history": []
+    "change_feed_history": [],
+    "index_configuration": []
   },
-  "format": 44,
+  "format": 45,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

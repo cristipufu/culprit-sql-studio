@@ -28,7 +28,7 @@ fn explain(
     read_complete: bool,
 ) -> Result<TableTemporalReport> {
     let source = read_outcome(coverage, observations.len(), read_complete)?;
-    culprit_checks::table_temporal::explain(culprit_checks::table_catalog::TableCatalogEvidence {
+    culprit_checks::table_temporal::explain(culprit_checks::table_catalog::MssqlCatalogEvidence {
         description,
         observations,
         source: &source,

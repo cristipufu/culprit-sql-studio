@@ -243,6 +243,7 @@ enum Analysis {
     DatabaseProperties,
     TableFullText,
     TableTemporal,
+    IndexConfiguration,
     InstanceResources,
     ManagedInstanceResources,
     Storage,
@@ -306,6 +307,7 @@ impl Analysis {
             | Self::DatabaseProperties
             | Self::TableFullText
             | Self::TableTemporal
+            | Self::IndexConfiguration
             | Self::Storage
             | Self::ConnectionOutcomes
             | Self::ConfiguredLogRates
@@ -501,6 +503,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::InstanceResources) => {
             let analysis = culprit_engine::collected_resources::instance_resources(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::instance_resources(&analysis.report))?;
+        }
+        Some(Analysis::IndexConfiguration) => {
+            let analysis = culprit_engine::collected_resources::index_configuration(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::index_configuration(&analysis.report))?;
         }
         Some(Analysis::TableTemporal) => {
             let analysis = culprit_engine::collected_resources::table_temporal(&capture)?;

@@ -48,7 +48,7 @@ database_performance_counters?: RecordedPerformanceCounters,
 /**
  * One authenticated selected-table memory original, independent of a later scan's table/member identities.
  */
-table_memory: Array<RecordedOperationalRead>, pool_settings?: RecordedPoolSettingsRead, 
+table_memory: Array<RecordedOperationalRead>, index_configuration: Array<RecordedOperationalRead>, pool_settings?: RecordedPoolSettingsRead, 
 /**
  * Independently captured observer/group points never grade the current database or workload.
  */

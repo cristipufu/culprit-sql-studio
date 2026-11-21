@@ -7,6 +7,15 @@ use crate::{
 pub(crate) fn row() -> Rec {
     let filter = "([owner]=N'private-owner')";
     Rec::of(&[
+        ("configuration_fill_factor_availability",Val::Int(0)),("configuration_fill_factor",Val::Int(0)),
+        ("configuration_is_padded_availability",Val::Int(0)),("configuration_is_padded",Val::Int(0)),
+        ("configuration_ignore_dup_key_availability",Val::Int(0)),("configuration_ignore_dup_key",Val::Int(0)),
+        ("configuration_allow_row_locks_availability",Val::Int(0)),("configuration_allow_row_locks",Val::Int(1)),
+        ("configuration_allow_page_locks_availability",Val::Int(0)),("configuration_allow_page_locks",Val::Int(1)),
+        ("configuration_partition_identity_availability",Val::Int(0)),
+        ("configuration_data_compression_availability",Val::Int(0)),("configuration_data_compression_desc_availability",Val::Int(0)),
+        ("configuration_xml_compression_availability",Val::Int(0)),("configuration_xml_compression_desc_availability",Val::Int(0)),
+        ("configuration_partitions",Val::Text("[]".into())),
         ("compression_availability",Val::Int(0)),("ordering_availability",Val::Int(0)),("clustering_availability",Val::Int(0)),("compression_delay",Val::Null),
         ("database_id",Val::Int(5)),("object_id",Val::Int(100)),
         ("created_without_offset",Val::Text("2026-11-10T07:00:00.123".into())),

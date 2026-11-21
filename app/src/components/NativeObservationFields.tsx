@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
 import type { NativeIdentity } from "../gen/NativeIdentity";
 import type { CollectionDescription } from "../gen/CollectionDescription";
+import { contextPreview } from "../lib/context-preview";
 import { t } from "../lib/i18n";
+
+export function nativeTextPreview(value: string, limit: number): string {
+  return contextPreview(value.replace(/\p{Cc}/gu, " "), limit).text;
+}
 
 export function queryHistoryReadTimes(report: { description: CollectionDescription | null; collected_from: string | null; collected_until: string | null }): ReactNode {
   const history = report.description?.observation;

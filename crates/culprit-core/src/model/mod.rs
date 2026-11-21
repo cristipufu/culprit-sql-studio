@@ -22,7 +22,7 @@ pub use workload::{
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
 /// or mean something else.
-pub const SNAPSHOT_FORMAT: u32 = 44;
+pub const SNAPSHOT_FORMAT: u32 = 45;
 
 /// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
 mod current_format {
@@ -436,6 +436,8 @@ pub struct TableStat {
     pub mssql_tracked_by_cdc: Option<bool>,
     /// Same-row SQL Server temporal/history configuration, not observed cleanup or history completeness.
     pub mssql_temporal_configuration: Option<crate::telemetry::MssqlTableTemporalConfiguration>,
+    /// Original heap index-zero partition configuration; no whole-table compression is inferred.
+    pub mssql_heap_configuration: Option<Box<crate::telemetry::MssqlIndexConfiguration>>,
     /// Bytes of the table's own rows (its heap or clustered index) kept in the rows' pages. With `lob_bytes` and
     /// `overflow_bytes`, how its data splits between the rows and the large values kept apart from them. `None` where
     /// the engine doesn't say.
@@ -475,6 +477,8 @@ impl TableStat {
 pub struct IndexStat {
     /// Persisted SQL Server columnstore configuration from the same native index read; not rowgroup health.
     pub mssql_columnstore: Option<Box<crate::telemetry::MssqlColumnstoreConfiguration>>,
+    /// Persisted native options and a bounded per-partition configuration, never physical state or advice.
+    pub mssql_configuration: Option<Box<crate::telemetry::MssqlIndexConfiguration>>,
     pub schema: String,
     pub table: String,
     pub name: String,

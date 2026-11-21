@@ -17,7 +17,7 @@ fn report(case: TableTemporalCase) -> TableTemporalReport {
             row
         })
         .collect::<Vec<_>>();
-    culprit_checks::table_temporal::explain(culprit_checks::table_catalog::TableCatalogEvidence {
+    culprit_checks::table_temporal::explain(culprit_checks::table_catalog::MssqlCatalogEvidence {
         description: &description,
         observations: &observations,
         source: &source,

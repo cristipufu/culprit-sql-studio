@@ -1,4 +1,5 @@
 //! Optional persisted catalog fields compile only after their native layout and permissions are observed.
+use crate::catalog_visibility::index_column_capability as capability;
 use crate::{
     read::{invalid_data, optional_integer},
     value::Rec,
@@ -13,6 +14,10 @@ pub(super) struct QueryParts {
 }
 
 pub(super) fn query(parts: QueryParts) -> String {
+    let configuration = super::configuration::columns_expression(true);
+    let configuration_declarations = super::configuration::declarations(true);
+    let configuration_parameters = super::configuration::parameters(true);
+    let configuration_arguments = super::configuration::arguments(true);
     let capabilities = [
         capability("compression", "sys.indexes", "compression_delay", "int", 13, true),
         capability("ordering", "sys.index_columns", "column_store_order_ordinal", "tinyint", 16, true),
@@ -31,7 +36,9 @@ pub(super) fn query(parts: QueryParts) -> String {
  @culprit_index_edition int=TRY_CONVERT(int,SERVERPROPERTY('EngineEdition')),
  @culprit_index_metadata int=HAS_PERMS_BY_NAME(DB_NAME(),N'DATABASE',N'VIEW DEFINITION');
 {capabilities}
-DECLARE /* culprit */ @culprit_index_sql nvarchar(max)={before}
+{configuration_declarations}
+DECLARE /* culprit */ @culprit_index_sql nvarchar(max)=CAST({before} AS nvarchar(max))
+ +{configuration}+N','
  +CASE WHEN @culprit_compression=0 THEN N'i.compression_delay' ELSE N'CAST(NULL AS int)' END
  +N' AS compression_delay,@culprit_compression AS compression_availability,@culprit_ordering AS ordering_availability,@culprit_clustering AS clustering_availability,'
  +{columns}
@@ -41,35 +48,8 @@ DECLARE /* culprit */ @culprit_index_sql nvarchar(max)={before}
  +N' AS data_clustering_ordinal'
  +{after};
 EXEC /* culprit */ sys.sp_executesql @culprit_index_sql,
- N'@P1 int,@culprit_compression int,@culprit_ordering int,@culprit_clustering int',
- @P1=@P1,@culprit_compression=@culprit_compression,@culprit_ordering=@culprit_ordering,@culprit_clustering=@culprit_clustering;"#
-    )
-}
-
-fn capability(
-    variable: &str,
-    catalog: &str,
-    column: &str,
-    native_type: &str,
-    minimum_major: u32,
-    azure: bool,
-) -> String {
-    let supported = if azure {
-        format!("@culprit_index_major>={minimum_major} OR @culprit_index_edition IN(5,8)")
-    } else {
-        format!("@culprit_index_major>={minimum_major}")
-    };
-    format!(
-        r#"DECLARE /* culprit */ @culprit_{variable} int=CASE
- WHEN @culprit_index_metadata=0 OR HAS_PERMS_BY_NAME(N'{catalog}',N'OBJECT',N'SELECT')=0 THEN 2
- WHEN @culprit_index_metadata IS NULL OR @culprit_index_major IS NULL OR @culprit_index_edition IS NULL
-  OR OBJECT_ID(N'{catalog}') IS NULL OR HAS_PERMS_BY_NAME(N'{catalog}',N'OBJECT',N'SELECT') IS NULL THEN 3
- WHEN NOT({supported}) THEN 1
- WHEN NOT EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{catalog}') AND name=N'{column}') THEN 1
- WHEN NOT EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{catalog}') AND name=N'{column}' AND system_type_id=TYPE_ID(N'{native_type}')) THEN 3
- WHEN HAS_PERMS_BY_NAME(N'{catalog}',N'OBJECT',N'SELECT',N'{column}',N'COLUMN')=0 THEN 2
- WHEN HAS_PERMS_BY_NAME(N'{catalog}',N'OBJECT',N'SELECT',N'{column}',N'COLUMN')=1 THEN 0
- ELSE 3 END;"#
+ N'@P1 int,@culprit_compression int,@culprit_ordering int,@culprit_clustering int{configuration_parameters}',
+ @P1=@P1,@culprit_compression=@culprit_compression,@culprit_ordering=@culprit_ordering,@culprit_clustering=@culprit_clustering{configuration_arguments};"#
     )
 }
 

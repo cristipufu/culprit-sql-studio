@@ -61,6 +61,7 @@ SELECT TOP (@P1) DB_ID() AS database_id,t.object_id,s.name AS schema_name,t.name
  CASE WHEN {measurable} THEN 1 ELSE 0 END AS sizes_available,
 "#
         ),
+        companion_expression: crate::indexes::configuration::columns_expression(false),
         after_temporal: format!(
             r#",
  {full_text_columns},
@@ -93,9 +94,10 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlTableSnapshot> {
         created_without_offset: text(row, "created_without_offset")?,
     };
     let full_text = full_text::decode(row, identity.object_id)?;
-    let value = MssqlTableSnapshot {
+    let mut value = MssqlTableSnapshot {
         identity,
         full_text,
+        heap_configuration: None,
         storage_configuration: storage_configuration(row)?,
         temporal_configuration: temporal::decode(row)?,
         tracked_by_cdc: optional_boolean(row, "is_tracked_by_cdc")?,
@@ -113,6 +115,7 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlTableSnapshot> {
         is_heap: optional_boolean(row, "is_heap")?,
         size_source,
     };
+    value.heap_configuration = crate::indexes::configuration::heap(row, &value)?;
     if !value.is_valid() {
         return Err(invalid_data());
     }
@@ -185,6 +188,7 @@ fn project(value: MssqlTableSnapshot) -> Result<TableStat> {
         xid_age: None,
         storage: None,
         mssql_full_text: Some(value.full_text),
+        mssql_heap_configuration: value.heap_configuration,
         mssql_storage_configuration: Some(value.storage_configuration),
         mssql_tracked_by_cdc: value.tracked_by_cdc,
         mssql_temporal_configuration: Some(value.temporal_configuration),

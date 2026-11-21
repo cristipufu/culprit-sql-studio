@@ -26,6 +26,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         counter_ratios: &'a Option<Box<culprit_core::CounterRatioReport>>,
         performance_counters: &'a [culprit_core::PerformanceCounterReport],
+        index_configuration: &'a [culprit_core::IndexConfigurationReport],
         #[serde(skip_serializing_if = "Option::is_none")]
         wait_counters: &'a Option<Box<culprit_core::WaitCounterReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,6 +132,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         compiler_admission,
         counter_ratios,
         performance_counters,
+        index_configuration,
         wait_counters,
         memory_clerks,
         tempdb_metadata_memory,
@@ -180,6 +182,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         compiler_admission,
         counter_ratios,
         performance_counters,
+        index_configuration,
         wait_counters,
         memory_clerks,
         tempdb_metadata_memory,

@@ -223,6 +223,7 @@ pub(crate) fn project(r: &NativeCounterSet) -> TableStat {
         mssql_full_text: None,
         mssql_storage_configuration: None,
         mssql_tracked_by_cdc: None,
+        mssql_heap_configuration: None,
         mssql_temporal_configuration: None,
         in_row_bytes: number(r, "in_row_bytes"),
         lob_bytes: number(r, "lob_bytes"),

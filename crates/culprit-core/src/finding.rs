@@ -376,6 +376,8 @@ pub struct SeverityCount {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct Report {
+    /// Independent current catalog points and authenticated historical originals remain separate.
+    pub index_configuration: Vec<crate::IndexConfigurationReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cdc: Option<Vec<crate::CdcReport>>,

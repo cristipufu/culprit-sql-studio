@@ -2,9 +2,8 @@ import type { CdcReport } from "../gen/CdcReport";
 import type { ChangeFeedReport } from "../gen/ChangeFeedReport";
 import type { ChangeCaptureEntry } from "../gen/ChangeCaptureEntry";
 import type { SourceOutcome } from "../gen/SourceOutcome";
-import { contextPreview } from "../lib/context-preview";
 import { t } from "../lib/i18n";
-import { NativeValue } from "./NativeObservationFields";
+import { NativeValue, nativeTextPreview } from "./NativeObservationFields";
 import { ObservationExplanationIssue, ObservationList, ObservationReadQualifications } from "./ObservationList";
 
 type HistoryReport = CdcReport | ChangeFeedReport;
@@ -29,7 +28,7 @@ export function changeCaptureHistoryState(reports: HistoryReport[] | undefined, 
 }
 
 function text(value: string, limit = TEXT_CHARS): string {
-  return contextPreview(value.replace(/\p{Cc}/gu, " "), limit).text;
+  return nativeTextPreview(value, limit);
 }
 function fieldValue(value: string | null): string | null {
   return value === null ? null : text(value, NATIVE_FIELD_CHARS);

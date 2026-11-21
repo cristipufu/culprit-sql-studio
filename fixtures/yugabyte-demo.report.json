@@ -532,6 +532,7 @@
       ]
     }
   ],
+  "index_configuration": [],
   "locked": [
     {
       "check": {
@@ -972,7 +973,7 @@
         "table": "orders"
       }
     ],
-    "format": 44,
+    "format": 45,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -1013,6 +1014,7 @@
         "lookups": null,
         "maintained": true,
         "mssql_columnstore": null,
+        "mssql_configuration": null,
         "name": "customers_pkey",
         "opclasses": [
           ""
@@ -1053,6 +1055,7 @@
         "lookups": null,
         "maintained": true,
         "mssql_columnstore": null,
+        "mssql_configuration": null,
         "name": "orders_created_idx",
         "opclasses": [
           ""
@@ -1093,6 +1096,7 @@
         "lookups": null,
         "maintained": true,
         "mssql_columnstore": null,
+        "mssql_configuration": null,
         "name": "orders_pkey",
         "opclasses": [
           ""
@@ -3463,6 +3467,7 @@
       "full_text_populations": [],
       "galera": [],
       "group_replication": [],
+      "index_configuration": [],
       "log_failures": [],
       "multixacts": [],
       "node_resources": {
@@ -5253,6 +5258,7 @@
         "lob_bytes": null,
         "modifications_since_analyze": null,
         "mssql_full_text": null,
+        "mssql_heap_configuration": null,
         "mssql_storage_configuration": null,
         "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,
@@ -5301,6 +5307,7 @@
         "lob_bytes": null,
         "modifications_since_analyze": null,
         "mssql_full_text": null,
+        "mssql_heap_configuration": null,
         "mssql_storage_configuration": null,
         "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,

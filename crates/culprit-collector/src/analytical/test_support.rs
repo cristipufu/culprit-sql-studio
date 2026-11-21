@@ -1097,3 +1097,6 @@ mod managed_instance_resources;
 pub use managed_instance_resources::{
     ManagedInstanceResourceCase, managed_instance_resource_case, managed_instance_resource_evidence,
 };
+
+mod index_configuration;
+pub use index_configuration::{IndexConfigurationCase, index_configuration_evidence};

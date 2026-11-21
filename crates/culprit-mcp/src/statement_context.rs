@@ -29,10 +29,12 @@ pub(crate) fn statement(payload: &DefinitionPayload) -> Value {
     }
 }
 
+/// The returned text, including a truncation marker, fits the requested character limit.
 pub(crate) fn bounded_text(value: &str, limit: usize) -> String {
     let preview = SqlPreview::bounded(value, limit);
     let mut text = preview.text;
-    if preview.truncated {
+    if preview.truncated && limit > 0 {
+        text.pop();
         text.push('…');
     }
     text

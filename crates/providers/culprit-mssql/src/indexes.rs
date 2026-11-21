@@ -9,6 +9,7 @@ use crate::{
 use culprit_core::{IndexStat, Result, telemetry::*};
 
 mod columnstore;
+pub(crate) mod configuration;
 const APPLICATION_INDEXES: usize = 10_000;
 pub(crate) struct Layout {
     pub with_dmvs: bool,
@@ -113,11 +114,13 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<NativeIndex> {
         disabled: boolean(row, "is_disabled")?,
         columns: columns.native,
         columnstore: None,
+        configuration: None,
         filter: crate::catalog_expression::decode(row, boolean(row, "has_filter")?, "filter", layout.expression_limit)?,
         reserved_bytes: optional_text(row, "reserved_bytes")?,
         usage,
     };
     snapshot.columnstore = columnstore::configuration(row, &snapshot, columns.columnstore)?;
+    snapshot.configuration = Some(configuration::index(row, &snapshot)?);
     if !snapshot.is_valid() {
         return Err(invalid_data());
     }
@@ -174,6 +177,7 @@ impl NativeIndex {
             .collect();
         Ok(IndexStat {
             mssql_columnstore: index.columnstore,
+            mssql_configuration: index.configuration,
             docdb: None,
             filter_facts: None,
             schema: index.schema,

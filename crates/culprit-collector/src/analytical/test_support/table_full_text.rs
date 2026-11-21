@@ -55,6 +55,7 @@ pub fn table_full_text_evidence(case: TableFullTextCase) -> (CollectionDescripti
         ),
     };
     let table = MssqlTableSnapshot {
+        heap_configuration: None,
         temporal_configuration: MssqlTableTemporalConfiguration {
             temporal_type_availability: MssqlCatalogAvailability::Available,
             temporal_type: Some(0),

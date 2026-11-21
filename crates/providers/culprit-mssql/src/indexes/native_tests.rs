@@ -11,6 +11,7 @@ use std::{
     sync::Arc,
 };
 
+mod configuration_scale;
 mod rowgroups;
 
 use crate::test_support::owned_control::{COMMAND_TIMEOUT, retire_control};

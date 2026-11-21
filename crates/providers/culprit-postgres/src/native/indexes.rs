@@ -172,6 +172,7 @@ pub(crate) fn decode(row: Row, database_oid: Option<&str>) -> Result<IndexReadin
 pub(crate) fn project(reading: &IndexReading) -> IndexStat {
     let r = &reading.row;
     IndexStat {
+        mssql_configuration: None,
         mssql_columnstore: None,
         docdb: None,
         filter_facts: None,

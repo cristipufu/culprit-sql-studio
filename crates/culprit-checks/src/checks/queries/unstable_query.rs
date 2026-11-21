@@ -600,6 +600,7 @@ mod tests {
         s.workload.as_mut().unwrap().total_time_ms = total;
         let pkey = s.indexes.iter().find(|i| i.name == "order_items_pkey").cloned().expect("demo index");
         s.indexes.push(culprit_core::IndexStat {
+            mssql_configuration: None,
             mssql_columnstore: None,
             filter_facts: None,
             name: "order_items_order_product_key".into(),

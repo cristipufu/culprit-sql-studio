@@ -24,4 +24,8 @@ impl SnapshotRecipe for Tables {
             fact: OperationalFact::MssqlTable(Box::new(table)),
         }))
     }
+    fn complete_record_scope(&self, record: &TelemetryRecord) -> bool {
+        matches!(record,TelemetryRecord::Operational(OperationalObservation {fact:OperationalFact::MssqlTable(value),..})
+            if value.heap_configuration.as_ref().is_none_or(|configuration| configuration.partitions_complete))
+    }
 }

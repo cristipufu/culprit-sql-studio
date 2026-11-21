@@ -52,7 +52,7 @@ fn compact_history_bounds_unicode_and_whole_withdrawal_without_known_zero_or_a_s
     report.intervals.extend(report.intervals.clone());
     let value = value(&report);
     assert_eq!(value["intervals"].as_array().unwrap().len(), 3);
-    assert_eq!(value["intervals"][0]["fields"][8]["value"].as_str().unwrap().chars().count(), 1025);
+    assert_eq!(value["intervals"][0]["fields"][8]["value"].as_str().unwrap().chars().count(), 1024);
     assert!(!value.to_string().contains('�'));
     report.source_state = SourceState::Unavailable;
     assert!(super::value(&report)["intervals"].as_array().unwrap().is_empty());

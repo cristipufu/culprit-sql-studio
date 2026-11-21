@@ -399,6 +399,7 @@
       ]
     }
   ],
+  "index_configuration": [],
   "locked": [
     {
       "check": {
@@ -652,7 +653,7 @@
     "escalations_before": null,
     "evictions_before": null,
     "foreign_keys": [],
-    "format": 44,
+    "format": 45,
     "histograms": null,
     "id": "20261023T213241Z",
     "identity": {
@@ -688,6 +689,7 @@
         "lookups": null,
         "maintained": true,
         "mssql_columnstore": null,
+        "mssql_configuration": null,
         "name": "sensor_readings_pkey",
         "opclasses": null,
         "partition_of": null,
@@ -720,6 +722,7 @@
         "lookups": null,
         "maintained": true,
         "mssql_columnstore": null,
+        "mssql_configuration": null,
         "name": "sensor_readings_observed_at_idx",
         "opclasses": null,
         "partition_of": null,
@@ -752,6 +755,7 @@
         "lookups": null,
         "maintained": true,
         "mssql_columnstore": null,
+        "mssql_configuration": null,
         "name": "devices_pkey",
         "opclasses": null,
         "partition_of": null,
@@ -790,6 +794,7 @@
       "full_text_populations": [],
       "galera": [],
       "group_replication": [],
+      "index_configuration": [],
       "index_usage_scope": "all-read-members",
       "log_failures": [],
       "multixacts": [
@@ -1471,6 +1476,7 @@
         "lob_bytes": null,
         "modifications_since_analyze": null,
         "mssql_full_text": null,
+        "mssql_heap_configuration": null,
         "mssql_storage_configuration": null,
         "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,
@@ -1620,6 +1626,7 @@
         "lob_bytes": 8192.0,
         "modifications_since_analyze": 0.0,
         "mssql_full_text": null,
+        "mssql_heap_configuration": null,
         "mssql_storage_configuration": null,
         "mssql_temporal_configuration": null,
         "mssql_tracked_by_cdc": null,

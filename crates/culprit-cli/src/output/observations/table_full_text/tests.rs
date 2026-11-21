@@ -17,7 +17,7 @@ fn report(case: TableFullTextCase) -> culprit_core::TableFullTextReport {
             _ => panic!(),
         })
         .collect::<Vec<_>>();
-    culprit_checks::table_full_text::explain(culprit_checks::table_catalog::TableCatalogEvidence {
+    culprit_checks::table_full_text::explain(culprit_checks::table_catalog::MssqlCatalogEvidence {
         description: &description,
         observations: &rows,
         source: &source,

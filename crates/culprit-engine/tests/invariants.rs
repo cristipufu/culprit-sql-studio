@@ -2021,6 +2021,7 @@ fn applying_recommended_index_or_drop_resolves_the_finding() {
                     _ => continue,
                 };
                 after.indexes.push(culprit_core::IndexStat {
+                    mssql_configuration: None,
                     mssql_columnstore: None,
                     schema,
                     table,

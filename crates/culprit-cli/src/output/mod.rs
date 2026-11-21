@@ -464,6 +464,9 @@ impl Out {
         for memory in report.table_memory.as_deref().unwrap_or_default() {
             println!("\n{}", observations::table_memory(memory));
         }
+        for configuration in &report.index_configuration {
+            println!("\n{}", observations::index_configuration(configuration));
+        }
         if !report.performance_counters.is_empty() {
             println!("\n{}", observations::performance_counter_populations(&report.performance_counters));
         }
@@ -815,6 +818,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "change_feed":report.change_feed.as_ref().map(|reports|reports.iter().map(|report|observations::compact_change_capture((&report.title,&report.summary),report.source_state,report.read_complete,report.context.as_ref(),&report.limitations,&report.entries,&report.sources)).collect::<Vec<_>>()),
         "runtime_fragments": report.runtime_fragments.as_deref().map(observations::compact_runtime_fragments),
         "query_wait_fragments": report.query_wait_fragments.as_deref().map(observations::compact_query_wait_fragments),
+        "index_configuration":report.index_configuration.iter().map(observations::compact_index_configuration).collect::<Vec<_>>(),
         "table_memory": report.table_memory.as_ref().map(|reports|reports.iter().map(observations::compact_table_memory).collect::<Vec<_>>()),
         "group_replication": report.group_replication.as_ref().map(|reports|reports.iter().map(observations::compact_group_replication).collect::<Vec<_>>()),
         "galera": report.galera.as_ref().map(|reports|reports.iter().map(observations::compact_galera).collect::<Vec<_>>()),
@@ -885,6 +889,9 @@ pub(super) fn markdown_report(report: &Report) -> String {
     }
     for memory in report.table_memory.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::table_memory(memory)));
+    }
+    for configuration in &report.index_configuration {
+        out.push_str(&markdown_text_block(&observations::index_configuration(configuration)));
     }
     if let Some(history) = &report.suspect_pages {
         out.push_str("\n\n");
