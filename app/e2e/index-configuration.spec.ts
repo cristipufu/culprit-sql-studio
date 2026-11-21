@@ -14,8 +14,8 @@ async function setConfiguration(page: Page, mode: "health" | "schema") {
     const entry = view.entries[0]!;
     const index = report.snapshot.indexes[0]!;
     const native = selected.mssql_configuration!;
-    native.schema = entry.schema = index.schema;
-    native.table_name = entry.table = index.table;
+    native.parent_schema = entry.parent_schema = index.schema;
+    native.parent_name = entry.parent_name = index.table;
     native.name = entry.index_name = index.name;
     index.mssql_configuration = native;
     if (mode === "health") {
@@ -83,7 +83,7 @@ test("Schema discloses the same qualified values and withdraws a changed native 
     const current = getState().report;
     if (current.status !== "ready") throw new Error("A settled report is required");
     const report = structuredClone(current.report);
-    report.snapshot.indexes[0]!.mssql_configuration!.table.created_without_offset = "2000-01-01T00:00:00.0000000";
+    report.snapshot.indexes[0]!.mssql_configuration!.parent_object.created_without_offset = "2000-01-01T00:00:00.0000000";
     setState({ report: { ...current, report } });
   }, "/src/lib/store.ts");
   await expect(summary).toHaveCount(0);

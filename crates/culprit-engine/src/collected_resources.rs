@@ -194,3 +194,6 @@ pub use managed_instance_resources::managed_instance_resources;
 
 mod index_configuration;
 pub use index_configuration::index_configuration;
+
+mod indexed_views;
+pub use indexed_views::indexed_views;

@@ -48,10 +48,10 @@ pub fn index_configuration_evidence(case: IndexConfigurationCase) -> (Collection
                 index.configuration = Some(Box::new(configuration(
                     case,
                     Parent {
-                        table: &index.table,
-                        schema: &index.schema,
-                        table_name: &index.table_name,
-                        modified: &index.table_modified_without_offset,
+                        table: &index.parent_object,
+                        schema: &index.parent_schema,
+                        table_name: &index.parent_name,
+                        modified: &index.parent_modified_without_offset,
                         index_id: index.index_id,
                         name: Some(&index.name),
                         type_code: index.type_code,
@@ -120,7 +120,7 @@ fn configuration(case: IndexConfigurationCase, parent: Parent<'_>) -> MssqlIndex
         "xml_compression_description":if null||denied{None}else{Some(if number==1{"OFF"}else{"ON"})}
     })).collect::<Vec<_>>();
     let configuration=serde_json::from_value::<MssqlIndexConfiguration>(json!({
-        "table":table,"schema":schema,"table_name":table_name,"table_modified_without_offset":modified,
+        "parent_kind":"table","parent_object":table,"parent_schema":schema,"parent_name":table_name,"parent_modified_without_offset":modified,
         "index_id":index_id,"name":name,"type_code":type_code,
         "options":if index_id==0{None}else{Some(json!({
             "fill_factor_availability":if denied{"permission-denied"}else{"available"},"fill_factor":if null||denied{None}else{Some(0)},

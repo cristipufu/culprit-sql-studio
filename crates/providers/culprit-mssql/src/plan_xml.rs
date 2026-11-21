@@ -684,6 +684,7 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
             children(o, "ColumnReference").filter_map(|c| c.attribute("Column")).map(str::to_string).collect()
         }),
         storage: operator.and_then(|o| o.attribute("Storage")).map(str::to_string),
+        mssql_index_parent_kind: operator.and_then(original_index_parent_kind),
         conversions: child(relop, "Warnings")
             .map(|w| {
                 children(w, "PlanAffectingConvert")
@@ -839,6 +840,22 @@ fn node_kind(op: &str, logical: &str) -> NodeKind {
         return NodeKind::Compute;
     }
     NodeKind::Other
+}
+
+/// Direct native ownership only. Missing/general/unknown kinds do not establish an ordinary table.
+fn original_index_parent_kind(operator: Node) -> Option<culprit_core::telemetry::MssqlIndexParentKind> {
+    let mut objects = children(operator, "Object");
+    let object = objects.next()?;
+    if objects.next().is_some()
+        || object.attribute("Table").is_none_or(|name| unbracket(name).is_empty())
+        || object.attribute("Index").is_none_or(|name| unbracket(name).is_empty())
+    {
+        return None;
+    }
+    match object.attribute("IndexKind")? {
+        "ViewClustered" | "ViewNonClustered" => Some(culprit_core::telemetry::MssqlIndexParentKind::IndexedView),
+        _ => None,
+    }
 }
 
 fn object_of(operator: Node) -> Option<(Option<String>, Option<String>)> {
@@ -1567,3 +1584,6 @@ mod tests {
         assert!(parse("not xml").is_err());
     }
 }
+
+#[cfg(test)]
+mod index_parent_tests;

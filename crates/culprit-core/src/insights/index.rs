@@ -151,11 +151,12 @@ pub(super) fn missing_index_hint(cx: &Cx) -> Vec<Draft> {
         .into_iter()
         .take(3)
         .map(|h| {
-            let leaf = table_leaf(&h.table).to_ascii_lowercase();
             let node = cx
                 .nodes
                 .iter()
-                .filter(|n| n.object.as_deref().is_some_and(|o| table_leaf(o).to_ascii_lowercase() == leaf))
+                .filter(|n| {
+                    n.object.as_deref().is_some_and(|o| super::index_parent::same_original_subject(o, &h.table))
+                })
                 .max_by(|a, b| a.self_cost.total_cmp(&b.self_cost))
                 .copied();
             let keys: Vec<String> = h.equality.iter().chain(&h.inequality).map(|c| clean_identifier(c)).collect();
@@ -405,6 +406,7 @@ pub(super) fn eager_spool(cx: &Cx) -> Vec<Draft> {
         let rows = n.children.first().map_or(0.0, rows_out);
         let impact = cx.subtree(n);
         let mut d = Draft::new("eager-spool", InsightArea::Index, impact, vec![n.id]);
+        d.index_subject_node = first_object_node(n).map(|subject| subject.id);
         d.floor = Severity::Medium;
         let (named, leaf) = (known(table.is_some()), table.as_deref().map(table_leaf).unwrap_or_default());
         d.title = t!("insight.eager_spool.title", named = named, table = &leaf);

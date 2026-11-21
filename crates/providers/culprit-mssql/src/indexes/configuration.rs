@@ -101,7 +101,7 @@ pub(crate) fn arguments(options: bool) -> String {
 /// The existing SELECT evaluates a correlated catalog/JSON projection for each returned parent.
 /// TOP bounds its returned prefix, not internal reads/sorts. At the 10,000-parent cap the projection can return 650,000
 /// native metadata rows; ordinary use needs owned scale/cost evidence, not dispatch-count equivalence.
-pub(crate) fn columns_expression(index: bool) -> String {
+pub(crate) fn columns_expression(index: bool, parent_alias: &str) -> String {
     let mut columns = Vec::new();
     if index {
         for field in OPTIONS {
@@ -123,7 +123,7 @@ pub(crate) fn columns_expression(index: bool) -> String {
         "(SELECT TOP({count}) cp.object_id,cp.index_id,CONVERT(varchar(20),cp.partition_id) AS partition_id,cp.partition_number,CONVERT(varchar(20),cp.hobt_id) AS hobt_id,"
     ));
     let suffix = crate::catalog_visibility::sql_literal(&format!(
-        " FROM sys.partitions cp WHERE cp.object_id=t.object_id AND cp.index_id={index_id} ORDER BY cp.partition_number FOR JSON PATH,INCLUDE_NULL_VALUES)"
+        " FROM sys.partitions cp WHERE cp.object_id={parent_alias}.object_id AND cp.index_id={index_id} ORDER BY cp.partition_number FOR JSON PATH,INCLUDE_NULL_VALUES)"
     ));
     columns.push(format!("(CASE WHEN @culprit_cfg_partitions=0 THEN CAST({prefix} AS nvarchar(max))+{values}+{suffix} ELSE N'CAST(NULL AS nvarchar(max))' END)+N' AS configuration_partitions'"));
     columns.push("N'@culprit_cfg_partitions AS configuration_partition_identity_availability'".into());
@@ -135,12 +135,13 @@ pub(crate) fn index(row: &Rec, index: &MssqlIndexSnapshot) -> Result<Box<MssqlIn
     decode(
         row,
         NativeOwner {
-            table: index.table.clone(),
-            schema: index.schema.clone(),
-            table_name: index.table_name.clone(),
-            modified: index.table_modified_without_offset.clone(),
+            kind: index.parent_kind,
+            object: index.parent_object.clone(),
+            parent_schema: index.parent_schema.clone(),
+            parent_name: index.parent_name.clone(),
+            modified: index.parent_modified_without_offset.clone(),
             index_id: index.index_id,
-            name: Some(index.name.clone()),
+            index_name: Some(index.name.clone()),
             type_code: index.type_code,
         },
         Some(options(row)?),
@@ -151,12 +152,13 @@ pub(crate) fn heap(row: &Rec, table: &MssqlTableSnapshot) -> Result<Option<Box<M
     let configuration = decode(
         row,
         NativeOwner {
-            table: table.identity.clone(),
-            schema: table.schema.clone(),
-            table_name: table.name.clone(),
+            kind: MssqlIndexParentKind::Table,
+            object: table.identity.clone(),
+            parent_schema: table.schema.clone(),
+            parent_name: table.name.clone(),
             modified: table.modified_without_offset.clone(),
             index_id: 0,
-            name: None,
+            index_name: None,
             type_code: 0,
         },
         None,
@@ -167,14 +169,16 @@ pub(crate) fn heap(row: &Rec, table: &MssqlTableSnapshot) -> Result<Option<Box<M
     Ok(Some(Box::new(configuration)))
 }
 struct NativeOwner {
-    table: MssqlObjectIdentity,
-    schema: String,
-    table_name: String,
+    kind: MssqlIndexParentKind,
+    object: MssqlObjectIdentity,
+    parent_schema: String,
+    parent_name: String,
     modified: String,
     index_id: u32,
-    name: Option<String>,
+    index_name: Option<String>,
     type_code: u32,
 }
+
 fn decode(row: &Rec, owner: NativeOwner, options: Option<MssqlStoredIndexOptions>) -> Result<MssqlIndexConfiguration> {
     let availability = |name| crate::catalog_visibility::availability(row, name);
     let partition_identity_availability = availability("configuration_partition_identity_availability")?;
@@ -193,12 +197,13 @@ fn decode(row: &Rec, owner: NativeOwner, options: Option<MssqlStoredIndexOptions
         return Err(invalid_data());
     }
     let mut configuration = MssqlIndexConfiguration {
-        table: owner.table,
-        schema: owner.schema,
-        table_name: owner.table_name,
-        table_modified_without_offset: owner.modified,
+        parent_kind: owner.kind,
+        parent_object: owner.object,
+        parent_schema: owner.parent_schema,
+        parent_name: owner.parent_name,
+        parent_modified_without_offset: owner.modified,
         index_id: owner.index_id,
-        name: owner.name,
+        name: owner.index_name,
         type_code: owner.type_code,
         options,
         partition_identity_availability,

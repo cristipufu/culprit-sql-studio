@@ -2,8 +2,8 @@ use super::*;
 use serde_json::json;
 fn configuration() -> MssqlIndexConfiguration {
     serde_json::from_value(json!({
-        "table":{"database_id":5,"object_id":100,"created_without_offset":"2026-11-10T07:00:00.123"},
-        "schema":"dbo","table_name":"Orders","table_modified_without_offset":"2026-11-10T07:01:00.123",
+        "parent_kind":"table","parent_object":{"database_id":5,"object_id":100,"created_without_offset":"2026-11-10T07:00:00.123"},
+        "parent_schema":"dbo","parent_name":"Orders","parent_modified_without_offset":"2026-11-10T07:01:00.123",
         "index_id":2,"name":"ix_orders","type_code":2,
         "options":{
             "fill_factor_availability":"available","fill_factor":0,
@@ -23,15 +23,16 @@ fn configuration() -> MssqlIndexConfiguration {
 }
 fn index(configuration: MssqlIndexConfiguration) -> MssqlIndexSnapshot {
     MssqlIndexSnapshot {
-        table: configuration.table.clone(),
-        schema: configuration.schema.clone(),
-        table_name: configuration.table_name.clone(),
+        parent_kind: MssqlIndexParentKind::Table,
+        parent_object: configuration.parent_object.clone(),
+        parent_schema: configuration.parent_schema.clone(),
+        parent_name: configuration.parent_name.clone(),
         index_id: 2,
         name: "ix_orders".into(),
-        table_modified_without_offset: configuration.table_modified_without_offset.clone(),
+        parent_modified_without_offset: configuration.parent_modified_without_offset.clone(),
         type_code: 2,
         native_type: "NONCLUSTERED".into(),
-        memory_optimized: false,
+        parent_memory_optimized: Some(false),
         unique: false,
         primary_key: false,
         disabled: false,
@@ -82,10 +83,10 @@ fn wrong_owner_generation_or_native_partition_contract_never_borrows_original_co
     for cause in ["database", "object", "created", "modified", "index", "name", "type"] {
         let mut changed = original.clone();
         match cause {
-            "database" => changed.table.database_id = 6,
-            "object" => changed.table.object_id = 101,
-            "created" => changed.table.created_without_offset = "2026-11-10T07:00:01.123".into(),
-            "modified" => changed.table_modified_without_offset = "2026-11-10T07:02:00.123".into(),
+            "database" => changed.parent_object.database_id = 6,
+            "object" => changed.parent_object.object_id = 101,
+            "created" => changed.parent_object.created_without_offset = "2026-11-10T07:00:01.123".into(),
+            "modified" => changed.parent_modified_without_offset = "2026-11-10T07:02:00.123".into(),
             "index" => changed.index_id = 3,
             "name" => changed.name = "another".into(),
             _ => changed.type_code = 1,

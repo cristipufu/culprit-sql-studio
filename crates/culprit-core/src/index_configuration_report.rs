@@ -1,7 +1,9 @@
 //! Native persisted configuration is informational and keeps every partition as its own observed row.
 use crate::{
     SourceState,
-    telemetry::{MssqlCatalogAvailability, MssqlObjectIdentity, NativeReadContext, SnapshotDataset},
+    telemetry::{
+        MssqlCatalogAvailability, MssqlIndexParentKind, MssqlObjectIdentity, NativeReadContext, SnapshotDataset,
+    },
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -26,10 +28,11 @@ pub struct PartitionConfigurationEntry {
 #[ts(export)]
 pub struct IndexConfigurationEntry {
     pub observation_key: Option<String>,
-    pub native_table: MssqlObjectIdentity,
-    pub schema: String,
-    pub table: String,
-    pub table_modified_without_offset: String,
+    pub parent_kind: MssqlIndexParentKind,
+    pub parent_object: MssqlObjectIdentity,
+    pub parent_schema: String,
+    pub parent_name: String,
+    pub parent_modified_without_offset: String,
     pub index_id: u32,
     pub index_name: Option<String>,
     pub type_code: u32,

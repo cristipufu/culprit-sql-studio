@@ -1102,3 +1102,6 @@ mod numa_nodes;
 pub use numa_nodes::{NumaNodeCase, numa_node_evidence};
 mod index_configuration;
 pub use index_configuration::{IndexConfigurationCase, index_configuration_evidence};
+
+mod indexed_views;
+pub use indexed_views::{IndexedViewsCase, indexed_views_evidence};

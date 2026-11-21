@@ -550,3 +550,5 @@ mod pool_settings;
 mod managed_instance_resources;
 
 mod index_configuration;
+
+mod indexed_views;

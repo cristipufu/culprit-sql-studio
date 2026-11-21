@@ -45,11 +45,11 @@ fn compact_original_keeps_partition_scope_and_partiality_without_native_owner_or
 fn compact_presentation_caps_do_not_mutate_original_or_infer_whole_index_state() {
     let mut report = report();
     report.entries = vec![report.entries[0].clone(); 10];
-    report.entries[0].table = "界".repeat(2000);
+    report.entries[0].parent_name = "界".repeat(2000);
     let before = json!(&report);
     let output = value(&report);
     assert_eq!(output["returned_rows"], ENTRY_LIMIT);
     assert_eq!(output["entries_limited"], true);
-    assert!(output["entries"][0]["table"].as_str().unwrap().chars().count() <= 256);
+    assert!(output["entries"][0]["parent_name"].as_str().unwrap().chars().count() <= 256);
     assert_eq!(json!(report), before);
 }

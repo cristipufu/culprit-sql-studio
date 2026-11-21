@@ -2579,9 +2579,11 @@
     "change_feed_history": [],
     "index_configuration": [],
     "numa_nodes": [],
-    "source_acquisitions": []
+    "source_acquisitions": [],
+    "indexed_views": null,
+    "indexed_view_originals": []
   },
-  "format": 47,
+  "format": 48,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

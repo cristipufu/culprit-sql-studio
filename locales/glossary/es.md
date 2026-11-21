@@ -196,3 +196,7 @@ the choice and the reason are given.
 | plan stub, lane, vCores | código auxiliar, franja, núcleos virtuales | Azure tiers (General Purpose, Hyperscale, Business Critical) stay in English |
 | telemetry outbox, capture revision, journal, replay | búfer de salida de telemetría, revisión de captura, registro transaccional, reproducir | capturas locales duraderas; no correo electrónico |
 | full-text index, full-text population (native crawl) | índice de texto completo, relleno del índice de texto completo | metadatos del catálogo; no confirman progreso ni resultados de búsqueda |
+
+## Indexed views
+
+- **indexed view**: *vista indizada* (SQL Server). A schema-bound view with native indexes; keep it distinct from an ordinary table and from a materialized view in other engines. Catalog configuration and usage do not establish health or workload benefit.

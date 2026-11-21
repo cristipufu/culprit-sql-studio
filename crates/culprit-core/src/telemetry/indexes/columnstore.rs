@@ -75,14 +75,15 @@ impl MssqlColumnstoreConfiguration {
     }
 
     pub(super) fn is_valid_for(&self, index: &MssqlIndexSnapshot) -> bool {
-        if !self.is_valid()
+        if index.parent_kind != MssqlIndexParentKind::Table
+            || !self.is_valid()
             || !matches!(index.type_code, 5 | 6)
-            || self.table != index.table
+            || self.table != index.parent_object
             || self.index_id != index.index_id
-            || self.schema != index.schema
-            || self.table_name != index.table_name
+            || self.schema != index.parent_schema
+            || self.table_name != index.parent_name
             || self.name != index.name
-            || self.table_modified_without_offset != index.table_modified_without_offset
+            || self.table_modified_without_offset != index.parent_modified_without_offset
             || self.columns.len() != index.columns.len()
         {
             return false;

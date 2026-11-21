@@ -359,3 +359,10 @@ pub struct CollectedIndexConfigurationAnalysis {
     pub context: crate::collected_analysis::CollectedEvidenceContext,
     pub report: Box<crate::IndexConfigurationReport>,
 }
+
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct CollectedIndexedViewsAnalysis {
+    pub context: crate::collected_analysis::CollectedEvidenceContext,
+    pub report: Box<crate::IndexedViewsReport>,
+}

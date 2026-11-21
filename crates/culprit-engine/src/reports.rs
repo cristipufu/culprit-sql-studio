@@ -30,6 +30,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         source_acquisitions: &'a [culprit_core::HistoricalSourceOverhead],
         performance_counters: &'a [culprit_core::PerformanceCounterReport],
         index_configuration: &'a [culprit_core::IndexConfigurationReport],
+        indexed_views: &'a [culprit_core::IndexedViewsReport],
         #[serde(skip_serializing_if = "Option::is_none")]
         wait_counters: &'a Option<Box<culprit_core::WaitCounterReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -138,6 +139,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         source_acquisitions,
         performance_counters,
         index_configuration,
+        indexed_views,
         wait_counters,
         memory_clerks,
         tempdb_metadata_memory,
@@ -190,6 +192,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         source_acquisitions,
         performance_counters,
         index_configuration,
+        indexed_views,
         wait_counters,
         memory_clerks,
         tempdb_metadata_memory,

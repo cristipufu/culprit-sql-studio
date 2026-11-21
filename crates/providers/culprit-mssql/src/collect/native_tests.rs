@@ -344,8 +344,8 @@ async fn verify_partition_accounting(pool: &Arc<Pool>) {
             assert_eq!(fallback.in_row_bytes, full.in_row_bytes);
             assert_eq!(fallback.lob_bytes, full.lob_bytes);
             assert_eq!(fallback.overflow_bytes, full.overflow_bytes);
-            let (indexes, _) = crate::indexes::application(reader, true).await?;
-            let (catalog_indexes, _) = crate::indexes::application(reader, false).await?;
+            let indexes = crate::indexes::application(reader, true).await?.table_indexes;
+            let catalog_indexes = crate::indexes::application(reader, false).await?.table_indexes;
             for index in indexes.iter().filter(|index| index.table == "storage_fixture") {
                 let fallback = catalog_indexes
                     .iter()

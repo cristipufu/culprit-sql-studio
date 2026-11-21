@@ -4,6 +4,25 @@ use culprit_core::{Report, Result, SnapshotOptions, telemetry::DeliveryProblem};
 use std::path::Path;
 
 impl Workspace {
+    /// Reuse one exact authenticated Indexes original after the ordinary scan owner settles.
+    pub async fn scan_with_captured_indexed_views(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalSnapshotAnalysis,
+    ) -> Result<Report> {
+        if captured.original().connection() != name
+            || captured.report().kind() != crate::LocalCaptureAnalysisKind::IndexedViews
+        {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::indexed_views(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
     /// Attach sealed sanitized history after normal scan settlement. No current database/member is borrowed.
     pub async fn scan_with_captured_source_overhead(
         &self,

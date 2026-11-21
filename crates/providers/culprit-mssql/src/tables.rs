@@ -61,7 +61,7 @@ SELECT TOP (@P1) DB_ID() AS database_id,t.object_id,s.name AS schema_name,t.name
  CASE WHEN {measurable} THEN 1 ELSE 0 END AS sizes_available,
 "#
         ),
-        companion_expression: crate::indexes::configuration::columns_expression(false),
+        companion_expression: crate::indexes::configuration::columns_expression(false, "t"),
         after_temporal: format!(
             r#",
  {full_text_columns},

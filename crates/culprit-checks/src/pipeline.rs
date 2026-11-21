@@ -33,6 +33,7 @@ mod galera;
 mod group_replication;
 mod hyperscale_log_components;
 mod index_configuration;
+mod indexed_views;
 mod instance_resources;
 mod jobs;
 mod maintenance_progress;
@@ -318,6 +319,7 @@ impl Pipeline {
         let table_full_text = table_full_text::explain(&mut snapshot);
         let table_temporal = table_temporal::explain(&mut snapshot);
         let index_configuration = index_configuration::explain(&mut snapshot);
+        let indexed_views = indexed_views::explain(&mut snapshot);
         let storage = storage::explain(&mut snapshot);
         let instance_resources = instance_resources::explain(&mut snapshot);
         let numa_nodes = numa_nodes::explain(&snapshot);
@@ -425,6 +427,7 @@ impl Pipeline {
             table_full_text,
             table_temporal,
             index_configuration,
+            indexed_views,
             storage,
             instance_resources,
             numa_nodes,

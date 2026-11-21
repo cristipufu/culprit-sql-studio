@@ -18,7 +18,7 @@ fn layout() -> Layout {
 async fn the_same_native_projection_reaches_scan_and_snapshot_with_exact_owner_and_configured_units() {
     let raw = decode(&row(), &layout()).unwrap();
     let expected = raw.snapshot.columnstore.as_ref().unwrap().clone();
-    assert_eq!(expected.table, raw.snapshot.table);
+    assert_eq!(expected.table, raw.snapshot.parent_object);
     assert_eq!(expected.index_id, raw.snapshot.index_id);
     assert_eq!(expected.compression_delay_minutes, Some(15));
     assert_eq!(expected.columns[0].column_id, 3);
@@ -27,8 +27,9 @@ async fn the_same_native_projection_reaches_scan_and_snapshot_with_exact_owner_a
     assert_eq!(expected.data_clustering_availability, MssqlCatalogAvailability::Unsupported);
     assert_eq!(raw.project().unwrap().mssql_columnstore, Some(expected.clone()));
     let mut reader = FakeRead::new(vec![Ok(vec![row()])]);
-    let (indexes, usage) = crate::indexes::application(&mut reader, false).await.unwrap();
-    assert!(!usage);
+    let read = crate::indexes::application(&mut reader, false).await.unwrap();
+    assert!(!read.with_usage);
+    let indexes = read.table_indexes;
     assert_eq!(indexes[0].mssql_columnstore, Some(expected));
     assert_eq!(reader.calls.len(), 1, "optional layout and data use the same native dispatch");
 }
@@ -75,7 +76,7 @@ async fn optional_denied_or_unsupported_configuration_keeps_ordinary_indexes_wit
             ],
         );
         let mut reader = FakeRead::new(vec![Ok(vec![row])]);
-        let (indexes, _) = crate::indexes::application(&mut reader, false).await.unwrap();
+        let indexes = crate::indexes::application(&mut reader, false).await.unwrap().table_indexes;
         assert_eq!(indexes.len(), 1);
         assert!(indexes[0].mssql_columnstore.is_none());
         assert_eq!(indexes[0].columns, ["id", "owner\u{1f}name DESC"]);

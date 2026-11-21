@@ -49,15 +49,15 @@ fn human_configuration_uses_original_canonical_states_and_separate_partition_val
 #[test]
 fn human_native_names_and_future_descriptions_are_bounded_escaped_text() {
     let mut report = report(IndexConfigurationCase::UnknownCode);
-    report.entries[0].schema = "schema\n\u{1b}[31m".into();
-    report.entries[0].table = "界".repeat(2000);
+    report.entries[0].parent_schema = "schema\n\u{1b}[31m".into();
+    report.entries[0].parent_name = "界".repeat(2000);
     report.entries[0].partitions[0].fields[1].text = "<native>\n\u{1b}[31m".into();
     let before = serde_json::to_value(&report).unwrap();
     let text = index_configuration(&report);
     assert!(text.contains("schema\\n\\u{1b}[31m"));
     assert!(text.contains("<native>\\n\\u{1b}[31m"));
     assert!(!text.contains('\u{1b}'));
-    assert!(!text.contains(&report.entries[0].table));
+    assert!(!text.contains(&report.entries[0].parent_name));
     assert_eq!(serde_json::to_value(&report).unwrap(), before);
 }
 

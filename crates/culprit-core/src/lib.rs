@@ -298,3 +298,6 @@ mod index_configuration_report;
 pub use index_configuration_report::{
     IndexConfigurationEntry, IndexConfigurationField, IndexConfigurationReport, PartitionConfigurationEntry,
 };
+
+mod indexed_views_report;
+pub use indexed_views_report::{IndexedViewIndexEntry, IndexedViewsReport};

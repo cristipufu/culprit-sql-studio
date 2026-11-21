@@ -400,6 +400,7 @@
     }
   ],
   "index_configuration": [],
+  "indexed_views": [],
   "locked": [
     {
       "check": {
@@ -653,7 +654,7 @@
     "escalations_before": null,
     "evictions_before": null,
     "foreign_keys": [],
-    "format": 47,
+    "format": 48,
     "histograms": null,
     "id": "20261023T213241Z",
     "identity": {
@@ -796,6 +797,8 @@
       "group_replication": [],
       "index_configuration": [],
       "index_usage_scope": "all-read-members",
+      "indexed_view_originals": [],
+      "indexed_views": null,
       "log_failures": [],
       "multixacts": [
         {
@@ -814,6 +817,7 @@
           "subject": "public.devices"
         }
       ],
+      "numa_nodes": [],
       "sequences": [
         {
           "allocated": true,
@@ -866,11 +870,10 @@
           "table": "_timescaledb_internal.bgw_job_stat_history"
         }
       ],
+      "source_acquisitions": [],
       "spaces": [],
       "sqlite": null,
-      "table_memory": [],
-      "numa_nodes": [],
-      "source_acquisitions": []
+      "table_memory": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -6505,6 +6508,7 @@
       "windowed": false
     }
   },
+  "source_acquisitions": [],
   "summary": {
     "by_category": [
       {
@@ -6646,6 +6650,5 @@
       "separator": " "
     },
     "top_share": 0.9867093326578282
-  },
-  "source_acquisitions": []
+  }
 }

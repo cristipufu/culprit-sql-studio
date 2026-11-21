@@ -253,6 +253,10 @@ pub struct PlanNodeFacts {
     pub table_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_method: Option<String>,
+    /// Only an original owned native Showplan Object IndexKind can establish this kind. Current catalog names cannot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mssql_index_parent_kind: Option<crate::telemetry::MssqlIndexParentKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_relationship: Option<PlanParentRelationship>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -33,7 +33,7 @@ async fn original_index_and_heap_configuration_keeps_each_partition_and_native_a
                 OperationalFact::MssqlTable(table) => table.heap_configuration.as_ref().unwrap(),
                 _ => panic!(),
             };
-            assert_eq!(entry.native_table, native.table);
+            assert_eq!(entry.parent_object, native.parent_object);
             assert_eq!(entry.index_id, native.index_id);
             assert_eq!(entry.retained_partitions, native.partitions.len() as u32);
             for (partition, native) in entry.partitions.iter().zip(&native.partitions) {

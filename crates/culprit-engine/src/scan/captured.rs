@@ -11,6 +11,7 @@ pub(crate) enum CapturedScanEvidence {
     SourceAcquisition(culprit_core::RecordedSourceAcquisition),
     NumaNodes(Box<CapturedOperationalRead>),
     IndexConfiguration(Box<CapturedOperationalRead>),
+    IndexedViews(Box<CapturedOperationalRead>),
     ChangeCapture {
         family: culprit_core::telemetry::MssqlChangeCaptureFamily,
         read: Box<CapturedOperationalRead>,
@@ -48,6 +49,10 @@ impl CapturedScanEvidence {
         Ok(Self::NumaNodes(read))
     }
 
+    pub(crate) fn indexed_views(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::indexed_views::explain_captured(&read)?;
+        Ok(Self::IndexedViews(read))
+    }
     pub(crate) fn index_configuration(read: Box<CapturedOperationalRead>) -> Result<Self> {
         culprit_checks::index_configuration::explain_captured(&read)?;
         Ok(Self::IndexConfiguration(read))
@@ -141,6 +146,13 @@ impl CapturedScanEvidence {
             },
             Self::NumaNodes(read) => {
                 culprit_core::telemetry::append_recorded_operational_read(&mut snapshot.operations.numa_nodes, read)?;
+            }
+            Self::IndexedViews(read) => {
+                culprit_checks::indexed_views::explain_captured(&read)?;
+                culprit_core::telemetry::append_recorded_operational_read(
+                    &mut snapshot.operations.indexed_view_originals,
+                    read,
+                )?;
             }
             Self::IndexConfiguration(read) => {
                 culprit_checks::index_configuration::explain_captured(&read)?;

@@ -55,6 +55,7 @@ impl WorkloadPart {
 
 #[derive(Default)]
 struct SchemaPart {
+    indexed_views: Option<Box<culprit_core::telemetry::MssqlIndexedViewCatalog>>,
     tables: Vec<TableStat>,
     indexes: Vec<IndexStat>,
     columns: Vec<ColumnInfo>,
@@ -315,21 +316,27 @@ async fn collect_schema(client: &mut impl NativeRead, probe: &Probe) -> SchemaPa
     let grant = || probe.grant_hint();
     let out = &mut part.outcome;
     let mut catalog_complete = probe.can_view_definition;
+    let mut indexed_views = Vec::new();
+    let mut retained_index_rows = None;
+    let mut parent_prefix_complete = false;
     if let Some(read) = sources::read(out, &sources::TABLES, crate::tables::application(client, dmv).await, grant) {
         out.completed(&sources::TABLES, read.tables.len());
         catalog_complete &= read.complete_scope;
         part.tables = read.tables;
         out.delivered(Capability::TableStats);
     }
-    if let Some((indexes, with_usage)) =
-        sources::read(out, &sources::INDEXES, crate::indexes::application(client, dmv).await, grant)
-    {
-        out.completed(&sources::INDEXES, indexes.len());
-        part.indexes = indexes;
-        if with_usage {
-            // Index usage is counted per database, from when it came online: no older than the server's start.
+    if let Some(read) = sources::read(out, &sources::INDEXES, crate::indexes::application(client, dmv).await, grant) {
+        out.completed(&sources::INDEXES, read.retained_index_rows);
+        if !read.parent_prefix_complete {
+            out.partial(&sources::INDEXES, culprit_core::message!("provider.mssql.indexed_views.parent_prefix"));
+        }
+        retained_index_rows = Some(read.retained_index_rows as u32);
+        parent_prefix_complete = read.parent_prefix_complete;
+        indexed_views = read.indexed_views;
+        part.indexes = read.table_indexes;
+        if read.with_usage {
             let since = usage_counted_since(client, probe).await;
-            part.indexes.iter_mut().for_each(|i| i.counters_since = since.clone());
+            part.indexes.iter_mut().for_each(|index| index.counters_since = since.clone());
             out.delivered(Capability::IndexUsage);
         } else {
             index_usage_unreadable(out, probe);
@@ -368,6 +375,17 @@ async fn collect_schema(client: &mut impl NativeRead, probe: &Probe) -> SchemaPa
     if !catalog_complete {
         restrict_catalog_scope(out);
     }
+    part.indexed_views =
+        out.outcomes().into_iter().find(|source| source.source == sources::INDEXES.name).map(|source| {
+            Box::new(culprit_core::telemetry::MssqlIndexedViewCatalog {
+                parent_prefix_complete: parent_prefix_complete
+                    && catalog_complete
+                    && matches!(source.state, culprit_core::SourceState::Collected | culprit_core::SourceState::Empty),
+                source,
+                retained_index_rows,
+                indexes: indexed_views,
+            })
+        });
     part
 }
 
@@ -608,6 +626,7 @@ async fn acquire(
         evictions_before: None,
         sizes_before: None,
         operations: culprit_core::operations::OperationalStats {
+            indexed_views: schema_part.indexed_views,
             index_usage_scope: Some(culprit_core::operations::IndexUsageScope::ConnectedMember),
             cleanup: misc_part.cleanup,
             compiler_admission: misc_part.compiler_admission,

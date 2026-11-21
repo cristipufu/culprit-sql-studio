@@ -378,6 +378,7 @@ pub struct SeverityCount {
 pub struct Report {
     /// Independent current catalog points and authenticated historical originals remain separate.
     pub index_configuration: Vec<crate::IndexConfigurationReport>,
+    pub indexed_views: Vec<crate::IndexedViewsReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub numa_nodes: Option<Vec<crate::InstanceResourceReport>>,

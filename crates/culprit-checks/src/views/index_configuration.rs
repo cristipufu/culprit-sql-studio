@@ -106,33 +106,20 @@ pub fn explain(evidence: MssqlCatalogEvidence<'_>) -> Result<IndexConfigurationR
     Ok(report)
 }
 pub fn explain_captured(read: &CapturedOperationalRead) -> Result<IndexConfigurationReport> {
-    if !read.is_valid() {
-        return Err(invalid());
-    }
-    let native = read.description.observation.snapshot().ok_or_else(invalid)?;
-    let [coverage] = native.sources.as_slice() else { return Err(invalid()) };
-    let missing = !read.read_complete || read.observations.len() != coverage.records as usize;
-    let source = SourceOutcome {
-        source: coverage.source.clone(),
-        state: if missing { SourceState::Partial } else { coverage.state },
-        reason: if missing {
-            Some(t!("view.index_configuration.partial"))
-        } else {
-            coverage.stopped.map(|stop| stop.error().message).or_else(|| {
-                coverage.error_code.map(|code| {
-                    t!(
-                        "view.index_configuration.source_error",
-                        reason = match code {
-                            culprit_core::ErrorCode::PermissionDenied => "permission",
-                            culprit_core::ErrorCode::Unsupported => "unsupported",
-                            _ => "read",
-                        }
-                    )
-                })
-            })
+    let source = super::table_catalog::original_outcome(
+        read,
+        culprit_core::message!("view.index_configuration.partial"),
+        |code| {
+            culprit_core::message!(
+                "view.index_configuration.source_error",
+                reason = match code {
+                    culprit_core::ErrorCode::PermissionDenied => "permission",
+                    culprit_core::ErrorCode::Unsupported => "unsupported",
+                    _ => "read",
+                }
+            )
         },
-        reason_message: None,
-    };
+    )?;
     explain(MssqlCatalogEvidence {
         description: &read.description,
         observations: &read.observations.iter().collect::<Vec<_>>(),
@@ -218,7 +205,10 @@ fn render(
         limitations,
     })
 }
-fn entry(configuration: &MssqlIndexConfiguration, reference: Option<&str>) -> Result<IndexConfigurationEntry> {
+pub(super) fn entry(
+    configuration: &MssqlIndexConfiguration,
+    reference: Option<&str>,
+) -> Result<IndexConfigurationEntry> {
     if !configuration.is_valid() {
         return Err(invalid());
     }
@@ -275,10 +265,11 @@ fn entry(configuration: &MssqlIndexConfiguration, reference: Option<&str>) -> Re
     }
     Ok(IndexConfigurationEntry {
         observation_key: reference.map(str::to_owned),
-        native_table: configuration.table.clone(),
-        schema: configuration.schema.clone(),
-        table: configuration.table_name.clone(),
-        table_modified_without_offset: configuration.table_modified_without_offset.clone(),
+        parent_kind: configuration.parent_kind,
+        parent_object: configuration.parent_object.clone(),
+        parent_schema: configuration.parent_schema.clone(),
+        parent_name: configuration.parent_name.clone(),
+        parent_modified_without_offset: configuration.parent_modified_without_offset.clone(),
         index_id: configuration.index_id,
         index_name: configuration.name.clone(),
         type_code: configuration.type_code,

@@ -22,7 +22,7 @@ async fn persisted_columnstore_configuration_keeps_exact_original_native_scope_n
         };
         assert!(index.is_valid());
         let configuration = index.columnstore.as_ref().unwrap();
-        assert_eq!(configuration.table, index.table);
+        assert_eq!(configuration.table, index.parent_object);
         assert_eq!(configuration.index_id, index.index_id);
         assert_eq!(configuration.columns.len(), index.columns.len());
         assert_eq!(fixture.recovery_object_reads(), before);

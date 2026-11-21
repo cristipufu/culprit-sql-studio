@@ -7,11 +7,12 @@ export function healthReportFixture(fields: DeepPartial<Report>): Report {
     source_acquisitions: [],
     performance_counters: [],
     index_configuration: [],
+    indexed_views: [],
     ...fields,
     snapshot: {
       ...fields.snapshot,
       operations: {
-        source_acquisitions: [], spaces: [], index_configuration: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null, cdc_history: [], change_feed_history: [], numa_nodes: [],
+        source_acquisitions: [], spaces: [], index_configuration: [], indexed_views: null, indexed_view_originals: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null, cdc_history: [], change_feed_history: [], numa_nodes: [],
         ...fields.snapshot?.operations,
       },
     },

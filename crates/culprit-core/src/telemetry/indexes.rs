@@ -2,8 +2,10 @@
 use super::*;
 mod columnstore;
 mod configuration;
+mod indexed_views;
 pub use columnstore::*;
 pub use configuration::*;
+pub use indexed_views::*;
 pub const MAX_MSSQL_INDEX_COLUMNS: usize = 1024;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -59,15 +61,17 @@ pub enum MssqlIndexUsage {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct MssqlIndexSnapshot {
-    pub table: MssqlObjectIdentity,
-    pub schema: String,
-    pub table_name: String,
+    pub parent_kind: MssqlIndexParentKind,
+    pub parent_object: MssqlObjectIdentity,
+    pub parent_schema: String,
+    pub parent_name: String,
     pub index_id: u32,
     pub name: String,
-    pub table_modified_without_offset: String,
+    pub parent_modified_without_offset: String,
     pub type_code: u32,
     pub native_type: String,
-    pub memory_optimized: bool,
+    #[serde(deserialize_with = "configuration::required_nullable")]
+    pub parent_memory_optimized: Option<bool>,
     pub unique: bool,
     pub primary_key: bool,
     pub disabled: bool,
@@ -81,7 +85,7 @@ pub struct MssqlIndexSnapshot {
 }
 impl MssqlIndexSnapshot {
     pub fn key(&self) -> Result<String> {
-        serde_json::to_vec(&(&self.table, self.index_id))
+        serde_json::to_vec(&(&self.parent_kind, &self.parent_object, self.index_id))
             .map(|bytes| digest(&bytes))
             .map_err(|_| CollectionStop::InvalidPage.error())
     }
@@ -93,13 +97,23 @@ impl MssqlIndexSnapshot {
     pub fn is_valid(&self) -> bool {
         let mut ordinals = std::collections::BTreeSet::new();
         let mut keys = std::collections::BTreeSet::new();
-        self.table.is_valid()
+        self.parent_object.is_valid()
+            && match self.parent_kind {
+                MssqlIndexParentKind::Table => self.parent_memory_optimized.is_some(),
+                MssqlIndexParentKind::IndexedView => {
+                    self.parent_memory_optimized.is_none()
+                        && self.filter.is_none()
+                        && matches!(self.type_code, 1 | 2)
+                        && !self.primary_key
+                        && (self.type_code != 1 || self.unique)
+                }
+            }
             && self.index_id > 0
             && self.type_code > 0
-            && [&self.schema, &self.table_name, &self.name, &self.native_type]
+            && [&self.parent_schema, &self.parent_name, &self.name, &self.native_type]
                 .into_iter()
                 .all(|name| !name.is_empty() && name.len() <= 2048)
-            && super::catalog::local_time(&self.table_modified_without_offset)
+            && super::catalog::local_time(&self.parent_modified_without_offset)
             && self.columns.len() <= MAX_MSSQL_INDEX_COLUMNS
             && self.columns.iter().all(|column| {
                 column.column_id > 0
@@ -115,8 +129,10 @@ impl MssqlIndexSnapshot {
             && self.filter.as_ref().is_none_or(CatalogExpression::is_valid)
             && self.reserved_bytes.as_deref().is_none_or(valid_counter)
             && match &self.usage {
-                MssqlIndexUsage::Observed(usage) => !self.memory_optimized && self.type_code != 4 && usage.is_valid(),
-                MssqlIndexUsage::NotApplicable => self.memory_optimized || self.type_code == 4,
+                MssqlIndexUsage::Observed(usage) => {
+                    self.parent_memory_optimized != Some(true) && self.type_code != 4 && usage.is_valid()
+                }
+                MssqlIndexUsage::NotApplicable => self.parent_memory_optimized == Some(true) || self.type_code == 4,
                 MssqlIndexUsage::NotCollected => true,
             }
     }

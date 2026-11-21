@@ -3,7 +3,8 @@ import type { CatalogExpression } from "./CatalogExpression";
 import type { MssqlCatalogIndexColumn } from "./MssqlCatalogIndexColumn";
 import type { MssqlColumnstoreConfiguration } from "./MssqlColumnstoreConfiguration";
 import type { MssqlIndexConfiguration } from "./MssqlIndexConfiguration";
+import type { MssqlIndexParentKind } from "./MssqlIndexParentKind";
 import type { MssqlIndexUsage } from "./MssqlIndexUsage";
 import type { MssqlObjectIdentity } from "./MssqlObjectIdentity";
 
-export type MssqlIndexSnapshot = { table: MssqlObjectIdentity, schema: string, table_name: string, index_id: number, name: string, table_modified_without_offset: string, type_code: number, native_type: string, memory_optimized: boolean, unique: boolean, primary_key: boolean, disabled: boolean, columns: Array<MssqlCatalogIndexColumn>, columnstore: MssqlColumnstoreConfiguration | null, configuration: MssqlIndexConfiguration | null, filter: CatalogExpression | null, reserved_bytes: string | null, usage: MssqlIndexUsage, };
+export type MssqlIndexSnapshot = { parent_kind: MssqlIndexParentKind, parent_object: MssqlObjectIdentity, parent_schema: string, parent_name: string, index_id: number, name: string, parent_modified_without_offset: string, type_code: number, native_type: string, parent_memory_optimized: boolean | null, unique: boolean, primary_key: boolean, disabled: boolean, columns: Array<MssqlCatalogIndexColumn>, columnstore: MssqlColumnstoreConfiguration | null, configuration: MssqlIndexConfiguration | null, filter: CatalogExpression | null, reserved_bytes: string | null, usage: MssqlIndexUsage, };

@@ -429,6 +429,7 @@
     }
   ],
   "index_configuration": [],
+  "indexed_views": [],
   "locked": [],
   "performance_counters": [],
   "provenance": {
@@ -848,7 +849,7 @@
         "table": "orders"
       }
     ],
-    "format": 47,
+    "format": 48,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -1011,14 +1012,16 @@
       "galera": [],
       "group_replication": [],
       "index_configuration": [],
+      "indexed_view_originals": [],
+      "indexed_views": null,
       "log_failures": [],
       "multixacts": [],
+      "numa_nodes": [],
       "sequences": [],
+      "source_acquisitions": [],
       "spaces": [],
       "sqlite": null,
-      "table_memory": [],
-      "numa_nodes": [],
-      "source_acquisitions": []
+      "table_memory": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -2545,6 +2548,7 @@
       "windowed": true
     }
   },
+  "source_acquisitions": [],
   "summary": {
     "by_category": [
       {
@@ -2726,6 +2730,5 @@
       "separator": " "
     },
     "top_share": 0.9887727501019123
-  },
-  "source_acquisitions": []
+  }
 }

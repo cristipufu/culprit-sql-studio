@@ -12,6 +12,7 @@ use std::{
 };
 
 mod configuration_scale;
+mod indexed_views;
 mod rowgroups;
 
 use crate::test_support::owned_control::{COMMAND_TIMEOUT, retire_control};
@@ -183,7 +184,7 @@ async fn read(
                 assert!(rows <= APPLICATION_INDEXES, "an overflow is not a complete prefix");
                 for row in batch.rows {
                     let index = decode(&row, &layout)?.snapshot;
-                    if index.schema == "dbo" && index.table_name == fixture.table && index.name == "cci_owned" {
+                    if index.parent_schema == "dbo" && index.parent_name == fixture.table && index.name == "cci_owned" {
                         assert!(selected.is_none(), "one row per exact native index");
                         assert!(index.is_valid());
                         selected = index.columnstore;
@@ -195,8 +196,9 @@ async fn read(
             }
             selected
         } else {
-            let (indexes, usage) = application(&mut reader, false).await?;
-            assert!(!usage);
+            let read=application(&mut reader,false).await?;
+            assert!(!read.with_usage);
+            let indexes=read.table_indexes;
             let selected = indexes
                 .iter()
                 .filter(|index| index.schema == "dbo" && index.table == fixture.table && index.name == "cci_owned")

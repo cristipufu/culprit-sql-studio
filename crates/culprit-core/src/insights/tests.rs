@@ -2958,3 +2958,5 @@ mismatch None None: Make the types match: send the value with the column's own t
 stale: SQL Server reported no usable statistics on tenant_id and status when this plan was compiled. These columns appear in seek keys of ix_orders_tenant. An index has statistics, but its histogram describes only the first key; the seek alone does not establish that each named column has a histogram or that the statistics are out of date. Query Store can retain the original warning after statistics change.
 stale with catalog: SQL Server reported no usable statistics on tenant_id and status when this plan was compiled. These columns appear in seek keys of ix_orders_tenant. An index has statistics, but its histogram describes only the first key; the seek alone does not establish that each named column has a histogram or that the statistics are out of date. Query Store can retain the original warning after statistics change. Current catalog: both have statistics.
 "##;
+
+mod indexed_views;

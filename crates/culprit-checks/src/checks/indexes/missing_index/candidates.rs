@@ -80,6 +80,7 @@ pub(crate) fn merge_candidates(snapshot: &Snapshot) -> Vec<Candidate> {
     let mut all: Vec<Candidate> = snapshot
         .missing_indexes
         .iter()
+        .filter(|m| permits_table_index_advice(snapshot, &m.schema, &m.table))
         .filter(|m| m.seeks + m.scans >= 10.0 && m.avg_impact_pct >= 10.0)
         .map(Candidate::from)
         .collect();

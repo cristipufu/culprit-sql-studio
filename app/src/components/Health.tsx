@@ -35,6 +35,7 @@ import { MemoryClerks } from "./MemoryClerks";
 import { TempdbMetadataMemory } from "./TempdbMetadataMemory";
 import { TableMemory } from "./TableMemory";
 import { IndexConfigurations } from "./IndexConfigurations";
+import { IndexedViews } from "./IndexedViews";
 import { QueryWaitFragments } from "./QueryWaitFragments";
 import { RuntimeFragments } from "./RuntimeFragments";
 import { GroupReplication } from "./GroupReplication";
@@ -325,6 +326,7 @@ export function HealthTab({
       {runtimeFragments && <RuntimeFragments report={runtimeFragments} />}
       {queryWaitFragments && <QueryWaitFragments report={queryWaitFragments} />}
       <IndexConfigurations key={report.snapshot.id} reports={indexConfiguration} />
+      <IndexedViews key={`indexed-views:${report.snapshot.id}`} reports={report.indexed_views} />
       {tableMemory.length > 0 && <TableMemory key={report.snapshot.id} reports={tableMemory} />}
       {groupReplication.length > 0 && <GroupReplication key={report.snapshot.id} reports={groupReplication} />}
       {managedInstanceResources && <ManagedInstanceResources key={managedInstanceResourcesRead?.kind === "captured" ? managedInstanceResourcesRead.read.origin.capture.manifest_sha256 : report.snapshot.id} report={managedInstanceResources} />}

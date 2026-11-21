@@ -190,3 +190,7 @@ Messen, Markieren, Ignorieren, Suchen, Weiter, Zurück, Fertig, Leeren (clear), 
 Progress: „Wird gespeichert…“, „Wird gelesen…“, „Wird ausgeführt…“.
 | telemetry outbox, capture revision, journal, replay | Telemetrie-Ausgangspuffer, Erfassungsrevision, Transaktionsjournal, erneut ausgeben | dauerhaft gespeicherte lokale Telemetrie; keine E-Mail |
 | full-text index, full-text population (native crawl) | Volltextindex, Volltextauffüllung | Katalogmetadaten; kein Nachweis über Fortschritt oder Suchergebnisse |
+
+## Indexed views
+
+- **indexed view**: *indizierte Sicht* (SQL Server). A schema-bound view with native indexes; keep it distinct from an ordinary table and from a materialized view in other engines. Catalog configuration and usage do not establish health or workload benefit.

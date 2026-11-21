@@ -352,6 +352,11 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             reason: crate::message!("view.query_wait_fragments.sharing_withheld"),
         };
     }
+    for recorded in &mut s.operations.indexed_view_originals {
+        *recorded = crate::telemetry::RecordedOperationalRead::Unavailable {
+            reason: crate::message!("view.indexed_views.sharing_withheld"),
+        };
+    }
     for recorded in &mut s.operations.index_configuration {
         *recorded = crate::telemetry::RecordedOperationalRead::Unavailable {
             reason: crate::message!("view.index_configuration.sharing_withheld"),

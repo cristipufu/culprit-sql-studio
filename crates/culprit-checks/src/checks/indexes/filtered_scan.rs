@@ -61,6 +61,9 @@ pub(crate) fn scan_groups(snapshot: &Snapshot) -> Vec<ScanGroup<'_>> {
             continue;
         }
         for node in plan.nodes() {
+            if culprit_core::insights::original_indexed_view_input(plan.engine, node) {
+                continue;
+            }
             if !matches!(node.kind, culprit_core::NodeKind::Scan | culprit_core::NodeKind::Seek) {
                 continue;
             }
@@ -78,6 +81,9 @@ pub(crate) fn scan_groups(snapshot: &Snapshot) -> Vec<ScanGroup<'_>> {
                 continue;
             }
             let Some((schema, table)) = split_object(object) else { continue };
+            if !permits_table_index_advice(snapshot, &schema, &table) {
+                continue;
+            }
             let rows = scan_rows(snapshot, node, &schema, &table)
                 .or_else(|| filter_parent.and(node.act_rows).map(|read| read / node.runs()))
                 .unwrap_or(0.0);

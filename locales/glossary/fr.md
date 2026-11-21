@@ -209,3 +209,7 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | the Queries, Live views | Requêtes, En direct | |
 | telemetry outbox, capture revision, journal, replay | tampon de sortie de télémétrie, révision de capture, journal transactionnel, relire | captures locales durables ; pas de messagerie |
 | full-text index, full-text population (native crawl) | index de texte intégral, remplissage de l’index de texte intégral | métadonnées du catalogue ; ne confirment ni progression ni résultats de recherche |
+
+## Indexed views
+
+- **indexed view**: *vue indexée* (SQL Server). A schema-bound view with native indexes; keep it distinct from an ordinary table and from a materialized view in other engines. Catalog configuration and usage do not establish health or workload benefit.

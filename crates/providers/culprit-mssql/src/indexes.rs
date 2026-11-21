@@ -10,7 +10,7 @@ use culprit_core::{IndexStat, Result, telemetry::*};
 
 mod columnstore;
 pub(crate) mod configuration;
-const APPLICATION_INDEXES: usize = 10_000;
+const APPLICATION_INDEXES: usize = MAX_CURRENT_MSSQL_INDEX_ROWS;
 pub(crate) struct Layout {
     pub with_dmvs: bool,
     pub expression_limit: usize,
@@ -18,8 +18,11 @@ pub(crate) struct Layout {
 pub(crate) fn select_sql(layout: &Layout) -> String {
     let relation = crate::partition_storage::relation(layout.with_dmvs);
     let page_bytes = crate::partition_storage::PAGE_BYTES;
-    let measurable =
-        if layout.with_dmvs { "t.is_memory_optimized=0" } else { "t.is_memory_optimized=0 AND i.type NOT IN (5,6)" };
+    let measurable = if layout.with_dmvs {
+        "(o.type='V' OR native_table.is_memory_optimized=0)"
+    } else {
+        "(o.type='V' OR native_table.is_memory_optimized=0) AND i.type NOT IN (5,6)"
+    };
     let filter = crate::catalog_expression::select("i.filter_definition", "filter", layout.expression_limit);
     let usage_fields = if layout.with_dmvs {
         let display = crate::sql_time::utc_local_iso(
@@ -40,11 +43,11 @@ pub(crate) fn select_sql(layout: &Layout) -> String {
         before_configuration: format!(
             r#"
 WITH native_partitions AS ({relation})
-SELECT TOP (@P1) DB_ID() AS database_id,t.object_id,
- CONVERT(varchar(40),t.create_date,126) AS created_without_offset,
- CONVERT(varchar(40),t.modify_date,126) AS modified_without_offset,
- s.name AS schema_name,t.name AS table_name,i.name AS index_name,i.index_id,i.type,i.type_desc,
- t.is_memory_optimized,i.is_unique,i.is_primary_key,i.is_disabled,i.has_filter,{filter},"#
+SELECT TOP (@P1) DB_ID() AS database_id,o.object_id,
+ CONVERT(varchar(40),o.create_date,126) AS created_without_offset,
+ CONVERT(varchar(40),o.modify_date,126) AS modified_without_offset,
+ s.name AS schema_name,o.name AS parent_name,i.name AS index_name,i.index_id,i.type,i.type_desc,
+ RTRIM(o.type) AS parent_native_type,native_table.is_memory_optimized AS parent_memory_optimized,i.is_unique,i.is_primary_key,i.is_disabled,i.has_filter,{filter},"#
         ),
         before_ordinals: format!(
             " ISNULL((SELECT TOP({}) ic.index_column_id,c.column_id,c.name,ic.key_ordinal,
@@ -57,9 +60,10 @@ SELECT TOP (@P1) DB_ID() AS database_id,t.object_id,
   WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id ORDER BY ic.index_column_id FOR JSON PATH,INCLUDE_NULL_VALUES),N'[]') AS index_columns,
  CASE WHEN {measurable} THEN CONVERT(varchar(40),(SELECT SUM(p.reserved_pages)*{page_bytes} FROM native_partitions p WHERE p.object_id=i.object_id AND p.index_id=i.index_id)) END AS reserved_bytes,
  {usage_fields}
-FROM sys.indexes i JOIN sys.tables t ON t.object_id=i.object_id
-JOIN sys.schemas s ON s.schema_id=t.schema_id {usage_join}
-WHERE t.is_ms_shipped=0 AND i.type>0 AND i.is_hypothetical=0
+FROM sys.indexes i JOIN sys.objects o ON o.object_id=i.object_id
+LEFT JOIN sys.tables native_table ON native_table.object_id=o.object_id AND o.type='U'
+JOIN sys.schemas s ON s.schema_id=o.schema_id {usage_join}
+WHERE o.is_ms_shipped=0 AND o.type IN('U','V') AND i.type>0 AND i.is_hypothetical=0
 ORDER BY i.object_id,i.index_id OPTION(MAXDOP 1)
 "#
         ),
@@ -73,12 +77,17 @@ pub(crate) struct NativeIndex {
 pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<NativeIndex> {
     let narrow = |field| integer(row, field)?.try_into().map_err(|_| invalid_data());
     let type_code = narrow("type")?;
-    let memory_optimized = boolean(row, "is_memory_optimized")?;
+    let parent_kind = match text(row, "parent_native_type")?.as_str() {
+        "U" => MssqlIndexParentKind::Table,
+        "V" => MssqlIndexParentKind::IndexedView,
+        _ => return Err(invalid_data()),
+    };
+    let parent_memory_optimized = optional_boolean(row, "parent_memory_optimized")?;
     // The DMV excludes spatial and memory-optimized indexes. Their missing rows cannot establish zero use.
     // https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-index-usage-stats-transact-sql
     let usage = if !layout.with_dmvs {
         MssqlIndexUsage::NotCollected
-    } else if memory_optimized || type_code == 4 {
+    } else if parent_memory_optimized == Some(true) || type_code == 4 {
         MssqlIndexUsage::NotApplicable
     } else {
         MssqlIndexUsage::Observed(Box::new(MssqlIndexUsageCounters {
@@ -96,19 +105,20 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<NativeIndex> {
     };
     let columns = columnstore::columns(&text(row, "index_columns")?)?;
     let mut snapshot = MssqlIndexSnapshot {
-        table: MssqlObjectIdentity {
+        parent_kind,
+        parent_object: MssqlObjectIdentity {
             database_id: narrow("database_id")?,
             object_id: narrow("object_id")?,
             created_without_offset: text(row, "created_without_offset")?,
         },
-        schema: text(row, "schema_name")?,
-        table_name: text(row, "table_name")?,
+        parent_schema: text(row, "schema_name")?,
+        parent_name: text(row, "parent_name")?,
         index_id: narrow("index_id")?,
         name: text(row, "index_name")?,
-        table_modified_without_offset: text(row, "modified_without_offset")?,
+        parent_modified_without_offset: text(row, "modified_without_offset")?,
         type_code,
         native_type: text(row, "type_desc")?,
-        memory_optimized,
+        parent_memory_optimized,
         unique: boolean(row, "is_unique")?,
         primary_key: boolean(row, "is_primary_key")?,
         disabled: boolean(row, "is_disabled")?,
@@ -130,7 +140,14 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<NativeIndex> {
         display_last_read: optional_text(row, "display_last_read")?,
     })
 }
-pub(crate) async fn application<R: NativeRead>(reader: &mut R, with_dmvs: bool) -> Result<(Vec<IndexStat>, bool)> {
+pub(crate) struct IndexRead {
+    pub table_indexes: Vec<IndexStat>,
+    pub indexed_views: Vec<MssqlIndexSnapshot>,
+    pub retained_index_rows: usize,
+    pub parent_prefix_complete: bool,
+    pub with_usage: bool,
+}
+pub(crate) async fn application<R: NativeRead>(reader: &mut R, with_dmvs: bool) -> Result<IndexRead> {
     let mut layout = Layout { with_dmvs, expression_limit: MAX_CATALOG_EXPRESSION_BYTES };
     let read = |layout: &Layout| (select_sql(layout), vec![Parameter::Integer((APPLICATION_INDEXES + 1) as i64)]);
     let (sql, parameters) = read(&layout);
@@ -143,16 +160,40 @@ pub(crate) async fn application<R: NativeRead>(reader: &mut R, with_dmvs: bool) 
         }
         Err(error) => return Err(error.into_error()),
     };
-    if rows.len() > APPLICATION_INDEXES {
+    if rows.len() > APPLICATION_INDEXES + 1 {
         return Err(CollectionStop::RowLimit.error());
     }
-    let indexes =
-        rows.iter().map(|row| decode(row, &layout).and_then(NativeIndex::project)).collect::<Result<Vec<_>>>()?;
-    Ok((indexes, layout.with_dmvs))
+    let parent_prefix_complete = rows.len() <= APPLICATION_INDEXES;
+    // Even the unretained lookahead must satisfy the original kind, identity, value and scope contract.
+    let mut native = rows.iter().map(|row| decode(row, &layout)).collect::<Result<Vec<_>>>()?;
+    if !mssql_index_rows_are_consistent(native.iter().map(|index| &index.snapshot)) {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    native.truncate(APPLICATION_INDEXES);
+    let retained_index_rows = native.len();
+    let mut table_indexes = Vec::new();
+    let mut indexed_views = Vec::new();
+    for index in native {
+        match index.snapshot.parent_kind {
+            MssqlIndexParentKind::Table => table_indexes.push(index.project()?),
+            MssqlIndexParentKind::IndexedView => indexed_views.push(index.snapshot),
+        }
+    }
+    Ok(IndexRead {
+        table_indexes,
+        indexed_views,
+        retained_index_rows,
+        parent_prefix_complete,
+        with_usage: layout.with_dmvs,
+    })
 }
+
 impl NativeIndex {
     fn project(self) -> Result<IndexStat> {
         let index = self.snapshot;
+        if index.parent_kind != MssqlIndexParentKind::Table {
+            return Err(invalid_data());
+        }
         if let Some(filter) = &index.filter {
             crate::catalog_expression::require_available(filter)?;
         }
@@ -180,8 +221,8 @@ impl NativeIndex {
             mssql_configuration: index.configuration,
             docdb: None,
             filter_facts: None,
-            schema: index.schema,
-            table: index.table_name,
+            schema: index.parent_schema,
+            table: index.parent_name,
             name: index.name,
             kind: index.native_type.to_ascii_lowercase(),
             columns,

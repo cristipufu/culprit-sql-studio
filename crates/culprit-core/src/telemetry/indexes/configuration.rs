@@ -61,10 +61,11 @@ pub struct MssqlPartitionCompression {
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct MssqlIndexConfiguration {
-    pub table: MssqlObjectIdentity,
-    pub schema: String,
-    pub table_name: String,
-    pub table_modified_without_offset: String,
+    pub parent_kind: MssqlIndexParentKind,
+    pub parent_object: MssqlObjectIdentity,
+    pub parent_schema: String,
+    pub parent_name: String,
+    pub parent_modified_without_offset: String,
     /// Zero is the native heap, not a named index. This does not supply an independent index incarnation.
     pub index_id: u32,
     #[serde(deserialize_with = "required_nullable")]
@@ -83,15 +84,19 @@ pub struct MssqlIndexConfiguration {
 }
 impl MssqlIndexConfiguration {
     pub fn is_valid(&self) -> bool {
-        self.table.is_valid()
-            && self.table.database_id <= i32::MAX as u32
-            && self.table.object_id <= i32::MAX as u32
+        self.parent_object.is_valid()
+            && self.parent_object.database_id <= i32::MAX as u32
+            && self.parent_object.object_id <= i32::MAX as u32
             && self.index_id <= i32::MAX as u32
             && self.type_code <= u8::MAX as u32
-            && [&self.schema, &self.table_name].into_iter().all(|name| label(name))
-            && super::super::catalog::local_time(&self.table_modified_without_offset)
+            && (self.parent_kind == MssqlIndexParentKind::Table || matches!(self.type_code, 1 | 2))
+            && [&self.parent_schema, &self.parent_name].into_iter().all(|name| label(name))
+            && super::super::catalog::local_time(&self.parent_modified_without_offset)
             && if self.index_id == 0 {
-                self.type_code == 0 && self.name.is_none() && self.options.is_none()
+                self.parent_kind == MssqlIndexParentKind::Table
+                    && self.type_code == 0
+                    && self.name.is_none()
+                    && self.options.is_none()
             } else {
                 self.type_code > 0
                     && self.name.as_deref().is_some_and(label)
@@ -107,7 +112,7 @@ impl MssqlIndexConfiguration {
         let mut identities = BTreeSet::new();
         let mut numbers = BTreeSet::new();
         self.partitions.iter().all(|partition| {
-            partition.object_id == self.table.object_id
+            partition.object_id == self.parent_object.object_id
                 && partition.index_id == self.index_id
                 && integer_id(&partition.partition_id, false)
                 && integer_id(&partition.hobt_id, true)
@@ -128,37 +133,41 @@ impl MssqlIndexConfiguration {
     }
     pub fn is_for_index(&self, index: &crate::IndexStat) -> bool {
         self.is_valid()
+            && self.parent_kind == MssqlIndexParentKind::Table
             && self.index_id > 0
-            && self.schema == index.schema
-            && self.table_name == index.table
+            && self.parent_schema == index.schema
+            && self.parent_name == index.table
             && self.name.as_deref() == Some(index.name.as_str())
     }
     pub fn is_for_table(&self, table: &crate::TableStat) -> bool {
         self.is_valid()
+            && self.parent_kind == MssqlIndexParentKind::Table
             && self.index_id == 0
             && table.is_heap == Some(true)
-            && self.schema == table.schema
-            && self.table_name == table.name
+            && self.parent_schema == table.schema
+            && self.parent_name == table.name
     }
     pub(super) fn is_valid_for(&self, index: &MssqlIndexSnapshot) -> bool {
         self.is_valid()
-            && self.table == index.table
+            && self.parent_kind == index.parent_kind
+            && self.parent_object == index.parent_object
             && self.index_id == index.index_id
             && self.name.as_deref() == Some(index.name.as_str())
             && self.type_code == index.type_code
-            && self.schema == index.schema
-            && self.table_name == index.table_name
-            && self.table_modified_without_offset == index.table_modified_without_offset
+            && self.parent_schema == index.parent_schema
+            && self.parent_name == index.parent_name
+            && self.parent_modified_without_offset == index.parent_modified_without_offset
     }
     pub(crate) fn is_valid_for_heap(&self, table: &MssqlTableSnapshot) -> bool {
         self.is_valid()
+            && self.parent_kind == MssqlIndexParentKind::Table
             && self.index_id == 0
             && self.type_code == 0
             && table.is_heap == Some(true)
-            && self.table == table.identity
-            && self.schema == table.schema
-            && self.table_name == table.name
-            && self.table_modified_without_offset == table.modified_without_offset
+            && self.parent_object == table.identity
+            && self.parent_schema == table.schema
+            && self.parent_name == table.name
+            && self.parent_modified_without_offset == table.modified_without_offset
     }
 }
 fn description(code: Option<u8>, value: Option<&str>) -> bool {

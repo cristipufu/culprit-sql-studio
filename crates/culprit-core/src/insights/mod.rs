@@ -24,6 +24,8 @@ mod catalog;
 mod conversions;
 mod growth;
 mod index;
+mod index_parent;
+pub use index_parent::original_indexed_view_input;
 mod memory;
 mod parallelism;
 mod parameters;
@@ -325,7 +327,9 @@ pub fn insights(plan: &Plan) -> Vec<PlanInsight> {
     let mut out: Vec<PlanInsight> = Vec::new();
     for rule in rules {
         for d in rule(&cx) {
-            if out.iter().any(|o| o.rule == d.rule && o.nodes.first() == d.nodes.first()) || on_system_objects(&cx, &d)
+            if out.iter().any(|o| o.rule == d.rule && o.nodes.first() == d.nodes.first())
+                || on_system_objects(&cx, &d)
+                || index_parent::is_original_indexed_view(&cx, &d)
             {
                 continue;
             }
@@ -510,6 +514,8 @@ struct Draft {
     impact: f64,
     nodes: Vec<u32>,
     index_hint: Option<crate::plan::PlanIndexHint>,
+    /// Exact original node selected as an objectless operator’s index-advice subject.
+    index_subject_node: Option<u32>,
     /// The insight is about everything below its first operator (the whole plan, a parallel branch): the materiality
     /// gate counts the rows of the busiest operator there.
     subtree: bool,
@@ -535,6 +541,7 @@ impl Draft {
             impact,
             nodes,
             index_hint: None,
+            index_subject_node: None,
             subtree: false,
             cost_ms: None,
             fixed_weight: false,
@@ -801,10 +808,13 @@ fn actionable_object(n: &PlanNode) -> Option<String> {
 
 /// The table (or the operator) a subtree reads first, for naming the outer and inner side of a join.
 fn first_object(n: &PlanNode) -> Option<String> {
-    if let Some(o) = &n.object {
-        return Some(o.clone());
+    first_object_node(n).and_then(|node| node.object.clone())
+}
+fn first_object_node(n: &PlanNode) -> Option<&PlanNode> {
+    if n.object.is_some() {
+        return Some(n);
     }
-    n.children.iter().find_map(first_object)
+    n.children.iter().find_map(first_object_node)
 }
 
 /// `n` as a message's plural number, for a count written with [`rows_text`]: exactly 1 where it rounds to one, so it

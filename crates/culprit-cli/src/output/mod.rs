@@ -470,6 +470,9 @@ impl Out {
         if !report.source_acquisitions.is_empty() {
             println!("\n{}", observations::historical_source_overhead(&report.source_acquisitions));
         }
+        for view in &report.indexed_views {
+            println!("\n{}", observations::indexed_views(view));
+        }
         for configuration in &report.index_configuration {
             println!("\n{}", observations::index_configuration(configuration));
         }
@@ -826,6 +829,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "runtime_fragments": report.runtime_fragments.as_deref().map(observations::compact_runtime_fragments),
         "query_wait_fragments": report.query_wait_fragments.as_deref().map(observations::compact_query_wait_fragments),
         "index_configuration":report.index_configuration.iter().map(observations::compact_index_configuration).collect::<Vec<_>>(),
+        "indexed_views":report.indexed_views.iter().map(observations::compact_indexed_views).collect::<Vec<_>>(),
         "source_acquisitions": report.source_acquisitions,
         "table_memory": report.table_memory.as_ref().map(|reports|reports.iter().map(observations::compact_table_memory).collect::<Vec<_>>()),
         "group_replication": report.group_replication.as_ref().map(|reports|reports.iter().map(observations::compact_group_replication).collect::<Vec<_>>()),
@@ -903,6 +907,9 @@ pub(super) fn markdown_report(report: &Report) -> String {
     }
     if !report.source_acquisitions.is_empty() {
         out.push_str(&markdown_text_block(&observations::historical_source_overhead(&report.source_acquisitions)));
+    }
+    for view in &report.indexed_views {
+        out.push_str(&markdown_text_block(&observations::indexed_views(view)));
     }
     for configuration in &report.index_configuration {
         out.push_str(&markdown_text_block(&observations::index_configuration(configuration)));

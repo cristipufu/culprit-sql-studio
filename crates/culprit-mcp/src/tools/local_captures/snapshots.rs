@@ -63,6 +63,7 @@ fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
         LocalSnapshotReport::DatabaseProperties(report) => database_properties(report),
         LocalSnapshotReport::SuspectPages(report) => crate::waits_view::suspect_pages::value(report),
         LocalSnapshotReport::TableFullText(report) => table_full_text::value(report),
+        LocalSnapshotReport::IndexedViews(report) => crate::waits_view::indexed_views::value(report),
         LocalSnapshotReport::IndexConfiguration(report) => crate::waits_view::index_configuration::value(report),
         LocalSnapshotReport::TableTemporal(report) => table_temporal::value(report),
         LocalSnapshotReport::Compilation(report) => compilation(analysis, report),

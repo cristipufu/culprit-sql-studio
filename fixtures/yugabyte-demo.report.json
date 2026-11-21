@@ -533,6 +533,7 @@
     }
   ],
   "index_configuration": [],
+  "indexed_views": [],
   "locked": [
     {
       "check": {
@@ -973,7 +974,7 @@
         "table": "orders"
       }
     ],
-    "format": 47,
+    "format": 48,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -3468,6 +3469,8 @@
       "galera": [],
       "group_replication": [],
       "index_configuration": [],
+      "indexed_view_originals": [],
+      "indexed_views": null,
       "log_failures": [],
       "multixacts": [],
       "node_resources": {
@@ -3505,7 +3508,9 @@
         "partial": false,
         "source": "yb_servers_metrics · shared YB-TServer nodes"
       },
+      "numa_nodes": [],
       "sequences": [],
+      "source_acquisitions": [],
       "spaces": [],
       "sqlite": null,
       "table_memory": [],
@@ -3701,9 +3706,7 @@
         "scope": "node",
         "source": "yb_terminated_queries (node 3d2d9e10555b4ae2a683a8402505e416)",
         "visibility": "Complete monitoring privilege for this database"
-      },
-      "numa_nodes": [],
-      "source_acquisitions": []
+      }
     },
     "options": {
       "collect_memory_failures": false,
@@ -7955,6 +7958,7 @@
       "windowed": false
     }
   },
+  "source_acquisitions": [],
   "summary": {
     "by_category": [
       {
@@ -8103,6 +8107,5 @@
       "separator": " "
     },
     "top_share": 0.8832246696651375
-  },
-  "source_acquisitions": []
+  }
 }

@@ -3,8 +3,8 @@ use culprit_core::DatabaseIdentity;
 use serde_json::json;
 fn configuration() -> MssqlIndexConfiguration {
     serde_json::from_value(json!({
-        "table":{"database_id":5,"object_id":100,"created_without_offset":"2026-11-10T07:00:00.123"},
-        "schema":"dbo","table_name":"Orders","table_modified_without_offset":"2026-11-10T07:01:00.123",
+        "parent_kind":"table","parent_object":{"database_id":5,"object_id":100,"created_without_offset":"2026-11-10T07:00:00.123"},
+        "parent_schema":"dbo","parent_name":"Orders","parent_modified_without_offset":"2026-11-10T07:01:00.123",
         "index_id":2,"name":"ix_orders","type_code":2,
         "options":{"fill_factor_availability":"available","fill_factor":0,"padded_availability":"available","padded":false,
             "ignore_duplicate_key_availability":"available","ignore_duplicate_key":false,"allow_row_locks_availability":"available","allow_row_locks":true,"allow_page_locks_availability":"available","allow_page_locks":true},
@@ -18,15 +18,16 @@ fn configuration() -> MssqlIndexConfiguration {
 }
 fn row(configuration: MssqlIndexConfiguration) -> OperationalObservation {
     let index = MssqlIndexSnapshot {
-        table: configuration.table.clone(),
-        schema: configuration.schema.clone(),
-        table_name: configuration.table_name.clone(),
-        table_modified_without_offset: configuration.table_modified_without_offset.clone(),
+        parent_kind: MssqlIndexParentKind::Table,
+        parent_object: configuration.parent_object.clone(),
+        parent_schema: configuration.parent_schema.clone(),
+        parent_name: configuration.parent_name.clone(),
+        parent_modified_without_offset: configuration.parent_modified_without_offset.clone(),
         index_id: configuration.index_id,
         name: configuration.name.clone().unwrap(),
         type_code: 2,
         native_type: "NONCLUSTERED".into(),
-        memory_optimized: false,
+        parent_memory_optimized: Some(false),
         unique: false,
         primary_key: false,
         disabled: false,
@@ -123,7 +124,7 @@ fn native_values_and_mixed_partitions_keep_their_own_state_and_offset_free_time(
     let configuration = configuration();
     let report = entry(&configuration, Some("original")).unwrap();
     assert_eq!(report.fields[0].text, t!("view.index_configuration.native_default"));
-    assert_eq!(report.native_table.created_without_offset, "2026-11-10T07:00:00.123");
+    assert_eq!(report.parent_object.created_without_offset, "2026-11-10T07:00:00.123");
     assert_eq!(report.partitions[0].partition_id, "9007199254740993");
     assert_ne!(report.partitions[0].fields[0].text, report.partitions[1].fields[0].text);
     assert_eq!(report.partitions[0].fields[3].availability, MssqlCatalogAvailability::Unsupported);
@@ -175,12 +176,12 @@ fn original_scope_count_and_native_generation_admission_precede_any_configuratio
             "source" => changed.source = source_id::TABLES.into(),
             "generation" => {
                 let OperationalFact::MssqlIndex(index) = &mut changed.fact else { panic!() };
-                index.table.created_without_offset = "2026-11-10T07:02:00.123".into();
+                index.parent_object.created_without_offset = "2026-11-10T07:02:00.123".into();
             }
             "database" => {
                 let OperationalFact::MssqlIndex(index) = &mut another.fact else { panic!() };
-                index.table.database_id = 6;
-                index.configuration.as_mut().unwrap().table.database_id = 6;
+                index.parent_object.database_id = 6;
+                index.configuration.as_mut().unwrap().parent_object.database_id = 6;
                 another.key = index.key().unwrap();
             }
             _ => {}

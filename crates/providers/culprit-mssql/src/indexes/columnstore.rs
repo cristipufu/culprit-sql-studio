@@ -14,7 +14,7 @@ pub(super) struct QueryParts {
 }
 
 pub(super) fn query(parts: QueryParts) -> String {
-    let configuration = super::configuration::columns_expression(true);
+    let configuration = super::configuration::columns_expression(true, "o");
     let configuration_declarations = super::configuration::declarations(true);
     let configuration_parameters = super::configuration::parameters(true);
     let configuration_arguments = super::configuration::arguments(true);
@@ -115,12 +115,12 @@ pub(super) fn configuration(
     let column_store_order_availability = crate::catalog_visibility::availability(row, "ordering_availability")?;
     let data_clustering_availability = crate::catalog_visibility::availability(row, "clustering_availability")?;
     let configuration = MssqlColumnstoreConfiguration {
-        table: index.table.clone(),
+        table: index.parent_object.clone(),
         index_id: index.index_id,
-        schema: index.schema.clone(),
-        table_name: index.table_name.clone(),
+        schema: index.parent_schema.clone(),
+        table_name: index.parent_name.clone(),
         name: index.name.clone(),
-        table_modified_without_offset: index.table_modified_without_offset.clone(),
+        table_modified_without_offset: index.parent_modified_without_offset.clone(),
         compression_delay_availability,
         compression_delay_minutes,
         column_store_order_availability,

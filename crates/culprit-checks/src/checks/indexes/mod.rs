@@ -10,6 +10,8 @@ use crate::support::*;
 mod duplicate_index;
 mod filtered_scan;
 mod missing_index;
+mod parent;
+pub(crate) use parent::permits_table_index_advice;
 pub(crate) mod notes;
 #[cfg(test)]
 mod tests;

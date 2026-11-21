@@ -22,9 +22,9 @@ test("schema disclosure refuses stale generation, ambiguous entries and original
   expect(shown).toContain(report.index_configuration[0]!.qualification);
   for (const limitation of report.index_configuration[0]!.limitations) expect(shown).toContain(limitation);
   const entry = report.index_configuration[0]!.entries[0]!;
-  entry.native_table = { ...entry.native_table, created_without_offset: "2000-01-01T00:00:00.0000000" };
+  entry.parent_object = { ...entry.parent_object, created_without_offset: "2000-01-01T00:00:00.0000000" };
   expect(renderToStaticMarkup(<IndexConfiguration report={report} index={index} />)).toBe("");
-  entry.native_table = index.mssql_configuration!.table; report.index_configuration[0]!.entries.push(entry);
+  entry.parent_object = index.mssql_configuration!.parent_object; report.index_configuration[0]!.entries.push(entry);
   expect(renderToStaticMarkup(<IndexConfiguration report={report} index={index} />)).toBe("");
   report.index_configuration[0]!.entries.pop();
   report.index_configuration[0]!.context = partial<NativeReadContext>({ observed_from: "2000-01-01T00:00:00Z", observed_until: "2000-01-01T00:00:01Z" });

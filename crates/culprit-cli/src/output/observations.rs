@@ -1383,3 +1383,6 @@ pub(crate) use managed_instance_resources::{
 
 mod index_configuration;
 pub(crate) use index_configuration::{compact_index_configuration, index_configuration};
+
+mod indexed_views;
+pub(crate) use indexed_views::{compact_indexed_views, indexed_views};

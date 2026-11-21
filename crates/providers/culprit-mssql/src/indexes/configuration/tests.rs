@@ -33,7 +33,7 @@ async fn one_existing_index_query_retains_native_options_and_each_exact_partitio
     assert_eq!(configuration.partitions[1].data_compression, Some(2));
     assert_eq!(configuration.partitions[0].partition_id, "9007199254740994");
     let mut reader = FakeRead::new(vec![Ok(vec![row()])]);
-    let (indexes, _) = crate::indexes::application(&mut reader, true).await.unwrap();
+    let indexes = crate::indexes::application(&mut reader, true).await.unwrap().table_indexes;
     assert_eq!(reader.calls.len(), 1);
     assert_eq!(indexes[0].mssql_configuration.as_ref(), Some(configuration));
     let query = &reader.calls[0].sql;
@@ -42,7 +42,7 @@ async fn one_existing_index_query_retains_native_options_and_each_exact_partitio
     assert!(query.contains("CAST("));
     assert!(query.contains("AS nvarchar(max)"));
     assert!(query.contains(&format!("SELECT TOP({}) cp.object_id", MAX_MSSQL_CONFIGURATION_PARTITIONS + 1)));
-    assert!(query.contains("cp.object_id=t.object_id AND cp.index_id=i.index_id"));
+    assert!(query.contains("cp.object_id=o.object_id AND cp.index_id=i.index_id"));
     for field in OPTIONS.into_iter().chain(COMPRESSION) {
         assert!(
             query.contains(&format!("name=N''{}''", field.name)) || query.contains(&format!("name=N'{}'", field.name))

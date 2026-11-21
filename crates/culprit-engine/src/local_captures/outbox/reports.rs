@@ -27,6 +27,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
         LocalCaptureAnalysisKind::InstanceResources => Ok(LocalSnapshotReport::InstanceResources(Box::new(
             culprit_checks::instance_resources::explain_captured(read)?,
         ))),
+        LocalCaptureAnalysisKind::IndexedViews => {
+            Ok(LocalSnapshotReport::IndexedViews(Box::new(culprit_checks::indexed_views::explain_captured(read)?)))
+        }
         LocalCaptureAnalysisKind::IndexConfiguration => Ok(LocalSnapshotReport::IndexConfiguration(Box::new(
             culprit_checks::index_configuration::explain_captured(read)?,
         ))),

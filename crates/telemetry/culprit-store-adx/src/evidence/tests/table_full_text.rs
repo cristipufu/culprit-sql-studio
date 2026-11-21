@@ -1,8 +1,8 @@
 use super::*;
 use test_support::{
-    IndexConfigurationCase, TableCdcCase, TableFullTextCase, TableStorageCase, TableTemporalCase,
-    assert_table_metadata_capture, index_configuration_evidence, table_cdc_evidence, table_full_text_evidence,
-    table_storage_evidence, table_temporal_evidence,
+    IndexConfigurationCase, IndexedViewsCase, TableCdcCase, TableFullTextCase, TableStorageCase, TableTemporalCase,
+    assert_table_metadata_capture, index_configuration_evidence, indexed_views_evidence, table_cdc_evidence,
+    table_full_text_evidence, table_storage_evidence, table_temporal_evidence,
 };
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
 #[tokio::test]
@@ -14,6 +14,7 @@ async fn original_full_text_catalog_states_round_trip_without_recovery_or_curren
         .chain(TableCdcCase::ALL.into_iter().map(table_cdc_evidence))
         .chain(TableTemporalCase::ALL.into_iter().map(table_temporal_evidence))
         .chain(IndexConfigurationCase::ALL.into_iter().map(index_configuration_evidence))
+        .chain(IndexedViewsCase::ALL.into_iter().map(indexed_views_evidence))
     {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
@@ -97,5 +98,23 @@ async fn changed_partition_compression_cannot_borrow_the_original_index_receipt(
         .read_capture(&fixture.range, FAMILY, EvidenceReadBudget { page_rows: 1, ..Default::default() }, None)
         .await
         .unwrap_err();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+}
+
+#[tokio::test]
+async fn changed_native_view_parent_kind_cannot_borrow_the_original_index_receipt() {
+    let (source, records) = indexed_views_evidence(IndexedViewsCase::Present);
+    let fixture = Fixture::new(source, records).await;
+    let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+    let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+    let mut rows = fixture.rows.clone();
+    let mut details: Value = serde_json::from_str(rows[1][column].as_str().unwrap()).unwrap();
+    details["parent_kind"] = json!("table");
+    details["parent_memory_optimized"] = json!(false);
+    details["configuration"]["parent_kind"] = json!("table");
+    rows[1][column] = json!(serde_json::to_string(&details).unwrap());
+    fixture.replies(vec![rows]);
+    let error =
+        fixture.reader().read_capture(&fixture.range, FAMILY, EvidenceReadBudget::default(), None).await.unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
 }

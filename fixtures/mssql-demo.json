@@ -16,7 +16,9 @@
     "change_feed_history": [],
     "index_configuration": [],
     "numa_nodes": [],
-    "source_acquisitions": []
+    "source_acquisitions": [],
+    "indexed_views": null,
+    "indexed_view_originals": []
   },
   "sources": [
     {
@@ -70,7 +72,7 @@
       "reason": null
     }
   ],
-  "format": 47,
+  "format": 48,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",
   "environment": "local",

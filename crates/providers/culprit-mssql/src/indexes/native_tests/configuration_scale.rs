@@ -244,7 +244,7 @@ async fn read(
     match family {
         Family::Indexes => Box::pin(application(&mut admitted, native_statistics))
             .await?
-            .0
+            .table_indexes
             .into_iter()
             .map(|index| index.mssql_configuration.map(|configuration| *configuration).ok_or_else(invalid_data))
             .collect(),
@@ -259,7 +259,8 @@ async fn read(
 fn verify_facts(facts: &[MssqlIndexConfiguration], tables: &[String], family: Family) {
     assert_eq!(facts.len(), tables.len());
     for table in tables {
-        let matches = facts.iter().filter(|fact| fact.schema == "dbo" && &fact.table_name == table).collect::<Vec<_>>();
+        let matches =
+            facts.iter().filter(|fact| fact.parent_schema == "dbo" && &fact.parent_name == table).collect::<Vec<_>>();
         let [fact] = matches.as_slice() else {
             panic!("one exact owned native parent per table");
         };

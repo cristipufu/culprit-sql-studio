@@ -42,6 +42,7 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
         case("table_full_text", super::table_full_text_evidence(super::TableFullTextCase::Enabled)),
         case("table_temporal", super::table_temporal_evidence(super::TableTemporalCase::SystemVersioned)),
         case("index_configuration", super::index_configuration_evidence(super::IndexConfigurationCase::Mixed)),
+        case("indexed_views", super::indexed_views_evidence(super::IndexedViewsCase::Present)),
         case("compilation", super::query_compilation_evidence()),
         case("configured_log_rates", super::configured_log_rate_evidence_cases().remove(0)),
         case("connection_outcomes", super::connection_outcome_evidence_cases().remove(0)),

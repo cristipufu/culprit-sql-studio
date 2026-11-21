@@ -622,6 +622,7 @@
     }
   ],
   "index_configuration": [],
+  "indexed_views": [],
   "locked": [
     {
       "check": {
@@ -1413,7 +1414,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 47,
+    "format": 48,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {
@@ -1971,14 +1972,16 @@
       "group_replication": [],
       "index_configuration": [],
       "index_usage_scope": "all-read-members",
+      "indexed_view_originals": [],
+      "indexed_views": null,
       "log_failures": [],
       "multixacts": [],
+      "numa_nodes": [],
       "sequences": [],
+      "source_acquisitions": [],
       "spaces": [],
       "sqlite": null,
-      "table_memory": [],
-      "numa_nodes": [],
-      "source_acquisitions": []
+      "table_memory": []
     },
     "options": {
       "collect_memory_failures": false,
@@ -5406,6 +5409,7 @@
     ],
     "workload": null
   },
+  "source_acquisitions": [],
   "summary": {
     "by_category": [
       {
@@ -5542,6 +5546,5 @@
     "runs_said": [],
     "takeaway": null,
     "top_share": null
-  },
-  "source_acquisitions": []
+  }
 }

@@ -13,6 +13,7 @@ import type { JobsSnapshot } from "./JobsSnapshot";
 import type { LoggedFailure } from "./LoggedFailure";
 import type { MaintenanceProgressSnapshot } from "./MaintenanceProgressSnapshot";
 import type { MemoryFailureSnapshot } from "./MemoryFailureSnapshot";
+import type { MssqlIndexedViewCatalog } from "./MssqlIndexedViewCatalog";
 import type { NativeFailureSnapshot } from "./NativeFailureSnapshot";
 import type { NodeResources } from "./NodeResources";
 import type { OperationalCounter } from "./OperationalCounter";
@@ -34,6 +35,10 @@ import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 
 export type OperationalStats = { 
+/**
+ * Current native indexed-view indexes from the same combined Indexes read. Never a base-table or query owner.
+ */
+indexed_views: MssqlIndexedViewCatalog | null, indexed_view_originals: Array<RecordedOperationalRead>, 
 /**
  * Independently sealed, sanitized acquisition history; never current native workload evidence.
  */

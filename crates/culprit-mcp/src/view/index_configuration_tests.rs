@@ -12,13 +12,13 @@ fn scan(case: IndexConfigurationCase) -> Report {
     match &row.fact {
         OperationalFact::MssqlIndex(native) => {
             let mut index = report.snapshot.indexes[0].clone();
-            index.schema = native.schema.clone();
-            index.table = native.table_name.clone();
+            index.schema = native.parent_schema.clone();
+            index.table = native.parent_name.clone();
             index.name = native.name.clone();
             index.mssql_configuration = native.configuration.clone();
             index.mssql_columnstore = None;
-            report.snapshot.tables[0].schema = native.schema.clone();
-            report.snapshot.tables[0].name = native.table_name.clone();
+            report.snapshot.tables[0].schema = native.parent_schema.clone();
+            report.snapshot.tables[0].name = native.parent_name.clone();
             report.snapshot.indexes = vec![index];
         }
         OperationalFact::MssqlTable(native) => {
@@ -83,7 +83,7 @@ fn selected_configuration_cannot_promote_unavailable_foreign_or_changed_native_p
                     .state = SourceState::Unavailable
             }
             "engine" => report.snapshot.server.engine = culprit_core::Engine::Postgres,
-            _ => report.snapshot.indexes[0].mssql_configuration.as_mut().unwrap().table_name = "Different".into(),
+            _ => report.snapshot.indexes[0].mssql_configuration.as_mut().unwrap().parent_name = "Different".into(),
         }
         assert!(super::table(&report, &name).is_err(), "{cause}");
     }
