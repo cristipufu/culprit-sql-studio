@@ -4,6 +4,7 @@ use culprit_core::{
     telemetry::*,
 };
 mod process_cpu;
+mod schedulers;
 pub use process_cpu::explain_source as explain_process_cpu_source;
 
 pub fn explain_source(
@@ -18,6 +19,14 @@ pub fn explain_source(
         let rows = observations.iter().filter(|row| row.source == coverage.source).collect::<Vec<_>>();
         report.process_cpu = Some(Box::new(process_cpu::explain_source(source, coverage, &rows, read_complete)?));
     }
+    if let Some(coverage) = source
+        .observation
+        .snapshot()
+        .and_then(|header| header.sources.iter().find(|source| source.source == culprit_core::source_id::SCHEDULERS))
+    {
+        let rows = observations.iter().filter(|row| row.source == coverage.source).collect::<Vec<_>>();
+        report.schedulers = Some(Box::new(schedulers::explain_source(source, coverage, &rows, read_complete)?));
+    }
     Ok(report)
 }
 
@@ -26,17 +35,23 @@ pub fn explain_snapshot(snapshot: &Snapshot) -> Result<Option<InstanceResourceRe
         Ok(cpu) => cpu,
         Err(_) => Some(process_cpu::invalid_report()),
     };
+    let schedulers = match schedulers::explain_snapshot(snapshot) {
+        Ok(report) => report,
+        Err(_) => Some(schedulers::invalid_report()),
+    };
     if let Some(read) = snapshot.pressure.as_ref().and_then(|pressure| pressure.instance_resources.as_deref()) {
         let mut report = explain(read)?;
         report.process_cpu = cpu.map(Box::new);
+        report.schedulers = schedulers.map(Box::new);
         return Ok(Some(report));
     }
     let source = snapshot.sources.iter().find(|source| source.source == INSTANCE_RESOURCES_SOURCE);
-    if source.is_none() && cpu.is_none() {
+    if source.is_none() && cpu.is_none() && schedulers.is_none() {
         return Ok(None);
     }
     let mut report = unavailable();
     report.process_cpu = cpu.map(Box::new);
+    report.schedulers = schedulers.map(Box::new);
     report.source_state = match source.map(|source| source.state).unwrap_or(SourceState::Unavailable) {
         SourceState::Collected | SourceState::Empty | SourceState::Partial => SourceState::Partial,
         state => state,
@@ -88,6 +103,7 @@ pub fn explain(read: &InstanceResourceRead) -> Result<InstanceResourceReport> {
 fn unavailable() -> InstanceResourceReport {
     InstanceResourceReport {
         process_cpu: None,
+        schedulers: None,
         context: None,
         native_source: None,
         source_state: SourceState::Unavailable,

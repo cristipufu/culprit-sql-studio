@@ -51,6 +51,7 @@ fn activity(backend: &str, request: &str, application: &str) -> Row {
     row(&[
         ("observed_at", Some(AT)),
         ("pid", Some("42")),
+        ("backend_type", Some("client backend")),
         ("backend_start", Some(backend)),
         ("query_start", Some(request)),
         ("database_oid", Some("16384")),

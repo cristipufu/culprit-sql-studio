@@ -41,6 +41,9 @@ pub(super) fn apply(read: &mut ActivityCensusRead, case: SessionCensusCase) {
 
 fn native_context(row: &mut ActivityObservation) -> &mut MssqlSessionContext {
     let SessionNativeContext::Mssql(native) =
-        row.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+        row.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap()
+    else {
+        panic!("MSSQL test context")
+    };
     native
 }

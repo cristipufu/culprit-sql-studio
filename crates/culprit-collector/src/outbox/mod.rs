@@ -486,3 +486,6 @@ fn problem(kind: OutboxProblem) -> Error {
 fn storage(error: impl std::fmt::Display) -> Error {
     problem(OutboxProblem::Storage).with_hint(culprit_core::t!("outbox.storage_detail", error = error.to_string()))
 }
+
+mod completed_managed_instance_resources;
+pub use completed_managed_instance_resources::CompletedManagedInstanceResources;

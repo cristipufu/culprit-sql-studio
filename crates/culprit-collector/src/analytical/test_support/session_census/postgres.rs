@@ -55,7 +55,18 @@ pub(super) fn shared_labels() -> (CollectionDescription, Vec<TelemetryRecord>) {
             transaction_age_ms: None,
             session_counters: ActivityCounters::default(),
             request_counters: query.map(|_| ActivityCounters::default()),
-            session_context: None,
+            session_context: Some(Box::new(ActivitySessionContext {
+                lifecycle: if query.is_some() { SessionLifecycle::Running } else { SessionLifecycle::Idle },
+                login_age_ms: None,
+                last_request_end_age_ms: None,
+                client_library: None,
+                client_process_id: None,
+                native: Some(Box::new(SessionNativeContext::Postgres(PostgresSessionContext {
+                    database_oid: Some("42".into()),
+                    database_name: Some("db".into()),
+                    backend_type: Some("client backend".into()),
+                }))),
+            })),
             waiting_on_lock: query.map(|_| true),
             wait: query.map(|_| ActivityWait {
                 class: None,

@@ -50,6 +50,7 @@ fn point(backend: &str, request: &str, application: &str) -> Row {
     row(&[
         ("observed_at", Some(NOW)),
         ("pid", Some("42")),
+        ("backend_type", Some("client backend")),
         ("backend_start", Some(backend)),
         ("query_start", Some(request)),
         ("database_oid", Some("42")),

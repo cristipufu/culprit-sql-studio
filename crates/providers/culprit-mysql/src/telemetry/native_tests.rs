@@ -474,6 +474,16 @@ async fn metadata_baseline_retains_waiter_generation_and_idle_context_without_a_
         })
         .expect("the idle connection is retained without pretending its transaction count was queried");
     assert!(owner.open_transactions.is_none());
+    for original in [owner, waiter] {
+        let Some(SessionNativeContext::Mysql(native)) = original.session_context.as_deref().unwrap().native.as_deref()
+        else {
+            panic!("original native thread context")
+        };
+        assert_eq!(native.default_database.as_deref(), Some("culprit_smoke"));
+        assert_eq!(native.thread_type.as_deref(), Some("FOREGROUND"));
+        assert!(native.is_client_thread(original.command.as_deref()));
+        assert!(original.session_context.as_deref().unwrap().login_age_ms.is_none());
+    }
     assert!(matches!(waiter.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }));
     assert!(rows.iter().all(|record| matches!(record, TelemetryRecord::Activity(_))));
 }

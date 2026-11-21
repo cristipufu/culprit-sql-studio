@@ -106,6 +106,25 @@ impl OutboxCaptureReader {
         let boundary = self.projection_boundary.clone();
         let lookup = CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
         match request.analysis.read_plan() {
+            LocalCaptureReadPlan::ManagedInstanceResources => {
+                delivery
+                    .with_completed_managed_instance_resources(
+                        lookup,
+                        self.budget,
+                        request.operation,
+                        permit,
+                        move |capture| {
+                            let result = explain_managed_instance_resources(capture)
+                                .map(|value| LocalCapturedAnalysis::ManagedInstanceResources(Box::new(value)));
+                            #[cfg(test)]
+                            if let Some(boundary) = boundary {
+                                boundary()?;
+                            }
+                            result
+                        },
+                    )
+                    .await
+            }
             LocalCaptureReadPlan::PoolSettings => {
                 delivery
                     .with_completed_snapshot(
@@ -368,3 +387,15 @@ fn invalid() -> culprit_core::Error {
 
 #[cfg(test)]
 mod tests;
+
+fn explain_managed_instance_resources(
+    captured: culprit_collector::outbox::CompletedManagedInstanceResources,
+) -> Result<super::LocalManagedInstanceResources> {
+    let connection = captured.connection().to_owned();
+    let collected_from = captured.collected_from().to_owned();
+    let collected_until = captured.collected_until().to_owned();
+    let bytes_read = captured.bytes_read();
+    let read = Box::new(captured.into_read()?);
+    let report = Box::new(culprit_checks::managed_instance_resources::explain_captured(&read)?);
+    Ok(super::LocalManagedInstanceResources { connection, read, report, collected_from, collected_until, bytes_read })
+}

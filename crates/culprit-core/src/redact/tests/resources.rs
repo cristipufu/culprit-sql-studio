@@ -3,6 +3,7 @@ use crate::{MeasurementScope, ResourceSample, SourceState, source_id, telemetry:
 
 fn measurement() -> ResourceMeasurement {
     ResourceMeasurement {
+        mssql_managed_instance: None,
         data_io_accounting: DataIoAccounting::DataFiles,
         at: "2020-01-01T06:00:15Z".into(),
         replica_id: Some("private-native-resource-member".into()),
@@ -164,4 +165,45 @@ fn private_metric_collisions_and_invalid_original_keys_leave_the_existing_explic
         assert!(!serde_json::to_string(&shared).unwrap().contains("private_metric_secret_canary"));
         assert_eq!(serde_json::to_value(redact_snapshot(&shared)).unwrap(), serde_json::to_value(&shared).unwrap());
     }
+}
+
+#[test]
+fn sharing_preserves_mi_interval_totals_and_withdraws_native_resource_labels() {
+    let mut row = measurement();
+    row.data_io_accounting = DataIoAccounting::Unknown;
+    row.at = "2020-01-01T06:00:15.000000000Z".into();
+    row.replica_id = None;
+    row.replica_role = None;
+    row.metrics[0].scope = MeasurementScope::Server;
+    row.metrics[0].limit_basis = ResourceLimitBasis::InstanceLimit;
+    row.metrics[0].value = Some(12.34);
+    row.mssql_managed_instance = Some(Box::new(MssqlManagedInstanceResourceSample {
+        started_at: "2020-01-01T06:00:00.000000000Z".into(),
+        ended_at: row.at.clone(),
+        avg_cpu_percent: Some("12.34".into()),
+        virtual_core_count: Some("8".into()),
+        reserved_storage_mb: Some("1048576".into()),
+        storage_space_used_mb: Some("9007199254740992.25".into()),
+        io_request: Some("9007199254740993".into()),
+        io_bytes_read: Some("9223372036854775807".into()),
+        io_bytes_written: Some("0".into()),
+        resource_type: Some("private-mi-type".into()),
+        resource_name: Some("private-mi-name".into()),
+        sku: Some("private-mi-sku".into()),
+        hardware_generation: Some("private-mi-hardware".into()),
+    }));
+    let mut original = snapshot();
+    original.resources = vec![ResourceSample::from_measurement(row.clone())];
+    assert_eq!(original.resources[0].cpu_pct, None, "the database chart cannot borrow shared MI CPU");
+    let shared = redact_snapshot(&original);
+    let encoded = serde_json::to_string(&shared).unwrap();
+    for private in ["private-mi-type", "private-mi-name", "private-mi-sku", "private-mi-hardware"] {
+        assert!(!encoded.contains(private), "{private}");
+    }
+    let native = shared.resources[0].measurement.as_ref().unwrap().mssql_managed_instance.as_ref().unwrap();
+    assert_eq!(native.io_request.as_deref(), Some("9007199254740993"));
+    assert_eq!(native.storage_space_used_mb.as_deref(), Some("9007199254740992.25"));
+    assert_eq!(native.started_at, "2020-01-01T06:00:00.000000000Z");
+    let repeated = redact_snapshot(&shared);
+    assert_eq!(repeated.resources[0].measurement, shared.resources[0].measurement);
 }

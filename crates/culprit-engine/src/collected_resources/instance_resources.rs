@@ -12,7 +12,9 @@ pub fn instance_resources(capture: &EvidenceCapture) -> Result<CollectedInstance
     for input in inputs.iter().filter(|input| {
         matches!(
             input.coverage.source.as_str(),
-            INSTANCE_RESOURCES_SOURCE | culprit_core::source_id::PROCESSOR_TOPOLOGY
+            INSTANCE_RESOURCES_SOURCE
+                | culprit_core::source_id::PROCESSOR_TOPOLOGY
+                | culprit_core::source_id::SCHEDULERS
         )
     }) {
         rows.extend(input.rows()?.into_iter().cloned());

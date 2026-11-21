@@ -8,6 +8,7 @@ use culprit_core::{
 use culprit_core::telemetry::{CachedRuntimeRead, CachedRuntimeReadOrigin};
 
 pub(crate) enum CapturedScanEvidence {
+    ManagedInstanceResources(Box<culprit_core::telemetry::CapturedManagedInstanceResourceRead>),
     #[cfg(feature = "collector")]
     CachedRuntime(Box<CachedRuntimeRead>),
     MemoryClerks(Box<CapturedOperationalRead>),
@@ -21,6 +22,12 @@ pub(crate) enum CapturedScanEvidence {
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
 impl CapturedScanEvidence {
+    pub(crate) fn managed_instance_resources(
+        read: Box<culprit_core::telemetry::CapturedManagedInstanceResourceRead>,
+    ) -> Result<Self> {
+        culprit_checks::managed_instance_resources::explain_captured(&read)?;
+        Ok(Self::ManagedInstanceResources(read))
+    }
     pub(crate) fn pool_settings(read: Box<culprit_core::telemetry::CapturedPoolSettingsRead>) -> Result<Self> {
         culprit_checks::pool_settings::explain_captured(&read)?;
         Ok(Self::PoolSettings(read))
@@ -66,6 +73,12 @@ impl CapturedScanEvidence {
     }
     pub(crate) fn attach(self, snapshot: &mut Snapshot) -> Result<()> {
         match self {
+            Self::ManagedInstanceResources(read) => {
+                culprit_checks::managed_instance_resources::explain_captured(&read)?;
+                if snapshot.operations.managed_instance_resources.as_deref().is_some_and(|original|!matches!(original,culprit_core::telemetry::RecordedManagedInstanceResourceRead::Captured {read:previous} if previous.as_ref()==read.as_ref())) {return Err(DeliveryProblem::Conflict.error())}
+                snapshot.operations.managed_instance_resources =
+                    Some(Box::new(culprit_core::telemetry::RecordedManagedInstanceResourceRead::Captured { read }));
+            }
             Self::PoolSettings(read) => {
                 culprit_checks::pool_settings::explain_captured(&read)?;
                 if snapshot.operations.pool_settings.as_deref().is_some_and(|original| {

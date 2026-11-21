@@ -972,7 +972,7 @@
         "table": "orders"
       }
     ],
-    "format": 40,
+    "format": 41,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -3458,8 +3458,9 @@
       },
       "cluster": null,
       "counters": [],
-      "group_replication": [],
       "full_text_populations": [],
+      "galera": [],
+      "group_replication": [],
       "log_failures": [],
       "multixacts": [],
       "node_resources": {
@@ -3693,8 +3694,7 @@
         "scope": "node",
         "source": "yb_terminated_queries (node 3d2d9e10555b4ae2a683a8402505e416)",
         "visibility": "Complete monitoring privilege for this database"
-      },
-      "galera": []
+      }
     },
     "options": {
       "collect_memory_failures": false,

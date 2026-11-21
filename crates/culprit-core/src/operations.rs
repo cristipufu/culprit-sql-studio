@@ -34,6 +34,9 @@ pub enum IndexUsageScope {
 pub struct OperationalStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub managed_instance_resources: Option<Box<crate::telemetry::RecordedManagedInstanceResourceRead>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub suspect_pages: Option<Box<crate::telemetry::SuspectPageHistoryRead>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -203,6 +206,7 @@ impl OperationalStats {
             cached_runtime: _,
             memory_clerks: _,
             database_performance_counters: _,
+            managed_instance_resources: _,
             table_memory: _,
             pool_settings: _,
             group_replication: _,

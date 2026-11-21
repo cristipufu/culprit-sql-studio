@@ -125,7 +125,7 @@ impl Registration {
 }
 
 const REGISTRATIONS: &[Registration] = &[
-    Registration::baseline("mysql.activity", Acquisition::Activity),
+    Registration { version: 2, ..Registration::baseline("mysql.activity", Acquisition::Activity) },
     Registration::baseline("mysql.deadlock-history", Acquisition::Deadlocks),
     Registration::baseline("mysql.statement-counters", Acquisition::Snapshot(Recipe::Statements)),
     Registration {
@@ -143,7 +143,10 @@ const REGISTRATIONS: &[Registration] = &[
     Registration::investigation("mysql.group-replication", Acquisition::GroupReplication),
     Registration::investigation("mariadb.galera", Acquisition::Galera),
     Registration::investigation("mysql.jobs", Acquisition::Jobs),
-    Registration::investigation("mysql.current-request-work", Acquisition::CurrentRequestWork),
+    Registration {
+        version: 2,
+        ..Registration::investigation("mysql.current-request-work", Acquisition::CurrentRequestWork)
+    },
     Registration::investigation("mysql.statement-definitions", Acquisition::Snapshot(Recipe::Definitions)),
     Registration::investigation(
         "mysql.cleanup",

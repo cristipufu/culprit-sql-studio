@@ -55,6 +55,16 @@ fn member(address: Option<&str>, at: &str) -> Row {
     )
 }
 fn actor_with_wait(pid: &str, state: &str, backend: Option<&str>, wait: Option<(&str, &str)>, elapsed_ms: &str) -> Row {
+    participant(pid, state, backend, wait, elapsed_ms, Some("client backend"))
+}
+fn participant(
+    pid: &str,
+    state: &str,
+    backend: Option<&str>,
+    wait: Option<(&str, &str)>,
+    elapsed_ms: &str,
+    backend_type: Option<&str>,
+) -> Row {
     Row::from_fields(
         [
             ("observed_at", Some("2020-01-01T06:00:00.100000Z".into())),
@@ -63,6 +73,7 @@ fn actor_with_wait(pid: &str, state: &str, backend: Option<&str>, wait: Option<(
             ("query_start", Some("2020-01-01T06:00:00Z".into())),
             ("transaction_start", None),
             ("database_oid", Some("42".into())),
+            ("backend_type", backend_type.map(str::to_owned)),
             ("database", Some("shop".into())),
             ("state", Some(state.into())),
             ("wait_event_type", wait.map(|(kind, _)| kind.into())),
@@ -362,4 +373,71 @@ async fn lost_final_statistics_visibility_retains_the_owner_and_positive_rows_wi
     assert_eq!(frame.coverage.state, culprit_core::SourceState::Partial);
     assert!(!frame.coverage.complete_scope);
     assert_eq!(captured.records.len(), 1);
+}
+
+#[tokio::test]
+async fn acquired_backend_oid_type_and_utc_start_survive_the_existing_five_reads_without_extra_discovery() {
+    let mut reader = reader(vec![actor("11", "idle", Some("2020-01-01T05:30:00Z"))], true);
+    let captured = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.unwrap();
+    let TelemetryRecord::Activity(row) = &captured.records[0] else { panic!() };
+    let Some(SessionNativeContext::Postgres(native)) = row.session_context.as_deref().unwrap().native.as_deref() else {
+        panic!()
+    };
+    assert_eq!(native.database_oid.as_deref(), Some("42"));
+    assert_eq!(native.database_name.as_deref(), Some("shop"));
+    assert!(native.is_client_backend());
+    assert_eq!(row.key.session.generation, "2020-01-01T05:30:00Z");
+    assert!(row.session_counters.logical_reads.is_none());
+    assert_eq!(reader.calls.len(), 5);
+    assert!(reader.calls[2].0.contains("a.backend_type"));
+}
+
+#[tokio::test]
+async fn native_parallel_internal_or_unknown_backend_types_remain_original_participants_without_client_authority() {
+    for kind in [None, Some("parallel worker"), Some("autovacuum worker"), Some("yb-conn-mgr worker connection")] {
+        let point = participant("11", "active", Some("2020-01-01T05:30:00Z"), None, "100", kind);
+        let native = activity::decode_row(point.clone(), "42").unwrap().facts.unwrap();
+        let Some(SessionNativeContext::Postgres(context)) =
+            native.session_context.as_deref().unwrap().native.as_deref()
+        else {
+            panic!()
+        };
+        assert_eq!(context.backend_type.as_deref(), kind);
+        assert!(!context.is_client_backend());
+        let mut reader = reader(vec![point], true);
+        let failure = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.err().unwrap();
+        assert_eq!(failure.detail, Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceChanged)));
+        assert_eq!(reader.calls.len(), 3, "a client-only selection cannot publish contradicting native kinds");
+    }
+}
+
+#[tokio::test]
+async fn client_only_selected_database_frame_refuses_foreign_or_unknown_native_backend_database() {
+    for oid in [Some("43"), None] {
+        let row = Row::from_fields(
+            [
+                ("observed_at", Some("2020-01-01T06:00:00.100000Z")),
+                ("pid", Some("11")),
+                ("backend_start", Some("2020-01-01T05:30:00Z")),
+                ("query_start", Some("2020-01-01T06:00:00Z")),
+                ("state", Some("active")),
+                ("database_oid", oid),
+                ("database", Some("native-foreign-label")),
+                ("backend_type", Some("client backend")),
+            ]
+            .map(|(key, value)| (key.into(), value.map(str::to_owned))),
+        );
+        let native = activity::decode_row(row.clone(), "42").unwrap().facts.unwrap();
+        let Some(SessionNativeContext::Postgres(context)) =
+            native.session_context.as_deref().unwrap().native.as_deref()
+        else {
+            panic!()
+        };
+        assert_eq!(context.database_oid.as_deref(), oid);
+        assert_eq!(native.scope, ActivityScopeBasis::OtherDatabase);
+        let mut reader = reader(vec![row], true);
+        let error = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.err().unwrap();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceChanged)));
+        assert_eq!(reader.calls.len(), 3);
+    }
 }

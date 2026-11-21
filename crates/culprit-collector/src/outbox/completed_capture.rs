@@ -85,6 +85,7 @@ pub(super) enum ReadRequest {
     Snapshot { attempt: DiagnosticAttemptReceipt, dataset: SnapshotDataset },
     SnapshotLookup { connection: String, observation_id: String, datasets: Vec<SnapshotDataset> },
     QueryHistory { connection: String, observation_id: String },
+    ManagedInstanceResources { connection: String, observation_id: String, attempt: Option<DiagnosticAttemptReceipt> },
     ActivityLookup { connection: String, observation_id: String },
     ActivityReference { connection: String, reference: DiagnosticCaptureRef },
 }
@@ -94,6 +95,7 @@ impl ReadRequest {
             Self::Snapshot { attempt, .. } => &attempt.capture.observation_id,
             Self::SnapshotLookup { observation_id, .. }
             | Self::QueryHistory { observation_id, .. }
+            | Self::ManagedInstanceResources { observation_id, .. }
             | Self::ActivityLookup { observation_id, .. } => observation_id,
             Self::ActivityReference { reference, .. } => &reference.capture.observation_id,
         }
@@ -103,6 +105,7 @@ impl ReadRequest {
         match self {
             Self::Snapshot { dataset, .. } => stream == dataset.stream(),
             Self::SnapshotLookup { datasets, .. } => datasets.iter().any(|dataset| stream == dataset.stream()),
+            Self::ManagedInstanceResources { .. } => stream == TelemetryStream::ResourceSamples,
             Self::QueryHistory { .. } => {
                 matches!(stream, TelemetryStream::QueryRuntime | TelemetryStream::QueryDefinitions)
             }
@@ -123,6 +126,41 @@ pub(super) struct CompletedCaptureRead {
     required_connection: Option<String>,
 }
 impl CompletedCaptureRead {
+    pub fn managed_instance_resources(
+        lookup: CompletedCaptureLookup<'_>,
+        budget: CompletedCaptureBudget,
+        operation: OperationHandle,
+    ) -> Result<Self> {
+        Self::lookup(
+            ReadRequest::ManagedInstanceResources {
+                connection: lookup.connection.into(),
+                observation_id: lookup.observation_id.into(),
+                attempt: None,
+            },
+            lookup,
+            budget,
+            operation,
+        )
+    }
+    pub fn managed_instance_resources_attempt(
+        connection: &str,
+        attempt: DiagnosticAttemptReceipt,
+        budget: CompletedCaptureBudget,
+        cancellation: CollectionCancellation,
+    ) -> Result<Self> {
+        validate_connection(connection)?;
+        let budget = budget.validate()?;
+        if !attempt.is_valid() || attempt.manifest_sha256.is_none() {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let deadline = Instant::now().checked_add(budget.timeout).ok_or_else(|| CollectionStop::TimedOut.error())?;
+        let request = ReadRequest::ManagedInstanceResources {
+            connection: connection.into(),
+            observation_id: attempt.capture.observation_id.clone(),
+            attempt: Some(attempt),
+        };
+        Ok(Self::new(request, ReadControl::Collection { cancellation, deadline }, budget))
+    }
     pub fn activity_lookup(
         lookup: CompletedCaptureLookup<'_>,
         budget: CompletedCaptureBudget,
@@ -285,6 +323,12 @@ impl artifacts::VerificationObserver for CompletedCaptureRead {
                     .ok_or_else(unsupported)?
                     .records
             }
+            ReadRequest::ManagedInstanceResources { .. } => match &source.observation {
+                SourceObservation::MssqlManagedInstanceResources(history) if history.matches_source(source) => {
+                    history.coverage.records
+                }
+                _ => return Err(unsupported()),
+            },
             ReadRequest::QueryHistory { .. } if source.query_history().is_some() => manifest
                 .files
                 .iter()
@@ -368,7 +412,10 @@ impl Files {
             return Err(problem(OutboxProblem::MissingCapture));
         }
         match &read.request {
-            ReadRequest::Snapshot { attempt, .. } if capture.identity != attempt.capture => {
+            ReadRequest::ManagedInstanceResources { attempt: Some(attempt), .. }
+            | ReadRequest::Snapshot { attempt, .. }
+                if capture.identity != attempt.capture =>
+            {
                 return Err(DeliveryProblem::Conflict.error());
             }
             ReadRequest::ActivityReference { reference, .. } if capture.identity != reference.capture => {
@@ -376,6 +423,7 @@ impl Files {
             }
             ReadRequest::SnapshotLookup { connection, .. }
             | ReadRequest::QueryHistory { connection, .. }
+            | ReadRequest::ManagedInstanceResources { connection, .. }
             | ReadRequest::ActivityLookup { connection, .. }
             | ReadRequest::ActivityReference { connection, .. }
                 if capture.connection != *connection =>
@@ -389,7 +437,8 @@ impl Files {
         }
         let validated = self.validated_observed(&capture.identity.observation_id, read)?;
         read.check()?;
-        if let ReadRequest::Snapshot { attempt, .. } = &read.request
+        if let ReadRequest::Snapshot { attempt, .. }
+        | ReadRequest::ManagedInstanceResources { attempt: Some(attempt), .. } = &read.request
             && attempt.manifest_sha256.as_deref() != Some(&validated.manifest_sha)
         {
             return Err(DeliveryProblem::Conflict.error());

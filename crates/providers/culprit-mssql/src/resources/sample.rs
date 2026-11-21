@@ -189,6 +189,7 @@ impl Sample {
     }
     pub(crate) fn exported(&self) -> ResourceMeasurement {
         ResourceMeasurement {
+            mssql_managed_instance: None,
             replica_role: self.replica_role.map(NativeResourceReplicaRole::MssqlDbResourceStats),
             data_io_accounting: self.data_io_accounting,
             at: self.at.clone(),

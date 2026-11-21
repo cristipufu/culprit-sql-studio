@@ -1,5 +1,7 @@
 //! Provider-neutral resource samples. Native adapters supply explicit units, scope and aggregation.
 use super::*;
+mod managed_instance;
+pub use managed_instance::*;
 
 /// What the native data-I/O utilization percentage accounts for. Its measurement scope and limit denominator
 /// remain independent; an unknown deployment must not inherit conventional storage semantics.
@@ -142,6 +144,8 @@ impl ResourceMetricSample {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct ResourceMeasurement {
+    /// Native MI service intervals carry their own start/units; current observer identity is not row ownership.
+    pub mssql_managed_instance: Option<Box<MssqlManagedInstanceResourceSample>>,
     pub data_io_accounting: DataIoAccounting,
     /// Native UTC timestamp. The collection window selects samples without prorating their values.
     pub at: String,
@@ -162,6 +166,7 @@ impl ResourceMeasurement {
                 .replica_id
                 .as_deref()
                 .is_none_or(|id| !id.is_empty() && id.len() <= 128 && id.chars().all(|ch| !ch.is_control()))
+            && self.mssql_managed_instance.as_ref().is_none_or(|native| native.matches_measurement(self))
             && (1..=64).contains(&self.metrics.len())
             && self
                 .metrics
@@ -175,6 +180,7 @@ mod tests {
     use super::*;
     fn sample() -> ResourceMeasurement {
         ResourceMeasurement {
+            mssql_managed_instance: None,
             replica_role: None,
             data_io_accounting: crate::telemetry::DataIoAccounting::Unknown,
             at: "2020-01-01T06:00:15Z".into(),

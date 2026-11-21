@@ -308,6 +308,11 @@
                 "value": "3"
               },
               {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current session database"
+              },
+              {
                 "key": "earliest_login",
                 "label": "Earliest native login (offset unknown)",
                 "value": "2020-01-01T11:50:00.0000000"
@@ -335,8 +340,11 @@
             ],
             "key": {
               "application": "fixture-client",
-              "database_id": "4",
-              "database_name": "session-default",
+              "database": {
+                "kind": "current-session",
+                "name": "session-default",
+                "native_id": "4"
+              },
               "host": "client-reported.invalid",
               "library": "fixture-native-library"
             },
@@ -349,13 +357,14 @@
         "grouped_sessions": 2,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 2 observed sessions and 3 observed current requests into 1 client-label groups; 0 observed sessions could not be grouped.",
+        "summary": "Grouped 2 observed sessions and 3 observed current requests into 1 client-label group; 0 observed sessions could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 0
       },
@@ -1081,13 +1090,14 @@
         "grouped_sessions": 0,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 0 observed sessions and 0 observed current requests into 0 client-label groups; 1 observed sessions could not be grouped.",
+        "summary": "Grouped 0 observed sessions and 0 observed current requests into 0 client-label groups; 1 observed session could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 1
       },
@@ -1364,6 +1374,7 @@
         "grouped_sessions": 0,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
@@ -1636,13 +1647,14 @@
         "grouped_sessions": 0,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 0 observed sessions and 0 observed current requests into 0 client-label groups; 1 observed sessions could not be grouped.",
+        "summary": "Grouped 0 observed sessions and 0 observed current requests into 0 client-label groups; 1 observed session could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 1
       },
@@ -2303,6 +2315,11 @@
                 "value": "2"
               },
               {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current session database"
+              },
+              {
                 "key": "earliest_login",
                 "label": "Earliest native login (offset unknown)",
                 "value": "2020-01-01T11:50:00.0000000"
@@ -2330,8 +2347,11 @@
             ],
             "key": {
               "application": "fixture-client",
-              "database_id": "4",
-              "database_name": "session-default",
+              "database": {
+                "kind": "current-session",
+                "name": "session-default",
+                "native_id": "4"
+              },
               "host": "client-reported.invalid",
               "library": "fixture-native-library"
             },
@@ -2344,13 +2364,14 @@
         "grouped_sessions": 2,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 2 observed sessions and 2 observed current requests into 1 client-label groups; 0 observed sessions could not be grouped.",
+        "summary": "Grouped 2 observed sessions and 2 observed current requests into 1 client-label group; 0 observed sessions could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 0
       },
@@ -2930,6 +2951,11 @@
                 "value": "0"
               },
               {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current session database"
+              },
+              {
                 "key": "earliest_login",
                 "label": "Earliest native login (offset unknown)",
                 "value": "2020-01-01T11:50:00.0000000"
@@ -2957,8 +2983,11 @@
             ],
             "key": {
               "application": "fixture-client",
-              "database_id": "7",
-              "database_name": "db",
+              "database": {
+                "kind": "current-session",
+                "name": "db",
+                "native_id": "7"
+              },
               "host": "client-reported.invalid",
               "library": "fixture-native-library"
             },
@@ -2971,13 +3000,14 @@
         "grouped_sessions": 1,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 1 observed sessions and 0 observed current requests into 1 client-label groups; 0 observed sessions could not be grouped.",
+        "summary": "Grouped 1 observed session and 0 observed current requests into 1 client-label group; 0 observed sessions could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 0
       },
@@ -3435,6 +3465,11 @@
                 "value": "2"
               },
               {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current session database"
+              },
+              {
                 "key": "earliest_login",
                 "label": "Earliest native login (offset unknown)",
                 "value": "2020-01-01T11:50:00.0000000"
@@ -3462,8 +3497,11 @@
             ],
             "key": {
               "application": "fixture-client",
-              "database_id": "4",
-              "database_name": "session-default",
+              "database": {
+                "kind": "current-session",
+                "name": "session-default",
+                "native_id": "4"
+              },
               "host": "client-reported.invalid",
               "library": "fixture-native-library"
             },
@@ -3476,13 +3514,14 @@
         "grouped_sessions": 1,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 1 observed sessions and 2 observed current requests into 1 client-label groups; 0 observed sessions could not be grouped.",
+        "summary": "Grouped 1 observed session and 2 observed current requests into 1 client-label group; 0 observed sessions could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 0
       },
@@ -3907,6 +3946,1924 @@
       "title": "Session census"
     }
   },
+  "mysql-shared": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": null,
+            "host": "shared-client",
+            "user": "shared-login"
+          },
+          "command": "Sleep",
+          "database": "db",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "1001",
+              "id": "701"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": null,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "idle",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "default_database": "db",
+                "request_schema": null,
+                "thread_name": "thread/sql/one_connection",
+                "thread_type": "FOREGROUND"
+              },
+              "kind": "mysql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "Sleep",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        },
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": null,
+            "host": "shared-client",
+            "user": "shared-login"
+          },
+          "command": "Query",
+          "database": "statement-default",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "4",
+              "id": "3"
+            },
+            "session": {
+              "generation": "1002",
+              "id": "702"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": null,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "running",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "default_database": "db",
+                "request_schema": "statement-default",
+                "thread_name": "thread/sql/one_connection",
+                "thread_type": "FOREGROUND"
+              },
+              "kind": "mysql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "executing",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.5Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "mysql-current-activity",
+              "state": "collected",
+              "stopped": null
+            },
+            "database_writable": true,
+            "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+            "native_rows": 2,
+            "observations": 2,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "population": "default-database-connections",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mysql",
+            "kind": "instance",
+            "namespace": {
+              "id": "mysql-server-uuid",
+              "qualifiers": {
+                "kind": "mysql-server-uuid"
+              }
+            },
+            "native": {
+              "id": "f54a461c-0001-4000-8000-000000000001",
+              "qualifiers": {}
+            }
+          }
+        },
+        "source": "mysql-current-activity",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mysql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 3306
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "client_groups": {
+        "available_groups": 1,
+        "entries": [
+          {
+            "fields": [
+              {
+                "key": "session_database_id",
+                "label": "Session database ID (native)",
+                "value": null
+              },
+              {
+                "key": "session_database_name",
+                "label": "Session database name (native)",
+                "value": "db"
+              },
+              {
+                "key": "host",
+                "label": "Client-reported host",
+                "value": "shared-client"
+              },
+              {
+                "key": "application",
+                "label": "Client program",
+                "value": null
+              },
+              {
+                "key": "library",
+                "label": "Client library",
+                "value": null
+              },
+              {
+                "key": "observed_sessions",
+                "label": "Observed sessions",
+                "value": "2"
+              },
+              {
+                "key": "observed_requests",
+                "label": "Observed current requests",
+                "value": "1"
+              },
+              {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current default schema"
+              },
+              {
+                "key": "session_logical_reads",
+                "label": "Summed session logical reads",
+                "value": null
+              },
+              {
+                "key": "session_writes",
+                "label": "Summed session writes",
+                "value": null
+              },
+              {
+                "key": "session_age_ms",
+                "label": "Summed native session age (ms)",
+                "value": null
+              }
+            ],
+            "key": {
+              "application": null,
+              "database": {
+                "kind": "current-default",
+                "name": "db"
+              },
+              "host": "shared-client",
+              "library": null
+            },
+            "limitations": [
+              "The native default schema can change and can differ from the statement default schema or accessed objects. Thread state age is not connection age; missing session counters remain unknown."
+            ],
+            "observed_requests": 1,
+            "observed_sessions": 2
+          }
+        ],
+        "entries_limited": false,
+        "grouped_sessions": 2,
+        "limitations": [
+          "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
+          "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+          "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+          "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+          "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
+          "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
+        ],
+        "summary": "Grouped 2 observed sessions and 1 observed current request into 1 client-label group; 0 observed sessions could not be grouped.",
+        "title": "Observed client groups",
+        "ungrouped_sessions": 0
+      },
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mysql",
+            "kind": "instance",
+            "namespace": {
+              "id": "mysql-server-uuid",
+              "qualifiers": {
+                "kind": "mysql-server-uuid"
+              }
+            },
+            "native": {
+              "id": "f54a461c-0001-4000-8000-000000000001",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mysql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 3306
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "1001",
+              "id": "701"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "Sleep"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": null
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": null
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "shared-client"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": null
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "thread_type",
+              "label": "Native thread type",
+              "value": "FOREGROUND"
+            },
+            {
+              "key": "thread_name",
+              "label": "Native thread class",
+              "value": "thread/sql/one_connection"
+            },
+            {
+              "key": "session_default_schema",
+              "label": "Native session default schema",
+              "value": "db"
+            },
+            {
+              "key": "current_statement_schema",
+              "label": "Current statement default schema",
+              "value": null
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Idle session",
+          "title": "Session 701"
+        },
+        {
+          "activity": {
+            "request": {
+              "generation": "4",
+              "id": "3"
+            },
+            "session": {
+              "generation": "1002",
+              "id": "702"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "executing"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "statement-default"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": null
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": null
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "shared-client"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": null
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "thread_type",
+              "label": "Native thread type",
+              "value": "FOREGROUND"
+            },
+            {
+              "key": "thread_name",
+              "label": "Native thread class",
+              "value": "thread/sql/one_connection"
+            },
+            {
+              "key": "session_default_schema",
+              "label": "Native session default schema",
+              "value": "db"
+            },
+            {
+              "key": "current_statement_schema",
+              "label": "Current statement default schema",
+              "value": "statement-default"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Running session",
+          "title": "Session 702, request 3"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+        "This source population does not include a complete idle and dormant session census. Positive rows remain useful within their original scope."
+      ],
+      "native_rows": 2,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 2,
+        "source": "mysql-current-activity",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_active_sessions": 1,
+      "observed_at": "2020-01-01T12:00:00.5Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 1,
+      "observed_rows": 2,
+      "observed_sessions": 2,
+      "population": "default-database-connections",
+      "presented_rows": 2,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "mysql-current-activity",
+          "state": "collected"
+        }
+      ],
+      "summary": "Observed session identities: 2; current request identities: 1. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
+  "mysql-switched": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": null,
+            "host": "shared-client",
+            "user": "shared-login"
+          },
+          "command": "Sleep",
+          "database": "other",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "1001",
+              "id": "701"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": null,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "idle",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "default_database": "other",
+                "request_schema": null,
+                "thread_name": "thread/sql/one_connection",
+                "thread_type": "FOREGROUND"
+              },
+              "kind": "mysql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "Sleep",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        },
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": null,
+            "host": "shared-client",
+            "user": "shared-login"
+          },
+          "command": "Query",
+          "database": "db",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "4",
+              "id": "3"
+            },
+            "session": {
+              "generation": "1002",
+              "id": "702"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": null,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "running",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "default_database": "other",
+                "request_schema": "db",
+                "thread_name": "thread/sql/one_connection",
+                "thread_type": "FOREGROUND"
+              },
+              "kind": "mysql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "executing",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:01.5Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "mysql-current-activity",
+              "state": "collected",
+              "stopped": null
+            },
+            "database_writable": true,
+            "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+            "native_rows": 2,
+            "observations": 2,
+            "observed_from": "2020-01-01T12:00:01Z",
+            "observed_until": "2020-01-01T12:00:02Z",
+            "population": "default-database-connections",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mysql",
+            "kind": "instance",
+            "namespace": {
+              "id": "mysql-server-uuid",
+              "qualifiers": {
+                "kind": "mysql-server-uuid"
+              }
+            },
+            "native": {
+              "id": "f54a461c-0001-4000-8000-000000000001",
+              "qualifiers": {}
+            }
+          }
+        },
+        "source": "mysql-current-activity",
+        "target": {
+          "identity": {
+            "database": "other",
+            "engine": "mysql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 3306
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "client_groups": {
+        "available_groups": 1,
+        "entries": [
+          {
+            "fields": [
+              {
+                "key": "session_database_id",
+                "label": "Session database ID (native)",
+                "value": null
+              },
+              {
+                "key": "session_database_name",
+                "label": "Session database name (native)",
+                "value": "other"
+              },
+              {
+                "key": "host",
+                "label": "Client-reported host",
+                "value": "shared-client"
+              },
+              {
+                "key": "application",
+                "label": "Client program",
+                "value": null
+              },
+              {
+                "key": "library",
+                "label": "Client library",
+                "value": null
+              },
+              {
+                "key": "observed_sessions",
+                "label": "Observed sessions",
+                "value": "2"
+              },
+              {
+                "key": "observed_requests",
+                "label": "Observed current requests",
+                "value": "1"
+              },
+              {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current default schema"
+              },
+              {
+                "key": "session_logical_reads",
+                "label": "Summed session logical reads",
+                "value": null
+              },
+              {
+                "key": "session_writes",
+                "label": "Summed session writes",
+                "value": null
+              },
+              {
+                "key": "session_age_ms",
+                "label": "Summed native session age (ms)",
+                "value": null
+              }
+            ],
+            "key": {
+              "application": null,
+              "database": {
+                "kind": "current-default",
+                "name": "other"
+              },
+              "host": "shared-client",
+              "library": null
+            },
+            "limitations": [
+              "The native default schema can change and can differ from the statement default schema or accessed objects. Thread state age is not connection age; missing session counters remain unknown."
+            ],
+            "observed_requests": 1,
+            "observed_sessions": 2
+          }
+        ],
+        "entries_limited": false,
+        "grouped_sessions": 2,
+        "limitations": [
+          "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
+          "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+          "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+          "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+          "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
+          "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
+        ],
+        "summary": "Grouped 2 observed sessions and 1 observed current request into 1 client-label group; 0 observed sessions could not be grouped.",
+        "title": "Observed client groups",
+        "ungrouped_sessions": 0
+      },
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T12:00:01Z",
+        "observed_until": "2020-01-01T12:00:02Z",
+        "partition": {
+          "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mysql",
+            "kind": "instance",
+            "namespace": {
+              "id": "mysql-server-uuid",
+              "qualifiers": {
+                "kind": "mysql-server-uuid"
+              }
+            },
+            "native": {
+              "id": "f54a461c-0001-4000-8000-000000000001",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "other",
+            "engine": "mysql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 3306
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "1001",
+              "id": "701"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "Sleep"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "other"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": null
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "other"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": null
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "shared-client"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": null
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "thread_type",
+              "label": "Native thread type",
+              "value": "FOREGROUND"
+            },
+            {
+              "key": "thread_name",
+              "label": "Native thread class",
+              "value": "thread/sql/one_connection"
+            },
+            {
+              "key": "session_default_schema",
+              "label": "Native session default schema",
+              "value": "other"
+            },
+            {
+              "key": "current_statement_schema",
+              "label": "Current statement default schema",
+              "value": null
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Idle session",
+          "title": "Session 701"
+        },
+        {
+          "activity": {
+            "request": {
+              "generation": "4",
+              "id": "3"
+            },
+            "session": {
+              "generation": "1002",
+              "id": "702"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "executing"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": null
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "other"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": null
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "shared-client"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": null
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "thread_type",
+              "label": "Native thread type",
+              "value": "FOREGROUND"
+            },
+            {
+              "key": "thread_name",
+              "label": "Native thread class",
+              "value": "thread/sql/one_connection"
+            },
+            {
+              "key": "session_default_schema",
+              "label": "Native session default schema",
+              "value": "other"
+            },
+            {
+              "key": "current_statement_schema",
+              "label": "Current statement default schema",
+              "value": "db"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Running session",
+          "title": "Session 702, request 3"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+        "This source population does not include a complete idle and dormant session census. Positive rows remain useful within their original scope."
+      ],
+      "native_rows": 2,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 2,
+        "source": "mysql-current-activity",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_active_sessions": 1,
+      "observed_at": "2020-01-01T12:00:01.5Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 1,
+      "observed_rows": 2,
+      "observed_sessions": 2,
+      "population": "default-database-connections",
+      "presented_rows": 2,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "mysql-current-activity",
+          "state": "collected"
+        }
+      ],
+      "summary": "Observed session identities: 2; current request identities: 1. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
+  "mysql-worker": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": null,
+            "host": "shared-client",
+            "user": "shared-login"
+          },
+          "command": "Sleep",
+          "database": "db",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "1001",
+              "id": "701"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": null,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "idle",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "default_database": "db",
+                "request_schema": null,
+                "thread_name": "thread/sql/one_connection",
+                "thread_type": "FOREGROUND"
+              },
+              "kind": "mysql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "Sleep",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        },
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": null,
+            "host": "shared-client",
+            "user": "shared-login"
+          },
+          "command": "Query",
+          "database": "statement-default",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "4",
+              "id": "3"
+            },
+            "session": {
+              "generation": "1002",
+              "id": "702"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": null,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "running",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "default_database": "db",
+                "request_schema": "statement-default",
+                "thread_name": "thread/sql/slave_sql",
+                "thread_type": "BACKGROUND"
+              },
+              "kind": "mysql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "executing",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.5Z",
+            "coverage": {
+              "complete_scope": false,
+              "error_code": null,
+              "records": 2,
+              "source": "mysql-current-activity",
+              "state": "partial",
+              "stopped": "source-unavailable"
+            },
+            "database_writable": true,
+            "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+            "native_rows": 2,
+            "observations": 2,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "population": "active-requests-open-transactions-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mysql",
+            "kind": "instance",
+            "namespace": {
+              "id": "mysql-server-uuid",
+              "qualifiers": {
+                "kind": "mysql-server-uuid"
+              }
+            },
+            "native": {
+              "id": "f54a461c-0001-4000-8000-000000000001",
+              "qualifiers": {}
+            }
+          }
+        },
+        "source": "mysql-current-activity",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mysql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 3306
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "client_groups": {
+        "available_groups": 1,
+        "entries": [
+          {
+            "fields": [
+              {
+                "key": "session_database_id",
+                "label": "Session database ID (native)",
+                "value": null
+              },
+              {
+                "key": "session_database_name",
+                "label": "Session database name (native)",
+                "value": "db"
+              },
+              {
+                "key": "host",
+                "label": "Client-reported host",
+                "value": "shared-client"
+              },
+              {
+                "key": "application",
+                "label": "Client program",
+                "value": null
+              },
+              {
+                "key": "library",
+                "label": "Client library",
+                "value": null
+              },
+              {
+                "key": "observed_sessions",
+                "label": "Observed sessions",
+                "value": "1"
+              },
+              {
+                "key": "observed_requests",
+                "label": "Observed current requests",
+                "value": "0"
+              },
+              {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current default schema"
+              },
+              {
+                "key": "session_logical_reads",
+                "label": "Summed session logical reads",
+                "value": null
+              },
+              {
+                "key": "session_writes",
+                "label": "Summed session writes",
+                "value": null
+              },
+              {
+                "key": "session_age_ms",
+                "label": "Summed native session age (ms)",
+                "value": null
+              }
+            ],
+            "key": {
+              "application": null,
+              "database": {
+                "kind": "current-default",
+                "name": "db"
+              },
+              "host": "shared-client",
+              "library": null
+            },
+            "limitations": [
+              "The native default schema can change and can differ from the statement default schema or accessed objects. Thread state age is not connection age; missing session counters remain unknown."
+            ],
+            "observed_requests": 0,
+            "observed_sessions": 1
+          }
+        ],
+        "entries_limited": false,
+        "grouped_sessions": 1,
+        "limitations": [
+          "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
+          "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+          "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+          "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+          "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
+          "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
+        ],
+        "summary": "Grouped 1 observed session and 0 observed current requests into 1 client-label group; 1 observed session could not be grouped.",
+        "title": "Observed client groups",
+        "ungrouped_sessions": 1
+      },
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "6eb02833fcccb009689e409251da4507f3aebc6b844997bc3f9a3f9420aab3ea",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mysql",
+            "kind": "instance",
+            "namespace": {
+              "id": "mysql-server-uuid",
+              "qualifiers": {
+                "kind": "mysql-server-uuid"
+              }
+            },
+            "native": {
+              "id": "f54a461c-0001-4000-8000-000000000001",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mysql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 3306
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "1001",
+              "id": "701"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "Sleep"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": null
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": null
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "shared-client"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": null
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "thread_type",
+              "label": "Native thread type",
+              "value": "FOREGROUND"
+            },
+            {
+              "key": "thread_name",
+              "label": "Native thread class",
+              "value": "thread/sql/one_connection"
+            },
+            {
+              "key": "session_default_schema",
+              "label": "Native session default schema",
+              "value": "db"
+            },
+            {
+              "key": "current_statement_schema",
+              "label": "Current statement default schema",
+              "value": null
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Idle session",
+          "title": "Session 701"
+        },
+        {
+          "activity": {
+            "request": {
+              "generation": "4",
+              "id": "3"
+            },
+            "session": {
+              "generation": "1002",
+              "id": "702"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "executing"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "statement-default"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": null
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": null
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "shared-client"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": null
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "thread_type",
+              "label": "Native thread type",
+              "value": "BACKGROUND"
+            },
+            {
+              "key": "thread_name",
+              "label": "Native thread class",
+              "value": "thread/sql/slave_sql"
+            },
+            {
+              "key": "session_default_schema",
+              "label": "Native session default schema",
+              "value": "db"
+            },
+            {
+              "key": "current_statement_schema",
+              "label": "Current statement default schema",
+              "value": "statement-default"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Running session",
+          "title": "Session 702, request 3"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+        "This source population does not include a complete idle and dormant session census. Positive rows remain useful within their original scope.",
+        "The observed rows do not establish complete population visibility. Missing permissions, generations, row limits and read gaps do not become healthy emptiness."
+      ],
+      "native_rows": 2,
+      "native_source": {
+        "complete_scope": false,
+        "error_code": null,
+        "records": 2,
+        "source": "mysql-current-activity",
+        "state": "partial",
+        "stopped": "source-unavailable"
+      },
+      "observed_active_sessions": 1,
+      "observed_at": "2020-01-01T12:00:00.5Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 1,
+      "observed_rows": 2,
+      "observed_sessions": 2,
+      "population": "active-requests-open-transactions-and-blockers",
+      "presented_rows": 2,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": "The telemetry source stopped before the read completed.",
+          "source": "mysql-current-activity",
+          "state": "partial"
+        }
+      ],
+      "summary": "Observed session identities: 2; current request identities: 1. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
   "partial": {
     "read": {
       "observations": [
@@ -4062,6 +6019,11 @@
                 "value": "0"
               },
               {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current session database"
+              },
+              {
                 "key": "earliest_login",
                 "label": "Earliest native login (offset unknown)",
                 "value": "2020-01-01T11:50:00.0000000"
@@ -4089,8 +6051,11 @@
             ],
             "key": {
               "application": "fixture-client",
-              "database_id": "7",
-              "database_name": "db",
+              "database": {
+                "kind": "current-session",
+                "name": "db",
+                "native_id": "7"
+              },
               "host": "client-reported.invalid",
               "library": "fixture-native-library"
             },
@@ -4103,13 +6068,14 @@
         "grouped_sessions": 1,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 1 observed sessions and 0 observed current requests into 1 client-label groups; 0 observed sessions could not be grouped.",
+        "summary": "Grouped 1 observed session and 0 observed current requests into 1 client-label group; 0 observed sessions could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 0
       },
@@ -4329,6 +6295,1730 @@
         }
       ],
       "summary": "Observed session identities: 1; current request identities: 0. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
+  "postgres-shared": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": "fixture-shared-pooled-driver",
+            "host": "127.0.0.1",
+            "user": "shared-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.000001Z",
+              "id": "statement"
+            },
+            "session": {
+              "generation": "2020-01-01T11:59:00.000001Z",
+              "id": "401"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": 1,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "running",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "backend_type": "client backend",
+                "database_name": "db",
+                "database_oid": "42"
+              },
+              "kind": "postgres"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "active",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "statement_identity": {
+            "id": "d1fce5a0e35f674cbe6175522bf5779600ccd451c720b8e7add32c6a31f9886a",
+            "qualifiers": {
+              "basis": "backend-query-start",
+              "source": "pg_stat_activity"
+            }
+          },
+          "transaction_age_ms": null,
+          "wait": {
+            "class": null,
+            "elapsed_ms": null,
+            "identified_resources": [],
+            "native_type": "Lock: advisory",
+            "owners": [],
+            "resources": null
+          },
+          "waiting_on_lock": true
+        },
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": "fixture-shared-pooled-driver",
+            "host": "127.0.0.1",
+            "user": "shared-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.000002Z",
+              "id": "statement"
+            },
+            "session": {
+              "generation": "2020-01-01T11:59:00.000002Z",
+              "id": "402"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": 1,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "running",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "backend_type": "client backend",
+                "database_name": "db",
+                "database_oid": "42"
+              },
+              "kind": "postgres"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "active",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "statement_identity": {
+            "id": "45453af58fb08e30b01b5b6498ff19d1eabd1cbf9b4c35fc288962595cbc3ee5",
+            "qualifiers": {
+              "basis": "backend-query-start",
+              "source": "pg_stat_activity"
+            }
+          },
+          "transaction_age_ms": null,
+          "wait": {
+            "class": null,
+            "elapsed_ms": null,
+            "identified_resources": [],
+            "native_type": "Lock: advisory",
+            "owners": [],
+            "resources": null
+          },
+          "waiting_on_lock": true
+        },
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": "fixture-shared-pooled-driver",
+            "host": "127.0.0.1",
+            "user": "shared-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:59:00.000003Z",
+              "id": "403"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": "250",
+          "open_transactions": 0,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "idle",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "backend_type": "client backend",
+                "database_name": "db",
+                "database_oid": "42"
+              },
+              "kind": "postgres"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "idle",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.5Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 3,
+              "source": "pg_stat_activity",
+              "state": "collected",
+              "stopped": null
+            },
+            "database_writable": true,
+            "epoch": "777ca5263e3a69c5d3e6a1ad9f54a4dd504ea5bf30c917876e5bfe2d57f2a21a",
+            "native_rows": 3,
+            "observations": 3,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "population": "client-backends",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "epoch": "777ca5263e3a69c5d3e6a1ad9f54a4dd504ea5bf30c917876e5bfe2d57f2a21a",
+          "kind": "instance-local",
+          "member": {
+            "engine": "postgres",
+            "kind": "instance",
+            "namespace": {
+              "id": "123456789",
+              "qualifiers": {
+                "kind": "postgres-system-identifier"
+              }
+            },
+            "native": {
+              "id": "127.0.0.1",
+              "qualifiers": {
+                "port": "5432"
+              }
+            }
+          }
+        },
+        "source": "pg_stat_activity",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "postgres",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 5432
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "client_groups": {
+        "available_groups": 1,
+        "entries": [
+          {
+            "fields": [
+              {
+                "key": "session_database_id",
+                "label": "Session database ID (native)",
+                "value": "42"
+              },
+              {
+                "key": "session_database_name",
+                "label": "Session database name (native)",
+                "value": "db"
+              },
+              {
+                "key": "host",
+                "label": "Client-reported host",
+                "value": "127.0.0.1"
+              },
+              {
+                "key": "application",
+                "label": "Client program",
+                "value": "fixture-shared-pooled-driver"
+              },
+              {
+                "key": "library",
+                "label": "Client library",
+                "value": null
+              },
+              {
+                "key": "observed_sessions",
+                "label": "Observed sessions",
+                "value": "3"
+              },
+              {
+                "key": "observed_requests",
+                "label": "Observed current requests",
+                "value": "2"
+              },
+              {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Database bound to the backend"
+              },
+              {
+                "key": "earliest_backend_start_utc",
+                "label": "Earliest native backend start (UTC)",
+                "value": "2020-01-01T11:59:00.000001Z"
+              },
+              {
+                "key": "session_logical_reads",
+                "label": "Summed session logical reads",
+                "value": null
+              },
+              {
+                "key": "session_writes",
+                "label": "Summed session writes",
+                "value": null
+              },
+              {
+                "key": "session_age_ms",
+                "label": "Summed native session age (ms)",
+                "value": null
+              }
+            ],
+            "key": {
+              "application": "fixture-shared-pooled-driver",
+              "database": {
+                "kind": "backend",
+                "name": "db",
+                "native_id": "42"
+              },
+              "host": "127.0.0.1",
+              "library": null
+            },
+            "limitations": [
+              "Backend start is a UTC timestamp, not a native elapsed counter. Missing session counters stay unknown; request time and database totals do not fill them."
+            ],
+            "observed_requests": 2,
+            "observed_sessions": 3
+          }
+        ],
+        "entries_limited": false,
+        "grouped_sessions": 3,
+        "limitations": [
+          "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
+          "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+          "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+          "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+          "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
+          "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
+        ],
+        "summary": "Grouped 3 observed sessions and 2 observed current requests into 1 client-label group; 0 observed sessions could not be grouped.",
+        "title": "Observed client groups",
+        "ungrouped_sessions": 0
+      },
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "777ca5263e3a69c5d3e6a1ad9f54a4dd504ea5bf30c917876e5bfe2d57f2a21a",
+          "kind": "instance-local",
+          "member": {
+            "engine": "postgres",
+            "kind": "instance",
+            "namespace": {
+              "id": "123456789",
+              "qualifiers": {
+                "kind": "postgres-system-identifier"
+              }
+            },
+            "native": {
+              "id": "127.0.0.1",
+              "qualifiers": {
+                "port": "5432"
+              }
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "postgres",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 5432
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.000001Z",
+              "id": "statement"
+            },
+            "session": {
+              "generation": "2020-01-01T11:59:00.000001Z",
+              "id": "401"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "active"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "42"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-shared-pooled-driver"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "127.0.0.1"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "1"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "backend_type",
+              "label": "Native backend type",
+              "value": "client backend"
+            },
+            {
+              "key": "backend_started_utc",
+              "label": "Native backend start (UTC)",
+              "value": "2020-01-01T11:59:00.000001Z"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Running session",
+          "title": "Session 401, request statement"
+        },
+        {
+          "activity": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.000002Z",
+              "id": "statement"
+            },
+            "session": {
+              "generation": "2020-01-01T11:59:00.000002Z",
+              "id": "402"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "active"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "42"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-shared-pooled-driver"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "127.0.0.1"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "1"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "backend_type",
+              "label": "Native backend type",
+              "value": "client backend"
+            },
+            {
+              "key": "backend_started_utc",
+              "label": "Native backend start (UTC)",
+              "value": "2020-01-01T11:59:00.000002Z"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Running session",
+          "title": "Session 402, request statement"
+        },
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:59:00.000003Z",
+              "id": "403"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "idle"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "42"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-shared-pooled-driver"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "127.0.0.1"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": "250"
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "0"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "backend_type",
+              "label": "Native backend type",
+              "value": "client backend"
+            },
+            {
+              "key": "backend_started_utc",
+              "label": "Native backend start (UTC)",
+              "value": "2020-01-01T11:59:00.000003Z"
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Idle session",
+          "title": "Session 403"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+        "This source population does not include a complete idle and dormant session census. Positive rows remain useful within their original scope."
+      ],
+      "native_rows": 3,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 3,
+        "source": "pg_stat_activity",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_active_sessions": 2,
+      "observed_at": "2020-01-01T12:00:00.5Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 2,
+      "observed_rows": 3,
+      "observed_sessions": 3,
+      "population": "client-backends",
+      "presented_rows": 3,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "pg_stat_activity",
+          "state": "collected"
+        }
+      ],
+      "summary": "Observed session identities: 3; current request identities: 2. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
+  "postgres-worker": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": "fixture-shared-pooled-driver",
+            "host": "127.0.0.1",
+            "user": "shared-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.000001Z",
+              "id": "statement"
+            },
+            "session": {
+              "generation": "2020-01-01T11:59:00.000001Z",
+              "id": "401"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": 1,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "running",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "backend_type": "parallel worker",
+                "database_name": "db",
+                "database_oid": "42"
+              },
+              "kind": "postgres"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "active",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "statement_identity": {
+            "id": "d1fce5a0e35f674cbe6175522bf5779600ccd451c720b8e7add32c6a31f9886a",
+            "qualifiers": {
+              "basis": "backend-query-start",
+              "source": "pg_stat_activity"
+            }
+          },
+          "transaction_age_ms": null,
+          "wait": {
+            "class": null,
+            "elapsed_ms": null,
+            "identified_resources": [],
+            "native_type": "Lock: advisory",
+            "owners": [],
+            "resources": null
+          },
+          "waiting_on_lock": true
+        },
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": "fixture-shared-pooled-driver",
+            "host": "127.0.0.1",
+            "user": "shared-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.000002Z",
+              "id": "statement"
+            },
+            "session": {
+              "generation": "2020-01-01T11:59:00.000002Z",
+              "id": "402"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": 1,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "running",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "backend_type": "client backend",
+                "database_name": "db",
+                "database_oid": "42"
+              },
+              "kind": "postgres"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "active",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "statement_identity": {
+            "id": "45453af58fb08e30b01b5b6498ff19d1eabd1cbf9b4c35fc288962595cbc3ee5",
+            "qualifiers": {
+              "basis": "backend-query-start",
+              "source": "pg_stat_activity"
+            }
+          },
+          "transaction_age_ms": null,
+          "wait": {
+            "class": null,
+            "elapsed_ms": null,
+            "identified_resources": [],
+            "native_type": "Lock: advisory",
+            "owners": [],
+            "resources": null
+          },
+          "waiting_on_lock": true
+        },
+        {
+          "blocking_status": "unknown",
+          "client": {
+            "application": "fixture-shared-pooled-driver",
+            "host": "127.0.0.1",
+            "user": "shared-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:59:00.000003Z",
+              "id": "403"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": "250",
+          "open_transactions": 0,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "idle",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "backend_type": "client backend",
+                "database_name": "db",
+                "database_oid": "42"
+              },
+              "kind": "postgres"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "idle",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.5Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 3,
+              "source": "pg_stat_activity",
+              "state": "collected",
+              "stopped": null
+            },
+            "database_writable": true,
+            "epoch": "777ca5263e3a69c5d3e6a1ad9f54a4dd504ea5bf30c917876e5bfe2d57f2a21a",
+            "native_rows": 3,
+            "observations": 3,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:01Z",
+            "population": "active-requests-open-transactions-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "epoch": "777ca5263e3a69c5d3e6a1ad9f54a4dd504ea5bf30c917876e5bfe2d57f2a21a",
+          "kind": "instance-local",
+          "member": {
+            "engine": "postgres",
+            "kind": "instance",
+            "namespace": {
+              "id": "123456789",
+              "qualifiers": {
+                "kind": "postgres-system-identifier"
+              }
+            },
+            "native": {
+              "id": "127.0.0.1",
+              "qualifiers": {
+                "port": "5432"
+              }
+            }
+          }
+        },
+        "source": "pg_stat_activity",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "postgres",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 5432
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "client_groups": {
+        "available_groups": 1,
+        "entries": [
+          {
+            "fields": [
+              {
+                "key": "session_database_id",
+                "label": "Session database ID (native)",
+                "value": "42"
+              },
+              {
+                "key": "session_database_name",
+                "label": "Session database name (native)",
+                "value": "db"
+              },
+              {
+                "key": "host",
+                "label": "Client-reported host",
+                "value": "127.0.0.1"
+              },
+              {
+                "key": "application",
+                "label": "Client program",
+                "value": "fixture-shared-pooled-driver"
+              },
+              {
+                "key": "library",
+                "label": "Client library",
+                "value": null
+              },
+              {
+                "key": "observed_sessions",
+                "label": "Observed sessions",
+                "value": "2"
+              },
+              {
+                "key": "observed_requests",
+                "label": "Observed current requests",
+                "value": "1"
+              },
+              {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Database bound to the backend"
+              },
+              {
+                "key": "earliest_backend_start_utc",
+                "label": "Earliest native backend start (UTC)",
+                "value": "2020-01-01T11:59:00.000002Z"
+              },
+              {
+                "key": "session_logical_reads",
+                "label": "Summed session logical reads",
+                "value": null
+              },
+              {
+                "key": "session_writes",
+                "label": "Summed session writes",
+                "value": null
+              },
+              {
+                "key": "session_age_ms",
+                "label": "Summed native session age (ms)",
+                "value": null
+              }
+            ],
+            "key": {
+              "application": "fixture-shared-pooled-driver",
+              "database": {
+                "kind": "backend",
+                "name": "db",
+                "native_id": "42"
+              },
+              "host": "127.0.0.1",
+              "library": null
+            },
+            "limitations": [
+              "Backend start is a UTC timestamp, not a native elapsed counter. Missing session counters stay unknown; request time and database totals do not fill them."
+            ],
+            "observed_requests": 1,
+            "observed_sessions": 2
+          }
+        ],
+        "entries_limited": false,
+        "grouped_sessions": 2,
+        "limitations": [
+          "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
+          "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+          "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+          "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+          "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
+          "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
+        ],
+        "summary": "Grouped 2 observed sessions and 1 observed current request into 1 client-label group; 1 observed session could not be grouped.",
+        "title": "Observed client groups",
+        "ungrouped_sessions": 1
+      },
+      "context": {
+        "database_writable": true,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "777ca5263e3a69c5d3e6a1ad9f54a4dd504ea5bf30c917876e5bfe2d57f2a21a",
+          "kind": "instance-local",
+          "member": {
+            "engine": "postgres",
+            "kind": "instance",
+            "namespace": {
+              "id": "123456789",
+              "qualifiers": {
+                "kind": "postgres-system-identifier"
+              }
+            },
+            "native": {
+              "id": "127.0.0.1",
+              "qualifiers": {
+                "port": "5432"
+              }
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "postgres",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 5432
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.000001Z",
+              "id": "statement"
+            },
+            "session": {
+              "generation": "2020-01-01T11:59:00.000001Z",
+              "id": "401"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "active"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "42"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-shared-pooled-driver"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "127.0.0.1"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "1"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "backend_type",
+              "label": "Native backend type",
+              "value": "parallel worker"
+            },
+            {
+              "key": "backend_started_utc",
+              "label": "Native backend start (UTC)",
+              "value": "2020-01-01T11:59:00.000001Z"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Running session",
+          "title": "Session 401, request statement"
+        },
+        {
+          "activity": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.000002Z",
+              "id": "statement"
+            },
+            "session": {
+              "generation": "2020-01-01T11:59:00.000002Z",
+              "id": "402"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "active"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "42"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-shared-pooled-driver"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "127.0.0.1"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "1"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "backend_type",
+              "label": "Native backend type",
+              "value": "client backend"
+            },
+            {
+              "key": "backend_started_utc",
+              "label": "Native backend start (UTC)",
+              "value": "2020-01-01T11:59:00.000002Z"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Running session",
+          "title": "Session 402, request statement"
+        },
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:59:00.000003Z",
+              "id": "403"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "idle"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "session_database_id",
+              "label": "Session database ID (native)",
+              "value": "42"
+            },
+            {
+              "key": "session_database_name",
+              "label": "Session database name (native)",
+              "value": "db"
+            },
+            {
+              "key": "request_database_id",
+              "label": "Request database ID (native)",
+              "value": null
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-shared-pooled-driver"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "shared-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "127.0.0.1"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": "250"
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "0"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "backend_type",
+              "label": "Native backend type",
+              "value": "client backend"
+            },
+            {
+              "key": "backend_started_utc",
+              "label": "Native backend start (UTC)",
+              "value": "2020-01-01T11:59:00.000003Z"
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Idle session",
+          "title": "Session 403"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
+        "This source population does not include a complete idle and dormant session census. Positive rows remain useful within their original scope."
+      ],
+      "native_rows": 3,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 3,
+        "source": "pg_stat_activity",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_active_sessions": 2,
+      "observed_at": "2020-01-01T12:00:00.5Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 2,
+      "observed_rows": 3,
+      "observed_sessions": 3,
+      "population": "active-requests-open-transactions-and-blockers",
+      "presented_rows": 3,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "pg_stat_activity",
+          "state": "collected"
+        }
+      ],
+      "summary": "Observed session identities: 3; current request identities: 2. Transport connections are a different population.",
       "title": "Session census"
     }
   },
@@ -4641,6 +8331,11 @@
                 "value": "3"
               },
               {
+                "key": "database_basis",
+                "label": "Native database context",
+                "value": "Current session database"
+              },
+              {
                 "key": "earliest_login",
                 "label": "Earliest native login (offset unknown)",
                 "value": "2020-01-01T11:50:00.0000000"
@@ -4668,8 +8363,11 @@
             ],
             "key": {
               "application": "fixture-client",
-              "database_id": "4",
-              "database_name": "session-default",
+              "database": {
+                "kind": "current-session",
+                "name": "session-default",
+                "native_id": "4"
+              },
               "host": "client-reported.invalid",
               "library": "fixture-native-library"
             },
@@ -4684,13 +8382,14 @@
         "grouped_sessions": 2,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 2 observed sessions and 3 observed current requests into 1 client-label groups; 0 observed sessions could not be grouped.",
+        "summary": "Grouped 2 observed sessions and 3 observed current requests into 1 client-label group; 0 observed sessions could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 0
       },
@@ -5350,6 +9049,7 @@
         "grouped_sessions": 0,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
@@ -5543,13 +9243,14 @@
         "grouped_sessions": 0,
         "limitations": [
           "Counts describe observed sessions and current requests, not transport connections or executions. This is not Hub’s last-hour filtered population or a complete database inventory.",
+          "Only known native client participants with database context are grouped. Internal, parallel, worker and unresolved native kinds remain outside these groups.",
           "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
           "Database IDs are scoped to this native source and observation. Session and request databases can differ; a reported zero identifies neither.",
           "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
           "Reads and writes are session-lifetime totals that can span databases, not work attributed to the current session database or this capture. Summed session age is time since login, not query duration or CPU time.",
           "Only equal recorded labels and session facts are combined. Missing values withhold the affected total; contradictory MARS rows exclude the whole session."
         ],
-        "summary": "Grouped 0 observed sessions and 0 observed current requests into 0 client-label groups; 1 observed sessions could not be grouped.",
+        "summary": "Grouped 0 observed sessions and 0 observed current requests into 0 client-label groups; 1 observed session could not be grouped.",
         "title": "Observed client groups",
         "ungrouped_sessions": 1
       },

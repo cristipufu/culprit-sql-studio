@@ -7,8 +7,8 @@ use crate::read::{NativeRead, Parameter, ReadError, invalid_data};
 use culprit_core::{Result, telemetry::*};
 use std::collections::BTreeSet;
 
-pub(crate) const NATIVE_OBJECT: &str = "sys.dm_os_schedulers";
-pub(crate) const MAX_SCHEDULERS: usize = 4096;
+pub(crate) const NATIVE_OBJECT: &str = MSSQL_SCHEDULER_OBJECT;
+pub(crate) const MAX_SCHEDULERS: usize = MAX_MSSQL_SCHEDULERS;
 const IDENTITY_COLUMN: &str = "scheduler_id";
 
 /// Both interactive and collector owners pass their bounded reader and retain responsibility for close/finish.

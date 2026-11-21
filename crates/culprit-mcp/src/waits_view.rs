@@ -123,6 +123,7 @@ pub fn report(report: &Report) -> Value {
     group_replication::attach(&mut response, report);
     galera::attach(&mut response, report);
     pool_settings::attach(&mut response, report);
+    managed_instance_resources::attach(&mut response, report);
     suspect_pages::attach(&mut response, report);
     configured_log_rates::attach(&mut response, report);
     instance_resources::attach(&mut response, report);
@@ -976,3 +977,5 @@ pub(crate) mod group_replication;
 pub(crate) mod galera;
 
 pub(crate) mod pool_settings;
+
+pub(crate) mod managed_instance_resources;

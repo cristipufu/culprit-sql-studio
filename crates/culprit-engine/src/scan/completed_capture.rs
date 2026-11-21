@@ -12,6 +12,7 @@ use culprit_core::{
 /// The retained family to attach; this selects no native source recipe or current execution population.
 #[derive(Clone, Copy, Debug)]
 pub enum CompletedCaptureAnalysis {
+    ManagedInstanceResources,
     CachedRuntime,
     MemoryClerks,
     DatabasePerformanceCounters,
@@ -23,8 +24,11 @@ pub enum CompletedCaptureAnalysis {
     HyperscaleLogComponents,
 }
 impl CompletedCaptureAnalysis {
-    fn dataset(self) -> SnapshotDataset {
-        match self {
+    fn dataset(self) -> Result<SnapshotDataset> {
+        Ok(match self {
+            Self::ManagedInstanceResources => {
+                return Err(culprit_core::telemetry::DeliveryProblem::UnsupportedSchema.error());
+            }
             Self::CachedRuntime => SnapshotDataset::CachedRuntime,
             Self::MemoryClerks => SnapshotDataset::Operational,
             Self::DatabasePerformanceCounters => SnapshotDataset::DatabasePerformanceCounters,
@@ -34,7 +38,7 @@ impl CompletedCaptureAnalysis {
             Self::PoolSettings => SnapshotDataset::Settings,
             Self::FullTextPopulations => SnapshotDataset::FullTextPopulations,
             Self::HyperscaleLogComponents => SnapshotDataset::HyperscaleLogComponents,
-        }
+        })
     }
 }
 
@@ -50,17 +54,36 @@ pub struct CompletedCaptureScanInput<'a> {
 }
 impl CompletedCaptureScanInput<'_> {
     async fn read(self, connection: &str) -> Result<super::CapturedScanEvidence> {
+        if matches!(self.analysis, CompletedCaptureAnalysis::ManagedInstanceResources) {
+            let original = self
+                .delivery
+                .completed_managed_instance_resources_for_connection(
+                    connection,
+                    self.attempt,
+                    self.budget,
+                    self.cancellation,
+                )
+                .await?;
+            let read = super::CapturedScanEvidence::managed_instance_resources(Box::new(original.into_read()?))?;
+            if self.cancellation.is_cancelled() {
+                return Err(CollectionStop::Cancelled.error());
+            }
+            return Ok(read);
+        }
         let captured = self
             .delivery
             .completed_snapshot_for_connection(
                 connection,
                 self.attempt,
-                self.analysis.dataset(),
+                self.analysis.dataset()?,
                 self.budget,
                 self.cancellation,
             )
             .await?;
         let read = match self.analysis {
+            CompletedCaptureAnalysis::ManagedInstanceResources => {
+                return Err(culprit_core::telemetry::DeliveryProblem::UnsupportedSchema.error());
+            }
             CompletedCaptureAnalysis::PoolSettings => {
                 super::CapturedScanEvidence::pool_settings(Box::new(captured.into_pool_settings_read()?))?
             }

@@ -20,6 +20,7 @@ struct Backend {
     status: Mutex<CollectionStatus>,
     state_sources: Mutex<Option<Vec<StateSourceCoverage>>>,
     reference_coverage: Mutex<ReferenceCoverage>,
+    description_override: Mutex<Option<CollectionDescription>>,
 }
 impl Backend {
     fn new() -> Self {
@@ -35,6 +36,7 @@ impl Backend {
             reference_coverage: Mutex::new(
                 crate::collection_references::ObservationReferences::default().coverage(true, None),
             ),
+            description_override: Mutex::new(None),
         }
     }
 }
@@ -141,13 +143,13 @@ impl FleetBackend for Backend {
                 started_at: "2026-11-10T12:00:00Z".into(),
                 finished_at: Some("2026-11-10T12:00:01Z".into()),
                 request,
-                description: Some(CollectionDescription {
+                description: Some(self.description_override.lock().unwrap().clone().unwrap_or(CollectionDescription {
                     partition: culprit_core::telemetry::SourcePartition::Target,
                     target,
                     source: "query_store".into(),
                     continuity: SourceContinuity::Unverified,
                     observation,
-                }),
+                })),
                 status: self.status.lock().unwrap().clone(),
                 source_queries: 1,
                 read_metrics: None,

@@ -4,6 +4,11 @@
 //! detail some checks use; without it those checks say less, never something wrong.
 
 use culprit_core::{Capability, Coverage, ErrorCode, Source, source_id};
+pub const MANAGED_INSTANCE_RESOURCES: Source = Source {
+    name: culprit_core::telemetry::MSSQL_MANAGED_INSTANCE_RESOURCES_SOURCE,
+    reads: culprit_core::key!("provider.mssql.source.managed_instance_resources"),
+    delivers: &[],
+};
 pub const BACKUP_HISTORY: Source = Source {
     name: culprit_core::telemetry::MSSQL_BACKUP_HISTORY_SOURCE,
     reads: culprit_core::key!("view.backup_history.source"),
@@ -459,6 +464,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    MANAGED_INSTANCE_RESOURCES,
     BACKUP_HISTORY,
     COLUMNSTORE_ROWGROUPS,
     FULL_TEXT_POPULATIONS,

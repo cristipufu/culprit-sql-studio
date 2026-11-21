@@ -35,14 +35,19 @@ fn mars_retains_both_request_connections_but_counts_one_session_without_combinin
     first.request_counters = Some(ActivityCounters::default());
     let context = first.session_context.as_deref_mut().unwrap();
     context.lifecycle = SessionLifecycle::Running;
-    let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+    let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap() else {
+        panic!("MSSQL test context")
+    };
     native.native_state = "Running".into();
     native.has_current_request = true;
     native.request_connection_id = Some("11111111-1111-1111-1111-111111111111".into());
     let mut second = first.clone();
     second.key.request.as_mut().unwrap().id = "1".into();
     let SessionNativeContext::Mssql(native) =
-        second.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+        second.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap()
+    else {
+        panic!("MSSQL test context")
+    };
     native.request_connection_id = Some("22222222-2222-2222-2222-222222222222".into());
     read.observations = vec![first, second];
     let SourceObservation::Activity(header) = &mut read.source.observation else { panic!() };
@@ -86,7 +91,9 @@ fn duplicate_native_requests_foreign_database_and_mismatched_login_tokens_are_re
             }
             other => {
                 let context = read.observations[0].session_context.as_deref_mut().unwrap();
-                let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+                let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap() else {
+                    panic!("MSSQL test context")
+                };
                 match other {
                     "login-token" => native.times.login_without_offset = "2020-01-01T11:50:01.0000000".into(),
                     "native-offset" => native.times.login_without_offset.push('Z'),
@@ -153,7 +160,9 @@ fn session_database_context_is_separate_from_mars_request_context_and_display_la
     first.request_counters = Some(ActivityCounters::default());
     let context = first.session_context.as_deref_mut().unwrap();
     context.lifecycle = SessionLifecycle::Running;
-    let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+    let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap() else {
+        panic!("MSSQL test context")
+    };
     native.native_state = "Running".into();
     native.has_current_request = true;
     native.session_database_id = Some("4".into());
@@ -183,7 +192,10 @@ fn missing_native_session_context_and_zero_ids_do_not_borrow_the_displayed_targe
     for native_id in [None, Some("0"), Some("7")] {
         let mut read = recorded();
         let SessionNativeContext::Mssql(native) =
-            read.observations[0].session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+            read.observations[0].session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap()
+        else {
+            panic!("MSSQL test context")
+        };
         native.session_database_id = native_id.map(str::to_owned);
         native.session_database_name = None;
         native.request_database_id = None;

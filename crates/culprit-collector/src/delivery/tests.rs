@@ -52,6 +52,7 @@ fn prepared_database(root: &std::path::Path, sequence: u64, database: &str) -> P
     let mut writer = ObservationFiles::create(&directory, request, capture, None).unwrap();
     writer.describe(source).unwrap();
     let row = TelemetryRecord::ResourceSample(ResourceMeasurement {
+        mssql_managed_instance: None,
         replica_role: None,
         data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
         at: "2020-01-01T06:00:15Z".into(),

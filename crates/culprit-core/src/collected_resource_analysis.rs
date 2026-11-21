@@ -331,3 +331,10 @@ pub struct CollectedPoolSettingsAnalysis {
     pub context: crate::collected_analysis::CollectedEvidenceContext,
     pub report: Box<crate::PoolSettingsReport>,
 }
+
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct CollectedManagedInstanceResourceAnalysis {
+    pub context: crate::collected_analysis::CollectedEvidenceContext,
+    pub report: Box<crate::ManagedInstanceResourceReport>,
+}

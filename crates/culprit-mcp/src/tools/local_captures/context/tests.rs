@@ -18,7 +18,9 @@ impl Original {
             Engine::Mssql,
         );
         let context = row.session_context.as_deref_mut().unwrap();
-        let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+        let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap() else {
+            panic!("MSSQL test context")
+        };
         if negative {
             context.lifecycle = SessionLifecycle::PoolResetPrelogin;
             context.login_age_ms = None;

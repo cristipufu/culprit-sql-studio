@@ -9,6 +9,12 @@ pub(super) fn redact(mut samples: Vec<ResourceSample>) -> Result<Vec<ResourceSam
     for sample in &mut samples {
         if let Some(measurement) = &mut sample.measurement {
             measurement.replica_id = measurement.replica_id.as_deref().map(opaque);
+            if let Some(native) = &mut measurement.mssql_managed_instance {
+                native.resource_type = native.resource_type.as_deref().map(opaque);
+                native.resource_name = native.resource_name.as_deref().map(opaque);
+                native.sku = native.sku.as_deref().map(opaque);
+                native.hardware_generation = native.hardware_generation.as_deref().map(opaque);
+            }
             for metric in &mut measurement.metrics {
                 if !public_metric_key(&metric.key) {
                     metric.key = opaque(&metric.key);

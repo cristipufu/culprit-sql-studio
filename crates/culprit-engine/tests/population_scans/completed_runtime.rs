@@ -37,7 +37,7 @@ impl TelemetrySource for CapturedRows {
         0
     }
     async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead> {
-        assert_eq!(stream, TelemetryStream::OperationalSamples);
+        assert_eq!(self.source.observation.collection().source_streams(), &[stream]);
         assert!(cursor.is_none());
         Ok(CollectionRead::Page { records: std::mem::take(&mut self.records), next_cursor: None })
     }
@@ -74,7 +74,6 @@ impl Captured {
     async fn from_source(connection: &str, source: CollectionDescription, rows: Vec<TelemetryRecord>) -> Self {
         let home = tempfile::tempdir().unwrap();
         let mut outbox = Outbox::create(&home.path().join("outbox"), Default::default()).unwrap();
-        let dataset = source.observation.snapshot().unwrap().dataset;
         let subject = match &source.target {
             CollectionTarget::Database(_) => CollectionSubject::Database,
             CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
@@ -82,13 +81,19 @@ impl Captured {
         let request = CollectionRequest {
             subject,
             selection: match &source.observation {
+                history if history.collection() == TelemetryCollection::ResourceHistory => {
+                    let TelemetryRange::TimeWindow { from, until } = history.range().unwrap() else {
+                        panic!("history fixture requires native time bounds")
+                    };
+                    CollectionSelection::ResourceHistory { from, until }
+                }
                 SourceObservation::FullTextPopulations { target, .. } => {
                     CollectionSelection::FullTextPopulations { target: target.clone() }
                 }
                 SourceObservation::TableMemory { target, .. } => {
                     CollectionSelection::TableMemory { target: target.clone() }
                 }
-                _ => CollectionSelection::Snapshot { dataset },
+                _ => CollectionSelection::Snapshot { dataset: source.observation.snapshot().unwrap().dataset },
             },
             budget: CollectionBudget::default(),
         };
@@ -425,3 +430,5 @@ async fn ordinary_scans_do_not_read_or_attach_existing_local_captures() {
 mod group_replication;
 
 mod galera;
+
+mod managed_instance_resources;

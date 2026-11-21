@@ -2,6 +2,10 @@
 use super::*;
 
 const MAX_NATIVE_DATABASE_NAME_BYTES: usize = 512;
+mod mysql;
+mod postgres;
+pub use mysql::MysqlSessionContext;
+pub use postgres::PostgresSessionContext;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -33,6 +37,8 @@ pub struct ActivitySessionContext {
 #[ts(export)]
 pub enum SessionNativeContext {
     Mssql(MssqlSessionContext),
+    Postgres(PostgresSessionContext),
+    Mysql(MysqlSessionContext),
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -131,6 +137,8 @@ impl ActivitySessionContext {
                             .as_deref()
                             .is_none_or(|id| key.request.is_some() && native_connection_token(id))
                 }
+                SessionNativeContext::Postgres(context) => context.is_valid_for(self, key, idle),
+                SessionNativeContext::Mysql(context) => context.is_valid_for(self, key, idle),
             })
     }
 }
@@ -164,5 +172,7 @@ fn native_integer_code(value: &str) -> bool {
     value.parse::<i32>().is_ok_and(|native| native.to_string() == value)
 }
 
+#[cfg(test)]
+mod native_databases_tests;
 #[cfg(test)]
 mod tests;

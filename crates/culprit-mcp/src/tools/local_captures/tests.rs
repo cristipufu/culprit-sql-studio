@@ -194,3 +194,5 @@ fn deadline_and_cancellation_remain_distinct_without_any_native_or_store_access(
 }
 
 mod session_census;
+
+mod managed_instance_resources;

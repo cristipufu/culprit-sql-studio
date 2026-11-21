@@ -79,7 +79,7 @@ fn metadata_query(query_id: bool, extra_columns: &str, selection: &str, limit: u
     format!(
         "WITH {ctes}stamp AS (SELECT pg_catalog.clock_timestamp() AS at)
         SELECT {} AS observed_at,a.pid::text AS pid,{} AS backend_start,{} AS query_start,{} AS transaction_start,
-        a.datid::text AS database_oid,a.datname AS database,a.usename AS username,a.application_name,
+        a.datid::text AS database_oid,a.datname AS database,a.backend_type,a.usename AS username,a.application_name,
         coalesce(a.client_hostname,pg_catalog.host(a.client_addr)) AS host,coalesce(a.state,a.backend_type) AS state,
         a.wait_event_type,a.wait_event,{} AS elapsed_ms,{} AS transaction_ms,{} AS idle_ms,
         {query_id} AS query_id{extra_columns}
@@ -137,7 +137,24 @@ pub fn decode_row(row: Row, database_oid: &str) -> Result<ActivityRecord> {
             culprit_core::engines::postgres_activity_statement_identity(&pid, &backend_start, &request.generation)
         });
         let observation = ActivityObservation {
-            session_context: None,
+            session_context: Some(Box::new(ActivitySessionContext {
+                lifecycle: PostgresSessionContext::lifecycle(!active),
+                login_age_ms: None,
+                last_request_end_age_ms: None,
+                client_library: None,
+                client_process_id: None,
+                native: Some(Box::new(SessionNativeContext::Postgres(PostgresSessionContext {
+                    database_oid: row.unsigned_text("database_oid")?,
+                    database_name: match row.value("database") {
+                        Some(value) => value.map(str::to_owned),
+                        None => return Err(invalid()),
+                    },
+                    backend_type: match row.value("backend_type") {
+                        Some(value) => value.map(str::to_owned),
+                        None => return Err(invalid()),
+                    },
+                }))),
+            })),
             waiting_on_lock: waiting_on_lock(&row),
             blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
             key: ActivityKey {

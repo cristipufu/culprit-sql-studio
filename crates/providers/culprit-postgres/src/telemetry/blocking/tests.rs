@@ -13,6 +13,7 @@ fn actor_row(pid: &str, state: &str, database_oid: &str, database: &str, waiters
         ("observed_at", Some(AT)),
         ("pid", Some(pid)),
         ("backend_start", Some(BACKEND)),
+        ("backend_type", Some("client backend")),
         ("query_start", Some(REQUEST)),
         ("transaction_start", Some(REQUEST)),
         ("database_oid", Some(database_oid)),

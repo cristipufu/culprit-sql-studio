@@ -539,3 +539,5 @@ mod group_replication;
 mod galera;
 
 mod pool_settings;
+
+mod managed_instance_resources;

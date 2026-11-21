@@ -36,6 +36,7 @@ pub enum LocalCaptureAnalysisKind {
     SuspectPages,
     TableFullText,
     InstanceResources,
+    ManagedInstanceResources,
     Compilation,
     ConfiguredLogRates,
     ConnectionOutcomes,
@@ -60,7 +61,7 @@ pub enum LocalCaptureAnalysisKind {
     SessionCensus,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 32] = [
         Self::PageServerReads,
         Self::MemoryClerks,
         Self::TempdbMetadataMemory,
@@ -70,6 +71,7 @@ impl LocalCaptureAnalysisKind {
         Self::SuspectPages,
         Self::TableFullText,
         Self::InstanceResources,
+        Self::ManagedInstanceResources,
         Self::Compilation,
         Self::ConfiguredLogRates,
         Self::ConnectionOutcomes,
@@ -102,6 +104,7 @@ impl LocalCaptureAnalysisKind {
             Self::PageServerReads => QueryHistory,
             Self::Replication => LocalCaptureReadPlan::Replication,
             Self::PoolSettings => LocalCaptureReadPlan::PoolSettings,
+            Self::ManagedInstanceResources => LocalCaptureReadPlan::ManagedInstanceResources,
             Self::Blocking => Blocking,
             Self::SessionCensus => Activity,
             Self::MemoryClerks
@@ -140,6 +143,7 @@ impl LocalCaptureAnalysisKind {
 
 #[cfg(feature = "collector")]
 enum LocalCaptureReadPlan {
+    ManagedInstanceResources,
     Replication,
     PoolSettings,
     Activity,
@@ -161,6 +165,7 @@ pub type LocalCaptureTask<'a> = Pin<Box<dyn Future<Output = Result<LocalCaptured
 
 #[derive(Debug)]
 pub enum LocalCapturedAnalysis {
+    ManagedInstanceResources(Box<LocalManagedInstanceResources>),
     PageServerReads(LocalPageServerReads),
     MemoryClerks(LocalMemoryClerks),
     HyperscaleLogComponents(LocalHyperscaleLogComponents),
@@ -181,6 +186,7 @@ impl LocalCapturedAnalysis {
             Self::SessionCensus(_) => LocalCaptureAnalysisKind::SessionCensus,
             Self::Replication(_) => LocalCaptureAnalysisKind::Replication,
             Self::PoolSettings(_) => LocalCaptureAnalysisKind::PoolSettings,
+            Self::ManagedInstanceResources(_) => LocalCaptureAnalysisKind::ManagedInstanceResources,
         }
     }
 }
@@ -266,3 +272,6 @@ impl LocalHyperscaleLogComponents {
         &self.report
     }
 }
+
+mod managed_instance_resources;
+pub use managed_instance_resources::LocalManagedInstanceResources;

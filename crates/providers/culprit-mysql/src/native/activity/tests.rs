@@ -146,3 +146,79 @@ async fn unavailable_or_cancelled_native_reads_do_not_run_optional_enrichment() 
         assert_eq!(reader.queries.len(), 1);
     }
 }
+
+#[test]
+fn native_thread_default_schema_is_retained_independently_of_a_current_statement_schema_and_state_age() {
+    for (command, current) in [("Query", true), ("Sleep", false)] {
+        let row = row_with(
+            1,
+            command,
+            current,
+            &[
+                ("db", Value::from("session-default")),
+                ("request_db", Value::from("statement-default")),
+                ("seconds", Value::from(999u64)),
+            ],
+        );
+        let point = decode(&row, "session-default", true).unwrap().unwrap();
+        let context = point.session_context.as_deref().unwrap();
+        let Some(SessionNativeContext::Mysql(native)) = context.native.as_deref() else { panic!() };
+        assert_eq!(native.default_database.as_deref(), Some("session-default"));
+        assert_eq!(native.request_schema.as_deref(), current.then_some("statement-default"));
+        assert_eq!(point.database.as_deref(), Some(if current { "statement-default" } else { "session-default" }));
+        assert!(native.is_client_thread(point.command.as_deref()));
+        assert!(context.login_age_ms.is_none() && context.client_library.is_none());
+        assert!(point.session_counters.logical_reads.is_none());
+    }
+}
+
+#[test]
+fn internal_and_unknown_native_thread_classes_are_retained_without_becoming_clients_from_user_labels() {
+    for (kind, name) in [
+        ("BACKGROUND", "thread/sql/one_connection"),
+        ("FOREGROUND", "thread/sql/slave_sql"),
+        ("FOREGROUND", "thread/sql/thread_pool_worker"),
+    ] {
+        let row = row_with(
+            1,
+            "Query",
+            true,
+            &[
+                ("thread_type", Value::from(kind)),
+                ("thread_name", Value::from(name)),
+                ("user_name", Value::from("ordinary-app-user")),
+            ],
+        );
+        let point = decode(&row, "shop", true).unwrap().unwrap();
+        let Some(SessionNativeContext::Mysql(native)) = point.session_context.as_deref().unwrap().native.as_deref()
+        else {
+            panic!()
+        };
+        assert!(!native.is_client_thread(point.command.as_deref()));
+        assert_eq!(native.thread_type.as_deref(), Some(kind));
+        assert_eq!(native.thread_name.as_deref(), Some(name));
+    }
+}
+
+#[test]
+fn null_default_schema_or_native_class_remains_unknown_and_does_not_borrow_the_request_schema() {
+    let row = row_with(1, "Query", true, &[("db", Value::NULL), ("thread_name", Value::NULL)]);
+    let point = decode(&row, "shop", true).unwrap().unwrap();
+    assert_eq!(point.database.as_deref(), Some("shop"));
+    let Some(SessionNativeContext::Mysql(native)) = point.session_context.as_deref().unwrap().native.as_deref() else {
+        panic!()
+    };
+    assert!(native.default_database.is_none() && native.thread_name.is_none());
+    assert_eq!(native.request_schema.as_deref(), Some("shop"));
+    assert!(!native.is_client_thread(point.command.as_deref()));
+}
+
+#[tokio::test]
+async fn selected_default_schema_frame_refuses_a_foreign_or_null_native_default_without_extra_reads() {
+    for db in [Value::from("foreign"), Value::NULL] {
+        let mut reader = Read::with(vec![Ok(consumers(true)), Ok(vec![row_with(1, "Query", true, &[("db", db)])])]);
+        let error = observe(&mut reader, &metadata(), &CollectionBudget::default()).await.err().unwrap();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceChanged)));
+        assert_eq!(reader.queries.len(), 2);
+    }
+}

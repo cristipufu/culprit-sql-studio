@@ -67,6 +67,9 @@ impl CulpritMcp {
         // A delegation revoked while a queued read ran cannot publish its result.
         self.allowed(&args.connection)?;
         let value = match analysis {
+            LocalCapturedAnalysis::ManagedInstanceResources(analysis) => {
+                managed_instance_resources::captured(&analysis)
+            }
             LocalCapturedAnalysis::PageServerReads(analysis) => {
                 crate::waits_view::page_server_reads::captured(&analysis)?
             }
@@ -99,3 +102,5 @@ pub(crate) fn check_operation(operation: &OperationHandle) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
+
+mod managed_instance_resources;

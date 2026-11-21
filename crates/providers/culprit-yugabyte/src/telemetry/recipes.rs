@@ -42,12 +42,13 @@ impl Route {
 
 struct Registration {
     id: &'static str,
+    version: u32,
     purpose: RecipePurpose,
     route: Route,
 }
 impl Registration {
     const fn snapshot(id: &'static str, recipe: Recipe) -> Self {
-        Self { id, purpose: RecipePurpose::Investigation, route: Route::Snapshot(recipe) }
+        Self { id, version: 1, purpose: RecipePurpose::Investigation, route: Route::Snapshot(recipe) }
     }
     const fn baseline(mut self) -> Self {
         self.purpose = RecipePurpose::Baseline;
@@ -56,7 +57,7 @@ impl Registration {
     fn descriptor(&self) -> RecipeDescriptor {
         RecipeDescriptor {
             id: self.id.into(),
-            version: 1,
+            version: self.version,
             purpose: self.purpose,
             selector: self.route.selector(),
             subjects: vec![RecipeSubject::Database],
@@ -78,13 +79,19 @@ impl Registration {
 }
 
 const REGISTRATIONS: &[Registration] = &[
-    Registration { id: "yugabyte.activity", purpose: RecipePurpose::Baseline, route: Route::Activity },
+    Registration { id: "yugabyte.activity", version: 2, purpose: RecipePurpose::Baseline, route: Route::Activity },
     Registration {
         id: "yugabyte.maintenance-progress",
+        version: 2,
         purpose: RecipePurpose::Investigation,
         route: Route::MaintenanceProgress,
     },
-    Registration { id: "yugabyte.operational", purpose: RecipePurpose::Baseline, route: Route::Operational },
+    Registration {
+        id: "yugabyte.operational",
+        version: 1,
+        purpose: RecipePurpose::Baseline,
+        route: Route::Operational,
+    },
     Registration::snapshot("yugabyte.statement-counters", Recipe::Statements).baseline(),
     Registration::snapshot("yugabyte.statement-definitions", Recipe::Definitions),
     Registration::snapshot("yugabyte.retained-plans", Recipe::Plans),

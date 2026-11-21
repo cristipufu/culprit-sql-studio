@@ -171,6 +171,7 @@ pub(super) fn decode(row: &Rec, pricing: Pricing) -> Result<ResourceMeasurement>
     // Pool statistics do not expose a pool deployment profile. Its member's Edition cannot establish the pool's
     // accounting basis, including heterogeneous/unknown membership. Preserve the measured percentage as such.
     let sample = ResourceMeasurement {
+        mssql_managed_instance: None,
         replica_role: None,
         data_io_accounting: DataIoAccounting::Unknown,
         at: canonical_time(&text(row, "sample_at")?)?,

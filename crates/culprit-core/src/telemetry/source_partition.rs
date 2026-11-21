@@ -69,6 +69,9 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
+        if let SourceObservation::MssqlManagedInstanceResources(history) = &self.observation {
+            return history.matches_source(self);
+        }
         if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::SuspectPages) {
             return suspect_page_context(self).is_ok();
         }

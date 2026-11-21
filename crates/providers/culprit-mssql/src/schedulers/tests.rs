@@ -215,3 +215,25 @@ async fn retiring_either_read_leaves_the_existing_owner_responsible_for_confirme
         }
     }
 }
+
+#[tokio::test]
+async fn canonical_scheduler_contract_accepts_actual_decoder_fields_nulls_and_unavailable_columns() {
+    for missing in [vec![], vec!["total_cpu_usage_ms", "ideal_workers_limit"]] {
+        let mut raw = row();
+        if !missing.is_empty() {
+            raw = replace(&raw, &[("total_cpu_usage_ms", Val::Null), ("ideal_workers_limit", Val::Null)]);
+        }
+        let mut reader = FakeRead::new(vec![Ok(metadata_without(&missing)), Ok(vec![raw])]);
+        let samples = read(&mut reader, 10).await.unwrap();
+        let point = MssqlSchedulerPoint::from_sample(&samples[0]).unwrap();
+        assert_eq!(point.scheduler_id(), "0");
+        for field in MSSQL_SCHEDULER_FIELDS {
+            match point.field(field).unwrap() {
+                MssqlSchedulerValue::ColumnUnavailable => assert!(missing.contains(&field.name)),
+                MssqlSchedulerValue::NativeNull => assert_eq!(field.name, "failed_to_create_worker"),
+                MssqlSchedulerValue::Observed(_) => assert!(!missing.contains(&field.name)),
+            }
+        }
+        assert_eq!(reader.calls.len(), 2);
+    }
+}

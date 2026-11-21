@@ -886,3 +886,5 @@ pub fn explain_table_full_text(
 ) -> culprit_core::Result<Option<culprit_core::TableFullTextReport>> {
     culprit_checks::table_full_text::explain_table(snapshot, table)
 }
+
+pub use local_captures::LocalManagedInstanceResources;

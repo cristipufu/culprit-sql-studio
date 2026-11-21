@@ -184,3 +184,33 @@ async fn baseline_member_projection_respects_native_mariadb_variable_versions_in
         }
     }
 }
+
+#[tokio::test]
+async fn foreign_default_schema_and_cancelled_frames_close_the_same_native_owner_without_publishing_a_census() {
+    for cancelled in [false, true] {
+        let request = bounded_request(&request());
+        let mut native = reader(context("2020-01-01T06:00:00.200000Z", 1));
+        native.io.replies[4] = if cancelled {
+            Err(CollectionStop::Cancelled.error())
+        } else {
+            Ok(vec![row(1, "Query", true).with_fields(&[("db", "foreign".into())])])
+        };
+        native.io.shutdown = Some(SourceShutdown::Unconfirmed);
+        let mut source = FrozenSource::new(native, &request).unwrap();
+        let failure = source.describe().await.err().unwrap();
+        let queried = source.query_count();
+        assert!(matches!(
+            failure.detail,
+            Some(culprit_core::ErrorDetail::CollectionStopped(
+                CollectionStop::Cancelled | CollectionStop::SourceChanged
+            ))
+        ));
+        assert!(queried <= request.budget.max_queries);
+        assert_eq!(
+            source.close().await,
+            SourceShutdown::Unconfirmed,
+            "close must retain the provided native owner, not acquire a replacement"
+        );
+        assert_eq!(source.query_count(), queried);
+    }
+}

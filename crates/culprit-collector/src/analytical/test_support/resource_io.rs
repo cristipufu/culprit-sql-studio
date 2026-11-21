@@ -159,6 +159,9 @@ pub async fn collected_resource_recovery(
         SourceObservation::RetainedSamples(history) => {
             CollectionSelection::ResourceHistory { from: history.from.clone(), until: history.until.clone() }
         }
+        SourceObservation::MssqlManagedInstanceResources(history) => {
+            CollectionSelection::ResourceHistory { from: history.from.clone(), until: history.until.clone() }
+        }
         SourceObservation::Activity(_) => CollectionSelection::Activity,
         observation => {
             let snapshot = observation.snapshot().expect("retained resource, Activity or snapshot fixture");

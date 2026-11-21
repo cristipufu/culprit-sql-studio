@@ -92,3 +92,65 @@ fn resource_summaries_keep_source_gaps_with_one_bounded_general_qualification() 
         assert!(text.len() < 16_384);
     }
 }
+
+#[test]
+fn scheduler_text_retains_each_native_field_exact_values_nullable_states_and_original_source_qualification() {
+    use culprit_collector::analytical::test_support::{SchedulerCase, instance_resource_scheduler_evidence};
+    for case in SchedulerCase::ALL {
+        let (source, rows) = instance_resource_scheduler_evidence(case);
+        let rows = rows
+            .into_iter()
+            .map(|row| {
+                let TelemetryRecord::Operational(row) = row else { panic!() };
+                row
+            })
+            .collect::<Vec<_>>();
+        let report = culprit_checks::instance_resources::explain_source(&source, &rows, true).unwrap();
+        let schedulers = report.schedulers.as_ref().unwrap();
+        let text = instance_resources(&report);
+        assert!(text.contains(&schedulers.title) && text.contains(&schedulers.summary));
+        assert!(text.contains(&schedulers.limitations[0]));
+        for entry in schedulers.entries.iter().take(3) {
+            assert!(text.contains(&entry.title));
+            for field in &entry.fields {
+                assert!(text.contains(&field.label));
+            }
+        }
+        if case == SchedulerCase::NativeNull {
+            assert!(text.contains(&t!("view.schedulers.value.null")));
+        }
+        if case == SchedulerCase::ColumnUnavailable {
+            assert!(text.contains(&t!("view.schedulers.value.unavailable")));
+        }
+        if case == SchedulerCase::Exact {
+            assert!(text.contains("9007199254740993"));
+        }
+        assert!(!text.contains("native-process-a") && !text.contains("native-instance-a"));
+        assert!(text.len() < 32_768, "{case:?}:{}", text.len());
+    }
+}
+
+#[test]
+fn scheduler_text_bounds_and_escapes_each_native_field_without_hiding_later_queue_values() {
+    use culprit_collector::analytical::test_support::{SchedulerCase, instance_resource_scheduler_evidence};
+    let (source, rows) = instance_resource_scheduler_evidence(SchedulerCase::Limited);
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            let TelemetryRecord::Operational(row) = row else { panic!() };
+            row
+        })
+        .collect::<Vec<_>>();
+    let mut report = culprit_checks::instance_resources::explain_source(&source, &rows, true).unwrap();
+    let schedulers = report.schedulers.as_mut().unwrap();
+    schedulers.entries[0].fields[0].value = Some(format!("\x1b[31m\n{}", "x".repeat(4096)));
+    let extra = schedulers.entries[0].fields[0].clone();
+    schedulers.entries[0].fields.extend(vec![extra; 100]);
+    let text = instance_resources(&report);
+    assert!(!text.contains('\x1b'));
+    assert!(!text.contains(&"x".repeat(141)));
+    assert!(text.contains("9007199254740993"));
+    assert!(text.contains(&t!("view.schedulers.limit.presentation")));
+    assert!(!text.contains(&t!("view.schedulers.entry", id = "3")));
+    assert!(text.len() < 32_768);
+}

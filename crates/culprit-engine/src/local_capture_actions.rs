@@ -187,3 +187,21 @@ impl Workspace {
             .map(|reports| *reports.requested)
     }
 }
+
+impl Workspace {
+    pub async fn scan_with_captured_managed_instance_resources(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalManagedInstanceResources,
+    ) -> Result<Report> {
+        if captured.connection() != name {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::managed_instance_resources(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+}

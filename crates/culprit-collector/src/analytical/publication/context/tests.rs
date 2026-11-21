@@ -251,3 +251,21 @@ async fn native_source_work_publication_and_capture_context_never_embed_private_
     );
     assert!(String::from_utf8(original).unwrap().contains("native-cost-reader-process-canary"));
 }
+
+#[test]
+fn managed_instance_history_publication_keeps_native_availability_without_current_reader_authority() {
+    let (source, rows) = test_support::managed_instance_resource_evidence();
+    let public = observation(&source.observation).unwrap();
+    assert_eq!(public["kind"], "mssql-managed-instance-resources");
+    assert_eq!(public["data"]["native_engine_edition"], 8);
+    assert_eq!(public["data"]["layout"]["hardware_generation"], "unsupported");
+    let encoded = serde_json::to_string(&public).unwrap();
+    for private in ["current_reader", "private-current-machine", "private-current-instance", "private-current-process"]
+    {
+        assert!(!encoded.contains(private), "{private}");
+    }
+    let recovery = test_support::Recovery::capture("fixture:mi", &digest(b"mi schema"), source, rows, 2);
+    let context = envelope::capture_context(&recovery.manifest, &digest(b"mi original manifest")).unwrap();
+    assert_eq!(context["observed_at"], "2020-01-01T06:10:00Z");
+    assert_eq!(context["interval_from"], "2020-01-01T06:00:00.000000000Z");
+}

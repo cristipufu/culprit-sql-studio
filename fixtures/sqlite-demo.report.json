@@ -847,7 +847,7 @@
         "table": "orders"
       }
     ],
-    "format": 40,
+    "format": 41,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -1000,15 +1000,15 @@
     "operations": {
       "cluster": null,
       "counters": [],
-      "group_replication": [],
       "full_text_populations": [],
+      "galera": [],
+      "group_replication": [],
       "log_failures": [],
       "multixacts": [],
       "sequences": [],
       "spaces": [],
       "sqlite": null,
-      "table_memory": [],
-      "galera": []
+      "table_memory": []
     },
     "options": {
       "collect_memory_failures": false,

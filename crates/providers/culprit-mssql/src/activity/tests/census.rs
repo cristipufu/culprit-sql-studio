@@ -65,7 +65,7 @@ async fn quiet_user_sessions_keep_library_lifetimes_and_exact_counters_without_a
     assert_eq!(context.client_library.as_deref(), Some("owned driver library"));
     assert_eq!(context.client_process_id.as_deref(), Some("0"));
     assert!(context.login_age_ms.is_some());
-    let SessionNativeContext::Mssql(native) = context.native.as_deref().unwrap();
+    let SessionNativeContext::Mssql(native) = context.native.as_deref().unwrap() else { panic!("MSSQL test context") };
     assert!(native.tds_protocol_version.is_none() && native.request_connection_id.is_none());
     assert_eq!(native.elapsed_ms.as_deref(), Some("123456"));
     assert_ne!(native.elapsed_ms, context.login_age_ms);
@@ -120,7 +120,10 @@ async fn mars_retains_each_exact_current_request_connection_without_a_representa
     let ids = rows
         .iter()
         .map(|row| {
-            let SessionNativeContext::Mssql(native) = row.session_context.as_ref().unwrap().native.as_deref().unwrap();
+            let SessionNativeContext::Mssql(native) = row.session_context.as_ref().unwrap().native.as_deref().unwrap()
+            else {
+                panic!("MSSQL test context")
+            };
             assert_eq!(native.session_database_id.as_deref(), Some("4"));
             assert_eq!(native.session_database_name.as_deref(), Some("session-default"));
             assert_eq!(native.request_database_id.as_deref(), Some("7"));
@@ -200,7 +203,10 @@ fn current_request_database_context_survives_an_unavailable_sql_locator_and_diff
         assert!(record.current_locator.is_none());
         assert!(record.facts.statement_identity.is_none());
         let SessionNativeContext::Mssql(native) =
-            record.facts.session_context.as_ref().unwrap().native.as_deref().unwrap();
+            record.facts.session_context.as_ref().unwrap().native.as_deref().unwrap()
+        else {
+            panic!("MSSQL test context")
+        };
         assert_eq!(native.session_database_id.as_deref(), Some("4"));
         assert_eq!(native.session_database_name.as_deref(), Some("session-default"));
         assert_eq!(native.request_database_id.as_deref(), expected);
@@ -220,7 +226,10 @@ fn null_zero_and_hidden_native_session_database_names_are_retained_without_reque
         );
         let record = rows::record(&row).unwrap().unwrap();
         let SessionNativeContext::Mssql(native) =
-            record.facts.session_context.as_ref().unwrap().native.as_deref().unwrap();
+            record.facts.session_context.as_ref().unwrap().native.as_deref().unwrap()
+        else {
+            panic!("MSSQL test context")
+        };
         assert_eq!(native.session_database_id.as_deref(), expected);
         assert!(native.session_database_name.is_none());
         assert!(native.request_database_id.is_none());
@@ -263,7 +272,9 @@ async fn same_session_projection_preserves_signed_native_elapsed_zero_unknown_an
         assert_eq!(reader.io.closed, 1);
         let live = result.unwrap();
         let context = live.activity_census.as_ref().unwrap().observations[0].session_context.as_ref().unwrap();
-        let SessionNativeContext::Mssql(native) = context.native.as_deref().unwrap();
+        let SessionNativeContext::Mssql(native) = context.native.as_deref().unwrap() else {
+            panic!("MSSQL test context")
+        };
         assert_eq!(native.elapsed_ms.as_deref(), expected);
         assert_eq!(reader.query_count(), 1);
     }

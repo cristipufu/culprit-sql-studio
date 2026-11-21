@@ -1,7 +1,8 @@
 //! One original census owns both session deduplication and observed client-label totals.
 use super::{field, number};
 use culprit_core::{
-    SessionCensusClientGroup, SessionCensusClientGroups, SessionClientGroupKey, format, t, telemetry::*,
+    SessionCensusClientGroup, SessionCensusClientGroups, SessionClientDatabase, SessionClientGroupKey, format, t,
+    telemetry::*,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,32 +11,62 @@ const MAX_PRESENTED_CLIENT_GROUPS: usize = 64;
 #[derive(PartialEq, Eq)]
 struct SessionFacts<'a> {
     key: SessionClientGroupKey,
-    login: &'a str,
-    last_end: Option<&'a str>,
+    times: SessionTimes<'a>,
     elapsed_ms: Option<&'a str>,
     logical_reads: Option<&'a str>,
     writes: Option<&'a str>,
 }
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum SessionTimes<'a> {
+    OffsetFree { login: &'a str, last_end: Option<&'a str> },
+    BackendUtc { started: &'a str },
+    Unavailable,
+}
 impl<'a> SessionFacts<'a> {
     fn from_row(row: &'a ActivityObservation) -> Option<Self> {
         let context = row.session_context.as_deref()?;
-        let SessionNativeContext::Mssql(native) = context.native.as_deref()?;
-        let database_id = native.session_database_id.as_deref().filter(|id| *id != "0")?;
+        let native = context.native.as_deref()?;
+        let database = match native {
+            SessionNativeContext::Mssql(native) => SessionClientDatabase::CurrentSession {
+                native_id: native.session_database_id.as_deref().filter(|id| *id != "0")?.into(),
+                name: native.session_database_name.clone(),
+            },
+            SessionNativeContext::Postgres(native) if native.is_client_backend() => SessionClientDatabase::Backend {
+                native_id: native.database_oid.as_deref().filter(|id| *id != "0")?.into(),
+                name: native.database_name.clone(),
+            },
+            SessionNativeContext::Mysql(native) if native.is_client_thread(row.command.as_deref()) => {
+                SessionClientDatabase::CurrentDefault { name: native.default_database.clone()? }
+            }
+            _ => return None,
+        };
         let client = row.client.as_ref();
-        Some(Self {
+        let mut facts = Self {
             key: SessionClientGroupKey {
-                database_id: database_id.into(),
-                database_name: native.session_database_name.clone(),
+                database,
                 host: client.and_then(|client| client.host.clone()),
                 application: client.and_then(|client| client.application.clone()),
                 library: context.client_library.clone(),
             },
-            login: &native.times.login_without_offset,
-            last_end: native.times.last_request_end_without_offset.as_deref(),
-            elapsed_ms: native.elapsed_ms.as_deref(),
+            times: SessionTimes::Unavailable,
+            elapsed_ms: None,
             logical_reads: row.session_counters.logical_reads.as_deref(),
             writes: row.session_counters.writes.as_deref(),
-        })
+        };
+        match native {
+            SessionNativeContext::Mssql(native) => {
+                facts.times = SessionTimes::OffsetFree {
+                    login: &native.times.login_without_offset,
+                    last_end: native.times.last_request_end_without_offset.as_deref(),
+                };
+                facts.elapsed_ms = native.elapsed_ms.as_deref();
+            }
+            SessionNativeContext::Postgres(_) => {
+                facts.times = SessionTimes::BackendUtc { started: &row.key.session.generation }
+            }
+            SessionNativeContext::Mysql(_) => (),
+        }
+        Some(facts)
     }
 }
 
@@ -65,6 +96,7 @@ pub(super) fn explain(frame: &ActivityFrameEvidence<'_>) -> SessionCensusClientG
     let entries_limited = groups.len() > MAX_PRESENTED_CLIENT_GROUPS;
     let mut limitations = vec![
         t!("view.session_census.groups.limit.population"),
+        t!("view.session_census.groups.limit.participants"),
         t!("view.session_census.limit.point"),
         t!("view.session_census.limit.database_ids"),
         t!("view.session_census.limit.client"),
@@ -85,10 +117,10 @@ pub(super) fn explain(frame: &ActivityFrameEvidence<'_>) -> SessionCensusClientG
         title: t!("view.session_census.groups.title"),
         summary: t!(
             "view.session_census.groups.summary",
-            sessions = format::digits(grouped_sessions.to_string()),
-            requests = format::digits(grouped_requests.to_string()),
-            groups = format::digits(available_groups.to_string()),
-            ungrouped = format::digits(ungrouped_sessions.to_string())
+            sessions = grouped_sessions,
+            requests = grouped_requests,
+            groups = available_groups,
+            ungrouped = ungrouped_sessions
         ),
         limitations,
         grouped_sessions,
@@ -120,17 +152,10 @@ fn consistent_session<'a>(
 }
 
 fn entry(key: SessionClientGroupKey, group: Group<'_>) -> SessionCensusClientGroup {
-    let earliest_login = group.sessions.iter().map(|session| session.login).min().map(str::to_owned);
-    let latest_end = group
-        .sessions
-        .iter()
-        .map(|session| session.last_end)
-        .collect::<Option<Vec<_>>>()
-        .and_then(|times| times.into_iter().max().map(str::to_owned));
     let reads = sum(&group.sessions, |session| session.logical_reads);
     let writes = sum(&group.sessions, |session| session.writes);
     let elapsed = sum(&group.sessions, |session| session.elapsed_ms);
-    let limitations = if group
+    let mut limitations = if group
         .sessions
         .iter()
         .any(|session| session.elapsed_ms.is_some_and(|value| value.parse::<i32>().is_ok_and(|native| native < 0)))
@@ -139,17 +164,24 @@ fn entry(key: SessionClientGroupKey, group: Group<'_>) -> SessionCensusClientGro
     } else {
         Vec::new()
     };
+    match &key.database {
+        SessionClientDatabase::Backend { .. } => limitations.push(t!("view.session_census.groups.limit.backend")),
+        SessionClientDatabase::CurrentDefault { .. } => {
+            limitations.push(t!("view.session_census.groups.limit.default_schema"))
+        }
+        SessionClientDatabase::CurrentSession { .. } => (),
+    }
     let observed_sessions = group.sessions.len() as u32;
-    let fields = vec![
+    let mut fields = vec![
         field(
             "session_database_id",
             t!("view.session_census.field.session_database_id"),
-            Some(key.database_id.clone()),
+            key.database.native_id().map(str::to_owned),
         ),
         field(
             "session_database_name",
             t!("view.session_census.field.session_database_name"),
-            key.database_name.clone(),
+            key.database.name().map(str::to_owned),
         ),
         field("host", t!("view.session_census.field.host"), key.host.clone()),
         field("application", t!("view.session_census.field.application"), key.application.clone()),
@@ -160,13 +192,66 @@ fn entry(key: SessionClientGroupKey, group: Group<'_>) -> SessionCensusClientGro
             Some(&observed_sessions.to_string()),
         ),
         number("observed_requests", t!("view.session_census.groups.field.requests"), Some(&group.requests.to_string())),
-        field("earliest_login", t!("view.session_census.groups.field.earliest_login"), earliest_login),
-        field("latest_end", t!("view.session_census.groups.field.latest_end"), latest_end),
+        field(
+            "database_basis",
+            t!("view.session_census.groups.field.database_basis"),
+            Some(match &key.database {
+                SessionClientDatabase::CurrentSession { .. } => {
+                    t!("view.session_census.groups.database.current_session")
+                }
+                SessionClientDatabase::Backend { .. } => t!("view.session_census.groups.database.backend"),
+                SessionClientDatabase::CurrentDefault { .. } => {
+                    t!("view.session_census.groups.database.current_default")
+                }
+            }),
+        ),
+    ];
+    fields.extend(time_fields(&group.sessions));
+    fields.extend([
         number("session_logical_reads", t!("view.session_census.groups.field.logical_reads"), reads.as_deref()),
         number("session_writes", t!("view.session_census.groups.field.writes"), writes.as_deref()),
         number("session_age_ms", t!("view.session_census.groups.field.elapsed"), elapsed.as_deref()),
-    ];
+    ]);
     SessionCensusClientGroup { key, observed_sessions, observed_requests: group.requests, limitations, fields }
+}
+
+fn time_fields(sessions: &[SessionFacts<'_>]) -> Vec<culprit_core::SessionCensusField> {
+    match sessions.first().map(|session| session.times) {
+        Some(SessionTimes::OffsetFree { .. }) => {
+            let login = sessions
+                .iter()
+                .map(|session| match session.times {
+                    SessionTimes::OffsetFree { login, .. } => Some(login),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+                .and_then(|times| times.into_iter().min().map(str::to_owned));
+            let end = sessions
+                .iter()
+                .map(|session| match session.times {
+                    SessionTimes::OffsetFree { last_end, .. } => last_end,
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+                .and_then(|times| times.into_iter().max().map(str::to_owned));
+            vec![
+                field("earliest_login", t!("view.session_census.groups.field.earliest_login"), login),
+                field("latest_end", t!("view.session_census.groups.field.latest_end"), end),
+            ]
+        }
+        Some(SessionTimes::BackendUtc { .. }) => {
+            let started = sessions
+                .iter()
+                .map(|session| match session.times {
+                    SessionTimes::BackendUtc { started } => Some(started),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+                .and_then(|times| times.into_iter().min().map(str::to_owned));
+            vec![field("earliest_backend_start_utc", t!("view.session_census.groups.field.backend_start"), started)]
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// At most MAX_ACTIVITY_FRAME_OBSERVATIONS u64 values fit exactly in u128. Missing/overflow never becomes zero.

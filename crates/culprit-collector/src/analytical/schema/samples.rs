@@ -6,6 +6,7 @@ const RESOURCES: &[Field] = &[
     Field::required("DataIoAccounting", "/record/data/data_io_accounting", String),
     Field::optional("ReplicaId", "/record/data/replica_id", String),
     Field::optional("ReplicaRole", "/record/data/replica_role", JsonContainer),
+    Field::optional("ManagedInstanceInterval", "/record/data/mssql_managed_instance", JsonContainer),
     // Scope and capacity basis remain independent. Context cannot establish the subject's own pressure.
     Field::required("Metrics", "/_projection/resource_metrics", JsonContainer),
 ];

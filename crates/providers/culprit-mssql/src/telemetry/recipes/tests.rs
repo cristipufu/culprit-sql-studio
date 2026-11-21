@@ -382,6 +382,7 @@ async fn native_resource_discovery_derives_its_routes_from_registrations_and_obs
             TelemetryCollection::Snapshot(SnapshotDataset::Operational),
         ];
         if edition == crate::probe::ENGINE_EDITION_MANAGED_INSTANCE {
+            expected.insert(1, TelemetryCollection::ResourceHistory);
             expected.push(TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures));
         }
         assert_eq!(collections, expected, "native edition {edition}");
@@ -390,6 +391,10 @@ async fn native_resource_discovery_derives_its_routes_from_registrations_and_obs
                 subject: CollectionSubject::Shared { resource: instance.clone() },
                 selection: match collection {
                     TelemetryCollection::Snapshot(dataset) => CollectionSelection::Snapshot { dataset },
+                    TelemetryCollection::ResourceHistory => CollectionSelection::ResourceHistory {
+                        from: "2020-01-01T06:00:00Z".into(),
+                        until: "2020-01-01T07:00:00Z".into(),
+                    },
                     TelemetryCollection::DeadlockHistory => CollectionSelection::DeadlockHistory {
                         from: "2020-01-01T06:00:00Z".into(),
                         until: "2020-01-01T07:00:00Z".into(),
@@ -621,4 +626,24 @@ fn pool_governance_settings_are_one_closed_investigation_recipe_with_a_total_inc
     assert_eq!(bounded.max_queries, 7);
     assert_eq!(bounded.total_timeout_ms, 1500);
     assert_eq!(bounded.statement_timeout_ms, 500);
+}
+
+#[test]
+fn managed_instance_history_is_an_explicit_native_profile_with_a_single_total_including_setup() {
+    let recipes = declarations();
+    let recipe = recipes.iter().find(|recipe| recipe.id == "mssql.managed-instance-resource-history").unwrap();
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, [RecipeSubject::Shared(SharedResourceKind::Instance)]);
+    assert_eq!(recipe.selector, RecipeSelector::Collection(TelemetryCollection::ResourceHistory));
+    assert_eq!(recipe.budget.max_queries, 12);
+    assert_eq!(crate::read::ReadSession::budget_after_setup(recipe.budget.clone()).unwrap().max_queries, 11);
+    assert_eq!(recipe.budget.statement_timeout_ms, 1000);
+    assert_eq!(recipe.budget.total_timeout_ms, 5000);
+    assert_eq!(recipe.budget.max_snapshot_rows, 512);
+    assert_eq!(recipe.budget.page_bytes, 128 * 1024);
+    let baseline = recipes.iter().find(|recipe| recipe.id == "mssql.resource-history").unwrap();
+    assert_eq!(baseline.version, 3);
+    assert_eq!(baseline.subjects, [RecipeSubject::Database]);
 }

@@ -121,7 +121,7 @@ async fn original_native_session_database_facts_survive_replay_without_becoming_
         (SessionCensusCase::Dormant, Some("0"), None, None),
         (SessionCensusCase::Mars, Some("4"), Some("session-default"), Some("7")),
         (SessionCensusCase::Unknown, None, None, None),
-        (SessionCensusCase::PostgresSharedLabels, None, None, None),
+        (SessionCensusCase::PostgresSharedLabels, Some("42"), Some("db"), None),
     ] {
         let (source, rows) = test_support::session_census_evidence(case);
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
@@ -153,7 +153,10 @@ async fn original_native_session_database_facts_survive_replay_without_becoming_
                     );
                     let mut changed = original.as_ref().clone();
                     let SessionNativeContext::Mssql(native) =
-                        changed.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+                        changed.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap()
+                    else {
+                        panic!("MSSQL test context")
+                    };
                     native.session_database_id = Some("8".into());
                     assert!(changed.is_valid());
                     assert!(reference.validate_canonical_record(&source, &TelemetryRecord::from(changed)).is_err());
@@ -219,6 +222,61 @@ async fn original_observed_client_groups_keep_exact_native_session_age_and_confl
                 .iter()
                 .find(|record| matches!(record, TelemetryRecord::Activity(row) if row.key == entry.activity))
                 .unwrap();
+            entry.reference.as_ref().unwrap().validate_canonical_record(&source, original).unwrap();
+        }
+        assert_eq!(fixture.recovery_object_reads(), opened);
+    }
+}
+
+#[tokio::test]
+async fn native_backend_and_mutable_default_groups_replay_original_scope_kind_and_unknown_work_without_collection() {
+    for (case, sessions, requests) in [
+        (SessionCensusCase::PostgresSharedLabels, 3, 2),
+        (SessionCensusCase::PostgresWorker, 2, 1),
+        (SessionCensusCase::MysqlShared, 2, 1),
+        (SessionCensusCase::MysqlSwitched, 2, 1),
+        (SessionCensusCase::MysqlWorker, 1, 0),
+    ] {
+        let (source, rows) = test_support::session_census_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let captured = fixture.read_families(&[EvidenceFamily::ActivityObservations]).await;
+        let analysis = culprit_engine::collected_resources::session_census(&captured).unwrap();
+        let groups = &analysis.report.client_groups;
+        assert_eq!(groups.grouped_sessions, sessions, "{case:?}");
+        assert_eq!(groups.entries.iter().map(|group| group.observed_requests).sum::<u32>(), requests);
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.report.observed_rows as usize, rows.len());
+        for group in &groups.entries {
+            match case {
+                SessionCensusCase::PostgresSharedLabels | SessionCensusCase::PostgresWorker => {
+                    assert!(
+                        matches!(&group.key.database, culprit_core::SessionClientDatabase::Backend { native_id, .. } if native_id=="42")
+                    );
+                    assert!(
+                        group
+                            .fields
+                            .iter()
+                            .find(|field| field.key == "earliest_backend_start_utc")
+                            .unwrap()
+                            .value
+                            .as_ref()
+                            .unwrap()
+                            .ends_with('Z')
+                    );
+                }
+                _ => assert_eq!(
+                    group.key.database,
+                    culprit_core::SessionClientDatabase::CurrentDefault {
+                        name: if matches!(case, SessionCensusCase::MysqlSwitched) { "other" } else { "db" }.into()
+                    }
+                ),
+            }
+            for key in ["session_age_ms", "session_logical_reads", "session_writes"] {
+                assert!(group.fields.iter().find(|field| field.key == key).unwrap().value.is_none());
+            }
+        }
+        for (entry, original) in analysis.report.entries.iter().zip(&rows) {
             entry.reference.as_ref().unwrap().validate_canonical_record(&source, original).unwrap();
         }
         assert_eq!(fixture.recovery_object_reads(), opened);

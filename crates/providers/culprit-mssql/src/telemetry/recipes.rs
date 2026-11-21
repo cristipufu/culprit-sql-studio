@@ -131,6 +131,14 @@ const REGISTRATIONS: &[Registration] = &[
     .baseline()
     .version(3),
     Registration::database(
+        "mssql.managed-instance-resource-history",
+        RecipeSelector::Collection(TelemetryCollection::ResourceHistory),
+        |pool, request, _, _| Ok(Box::new(resources::ManagedInstanceResourceSource::new(pool, request)?)),
+    )
+    .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
+    .on_editions(&[crate::probe::ENGINE_EDITION_MANAGED_INSTANCE])
+    .bounded(resources::managed_instance_budget),
+    Registration::database(
         "mssql.pool-resource-history",
         RecipeSelector::Collection(TelemetryCollection::ResourceHistory),
         |pool, request, _, _| resources::pool_source(pool, request),

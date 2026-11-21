@@ -11,7 +11,10 @@ fn read() -> ActivityCensusRead {
 }
 fn native(row: &mut ActivityObservation) -> &mut MssqlSessionContext {
     let SessionNativeContext::Mssql(native) =
-        row.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+        row.session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap()
+    else {
+        panic!("MSSQL test context")
+    };
     native
 }
 fn with_rows(mut read: ActivityCensusRead, rows: Vec<ActivityObservation>) -> ActivityCensusRead {
@@ -67,8 +70,9 @@ fn mars_groups_sessions_once_and_keeps_measured_session_totals_separate_from_req
     assert_eq!(value(group, "session_logical_reads"), Some("9007199254741000"));
     assert_eq!(value(group, "session_writes"), Some("5"));
     assert_eq!(value(group, "session_age_ms"), Some("900000"));
-    assert_eq!(group.key.database_id, "7");
-    assert_eq!(group.key.database_name.as_deref(), Some("original-session-db"));
+    assert_eq!(group.key.database.native_id(), Some("7"));
+    assert_eq!(group.key.database.name(), Some("original-session-db"));
+    assert!(matches!(group.key.database, culprit_core::SessionClientDatabase::CurrentSession { .. }));
     assert_eq!(analysis.entries.len(), 3);
     assert!(groups.limitations.contains(&t!("view.session_census.limit.client")));
     assert_eq!(
@@ -288,3 +292,5 @@ fn signed_native_elapsed_keeps_consistent_mars_and_positive_peers_but_withholds_
     assert_eq!((analysis.client_groups.grouped_sessions, analysis.client_groups.ungrouped_sessions), (1, 1));
     assert_eq!(value(&analysis.client_groups.entries[0], "session_age_ms"), Some("300000"));
 }
+
+mod native_databases;

@@ -139,3 +139,94 @@ async fn process_cpu_counter_sets_replay_original_nullable_totals_source_clock_a
         assert_eq!(capture.metrics().recovery_objects, 0);
     }
 }
+
+#[tokio::test]
+async fn individual_schedulers_replay_the_same_original_identity_nullable_fields_units_and_complete_source_coverage() {
+    // A real caller may choose a smaller ordinal page. Fixed fake replies must fit both reader row and
+    // byte admission; a default250-row chunk is not an authoritative byte-admitted window for these rows.
+    let read_budget = EvidenceReadBudget { page_rows: 3, ..EvidenceReadBudget::default() };
+    for case in test_support::SchedulerCase::ALL {
+        let (fixture, source, rows) =
+            collected_original(test_support::instance_resource_scheduler_evidence(case)).await;
+        fixture.replies(fixture.rows.chunks(read_budget.page_rows as usize).map(|rows| rows.to_vec()).collect());
+        let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        let capture = fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], read_budget, None)
+            .await
+            .unwrap_or_else(|error| panic!("{case:?}: {error:?}"));
+        test_support::assert_operational_capture(&capture, &source, &rows);
+        assert!(capture.is_read_complete());
+        let expected_pages = rows.len().div_ceil(read_budget.page_rows as usize) as u32;
+        assert_eq!(capture.metrics().pages, expected_pages, "{case:?}");
+        assert_eq!(capture.metrics().queries, expected_pages + 2, "publication + membership + data pages");
+        assert_eq!(capture.metrics().returned_rows, rows.len() as u32, "{case:?}");
+        assert!(capture.metrics().queries <= read_budget.max_queries);
+        assert!(fixture.query.replies.lock().unwrap().is_empty(), "{case:?}: every planned page consumed");
+        let native = source
+            .observation
+            .snapshot()
+            .unwrap()
+            .sources
+            .iter()
+            .find(|source| source.source == culprit_core::source_id::SCHEDULERS)
+            .unwrap();
+        let restored = capture
+            .records()
+            .iter()
+            .filter_map(|row| match &row.row().record {
+                TelemetryRecord::Operational(observation)
+                    if observation.source == culprit_core::source_id::SCHEDULERS =>
+                {
+                    let OperationalFact::CounterSet(sample) = &observation.fact else { panic!() };
+                    Some(sample.as_ref())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(restored.len(), native.records as usize);
+        for sample in restored {
+            assert!(MssqlSchedulerPoint::from_sample(sample).is_ok());
+        }
+        assert_eq!(capture.source(), &source);
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+        assert_eq!(capture.metrics().recovery_objects, 0);
+    }
+}
+
+#[tokio::test]
+async fn changed_scheduler_identity_status_null_or_exact_counter_cannot_borrow_its_original_receipt() {
+    for (pointer, value) in [
+        ("/identity/id", json!("99")),
+        ("/properties/status", json!("VISIBLE OFFLINE")),
+        ("/counters/0/value/value", json!("3")),
+        ("/properties/native_null_columns", json!("[\"current_tasks_count\"]")),
+    ] {
+        let (fixture, _, _) = collected_original(test_support::instance_resource_scheduler_evidence(
+            test_support::SchedulerCase::NativeNull,
+        ))
+        .await;
+        let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+        let mut rows = fixture.rows.clone();
+        let mut details: Value = serde_json::from_str(rows[1][column].as_str().unwrap()).unwrap();
+        *details.pointer_mut(pointer).unwrap() = value;
+        rows[1][column] = json!(serde_json::to_string(&details).unwrap());
+        fixture.replies(vec![rows]);
+        let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        assert!(
+            fixture
+                .reader()
+                .read_capture(
+                    &fixture.range,
+                    &[EvidenceFamily::OperationalSamples],
+                    EvidenceReadBudget::default(),
+                    Some(fixture.recovery.as_ref())
+                )
+                .await
+                .is_err(),
+            "{pointer}"
+        );
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+    }
+}

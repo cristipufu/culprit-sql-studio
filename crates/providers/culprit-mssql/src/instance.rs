@@ -11,11 +11,13 @@ pub(crate) const SUPPORTED_EDITIONS: &[i64] = &[2, 3, 4, 8];
 pub(crate) enum PointClock {
     CurrentUtc,
     PerformanceRead,
+    ManagedInstanceRead,
 }
 pub(crate) fn point_columns(clock: PointClock) -> String {
     let clock = match clock {
         PointClock::CurrentUtc => "SYSUTCDATETIME()",
         PointClock::PerformanceRead => "@counter_observed_at",
+        PointClock::ManagedInstanceRead => "@observed_at",
     };
     format!(
         r#"i.sqlserver_start_time_ms_ticks AS started_at_ticks,i.ms_ticks,
@@ -58,6 +60,14 @@ pub(crate) struct Observation {
 impl Observation {
     pub(crate) fn supports_instance(&self) -> bool {
         self.native.is_some()
+    }
+    pub(crate) fn identity(&self) -> Option<&SharedResourceIdentity> {
+        self.native.as_ref().map(|(identity, _)| identity)
+    }
+    pub(crate) fn same_process(&self, other: &Self) -> bool {
+        self.edition == other.edition
+            && self.major == other.major
+            && self.native.as_ref().zip(other.native.as_ref()).is_some_and(|(before, after)| before == after)
     }
     pub(crate) async fn context<R: NativeRead>(&self, reader: &mut R) -> Result<Option<Context>> {
         if self.native.is_none() {

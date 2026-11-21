@@ -100,7 +100,14 @@ pub(super) async fn execute(
     {
         return failure(job, FleetWork::Capture, CollectionStop::InvalidPage.error(), gap);
     }
-    if manifest.status == CollectionStatus::Complete || retention_gap {
+    let completed_window = manifest.status == CollectionStatus::Complete
+        && match &request.selection {
+            CollectionSelection::ResourceHistory { .. } | CollectionSelection::DeadlockHistory { .. } => {
+                manifest.description.as_ref().is_some_and(|source| source.observation.can_advance_history_window())
+            }
+            _ => true,
+        };
+    if completed_window || retention_gap {
         if let CollectionSelection::ResourceHistory { from, until }
         | CollectionSelection::DeadlockHistory { from, until } = &request.selection
         {
@@ -131,7 +138,12 @@ pub(super) async fn execute(
         })
         .transpose()?;
     journal.save_progress(&job.key, &checkpoint, recorded_gap).await?;
-    completed(job, manifest, gap, false)
+    let complete_artifact = manifest.status == CollectionStatus::Complete;
+    let mut result = completed(job, manifest, gap, false)?;
+    if complete_artifact && !completed_window {
+        result.outcome = Outcome::Failed;
+    }
+    Ok(result)
 }
 
 impl Checkpoint {
@@ -176,9 +188,9 @@ pub(super) fn completed_for(
     let native_coverage = manifest
         .description
         .as_ref()
-        .and_then(|description| description.observation.snapshot())
-        .map(|snapshot| snapshot.coverage_state())
+        .map(|description| description.observation.native_coverage_state())
         .transpose()?
+        .flatten()
         .map(|coverage| {
             if manifest.status != CollectionStatus::Complete
                 && matches!(coverage, culprit_core::SourceState::Collected | culprit_core::SourceState::Empty)

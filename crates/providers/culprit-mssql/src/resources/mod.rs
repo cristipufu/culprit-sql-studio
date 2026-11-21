@@ -2,6 +2,7 @@
 mod admission;
 mod instance_admission;
 mod inventory;
+pub(crate) mod managed_instance;
 pub(crate) mod pool;
 mod sample;
 mod sql;

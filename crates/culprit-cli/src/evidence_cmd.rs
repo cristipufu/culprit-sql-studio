@@ -241,6 +241,7 @@ enum Analysis {
     DatabaseProperties,
     TableFullText,
     InstanceResources,
+    ManagedInstanceResources,
     Storage,
     WaitCounters,
     Cleanup,
@@ -264,6 +265,7 @@ impl Analysis {
             Self::Tuning => vec![EvidenceFamily::TuningObservations],
             Self::Replication => vec![EvidenceFamily::ReplicationSamples],
             Self::PoolSettings => vec![EvidenceFamily::SettingObservations],
+            Self::ManagedInstanceResources => vec![EvidenceFamily::ResourceSamples],
             Self::PageServerReads => vec![EvidenceFamily::QueryRuntime],
             Self::Queries => vec![
                 EvidenceFamily::QueryDefinitions,
@@ -473,6 +475,12 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::Storage) => {
             let analysis = culprit_engine::collected_resources::storage(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::storage(&analysis.report))?;
+        }
+        Some(Analysis::ManagedInstanceResources) => {
+            let analysis = culprit_engine::collected_resources::managed_instance_resources(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || {
+                observations::managed_instance_resources(&analysis.report)
+            })?;
         }
         Some(Analysis::InstanceResources) => {
             let analysis = culprit_engine::collected_resources::instance_resources(&capture)?;

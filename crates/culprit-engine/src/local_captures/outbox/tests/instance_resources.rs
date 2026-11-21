@@ -101,3 +101,74 @@ async fn cold_instance_point_refuses_foreign_journal_cancel_byte_budget_and_modi
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn cold_scheduler_originals_keep_the_native_row_counts_and_typed_detail_on_the_existing_capture_owner() {
+    use culprit_collector::analytical::test_support::{SchedulerCase, instance_resource_scheduler_evidence};
+    for case in SchedulerCase::ALL {
+        let (source, rows) = instance_resource_scheduler_evidence(case);
+        let mut fixture = LocalCaptureFixture::snapshot(source.clone(), rows).await;
+        drop(fixture.outbox.take());
+        let reader =
+            OutboxCaptureReader::directory(fixture.directory.clone(), CompletedCaptureBudget::default()).unwrap();
+        let guard = OperationGuard::new(reader.timeout()).unwrap();
+        let analysis = reader
+            .analyze(LocalCaptureRequest {
+                connection: "local-evidence",
+                observation_id: &fixture.manifest.capture.observation_id,
+                analysis: LocalCaptureAnalysisKind::InstanceResources,
+                operation: guard.handle(),
+            })
+            .await
+            .unwrap();
+        let LocalCapturedAnalysis::Snapshot(analysis) = analysis else { panic!() };
+        assert_eq!(analysis.original().read().description, source);
+        assert_eq!(analysis.original().read().origin.capture.capture, fixture.manifest.capture);
+        assert_eq!(analysis.original().bytes_read(), fixture.original_bytes());
+        let LocalSnapshotReport::InstanceResources(report) = analysis.report() else { panic!() };
+        assert_eq!(
+            report,
+            &Box::new(culprit_checks::instance_resources::explain_captured(analysis.original().read()).unwrap())
+        );
+        let schedulers = report.schedulers.as_deref().unwrap();
+        assert_eq!(schedulers.read_complete, Some(true));
+        assert_eq!(schedulers.native_source.as_ref().unwrap().source, culprit_core::source_id::SCHEDULERS);
+        assert_eq!(
+            schedulers.native_rows,
+            Some(if case == SchedulerCase::Denied {
+                0
+            } else if case == SchedulerCase::Limited {
+                257
+            } else {
+                2
+            })
+        );
+        assert!(schedulers.context.as_ref().unwrap().native().unwrap().target.database().is_none());
+    }
+}
+
+#[tokio::test]
+async fn cold_scheduler_analysis_refuses_changed_original_state_without_any_live_fallback() {
+    use culprit_collector::analytical::test_support::{SchedulerCase, instance_resource_scheduler_evidence};
+    let (source, rows) = instance_resource_scheduler_evidence(SchedulerCase::Exact);
+    let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+    drop(fixture.outbox.take());
+    let reader = OutboxCaptureReader::directory(fixture.directory.clone(), CompletedCaptureBudget::default()).unwrap();
+    let body = fixture.capture_directory.join(&fixture.manifest.files[0].file);
+    let original = std::fs::read_to_string(&body).unwrap();
+    let changed = original.replace("HIDDEN ONLINE", "HIDDEN OFFLINE");
+    assert_ne!(original, changed);
+    std::fs::write(body, changed).unwrap();
+    let guard = OperationGuard::new(reader.timeout()).unwrap();
+    assert!(
+        reader
+            .analyze(LocalCaptureRequest {
+                connection: "local-evidence",
+                observation_id: &fixture.manifest.capture.observation_id,
+                analysis: LocalCaptureAnalysisKind::InstanceResources,
+                operation: guard.handle()
+            })
+            .await
+            .is_err()
+    );
+}

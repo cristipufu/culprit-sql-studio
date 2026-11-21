@@ -241,6 +241,7 @@ impl ActivityObservation {
             !matches!(context.lifecycle, SessionLifecycle::PoolResetPrelogin | SessionLifecycle::Connecting)
                 && context.native.as_deref().is_none_or(|native| match native {
                     SessionNativeContext::Mssql(native) => native.login_established,
+                    SessionNativeContext::Postgres(_) | SessionNativeContext::Mysql(_) => true,
                 })
         })
     }

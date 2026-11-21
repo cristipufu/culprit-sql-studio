@@ -2,11 +2,16 @@
 use super::*;
 mod process_cpu;
 mod ratios;
+mod schedulers;
 pub use process_cpu::{
     MAX_MSSQL_PROCESSOR_OBSERVATIONS, MSSQL_PROCESS_CPU_COUNTERS, MSSQL_PROCESS_CPU_KIND, MSSQL_PROCESS_CPU_OBJECT,
     MssqlProcessCpuPoint,
 };
 pub use ratios::{CounterRatioGap, CounterRatioIssue, CounterRatioKind, CounterRatioSupport, NativeCounterRatio};
+pub use schedulers::{
+    MAX_MSSQL_SCHEDULERS, MSSQL_SCHEDULER_FIELDS, MSSQL_SCHEDULER_OBJECT, MssqlSchedulerField, MssqlSchedulerFieldKind,
+    MssqlSchedulerPoint, MssqlSchedulerValue, scheduler_candidate,
+};
 
 /// The existing generic set ceiling also bounds each native performance-counter acquisition.
 pub const MAX_NATIVE_COUNTERS: usize = 128;

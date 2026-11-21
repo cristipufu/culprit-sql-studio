@@ -10,8 +10,11 @@ struct SqlPreview {
 }
 impl SqlPreview {
     fn new(text: &str) -> Self {
+        Self::bounded(text, SQL_PREVIEW_CHARS)
+    }
+    fn bounded(text: &str, limit: usize) -> Self {
         let mut characters = text.chars();
-        let text = characters.by_ref().take(SQL_PREVIEW_CHARS).collect();
+        let text = characters.by_ref().take(limit).collect();
         Self { text, truncated: characters.next().is_some() }
     }
 }
@@ -24,4 +27,13 @@ pub(crate) fn statement(payload: &DefinitionPayload) -> Value {
         }
         DefinitionPayload::Unavailable { reason } => json!({"availability":"unavailable", "reason":reason}),
     }
+}
+
+pub(crate) fn bounded_text(value: &str, limit: usize) -> String {
+    let preview = SqlPreview::bounded(value, limit);
+    let mut text = preview.text;
+    if preview.truncated {
+        text.push('…');
+    }
+    text
 }

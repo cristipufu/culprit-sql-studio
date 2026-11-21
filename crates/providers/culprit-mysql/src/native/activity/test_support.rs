@@ -43,6 +43,8 @@ pub(crate) fn row_with(id: u64, command: &str, current: bool, changes: &[(&str, 
     let mut values = vec![
         ("id", Value::from(id)),
         ("thread_id", Value::from(id + 100)),
+        ("thread_type", Value::from("FOREGROUND")),
+        ("thread_name", Value::from("thread/sql/one_connection")),
         ("db", Value::from("shop")),
         ("user_name", Value::from("app")),
         ("host", Value::from("client")),

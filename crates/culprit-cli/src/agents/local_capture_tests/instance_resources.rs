@@ -69,3 +69,42 @@ async fn exact_shared_instance_reports_reach_mcp_with_bounded_fields_original_cl
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
+
+#[tokio::test]
+async fn individual_scheduler_originals_reach_compact_mcp_with_native_null_units_and_bounded_rows_without_provider_work()
+ {
+    use culprit_collector::analytical::test_support::{SchedulerCase, instance_resource_scheduler_evidence};
+    for case in SchedulerCase::ALL {
+        let (source, rows) = instance_resource_scheduler_evidence(case);
+        let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
+        drop(fixture.outbox.take());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fixture, calls.clone());
+        let (error, value) =
+            analyze(&server, &fixture.manifest.capture.observation_id, LocalCaptureAnalysisKind::InstanceResources)
+                .await;
+        assert!(!error, "{case:?}:{value}");
+        let schedulers = &value["instance_resources"]["schedulers"];
+        assert_eq!(schedulers["native_source"]["source"], culprit_core::source_id::SCHEDULERS);
+        assert_eq!(schedulers["read_complete"], true);
+        assert!(schedulers["entries"].as_array().unwrap().len() <= 5);
+        for entry in schedulers["entries"].as_array().unwrap() {
+            assert_eq!(entry["fields"].as_array().unwrap().len(), 21);
+            assert!(entry["fields"].as_array().unwrap().iter().any(|field| field["native_name"] == "work_queue_count"));
+        }
+        if case == SchedulerCase::NativeNull {
+            assert!(schedulers.to_string().contains("native-null"));
+        }
+        if case == SchedulerCase::ColumnUnavailable {
+            assert!(schedulers.to_string().contains("column-unavailable"));
+        }
+        if case == SchedulerCase::Limited {
+            assert_eq!(schedulers["entries_available"], 256);
+            assert_eq!(schedulers["entries_omitted"], 251);
+        }
+        for private in ["native-process-a", "native-instance-a", "manifest_sha256", "source_sha256", "qualifiers"] {
+            assert!(!schedulers.to_string().contains(private), "{private}");
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}

@@ -412,6 +412,9 @@ pub struct Report {
     pub pool_settings: Option<Box<crate::PoolSettingsReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub managed_instance_resources: Option<Box<crate::ManagedInstanceResourceReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub suspect_pages: Option<Box<crate::SuspectPageHistoryReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

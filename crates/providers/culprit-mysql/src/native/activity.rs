@@ -51,6 +51,11 @@ pub(crate) async fn observe<R: QueryRead>(
     let mut observations = Vec::new();
     let mut fully_represented = true;
     for row in rows.iter().take(limit) {
+        if row.native_text("db")?.as_deref() != Some(meta.connection.database_name.as_str())
+            || row.native_text("thread_type")?.as_deref() != Some("FOREGROUND")
+        {
+            return Err(CollectionStop::SourceChanged.error());
+        }
         if canonical_time(&text(row, "observed_at")?)? != at {
             return Err(invalid());
         }
@@ -114,7 +119,7 @@ pub(crate) async fn consumers<R: QueryRead>(reader: &mut R, stages: bool) -> Res
     Ok(Consumers { statements, stages: stages.then(|| values.get("events_stages_current").copied()).flatten() })
 }
 
-pub(crate) const GENERATION_COLUMNS: &str = "t.THREAD_ID AS thread_id, t.INSTRUMENTED AS instrumented,
+pub(crate) const GENERATION_COLUMNS: &str = "t.THREAD_ID AS thread_id, t.TYPE AS thread_type,t.NAME AS thread_name,t.INSTRUMENTED AS instrumented,
         e.EVENT_ID AS event_id, e.TIMER_START AS timer_start, e.TIMER_WAIT AS elapsed_ps, e.END_EVENT_ID AS end_event_id,
         e.CURRENT_SCHEMA AS request_db, e.DIGEST AS query_hash,
         DATE_FORMAT(UTC_TIMESTAMP(6), '%Y-%m-%dT%H:%i:%s.%fZ') AS observed_at";
@@ -184,8 +189,23 @@ pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -
         None
     };
     let request_db = row.native_text("request_db")?;
+    let default_database = row.native_text("db")?;
+    let thread_type = row.native_text("thread_type")?;
+    let thread_name = row.native_text("thread_name")?;
     let observation = ActivityObservation {
-        session_context: None,
+        session_context: Some(Box::new(ActivitySessionContext {
+            lifecycle: MysqlSessionContext::lifecycle(idle, request.is_some()),
+            login_age_ms: None,
+            last_request_end_age_ms: None,
+            client_library: None,
+            client_process_id: None,
+            native: Some(Box::new(SessionNativeContext::Mysql(MysqlSessionContext {
+                default_database: default_database.clone(),
+                request_schema: request.as_ref().and(request_db.clone()),
+                thread_type,
+                thread_name,
+            }))),
+        })),
         waiting_on_lock: request.as_ref().and(lock_wait),
         blocking_status: ActivityBlockingStatus::Unknown,
         key: ActivityKey { session, request: request.clone(), transaction: None },
@@ -196,7 +216,7 @@ pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -
             ActivityScopeBasis::SessionDatabase
         },
         state: state.clone(),
-        database: if request.is_some() { request_db.or(row.native_text("db")?) } else { row.native_text("db")? },
+        database: if request.is_some() { request_db.or(default_database) } else { default_database },
         command: Some(command),
         last_request_age_ms: None,
         open_transactions: None,

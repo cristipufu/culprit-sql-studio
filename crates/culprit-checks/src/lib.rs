@@ -157,3 +157,5 @@ pub use views::group_replication;
 pub use views::galera;
 
 pub use views::pool_settings;
+
+pub use views::managed_instance_resources;

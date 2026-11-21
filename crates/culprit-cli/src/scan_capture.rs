@@ -14,7 +14,7 @@ use std::{future::Future, path::PathBuf};
 
 #[derive(Args, Default)]
 #[command(group(clap::ArgGroup::new("captured_original")
-    .args(["memory_clerks_capture", "hyperscale_log_components_capture", "tempdb_metadata_memory_capture", "pool_settings_capture"]).multiple(false)))]
+    .args(["memory_clerks_capture", "hyperscale_log_components_capture", "tempdb_metadata_memory_capture", "pool_settings_capture", "managed_instance_resources_capture"]).multiple(false)))]
 pub(crate) struct CapturedScanArgs {
     #[arg(long, value_name = "DIRECTORY", requires = "captured_original", help = culprit_core::t!("view.hyperscale_log_components.intake.outbox"))]
     evidence_outbox: Option<PathBuf>,
@@ -26,6 +26,8 @@ pub(crate) struct CapturedScanArgs {
     tempdb_metadata_memory_capture: Option<String>,
     #[arg(long,value_name="OBSERVATION",requires="evidence_outbox",help=culprit_core::t!("view.pool_settings.intake.observation"))]
     pool_settings_capture: Option<String>,
+    #[arg(long,value_name="OBSERVATION",requires="evidence_outbox",help=culprit_core::t!("view.mi_resources.intake"))]
+    managed_instance_resources_capture: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -40,6 +42,7 @@ impl CapturedScanArgs {
             (self.hyperscale_log_components_capture.as_deref(), LocalCaptureAnalysisKind::HyperscaleLogComponents),
             (self.tempdb_metadata_memory_capture.as_deref(), LocalCaptureAnalysisKind::TempdbMetadataMemory),
             (self.pool_settings_capture.as_deref(), LocalCaptureAnalysisKind::PoolSettings),
+            (self.managed_instance_resources_capture.as_deref(), LocalCaptureAnalysisKind::ManagedInstanceResources),
         ]
         .into_iter()
         .filter_map(|(observation_id, analysis)| {
@@ -77,6 +80,17 @@ async fn captured_scan(
     let captured = read(workspace, reader, &args.connection, original, cancellation).await?;
     let options = args.snapshot_options();
     match captured {
+        LocalCapturedAnalysis::ManagedInstanceResources(captured) => {
+            scan_until_cancelled(cancellation, || {
+                workspace.scan_with_captured_managed_instance_resources(
+                    &args.connection,
+                    &options,
+                    args.query_log.as_deref(),
+                    *captured,
+                )
+            })
+            .await
+        }
         LocalCapturedAnalysis::MemoryClerks(captured) => {
             scan_until_cancelled(cancellation, || {
                 workspace.scan_with_captured_memory_clerks(

@@ -34,6 +34,7 @@ pub(crate) fn actor(backend: &str, query: &str) -> Row {
     row(&[
         ("observed_at", Some(AT)),
         ("pid", Some("42")),
+        ("backend_type", Some("client backend")),
         ("backend_start", Some(backend)),
         ("query_start", Some(query)),
         ("database_oid", Some("16384")),

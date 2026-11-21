@@ -142,3 +142,33 @@ fn signed_session_elapsed_remains_raw_while_the_group_withholds_its_duration_and
         value = "-1"
     )));
 }
+
+#[test]
+fn backend_and_current_default_database_groups_render_canonical_scope_kind_clock_and_unknown_work() {
+    for case in [
+        SessionCensusCase::PostgresSharedLabels,
+        SessionCensusCase::PostgresWorker,
+        SessionCensusCase::MysqlShared,
+        SessionCensusCase::MysqlSwitched,
+        SessionCensusCase::MysqlWorker,
+    ] {
+        let report = report(case);
+        let text = session_census(&report);
+        assert!(text.contains(&report.client_groups.summary));
+        for group in &report.client_groups.entries {
+            assert!(group.fields.iter().find(|field| field.key == "session_age_ms").unwrap().value.is_none());
+            for limitation in &group.limitations {
+                assert!(text.contains(limitation));
+            }
+            for key in ["session_database_name", "database_basis"] {
+                let field = group.fields.iter().find(|field| field.key == key).unwrap();
+                assert!(text.contains(&t!(
+                    "view.counter_ratios.cli.metric",
+                    label = &field.label,
+                    value = field.value.as_ref().unwrap()
+                )));
+            }
+        }
+        assert!(text.len() < 32 * 1024);
+    }
+}

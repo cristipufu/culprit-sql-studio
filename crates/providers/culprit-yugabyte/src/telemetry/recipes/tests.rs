@@ -38,7 +38,13 @@ fn every_public_declaration_has_one_actual_offline_constructor_and_no_native_cos
         let request = request(registration, CollectionBudget::default());
         assert_eq!(descriptor, registration.descriptor());
         assert_eq!(descriptor.cost, RecipeCostQualification::Unqualified);
-        assert_eq!(descriptor.version, 1);
+        assert_eq!(
+            descriptor.version,
+            match registration.route {
+                Route::Activity | Route::MaintenanceProgress => 2,
+                _ => 1,
+            }
+        );
         assert!(descriptor.accepts(&request));
         assert_eq!(REGISTRATIONS.iter().filter(|route| route.accepts(&request)).count(), 1);
         let source = super::super::source(connector.clone(), &request).unwrap();

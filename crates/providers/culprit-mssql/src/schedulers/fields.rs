@@ -7,103 +7,59 @@ use crate::{
 use culprit_core::{MeasurementScope, ResetMarker};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Copy)]
-enum Kind {
-    Identity,
-    IntegerProperty,
-    TextProperty,
-    BooleanProperty,
-    Counter { unit: CounterUnit, nature: CounterNature },
-}
-struct Field {
-    name: &'static str,
-    kind: Kind,
-    required_column: bool,
-}
-impl Field {
-    const fn counter(name: &'static str, unit: CounterUnit, nature: CounterNature) -> Self {
-        Self { name, kind: Kind::Counter { unit, nature }, required_column: false }
-    }
-    fn sql_type(&self) -> &'static str {
-        match self.kind {
-            Kind::BooleanProperty => "bit",
-            Kind::TextProperty => "nvarchar(60)",
-            _ => "bigint",
-        }
-    }
-    fn append_native_value(&self, row: &Rec, sample: &mut NativeCounterSet) -> Result<()> {
-        match self.kind {
-            Kind::Identity => {
-                signed_integer(row, self.name)?;
-            }
-            Kind::IntegerProperty => {
-                sample.properties.insert(
-                    self.name.into(),
-                    optional_signed_integer(row, self.name)?.ok_or_else(invalid_data)?.to_string(),
-                );
-            }
-            Kind::TextProperty => {
-                let value = crate::read::optional_text(row, self.name)?.ok_or_else(invalid_data)?;
-                if value.is_empty() || value.chars().any(char::is_control) {
-                    return Err(invalid_data());
-                }
-                sample.properties.insert(self.name.into(), value);
-            }
-            Kind::BooleanProperty => {
-                sample.properties.insert(
-                    self.name.into(),
-                    u8::from(optional_boolean(row, self.name)?.ok_or_else(invalid_data)?).to_string(),
-                );
-            }
-            Kind::Counter { unit, nature } => {
-                let count = optional_integer(row, self.name)?.ok_or_else(invalid_data)?;
-                sample.counters.push(NativeCounterSample {
-                    key: self.name.into(),
-                    value: MeasurementValue::Integer(count.to_string()),
-                    unit,
-                    nature,
-                    scope: MeasurementScope::Server,
-                    reset: ResetMarker::Unknown,
-                    native_object: NATIVE_OBJECT.into(),
-                    native_name: self.name.into(),
-                    native_instance: None,
-                    native_type: None,
-                });
-            }
-        }
-        Ok(())
-    }
-}
-use CounterNature::{Cumulative, Gauge, Unknown};
-use CounterUnit::{Count, Milliseconds};
+use culprit_core::telemetry::{
+    MSSQL_SCHEDULER_FIELDS as FIELDS, MssqlSchedulerField as Field, MssqlSchedulerFieldKind as Kind,
+};
 
-// Internal progress/load values retain unknown units/meaning. Unsupported quantum_length_us and
-// total_cpu_idle_capped_ms are intentionally excluded. Optional columns are selected by native availability,
-// including total_cpu_usage_ms/total_scheduler_delay_ms (SQL Server 2016+) and ideal_workers_limit (2019+).
-const FIELDS: &[Field] = &[
-    Field { name: IDENTITY_COLUMN, kind: Kind::Identity, required_column: true },
-    Field { name: "parent_node_id", kind: Kind::IntegerProperty, required_column: true },
-    Field { name: "cpu_id", kind: Kind::IntegerProperty, required_column: true },
-    Field { name: "status", kind: Kind::TextProperty, required_column: true },
-    Field { name: "is_online", kind: Kind::BooleanProperty, required_column: true },
-    Field { name: "is_idle", kind: Kind::BooleanProperty, required_column: true },
-    Field { name: "failed_to_create_worker", kind: Kind::BooleanProperty, required_column: false },
-    Field::counter("current_tasks_count", Count, Gauge),
-    Field::counter("runnable_tasks_count", Count, Gauge),
-    Field::counter("current_workers_count", Count, Gauge),
-    Field::counter("active_workers_count", Count, Gauge),
-    Field::counter("work_queue_count", Count, Gauge),
-    Field::counter("pending_disk_io_count", Count, Gauge),
-    Field::counter("preemptive_switches_count", Count, Cumulative),
-    Field::counter("context_switches_count", Count, Cumulative),
-    Field::counter("idle_switches_count", Count, Cumulative),
-    Field::counter("load_factor", CounterUnit::Unknown, Gauge),
-    Field::counter("yield_count", CounterUnit::Unknown, Unknown),
-    Field::counter("last_timer_activity", CounterUnit::Unknown, Gauge),
-    Field::counter("total_cpu_usage_ms", Milliseconds, Cumulative),
-    Field::counter("total_scheduler_delay_ms", Milliseconds, Cumulative),
-    Field::counter("ideal_workers_limit", Count, Gauge),
-];
+fn sql_type(kind: Kind) -> &'static str {
+    match kind {
+        Kind::BooleanProperty => "bit",
+        Kind::TextProperty => "nvarchar(60)",
+        _ => "bigint",
+    }
+}
+fn append_native_value(field: &Field, row: &Rec, sample: &mut NativeCounterSet) -> Result<()> {
+    match field.kind {
+        Kind::Identity => {
+            signed_integer(row, field.name)?;
+        }
+        Kind::IntegerProperty => {
+            sample.properties.insert(
+                field.name.into(),
+                optional_signed_integer(row, field.name)?.ok_or_else(invalid_data)?.to_string(),
+            );
+        }
+        Kind::TextProperty => {
+            let value = crate::read::optional_text(row, field.name)?.ok_or_else(invalid_data)?;
+            if value.is_empty() || value.chars().any(char::is_control) {
+                return Err(invalid_data());
+            }
+            sample.properties.insert(field.name.into(), value);
+        }
+        Kind::BooleanProperty => {
+            sample.properties.insert(
+                field.name.into(),
+                u8::from(optional_boolean(row, field.name)?.ok_or_else(invalid_data)?).to_string(),
+            );
+        }
+        Kind::Counter { unit, nature } => {
+            let count = optional_integer(row, field.name)?.ok_or_else(invalid_data)?;
+            sample.counters.push(NativeCounterSample {
+                key: field.name.into(),
+                value: MeasurementValue::Integer(count.to_string()),
+                unit,
+                nature,
+                scope: MeasurementScope::Server,
+                reset: ResetMarker::Unknown,
+                native_object: NATIVE_OBJECT.into(),
+                native_name: field.name.into(),
+                native_instance: None,
+                native_type: None,
+            });
+        }
+    }
+    Ok(())
+}
 
 pub(super) struct Columns {
     available: BTreeSet<String>,
@@ -141,7 +97,7 @@ impl Columns {
                 if self.available.contains(field.name) {
                     format!("[{}]", field.name)
                 } else {
-                    format!("CAST(NULL AS {}) AS [{}]", field.sql_type(), field.name)
+                    format!("CAST(NULL AS {}) AS [{}]", sql_type(field.kind), field.name)
                 }
             })
             .collect::<Vec<_>>()
@@ -176,7 +132,7 @@ impl Columns {
                 native_null.push(field.name);
                 continue;
             }
-            field.append_native_value(row, &mut sample)?;
+            append_native_value(field, row, &mut sample)?;
         }
         for (key, names) in [("unavailable_columns", unavailable), ("native_null_columns", native_null)] {
             if !names.is_empty() {

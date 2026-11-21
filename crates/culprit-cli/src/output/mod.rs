@@ -437,6 +437,9 @@ impl Out {
         if let Some(history) = &report.suspect_pages {
             println!("\n{}", observations::suspect_pages(history));
         }
+        if let Some(history) = &report.managed_instance_resources {
+            println!("\n{}", observations::managed_instance_resources(history));
+        }
         if let Some(pool) = &report.pool_settings {
             println!("\n{}", observations::pool_settings(pool));
         }
@@ -800,6 +803,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "group_replication": report.group_replication.as_ref().map(|reports|reports.iter().map(observations::compact_group_replication).collect::<Vec<_>>()),
         "galera": report.galera.as_ref().map(|reports|reports.iter().map(observations::compact_galera).collect::<Vec<_>>()),
         "pool_settings": report.pool_settings.as_deref().map(observations::compact_pool_settings),
+        "managed_instance_resources":report.managed_instance_resources.as_deref().map(observations::compact_managed_instance_resources),
         "performance_counters": report.performance_counters,
         "suspect_pages": report.suspect_pages.as_deref().map(observations::compact_suspect_pages),
         "notes": s.notes,

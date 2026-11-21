@@ -291,6 +291,7 @@ fn resource_metrics_preserve_scope_units_aggregation_and_unknown_values() {
         value: None,
     };
     let native = ResourceMeasurement {
+        mssql_managed_instance: None,
         replica_role: None,
         data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
         at: "2026-11-11T06:00:00Z".into(),

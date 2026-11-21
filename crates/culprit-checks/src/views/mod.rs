@@ -66,3 +66,5 @@ pub mod storage;
 pub mod group_replication;
 
 pub mod galera;
+
+pub mod managed_instance_resources;

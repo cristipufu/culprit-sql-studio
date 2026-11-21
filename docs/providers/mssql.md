@@ -273,6 +273,27 @@ establish that no failures occurred. See the [native source and permission refer
 
 On Azure SQL Database, scans and background capture share the same native resource reader. Scans reuse their retained samples for the resource timeline and pressure summary. Selected export windows and workload admission request their own bounded projections, with the same units, scope, null handling and timestamps. Instance CPU and memory remain shared context. Background resource capture currently supports primary replicas; native reads preserve the connected replica's role.
 
+Managed Instance has a separate native resource-history recipe through a discovered instance identity. It reads
+[`sys.server_resource_stats`](https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-server-resource-stats-azure-sql-database?view=azuresqldb-current)
+in a selected window of at most two hours, retaining up to 512 rows and one lookahead. The existing streaming reader
+bounds native batches and total bytes; the same frozen capture supplies output pages without repeating the query.
+
+| Native facts | Meaning |
+|---|---|
+| CPU percentage | Mean over the native nominal 15-second interval, relative to the Managed Instance service-tier limit; shared across its databases and resource pools |
+| I/O requests, bytes read and bytes written | Exact totals within each original interval, separate from rates and running counters |
+| Reserved/used storage, vCores, tier and hardware | Native configuration and resource context; nullable values and unavailable columns remain distinct |
+
+Original interval times stay separate from the current reader's process witness. Publication freshness and
+continuous historical coverage remain unproven. A bounded partial prefix stays readable without advancing the
+fleet checkpoint past unread rows. The recipe remains cost-unqualified: its one-second statement and five-second
+overall ceilings do not establish a server CPU or I/O quota.
+
+The separate `resource-pool-settings` selection retains six native user-resource-pool configuration values through
+the original database route. Optional elastic-pool membership is independent: hidden membership cannot discard
+readable limits, and native Resource Governor IDs do not become Azure elastic-pool identities. These settings
+describe configured limits, not observed contention, current memory availability or cloud entitlement.
+
 ## Schema and indexes
 
 Catalog and DMV sources provide tables, columns, constraints, statistics, index definitions and usage. Missing-index requests come from the optimizer's own DMVs and are checked against the existing index set.

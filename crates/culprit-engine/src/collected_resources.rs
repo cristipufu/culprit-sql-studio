@@ -179,3 +179,6 @@ pub use galera::galera;
 
 mod pool_settings;
 pub use pool_settings::pool_settings;
+
+mod managed_instance_resources;
+pub use managed_instance_resources::managed_instance_resources;

@@ -1,0 +1,120 @@
+use super::*;
+use culprit_core::{
+    InstanceResourceReport, SchedulerEntry, SchedulerField, SchedulerFieldAvailability, SchedulerReport, SourceState,
+    telemetry::*,
+};
+
+fn report() -> InstanceResourceReport {
+    let field = SchedulerField {
+        native_name: "work_queue_count".into(),
+        label: "native field".into(),
+        value: Some("9007199254740993".into()),
+        availability: SchedulerFieldAvailability::Observed,
+        explanation: None,
+        unit: Some(CounterUnit::Count),
+        nature: Some(CounterNature::Gauge),
+        reset: Some(culprit_core::ResetMarker::Unknown),
+    };
+    InstanceResourceReport {
+        process_cpu: None,
+        context: None,
+        native_source: None,
+        source_state: SourceState::Unavailable,
+        read_complete: None,
+        observed_at: None,
+        native_populations_complete: None,
+        title: "resource title".into(),
+        summary: "resource summary".into(),
+        limitations: vec![],
+        groups: vec![],
+        schedulers: Some(Box::new(SchedulerReport {
+            scope: culprit_core::MeasurementScope::Server,
+            population: "population".into(),
+            context: Some(ObservationReadContext::Collector {
+                observed_from: "2020-01-01T00:00:00Z".into(),
+                observed_until: "2020-01-01T00:00:01Z".into(),
+            }),
+            native_source: Some(StateSourceCoverage::observed(culprit_core::source_id::SCHEDULERS.into(), 9, false)),
+            source_state: SourceState::Partial,
+            source_reason: None,
+            read_complete: Some(false),
+            native_rows: Some(9),
+            observed_rows: 7,
+            presented_rows: 7,
+            entries_limited: false,
+            title: "scheduler title".into(),
+            summary: "scheduler summary".into(),
+            limitations: vec!["qualification".into()],
+            entries: (0..7)
+                .map(|id| SchedulerEntry {
+                    observation_key: id.to_string(),
+                    scheduler_id: id.to_string(),
+                    title: format!("scheduler {id}"),
+                    fields: vec![field.clone()],
+                })
+                .collect(),
+        })),
+    }
+}
+
+#[test]
+fn compact_scheduler_values_preserve_exact_inputs_typed_unknowns_and_original_counts_without_raw_context() {
+    let mut report = report();
+    let fields = &mut report.schedulers.as_mut().unwrap().entries[0].fields;
+    fields.push(SchedulerField {
+        native_name: "failed_to_create_worker".into(),
+        label: "native flag".into(),
+        value: None,
+        availability: SchedulerFieldAvailability::NativeNull,
+        explanation: None,
+        unit: None,
+        nature: None,
+        reset: None,
+    });
+    fields.push(SchedulerField {
+        native_name: "ideal_workers_limit".into(),
+        label: "native limit".into(),
+        value: None,
+        availability: SchedulerFieldAvailability::ColumnUnavailable,
+        explanation: None,
+        unit: Some(CounterUnit::Count),
+        nature: Some(CounterNature::Gauge),
+        reset: Some(culprit_core::ResetMarker::Unknown),
+    });
+    let value = value(&report);
+    let schedulers = &value["schedulers"];
+    assert_eq!(schedulers["scope"], "server");
+    assert_eq!(schedulers["source_state"], "partial");
+    assert_eq!(schedulers["native_rows"], 9);
+    assert_eq!(schedulers["observed_rows"], 7);
+    assert_eq!(schedulers["entries_presented"], 5);
+    assert_eq!(schedulers["entries_omitted"], 2);
+    assert_eq!(schedulers["entries"][0]["fields"][0]["value"], "9007199254740993");
+    assert_eq!(schedulers["entries"][0]["fields"][0]["nature"], "gauge");
+    assert_eq!(schedulers["entries"][0]["fields"][0]["reset"]["kind"], "unknown");
+    assert_eq!(schedulers["entries"][0]["fields"][1]["availability"], "native-null");
+    assert_eq!(schedulers["entries"][0]["fields"][2]["availability"], "column-unavailable");
+    assert!(schedulers["entries"][0]["fields"][1]["value"].is_null());
+    assert_eq!(schedulers["original_read_bounds"]["until"], "2020-01-01T00:00:01Z");
+    assert!(schedulers.get("context").is_none());
+}
+
+#[test]
+fn compact_scheduler_formatter_bounds_extra_fields_and_native_strings_independently() {
+    let mut report = report();
+    let schedulers = report.schedulers.as_mut().unwrap();
+    schedulers.title = "é".repeat(4096);
+    let entry = &mut schedulers.entries[0];
+    let mut field = entry.fields[0].clone();
+    field.value = Some("x".repeat(4096));
+    field.label = "y".repeat(4096);
+    entry.fields = vec![field; 100];
+    let value = value(&report);
+    let schedulers = &value["schedulers"];
+    assert_eq!(schedulers["title"].as_str().unwrap().chars().count(), 512);
+    let entry = &schedulers["entries"][0];
+    assert_eq!(entry["fields_presented"], 21);
+    assert_eq!(entry["fields_omitted"], 79);
+    assert_eq!(entry["fields"][0]["value"].as_str().unwrap().chars().count(), 512);
+    assert_eq!(entry["fields"][0]["label"].as_str().unwrap().chars().count(), 512);
+}

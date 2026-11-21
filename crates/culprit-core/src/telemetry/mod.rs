@@ -711,7 +711,12 @@ impl TelemetryRecord {
             }
             Self::ResourceSample(row) => {
                 row.at = canonical_time(&row.at)?;
-                source.observation.accepts_sample(&row.at)
+                match &source.observation {
+                    SourceObservation::MssqlManagedInstanceResources(history) => {
+                        history.matches_source(source) && history.accepts(row)
+                    }
+                    _ => row.mssql_managed_instance.is_none() && source.observation.accepts_sample(&row.at),
+                }
             }
             Self::Activity(row) => {
                 row.redact(source.target.engine());

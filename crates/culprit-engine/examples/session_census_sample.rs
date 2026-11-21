@@ -20,6 +20,11 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
         ("group-conflict", SessionCensusCase::ContradictoryMars),
         ("group-unknown", SessionCensusCase::GroupUnknownTotals),
         ("signed-elapsed", SessionCensusCase::NativeSignedElapsed),
+        ("postgres-shared", SessionCensusCase::PostgresSharedLabels),
+        ("postgres-worker", SessionCensusCase::PostgresWorker),
+        ("mysql-shared", SessionCensusCase::MysqlShared),
+        ("mysql-switched", SessionCensusCase::MysqlSwitched),
+        ("mysql-worker", SessionCensusCase::MysqlWorker),
     ] {
         let (source, rows) = session_census_evidence(case);
         let observations = rows

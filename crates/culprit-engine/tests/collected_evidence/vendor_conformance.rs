@@ -90,6 +90,7 @@ async fn export_vendor_field_conformance_from_canonical_original_evidence() {
         "field_context_export_version":1,"field_context_contracts":field_context_contracts(),
         "database_property_contract_export_version":1,"database_property_contracts":database_property_contracts(),
         "suspect_page_contract_export_version":1,"suspect_page_contracts":suspect_page_contracts(),
+        "scheduler_contract_export_version":1,"scheduler_contracts":scheduler_contracts(),
         "cases":cases,
     });
     let mut options = OpenOptions::new();
@@ -196,6 +197,10 @@ fn inputs() -> Vec<(&'static str, String, CollectionDescription, Vec<TelemetryRe
         let (s, r) = corpus::instance_resource_evidence(case);
         cases.push(("instance-resources", format!("{case:?}"), s, r));
     }
+    for case in corpus::SchedulerCase::ALL {
+        let (s, r) = corpus::instance_resource_scheduler_evidence(case);
+        cases.push(("schedulers", format!("{case:?}"), s, r));
+    }
     for case in corpus::WaitCounterCase::ALL {
         let (s, r) = corpus::wait_counter_evidence(case);
         cases.push(("wait-counters", format!("{case:?}"), s, r));
@@ -247,6 +252,18 @@ fn inputs() -> Vec<(&'static str, String, CollectionDescription, Vec<TelemetryRe
 // This is controlled corpus replay, not a native source/profile or cost acceptance receipt.
 fn field_context(family: &str, source: &CollectionDescription, records: &[TelemetryRecord]) -> Option<Value> {
     match family {
+        "schedulers" => {
+            let rows = records
+                .iter()
+                .map(|row| {
+                    let TelemetryRecord::Operational(row) = row else { panic!("original scheduler Operational row") };
+                    row.clone()
+                })
+                .collect::<Vec<_>>();
+            let report = culprit_checks::instance_resources::explain_source(source, &rows, true).unwrap();
+            Some(json!({"instance_resources":report}))
+        }
+
         "session-census" => {
             let rows = records
                 .iter()
@@ -318,5 +335,16 @@ fn suspect_page_contracts() -> Vec<Value> {
         json!({"path":"crates/culprit-core/src/telemetry/suspect_pages.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-core/src/telemetry/suspect_pages.rs")))}),
         json!({"path":"crates/culprit-checks/src/views/suspect_pages.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-checks/src/views/suspect_pages.rs")))}),
         json!({"path":"crates/culprit-collector/src/analytical/test_support/suspect_pages.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/test_support/suspect_pages.rs")))}),
+    ]
+}
+
+// Compiled source/semantic/consumer owners for the same original scheduler corpus, not native qualification.
+fn scheduler_contracts() -> Vec<Value> {
+    vec![
+        json!({"path":"crates/culprit-core/src/telemetry/counters/schedulers.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-core/src/telemetry/counters/schedulers.rs")))}),
+        json!({"path":"crates/providers/culprit-mssql/src/schedulers/fields.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../providers/culprit-mssql/src/schedulers/fields.rs")))}),
+        json!({"path":"crates/culprit-checks/src/views/instance_resources/schedulers.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-checks/src/views/instance_resources/schedulers.rs")))}),
+        json!({"path":"crates/culprit-engine/src/collected_resources/instance_resources.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/src/collected_resources/instance_resources.rs")))}),
+        json!({"path":"crates/culprit-collector/src/analytical/test_support/instance_resources/schedulers.rs","sha256":digest(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),"/../culprit-collector/src/analytical/test_support/instance_resources/schedulers.rs")))}),
     ]
 }

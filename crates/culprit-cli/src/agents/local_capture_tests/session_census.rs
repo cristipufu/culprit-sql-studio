@@ -7,6 +7,10 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
 {
     for case in SessionCensusCase::ALL {
         let (source, rows) = session_census_evidence(case);
+        let has_wide_native_session_count = rows.iter().any(|row| {
+            matches!(row,
+            TelemetryRecord::Activity(row) if row.session_counters.logical_reads.as_deref() == Some("9007199254740993"))
+        });
         let mut fixture = LocalCaptureFixture::activity(source.clone(), rows).await;
         let native = source.observation.activity().unwrap();
         let bytes = fixture.original_bytes();
@@ -22,7 +26,10 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
         let report = &value["session_census"];
         assert_eq!(report["title"], culprit_core::i18n::scope("en", || culprit_core::t!("view.session_census.title")));
         assert_eq!(report["native_read_bounds"], json!({"from":native.observed_from,"until":native.observed_until}));
-        assert_eq!(report["logical_database"], "db");
+        assert_eq!(
+            report["logical_database"],
+            json!(source.target.database().map(|database| database.database.as_str()))
+        );
         assert_eq!(report["source"], json!(native.coverage));
         assert_eq!(report["read_complete"], true);
         assert_eq!(report["native_rows"], native.native_rows);
@@ -31,6 +38,10 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
             SessionCensusCase::Mars => (1, 2),
             SessionCensusCase::GroupedClients | SessionCensusCase::NativeSignedElapsed => (2, 3),
             SessionCensusCase::GroupUnknownTotals => (2, 2),
+            SessionCensusCase::PostgresSharedLabels => (3, 2),
+            SessionCensusCase::PostgresWorker => (2, 1),
+            SessionCensusCase::MysqlShared | SessionCensusCase::MysqlSwitched => (2, 1),
+            SessionCensusCase::MysqlWorker => (1, 0),
             _ => (0, 0),
         };
         assert_eq!(report["client_groups"]["grouped_sessions"], grouped, "{case:?}");
@@ -52,6 +63,11 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
             | SessionCensusCase::GroupUnknownTotals
             | SessionCensusCase::NativeSignedElapsed => (Some("4"), Some("session-default"), Some("7")),
             SessionCensusCase::Dormant => (Some("0"), None, None),
+            SessionCensusCase::PostgresSharedLabels | SessionCensusCase::PostgresWorker => {
+                (Some("42"), Some("db"), None)
+            }
+            SessionCensusCase::MysqlShared | SessionCensusCase::MysqlWorker => (None, Some("db"), None),
+            SessionCensusCase::MysqlSwitched => (None, Some("other"), None),
             _ => (None, None, None),
         };
         for entry in report["entries"].as_array().unwrap() {
@@ -68,13 +84,7 @@ async fn actual_startup_mcp_route_reanalyzes_one_original_census_with_exact_valu
         assert_eq!(value["local_verification_bytes"], bytes);
         assert_eq!(value["collected_from"], fixture.manifest.started_at);
         let encoded = value.to_string();
-        if !matches!(
-            case,
-            SessionCensusCase::Unknown
-                | SessionCensusCase::Unavailable
-                | SessionCensusCase::Empty
-                | SessionCensusCase::PostgresSharedLabels
-        ) {
+        if has_wide_native_session_count {
             assert!(encoded.contains("9007199254740993"));
         }
         for private in [

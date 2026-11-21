@@ -324,6 +324,7 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
         revision: Some(CaptureRevision { outbox_id: "outbox".into(), owner_epoch: "1".into(), sequence: "2".into() }),
     };
     let record = TelemetryRecord::ResourceSample(ResourceMeasurement {
+        mssql_managed_instance: None,
         replica_role: None,
         data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
         at: "2020-01-01T06:00:15Z".into(),
@@ -1062,7 +1063,8 @@ pub use qualification::{QualificationFixture, QualificationFixtureCase};
 
 mod instance_resources;
 pub use instance_resources::{
-    InstanceResourceCase, ProcessCpuCase, instance_resource_cpu_evidence, instance_resource_evidence,
+    InstanceResourceCase, ProcessCpuCase, SchedulerCase, instance_resource_cpu_evidence, instance_resource_evidence,
+    instance_resource_scheduler_evidence,
 };
 
 mod boxed_query_history;
@@ -1076,3 +1078,8 @@ pub use galera::{GaleraCase, galera_evidence};
 
 mod pool_settings;
 pub use pool_settings::{PoolSettingsCase, assert_pool_settings_capture, pool_settings_evidence};
+
+mod managed_instance_resources;
+pub use managed_instance_resources::{
+    ManagedInstanceResourceCase, managed_instance_resource_case, managed_instance_resource_evidence,
+};

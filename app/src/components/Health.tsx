@@ -1,3 +1,4 @@
+import { ManagedInstanceResources } from "./ManagedInstanceResources";
 import { evidencePresentation } from "../lib/engines";
 import { useState, type MouseEvent } from "react";
 import type { Engine } from "../gen/Engine";
@@ -160,8 +161,9 @@ export function HealthTab({
   const counterRatioIssue = observationReadIssue("performance counters", report.snapshot.sources ?? []);
   const instanceResources = report.instance_resources;
   const instanceResourceRead = pressure?.instance_resources;
-  const instanceResourceRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "instance-resources");
-  const instanceResourceIssue = observationReadIssue("instance-resources", report.snapshot.sources ?? [], Boolean(instanceResourceRead));
+  const instanceResourceRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "instance-resources" || source.source === "schedulers");
+  const instanceResourceIssue = observationReadIssue("instance-resources", report.snapshot.sources ?? [], Boolean(instanceResourceRead))
+    ?? observationReadIssue("schedulers", report.snapshot.sources ?? []);
   const storage = report.storage;
   const storageRead = report.snapshot.operations.storage;
   const storageIssue = observationReadIssue("file_capacity", report.snapshot.sources ?? [], Boolean(storageRead));
@@ -169,6 +171,8 @@ export function HealthTab({
   const suspectRecorded = Boolean(report.snapshot.operations.suspect_pages) || (report.snapshot.sources ?? []).some((source) => source.source === "suspect_pages");
   const suspectIssue = observationReadIssue("suspect_pages", report.snapshot.sources ?? [], suspectRecorded);
   const databaseProperties = report.database_properties;
+  const managedInstanceResources = report.managed_instance_resources;
+  const managedInstanceResourcesRead = report.snapshot.operations.managed_instance_resources;
   const poolSettings = report.pool_settings;
   const poolSettingsRead = report.snapshot.operations.pool_settings;
   const databasePropertiesRead = report.snapshot.operations.database_properties;
@@ -205,7 +209,7 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, tableMemory.length > 0, groupReplication.length > 0, galera.length > 0, fullTextPopulations.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, suspectPages, suspectRecorded, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, poolSettings, poolSettingsRead, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, tableMemory.length > 0, groupReplication.length > 0, galera.length > 0, fullTextPopulations.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, suspectPages, suspectRecorded, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, managedInstanceResources, managedInstanceResourcesRead, poolSettings, poolSettingsRead, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
   const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, suspectIssue, databasePropertiesIssue, memoryClerkIssue, tempdbMetadataIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
@@ -302,6 +306,8 @@ export function HealthTab({
       {!databaseProperties && (databasePropertiesRead || databasePropertiesRecorded) && !databasePropertiesIssue && <ObservationExplanationIssue title={t("view.database_properties.title")} reason={t("view.database_properties.invalid")} />}
       {tableMemory.length > 0 && <TableMemory key={report.snapshot.id} reports={tableMemory} />}
       {groupReplication.length > 0 && <GroupReplication key={report.snapshot.id} reports={groupReplication} />}
+      {managedInstanceResources && <ManagedInstanceResources key={managedInstanceResourcesRead?.kind === "captured" ? managedInstanceResourcesRead.read.origin.capture.manifest_sha256 : report.snapshot.id} report={managedInstanceResources} />}
+      {managedInstanceResourcesRead && !managedInstanceResources && <ObservationExplanationIssue title={t("view.mi_resources.title")} reason={t("view.mi_resources.invalid")} />}
       {galera.length > 0 && <Galera key={report.snapshot.id} reports={galera} />}
       {fullTextPopulations.length > 0 && <FullTextPopulations key={report.snapshot.id} reports={fullTextPopulations} />}
       {tempdbMetadataMemory && <TempdbMetadataMemory key={report.snapshot.id} report={tempdbMetadataMemory} />}

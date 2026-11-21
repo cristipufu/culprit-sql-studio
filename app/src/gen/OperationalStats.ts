@@ -17,6 +17,7 @@ import type { NativeFailureSnapshot } from "./NativeFailureSnapshot";
 import type { NodeResources } from "./NodeResources";
 import type { OperationalCounter } from "./OperationalCounter";
 import type { PageWaitSnapshot } from "./PageWaitSnapshot";
+import type { RecordedManagedInstanceResourceRead } from "./RecordedManagedInstanceResourceRead";
 import type { RecordedOperationalRead } from "./RecordedOperationalRead";
 import type { RecordedPerformanceCounters } from "./RecordedPerformanceCounters";
 import type { RecordedPoolSettingsRead } from "./RecordedPoolSettingsRead";
@@ -30,7 +31,7 @@ import type { SuspectPageHistoryRead } from "./SuspectPageHistoryRead";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 
-export type OperationalStats = { suspect_pages?: SuspectPageHistoryRead, storage?: StorageRead, cached_runtime?: CachedRuntimeRead, 
+export type OperationalStats = { managed_instance_resources?: RecordedManagedInstanceResourceRead, suspect_pages?: SuspectPageHistoryRead, storage?: StorageRead, cached_runtime?: CachedRuntimeRead, 
 /**
  * An independent original capture; its shared target and receipts are never current database ownership.
  */

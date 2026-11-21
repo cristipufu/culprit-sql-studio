@@ -298,6 +298,7 @@ impl Pipeline {
         let hyperscale_log_components = hyperscale_log_components::explain(&mut snapshot);
         let memory_clerks = memory_clerks::explain(&mut snapshot);
         let tempdb_metadata_memory = tempdb_metadata_memory::explain(&mut snapshot);
+        let managed_instance_resources = managed_instance_resources::explain(&snapshot);
         let table_memory = table_memory::explain(&mut snapshot);
         let group_replication = group_replication::explain(&mut snapshot);
         let galera = galera::explain(&mut snapshot);
@@ -437,6 +438,7 @@ impl Pipeline {
             hyperscale_log_components,
             memory_clerks,
             tempdb_metadata_memory,
+            managed_instance_resources,
             table_memory,
             group_replication,
             galera,
@@ -937,3 +939,5 @@ mod tests {
         assert_eq!(unowned.page_waits.unwrap().entries.len(), 1);
     }
 }
+
+mod managed_instance_resources;

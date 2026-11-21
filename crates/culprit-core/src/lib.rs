@@ -31,7 +31,8 @@ pub mod completed_spill_report;
 mod configured_log_rate_report;
 mod instance_resource_report;
 pub use instance_resource_report::{
-    InstanceResourceField, InstanceResourceGroup, InstanceResourceReport, ProcessCpuReport,
+    InstanceResourceField, InstanceResourceGroup, InstanceResourceReport, ProcessCpuReport, SchedulerEntry,
+    SchedulerField, SchedulerFieldAvailability, SchedulerReport,
 };
 mod table_full_text_report;
 pub use table_full_text_report::{TableFullTextEntry, TableFullTextReport};
@@ -90,7 +91,7 @@ pub use storage_report::{StorageEntry, StorageField, StorageReport};
 mod session_census_report;
 pub use session_census_report::{
     SessionCensusClientGroup, SessionCensusClientGroups, SessionCensusEntry, SessionCensusField, SessionCensusReport,
-    SessionClientGroupKey,
+    SessionClientDatabase, SessionClientGroupKey,
 };
 pub mod page_server_read_report;
 pub mod page_wait_report;
@@ -274,3 +275,8 @@ pub use group_replication_report::{GroupReplicationOrigin, GroupReplicationRepor
 
 mod galera_report;
 pub use galera_report::{GaleraOrigin, GaleraReport};
+
+mod managed_instance_resource_report;
+pub use managed_instance_resource_report::{
+    ManagedInstanceResourceField, ManagedInstanceResourceInterval, ManagedInstanceResourceReport,
+};

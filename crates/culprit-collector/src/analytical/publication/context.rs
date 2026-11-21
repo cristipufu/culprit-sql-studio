@@ -8,6 +8,15 @@ use serde_json::Value;
 enum PublicObservation<'a> {
     QueryHistory(&'a QueryHistoryDescription),
     RetainedSamples(&'a SampleHistoryDescription),
+    MssqlManagedInstanceResources {
+        from: &'a str,
+        until: &'a str,
+        observed_at: &'a str,
+        native_engine_edition: i64,
+        coverage: &'a StateSourceCoverage,
+        native_rows: u32,
+        layout: &'a MssqlManagedInstanceResourceLayout,
+    },
     RetainedEvents(&'a EventHistoryDescription),
     Activity(&'a ActivitySnapshotDescription),
     FocusedBlockingContext {
@@ -177,6 +186,15 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
     let projected = match value {
         SourceObservation::QueryHistory(value) => PublicObservation::QueryHistory(value),
         SourceObservation::RetainedSamples(value) => PublicObservation::RetainedSamples(value),
+        SourceObservation::MssqlManagedInstanceResources(history) => PublicObservation::MssqlManagedInstanceResources {
+            from: &history.from,
+            until: &history.until,
+            observed_at: &history.observed_at,
+            native_engine_edition: history.native_engine_edition,
+            coverage: &history.coverage,
+            native_rows: history.native_rows,
+            layout: &history.layout,
+        },
         SourceObservation::RetainedEvents(value) => PublicObservation::RetainedEvents(value),
         SourceObservation::Activity(value) => PublicObservation::Activity(value),
         SourceObservation::FocusedBlocking { snapshot, result } => PublicObservation::FocusedBlockingContext {

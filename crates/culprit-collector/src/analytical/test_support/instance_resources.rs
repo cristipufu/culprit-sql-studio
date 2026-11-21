@@ -154,3 +154,6 @@ pub fn instance_resource_evidence(case: InstanceResourceCase) -> (CollectionDesc
     assert!(source.partition_is_consistent());
     (source, rows)
 }
+
+mod schedulers;
+pub use schedulers::{SchedulerCase, instance_resource_scheduler_evidence};

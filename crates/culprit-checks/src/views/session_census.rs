@@ -115,22 +115,24 @@ fn entry(row: &ActivityFrameRow<'_>) -> SessionCensusEntry {
     let point = row.observation;
     let client = point.client.as_ref();
     let context = point.session_context.as_deref();
-    let native = context.and_then(|context| context.native.as_deref()).map(|native| match native {
-        SessionNativeContext::Mssql(native) => native,
+    let native_context = context.and_then(|context| context.native.as_deref());
+    let (session_database_id, session_database_name) = match native_context {
+        Some(SessionNativeContext::Mssql(native)) => {
+            (native.session_database_id.clone(), native.session_database_name.clone())
+        }
+        Some(SessionNativeContext::Postgres(native)) => (native.database_oid.clone(), native.database_name.clone()),
+        Some(SessionNativeContext::Mysql(native)) => (None, native.default_database.clone()),
+        None => (None, None),
+    };
+    let native = native_context.and_then(|native| match native {
+        SessionNativeContext::Mssql(native) => Some(native),
+        SessionNativeContext::Postgres(_) | SessionNativeContext::Mysql(_) => None,
     });
     let mut fields = vec![
         field("actor_state", t!("view.session_census.field.actor_state"), Some(point.state.clone())),
         field("database", t!("view.session_census.field.database"), point.database.clone()),
-        field(
-            "session_database_id",
-            t!("view.session_census.field.session_database_id"),
-            native.and_then(|native| native.session_database_id.clone()),
-        ),
-        field(
-            "session_database_name",
-            t!("view.session_census.field.session_database_name"),
-            native.and_then(|native| native.session_database_name.clone()),
-        ),
+        field("session_database_id", t!("view.session_census.field.session_database_id"), session_database_id),
+        field("session_database_name", t!("view.session_census.field.session_database_name"), session_database_name),
         field(
             "request_database_id",
             t!("view.session_census.field.request_database_id"),
@@ -236,6 +238,7 @@ fn entry(row: &ActivityFrameRow<'_>) -> SessionCensusEntry {
             ),
         ]);
     }
+    fields.extend(participant_fields(native_context, &point.key));
     SessionCensusEntry {
         activity: point.key.clone(),
         reference: row.reference.cloned(),
@@ -249,6 +252,33 @@ fn entry(row: &ActivityFrameRow<'_>) -> SessionCensusEntry {
         },
         state: context.map_or_else(|| t!("view.session_census.state.unknown"), |context| lifecycle(context.lifecycle)),
         fields,
+    }
+}
+fn participant_fields(native: Option<&SessionNativeContext>, key: &ActivityKey) -> Vec<SessionCensusField> {
+    match native {
+        Some(SessionNativeContext::Postgres(native)) => vec![
+            field("backend_type", t!("view.session_census.field.backend_type"), native.backend_type.clone()),
+            field(
+                "backend_started_utc",
+                t!("view.session_census.field.backend_start"),
+                Some(key.session.generation.clone()),
+            ),
+        ],
+        Some(SessionNativeContext::Mysql(native)) => vec![
+            field("thread_type", t!("view.session_census.field.thread_type"), native.thread_type.clone()),
+            field("thread_name", t!("view.session_census.field.thread_name"), native.thread_name.clone()),
+            field(
+                "session_default_schema",
+                t!("view.session_census.field.default_schema"),
+                native.default_database.clone(),
+            ),
+            field(
+                "current_statement_schema",
+                t!("view.session_census.field.request_schema"),
+                native.request_schema.clone(),
+            ),
+        ],
+        _ => Vec::new(),
     }
 }
 #[derive(Clone, Copy)]

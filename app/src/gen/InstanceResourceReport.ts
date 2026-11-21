@@ -2,6 +2,7 @@
 import type { InstanceResourceGroup } from "./InstanceResourceGroup";
 import type { ObservationReadContext } from "./ObservationReadContext";
 import type { ProcessCpuReport } from "./ProcessCpuReport";
+import type { SchedulerReport } from "./SchedulerReport";
 import type { SourceState } from "./SourceState";
 import type { StateSourceCoverage } from "./StateSourceCoverage";
 
@@ -9,7 +10,11 @@ export type InstanceResourceReport = {
 /**
  * A separate processor-source point, never merged into the resource point's clock or populations.
  */
-process_cpu: ProcessCpuReport | null, context: ObservationReadContext | null, native_source: StateSourceCoverage | null, source_state: SourceState, read_complete: boolean | null, observed_at: string | null, 
+process_cpu: ProcessCpuReport | null, 
+/**
+ * Per-scheduler rows are an independent source population, never the aggregate resource point.
+ */
+schedulers: SchedulerReport | null, context: ObservationReadContext | null, native_source: StateSourceCoverage | null, source_state: SourceState, read_complete: boolean | null, observed_at: string | null, 
 /**
  * This describes the bounded source populations, independently of body or optional-read admission.
  */

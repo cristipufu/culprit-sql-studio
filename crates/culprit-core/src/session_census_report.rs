@@ -52,8 +52,7 @@ pub struct SessionCensusReport {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[ts(export)]
 pub struct SessionClientGroupKey {
-    pub database_id: String,
-    pub database_name: Option<String>,
+    pub database: SessionClientDatabase,
     pub host: Option<String>,
     pub application: Option<String>,
     pub library: Option<String>,
@@ -80,4 +79,28 @@ pub struct SessionCensusClientGroups {
     pub available_groups: u32,
     pub entries_limited: bool,
     pub entries: Vec<SessionCensusClientGroup>,
+}
+
+/// Native scope for a grouping label, not a database incarnation or attribution of accumulated work.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum SessionClientDatabase {
+    CurrentSession { native_id: String, name: Option<String> },
+    Backend { native_id: String, name: Option<String> },
+    CurrentDefault { name: String },
+}
+impl SessionClientDatabase {
+    pub fn native_id(&self) -> Option<&str> {
+        match self {
+            Self::CurrentSession { native_id, .. } | Self::Backend { native_id, .. } => Some(native_id),
+            Self::CurrentDefault { .. } => None,
+        }
+    }
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::CurrentSession { name, .. } | Self::Backend { name, .. } => name.as_deref(),
+            Self::CurrentDefault { name } => Some(name),
+        }
+    }
 }

@@ -125,6 +125,7 @@ pub(super) fn original(row: &Value, p: &probe::Probe, node: &str) -> Option<Acti
         ("pid", "pid"),
         ("database_oid", "datid"),
         ("database", "datname"),
+        ("backend_type", "backend_type"),
         ("username", "usename"),
         ("application_name", "application_name"),
         ("host", "client_addr"),

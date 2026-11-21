@@ -7,6 +7,10 @@ use async_trait::async_trait;
 use culprit_core::{DatabaseIdentity, Result, telemetry::*};
 use std::sync::Arc;
 
+mod managed_instance;
+pub(super) use managed_instance::ManagedInstanceResourceSource;
+pub(super) use managed_instance::bounded_budget as managed_instance_budget;
+
 const ENCODED_ROW_ALLOWANCE: u32 = 4096;
 
 #[async_trait]

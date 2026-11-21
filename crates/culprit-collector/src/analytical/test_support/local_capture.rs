@@ -37,7 +37,7 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
         ),
         case("table_memory", super::table_memory_evidence(super::TableMemoryCase::Exact)),
         case("full_text_populations", super::full_text_population_evidence(super::FullTextPopulationCase::Processing)),
-        case("instance_resources", super::instance_resource_evidence(super::InstanceResourceCase::Exact)),
+        case("instance_resources", super::instance_resource_scheduler_evidence(super::SchedulerCase::Exact)),
         case("database_properties", super::database_properties_evidence(super::DatabasePropertiesCase::Exact)),
         case("table_full_text", super::table_full_text_evidence(super::TableFullTextCase::Enabled)),
         case("compilation", super::query_compilation_evidence()),
@@ -106,6 +106,9 @@ impl LocalCaptureFixture {
 
 fn selection(source: &CollectionDescription) -> CollectionSelection {
     match &source.observation {
+        SourceObservation::MssqlManagedInstanceResources(history) => {
+            CollectionSelection::ResourceHistory { from: history.from.clone(), until: history.until.clone() }
+        }
         SourceObservation::MssqlPoolSettings { .. } => CollectionSelection::ResourcePoolSettings,
         SourceObservation::Activity(_) => CollectionSelection::Activity,
         SourceObservation::TableMemory { target, .. } => CollectionSelection::TableMemory { target: target.clone() },

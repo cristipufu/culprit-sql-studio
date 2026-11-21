@@ -123,6 +123,16 @@ fn assert_shared_callers(report: &SessionCensusReport, identities: &[NativeActiv
     assert!(field(entries[0], "login").is_some());
     assert_eq!(field(entries[0], "login"), field(entries[1], "login"));
     assert_ne!(entries[0].reference, entries[1].reference);
+    let group = report
+        .client_groups
+        .entries
+        .iter()
+        .find(|group| group.key.application.as_deref() == Some(actors::SHARED_APPLICATION))
+        .expect("same original native client group");
+    assert!(group.observed_sessions >= identities.len() as u32);
+    assert!(matches!(group.key.database, culprit_core::SessionClientDatabase::Backend { .. }));
+    assert!(group.fields.iter().find(|field| field.key == "earliest_backend_start_utc").unwrap().value.is_some());
+    assert!(group.fields.iter().find(|field| field.key == "session_logical_reads").unwrap().value.is_none());
     assert!(report.limitations.contains(&culprit_core::t!("view.session_census.limit.client")));
 }
 fn assert_binding(capture: &owned_fixture::Captured, expected: FocusedRequestBinding) {

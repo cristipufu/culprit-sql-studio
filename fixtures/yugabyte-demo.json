@@ -2576,7 +2576,7 @@
     },
     "galera": []
   },
-  "format": 40,
+  "format": 41,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

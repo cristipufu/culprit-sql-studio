@@ -91,6 +91,12 @@ async fn capture<R: crate::read::QueryRead>(
         &request.budget,
     )
     .await?;
+    if read.frame.records.iter().any(|row| {
+        row.native_text("backend_type").as_deref() != Some("client backend")
+            || row.native_text("database_oid").as_deref() != Some(before.database_oid.as_str())
+    }) {
+        return Err(CollectionStop::SourceChanged.error());
+    }
     let completion = local_context::complete(reader, host, port, &before, owner.as_ref()).await?;
     let visible = completion.full_visibility && read.frame.fully_visible_for(&before.database_oid);
     let context = completion.context;

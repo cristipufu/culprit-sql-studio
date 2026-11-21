@@ -45,6 +45,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         pool_settings: &'a Option<Box<culprit_core::PoolSettingsReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        managed_instance_resources: &'a Option<Box<culprit_core::ManagedInstanceResourceReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         suspect_pages: &'a Option<Box<culprit_core::SuspectPageHistoryReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         table_full_text: &'a Option<Box<culprit_core::TableFullTextReport>>,
@@ -126,6 +128,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         full_text_populations,
         database_properties,
         pool_settings,
+        managed_instance_resources,
         suspect_pages,
         table_full_text,
         maintenance_progress,
@@ -169,6 +172,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         full_text_populations,
         database_properties,
         pool_settings,
+        managed_instance_resources,
         suspect_pages,
         table_full_text,
         maintenance_progress,

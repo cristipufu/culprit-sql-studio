@@ -424,6 +424,7 @@ pub enum SourceObservation {
     },
     QueryHistory(QueryHistoryDescription),
     RetainedSamples(SampleHistoryDescription),
+    MssqlManagedInstanceResources(Box<MssqlManagedInstanceResourceHistory>),
     RetainedEvents(EventHistoryDescription),
     Activity(ActivitySnapshotDescription),
     FocusedBlocking {
@@ -580,7 +581,7 @@ impl SourceObservation {
                 TelemetryCollection::Snapshot(SnapshotDataset::CompilerAdmission)
             }
             Self::QueryHistory(_) => TelemetryCollection::QueryHistory,
-            Self::RetainedSamples(_) => TelemetryCollection::ResourceHistory,
+            Self::RetainedSamples(_) | Self::MssqlManagedInstanceResources(_) => TelemetryCollection::ResourceHistory,
             Self::RetainedEvents(_) => TelemetryCollection::DeadlockHistory,
             Self::Activity(_) | Self::FocusedBlocking { .. } => TelemetryCollection::Activity,
             Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
@@ -623,6 +624,9 @@ impl SourceObservation {
             }
             Self::QueryHistory(history) => TelemetryRange::NativeInterval { interval: history.interval.clone() },
             Self::RetainedSamples(history) => {
+                TelemetryRange::TimeWindow { from: history.from.clone(), until: history.until.clone() }
+            }
+            Self::MssqlManagedInstanceResources(history) => {
                 TelemetryRange::TimeWindow { from: history.from.clone(), until: history.until.clone() }
             }
             Self::RetainedEvents(history) => {
@@ -671,12 +675,37 @@ impl SourceObservation {
         })
     }
     pub fn accepts_sample(&self, at: &str) -> bool {
-        let Self::RetainedSamples(history) = self else {
-            return false;
+        let (from, until) = match self {
+            Self::RetainedSamples(history) => (&history.from, &history.until),
+            Self::MssqlManagedInstanceResources(history) if history.is_valid() => (&history.from, &history.until),
+            _ => return false,
         };
         let parse = |value: &str| DateTime::parse_from_rfc3339(value).ok();
-        matches!((parse(&history.from), parse(at), parse(&history.until)), (Some(from),Some(at),Some(until)) if from <= at && at < until)
+        matches!((parse(from), parse(at), parse(until)), (Some(from),Some(at),Some(until)) if from <= at && at < until)
     }
+    /// A valid original may contain only a bounded prefix. Retaining that original does not permit a
+    /// history scheduler to skip the unread suffix. This says nothing about native publication freshness.
+    pub fn can_advance_history_window(&self) -> bool {
+        match self {
+            Self::RetainedSamples(history) => history.covers_request(),
+            Self::RetainedEvents(_) => true,
+            Self::MssqlManagedInstanceResources(history) => {
+                history.is_valid()
+                    && history.coverage.state == crate::SourceState::Collected
+                    && history.coverage.complete_scope
+                    && history.coverage.stopped.is_none()
+            }
+            _ => false,
+        }
+    }
+
+    pub fn native_coverage_state(&self) -> Result<Option<crate::SourceState>> {
+        match self {
+            Self::MssqlManagedInstanceResources(history) => Ok(Some(history.coverage.state)),
+            _ => self.snapshot().map(StateSnapshotDescription::coverage_state).transpose(),
+        }
+    }
+
     pub fn covers_request(&self) -> bool {
         match self {
             Self::SourceRead { snapshot, focus_key, execution } => {
@@ -689,6 +718,8 @@ impl SourceObservation {
             }
             Self::QueryHistory(history) => history.is_valid(),
             Self::RetainedSamples(history) => history.covers_request(),
+            // A bounded published prefix is independently marked partial; this is not publication freshness.
+            Self::MssqlManagedInstanceResources(history) => history.is_valid(),
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
             Self::BackupHistory { snapshot, .. } => backup_history_header_is_valid(snapshot),
@@ -880,6 +911,9 @@ impl SourceObservation {
             Self::QueryHistory(_) | Self::RetainedEvents(_) => true,
             Self::RetainedSamples(history) => {
                 count(TelemetryStream::ResourceSamples) == u64::from(history.expected_samples)
+            }
+            Self::MssqlManagedInstanceResources(history) => {
+                count(TelemetryStream::ResourceSamples) == u64::from(history.coverage.records)
             }
             Self::Activity(snapshot) | Self::FocusedBlocking { snapshot, .. } => {
                 count(TelemetryStream::ActivityObservations) == u64::from(snapshot.observations)
@@ -1272,6 +1306,11 @@ impl CollectionDescription {
             (SourceObservation::RetainedSamples(history), TelemetryCollection::ResourceHistory) => {
                 (&history.from, &history.until, history.is_valid())
             }
+            (SourceObservation::MssqlManagedInstanceResources(history), TelemetryCollection::ResourceHistory) => (
+                &history.from,
+                &history.until,
+                history.matches_source(self) && history.coverage.records <= request.budget.max_snapshot_rows,
+            ),
             (SourceObservation::RetainedEvents(history), TelemetryCollection::DeadlockHistory) => {
                 (&history.from, &history.until, history.is_valid())
             }

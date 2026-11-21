@@ -1,6 +1,7 @@
 //! Native-shaped census facts without a live/native-cost or current-owner qualification claim.
 use super::*;
 mod groups;
+mod mysql;
 mod postgres;
 
 #[derive(Clone, Copy, Debug)]
@@ -17,9 +18,13 @@ pub enum SessionCensusCase {
     ContradictoryMars,
     GroupUnknownTotals,
     NativeSignedElapsed,
+    PostgresWorker,
+    MysqlShared,
+    MysqlSwitched,
+    MysqlWorker,
 }
 impl SessionCensusCase {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 16] = [
         Self::Idle,
         Self::Dormant,
         Self::Mars,
@@ -32,12 +37,34 @@ impl SessionCensusCase {
         Self::ContradictoryMars,
         Self::GroupUnknownTotals,
         Self::NativeSignedElapsed,
+        Self::PostgresWorker,
+        Self::MysqlShared,
+        Self::MysqlSwitched,
+        Self::MysqlWorker,
     ];
 }
 
 pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
-    if matches!(case, SessionCensusCase::PostgresSharedLabels) {
-        return postgres::shared_labels();
+    if matches!(case, SessionCensusCase::PostgresSharedLabels | SessionCensusCase::PostgresWorker) {
+        let (mut source, mut rows) = postgres::shared_labels();
+        if matches!(case, SessionCensusCase::PostgresWorker) {
+            let TelemetryRecord::Activity(row) = &mut rows[0] else { unreachable!() };
+            let Some(SessionNativeContext::Postgres(native)) =
+                row.session_context.as_deref_mut().unwrap().native.as_deref_mut()
+            else {
+                unreachable!()
+            };
+            native.backend_type = Some("parallel worker".into());
+            let SourceObservation::Activity(header) = &mut source.observation else { unreachable!() };
+            header.population = ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers;
+        }
+        return (source, rows);
+    }
+    if matches!(
+        case,
+        SessionCensusCase::MysqlShared | SessionCensusCase::MysqlSwitched | SessionCensusCase::MysqlWorker
+    ) {
+        return mysql::evidence(case);
     }
     let mut read: ActivityCensusRead = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -45,7 +72,10 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
     )))
     .unwrap();
     let SessionNativeContext::Mssql(native) =
-        read.observations[0].session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap();
+        read.observations[0].session_context.as_deref_mut().unwrap().native.as_deref_mut().unwrap()
+    else {
+        panic!("MSSQL test context")
+    };
     native.session_database_id = Some("7".into());
     native.session_database_name = Some("db".into());
     native.request_database_id = None;
@@ -61,7 +91,9 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
             context.lifecycle = SessionLifecycle::PoolResetPrelogin;
             context.login_age_ms = None;
             context.last_request_end_age_ms = None;
-            let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+            let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap() else {
+                panic!("MSSQL test context")
+            };
             native.native_state = "Dormant".into();
             native.session_database_id = Some("0".into());
             native.session_database_name = None;
@@ -87,7 +119,9 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
             context.last_request_end_age_ms = None;
             context.client_library = None;
             context.client_process_id = None;
-            let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+            let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap() else {
+                panic!("MSSQL test context")
+            };
             native.native_state = "future-native-state".into();
             native.elapsed_ms = None;
             native.session_database_id = None;
@@ -102,7 +136,11 @@ pub fn session_census_evidence(case: SessionCensusCase) -> (CollectionDescriptio
         | SessionCensusCase::NativeSignedElapsed => {
             groups::apply(&mut read, case);
         }
-        SessionCensusCase::PostgresSharedLabels => unreachable!(),
+        SessionCensusCase::PostgresSharedLabels
+        | SessionCensusCase::PostgresWorker
+        | SessionCensusCase::MysqlShared
+        | SessionCensusCase::MysqlSwitched
+        | SessionCensusCase::MysqlWorker => unreachable!(),
     }
     let SourceObservation::Activity(header) = &mut read.source.observation else { panic!() };
     header.observations = read.observations.len() as u32;
@@ -139,7 +177,9 @@ fn current_request(mut row: ActivityObservation, id: &str, connection: &str) -> 
     row.request_counters = Some(ActivityCounters { cpu_ms: Some("0".into()), ..Default::default() });
     let context = row.session_context.as_deref_mut().unwrap();
     context.lifecycle = SessionLifecycle::Running;
-    let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap();
+    let SessionNativeContext::Mssql(native) = context.native.as_deref_mut().unwrap() else {
+        panic!("MSSQL test context")
+    };
     native.native_state = "Running".into();
     native.session_database_id = Some("4".into());
     native.session_database_name = Some("session-default".into());

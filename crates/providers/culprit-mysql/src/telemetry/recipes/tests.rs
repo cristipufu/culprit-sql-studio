@@ -66,7 +66,7 @@ async fn every_static_declaration_selects_one_real_native_constructor_without_op
 }
 
 #[test]
-fn expanded_status_allowlist_revises_only_its_recipe_identity_without_qualifying_cost() {
+fn native_projection_revisions_invalidate_only_changed_recipe_identities_without_qualifying_cost() {
     let declarations = declarations();
     let operational = declarations.iter().find(|recipe| recipe.id == "mysql.operational").unwrap();
     assert_eq!(operational.version, 2);
@@ -74,7 +74,13 @@ fn expanded_status_allowlist_revises_only_its_recipe_identity_without_qualifying
         operational.selector,
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Operational))
     );
-    assert!(declarations.iter().filter(|recipe| recipe.id != "mysql.operational").all(|recipe| recipe.version == 1));
+    for recipe in &declarations {
+        let expected = match recipe.id.as_str() {
+            "mysql.activity" | "mysql.current-request-work" | "mysql.operational" => 2,
+            _ => 1,
+        };
+        assert_eq!(recipe.version, expected, "{}", recipe.id);
+    }
     assert!(declarations.iter().all(|recipe| recipe.cost == RecipeCostQualification::Unqualified));
 }
 

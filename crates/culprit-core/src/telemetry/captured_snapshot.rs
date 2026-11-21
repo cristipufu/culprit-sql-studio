@@ -101,8 +101,16 @@ fn valid_header(
     positions: &[CapturedSnapshotPosition],
     read_complete: bool,
 ) -> Result<TelemetryStream> {
-    let snapshot = source.observation.snapshot().ok_or_else(invalid)?;
-    let [stream] = snapshot.dataset.streams() else { return Err(invalid()) };
+    let (stream, records) = match &source.observation {
+        SourceObservation::MssqlManagedInstanceResources(history) if history.matches_source(source) => {
+            (TelemetryStream::ResourceSamples, history.coverage.records)
+        }
+        _ => {
+            let snapshot = source.observation.snapshot().ok_or_else(invalid)?;
+            let [stream] = snapshot.dataset.streams() else { return Err(invalid()) };
+            (*stream, snapshot.records)
+        }
+    };
     let mut ordinals = BTreeSet::new();
     if !capture.is_valid()
         || !valid_digest(source_sha256)
@@ -111,14 +119,14 @@ fn valid_header(
         || positions.len() > CollectionBudget::upper_limits().max_snapshot_rows as usize
         || positions.iter().any(|position| {
             !valid_digest(&position.payload_sha256)
-                || position.row_ordinal >= snapshot.records
+                || position.row_ordinal >= records
                 || !ordinals.insert(position.row_ordinal)
         })
-        || read_complete && positions.len() != snapshot.records as usize
+        || read_complete && positions.len() != records as usize
     {
         return Err(invalid());
     }
-    Ok(*stream)
+    Ok(stream)
 }
 
 fn reference(

@@ -128,3 +128,35 @@ test("negative native session elapsed remains a point value while only its group
   expect(html).toContain(t("view.session_census.groups.limit.elapsed"));
   expect(html).toContain(">-1<");
 });
+
+test("native backend groups retain UTC start while mutable default schema groups retain unknown lifetime", () => {
+  for (const name of ["postgres-shared", "mysql-shared", "mysql-switched"] as const) {
+    const { report } = sessionCensusCase(name);
+    const group = report.client_groups.entries[0]!;
+    const html = renderToStaticMarkup(<SessionCensus report={report} />);
+    expect(html).toContain(report.client_groups.summary);
+    expect(group.fields.find((field) => field.key === "session_age_ms")!.value).toBeNull();
+    expect(group.fields.find((field) => field.key === "session_logical_reads")!.value).toBeNull();
+    if (name === "postgres-shared") {
+      expect(group.key.database.kind).toBe("backend");
+      expect(group.fields.find((field) => field.key === "earliest_backend_start_utc")!.value?.endsWith("Z")).toBe(true);
+    } else {
+      expect(group.key.database.kind).toBe("current-default");
+      expect(group.fields.find((field) => field.key === "session_database_id")!.value).toBeNull();
+      expect(group.fields.find((field) => field.key === "session_database_name")!.value).toBe(name === "mysql-switched" ? "other" : "db");
+    }
+    for (const limitation of group.limitations) expect(html).toContain(limitation);
+  }
+});
+
+test("native worker participants keep raw evidence without entering client groups from shared labels", () => {
+  for (const name of ["postgres-worker", "mysql-worker"] as const) {
+    const { report } = sessionCensusCase(name);
+    expect(report.client_groups.ungrouped_sessions).toBe(1);
+    expect(report.entries.length).toBe(name === "postgres-worker" ? 3 : 2);
+    const html = renderToStaticMarkup(<SessionCensus report={report} />);
+    expect(html).toContain(report.client_groups.summary);
+    expect(html).toContain(name === "postgres-worker" ? "parallel worker" : "thread/sql/slave_sql");
+    expect(html).not.toContain("sig-dot");
+  }
+});

@@ -138,6 +138,10 @@ fn resources(values: &Map<String, Value>) -> Result<TelemetryRecord> {
     let data_io_accounting =
         serde_json::from_value(values.get("DataIoAccounting").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
     Ok(TelemetryRecord::ResourceSample(ResourceMeasurement {
+        mssql_managed_instance: serde_json::from_value(
+            values.get("ManagedInstanceInterval").ok_or_else(invalid)?.clone(),
+        )
+        .map_err(|_| invalid())?,
         data_io_accounting,
         at,
         replica_id,

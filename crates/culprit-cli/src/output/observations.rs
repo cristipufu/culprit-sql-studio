@@ -1355,3 +1355,8 @@ pub(crate) use galera::{compact as compact_galera, galera};
 
 mod pool_settings;
 pub(crate) use pool_settings::{compact as compact_pool_settings, pool_settings};
+
+mod managed_instance_resources;
+pub(crate) use managed_instance_resources::{
+    compact as compact_managed_instance_resources, managed_instance_resources,
+};
