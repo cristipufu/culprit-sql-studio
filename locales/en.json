@@ -12592,5 +12592,16 @@
   "view.incident_input.read_owner_unavailable": "The original qualified database read owner is unavailable. A current connection or database name cannot supply it.",
   "view.incident_input.shared_mismatch": "The original shared target and native member disagree. These failure observations cannot enter that resource’s incident controller.",
   "view.incident_input.shared_unavailable": "This original does not prove the shared owner, member and native process generation required for incident grouping. Shared observations remain available without being assigned to a database.",
-  "view.incident_input.unsupported": "This source has no supported incident-input interpretation. Its native evidence remains available for separate analysis."
+  "view.incident_input.unsupported": "This source has no supported incident-input interpretation. Its native evidence remains available for separate analysis.",
+  "core.model.session_id": "'{session}' is not a session id",
+  "engine.brief.no_finding": "No finding {id}",
+  "ui.sign_in_dialog.browser_error": "Could not open the browser: {error}",
+  "ui.sign_in_dialog.browser_exit": "Could not open the browser (exit code {code}).",
+  "ui.sign_in_dialog.browser_stopped": "Could not open the browser because the opener stopped without an exit code.",
+  "ui.sign_in_dialog.no_pending": "No sign-in is waiting",
+  "ui.ssh_fields.identity_unreadable": "That identity file cannot be read from here",
+  "ui.updates.check_failed": "Couldn't check for updates: {error}",
+  "ui.updates.endpoint_invalid": "CULPRIT_UPDATE_ENDPOINT isn't a URL",
+  "ui.updates.install_failed": "Couldn't install the update: {error}",
+  "ui.updates.no_pending": "No update is waiting. Check for updates again."
 }

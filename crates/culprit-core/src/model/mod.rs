@@ -1018,10 +1018,11 @@ impl LiveState {
 /// anything but digits is refused.
 pub fn session_number(session: &str) -> crate::error::Result<u64> {
     let session = session.trim();
+    let invalid = || crate::error::Error::invalid(crate::message!("core.model.session_id", session = session));
     if session.is_empty() || session.len() > 19 || !session.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(crate::error::Error::invalid(format!("'{session}' is not a session id")));
+        return Err(invalid());
     }
-    session.parse().map_err(|_| crate::error::Error::invalid(format!("'{session}' is not a session id")))
+    session.parse().map_err(|_| invalid())
 }
 
 /// Something Live can do to another session. Never offered on production connections.

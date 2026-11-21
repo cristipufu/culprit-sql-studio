@@ -21,6 +21,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 mod incident_history;
 mod requests;
 mod screenshot;
+mod sign_in_page;
 
 #[derive(Default)]
 struct DiscoveryRequests(requests::WindowRequests);
@@ -212,33 +213,9 @@ fn cancel_sign_in(ws: Ws) {
     ws.cancel_sign_in();
 }
 
-/// Microsoft's device-login pages only.
-fn sign_in_page_allowed(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("https://") else { return false };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("").to_ascii_lowercase();
-    matches!(
-        host.as_str(),
-        "microsoft.com" | "www.microsoft.com" | "login.microsoftonline.com" | "login.microsoft.com" | "aka.ms"
-    )
-}
-
 #[tauri::command]
 fn open_sign_in_page(sign_in: State<SignIn>) -> Result<()> {
-    let url = sign_in
-        .0
-        .lock()
-        .ok()
-        .and_then(|p| p.as_ref().map(|p| p.verification_uri.clone()))
-        .filter(|u| sign_in_page_allowed(u))
-        .ok_or_else(|| Error::not_found("No sign-in is waiting"))?;
-    let opened = if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(&url).status()
-    } else if cfg!(windows) {
-        std::process::Command::new("explorer").arg(&url).status()
-    } else {
-        std::process::Command::new("xdg-open").arg(&url).status()
-    };
-    opened.map(|_| ()).map_err(|e| Error::internal(format!("Could not open the browser: {e}")))
+    sign_in_page::open_pending(&sign_in.0)
 }
 
 #[tauri::command]
@@ -329,11 +306,10 @@ async fn brief(ws: Ws<'_>, name: String, report_id: String, finding_id: String) 
     blocking_workspace(ws.inner().clone(), move |ws| {
         culprit_core::i18n::scope("en", || {
             let report = ws.report_at(&name, &report_id)?;
-            let finding = report
-                .findings
-                .iter()
-                .find(|f| f.id == finding_id)
-                .ok_or_else(|| Error::not_found(format!("No finding {finding_id}")))?;
+            let finding =
+                report.findings.iter().find(|f| f.id == finding_id).ok_or_else(|| {
+                    Error::not_found(culprit_core::message!("engine.brief.no_finding", id = finding_id))
+                })?;
             Ok(culprit_engine::agent_brief(&report, finding))
         })
     })
@@ -505,8 +481,8 @@ async fn dashboard(
             return ws.dashboard_for_report(&name, &report_id);
         }
         let report = ws.latest_report(&name, requested_window(window_minutes))?.ok_or_else(|| {
-            Error::not_found(format!("No saved report for '{name}'"))
-                .with_hint(format!("Run `culprit scan {name}` first"))
+            Error::not_found(culprit_core::message!("engine.no_saved_report", name = &name))
+                .with_hint(culprit_core::message!("engine.scan_first", name = &name))
         })?;
         let mut dashboard = culprit_engine::dashboard_report(&report);
         dashboard.connection = name;
@@ -742,7 +718,8 @@ async fn choose_ssh_identity(app: AppHandle) -> Result<Option<String>> {
         let _ = sender.send(picked);
     });
     let Some(picked) = receiver.await.ok().flatten() else { return Ok(None) };
-    let path = picked.into_path().map_err(|_| Error::invalid("That identity file cannot be read from here"))?;
+    let path =
+        picked.into_path().map_err(|_| Error::invalid(culprit_core::message!("ui.ssh_fields.identity_unreadable")))?;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
@@ -820,11 +797,15 @@ struct UpdateProgress {
 /// matches the public key built into the app.
 fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater> {
     let failed = |e: tauri_plugin_updater::Error| {
-        Error::new(ErrorCode::ConnectionFailed, format!("Couldn't check for updates: {e}"))
+        Error::new(
+            ErrorCode::ConnectionFailed,
+            culprit_core::message!("ui.updates.check_failed", error = e.to_string()),
+        )
     };
     let mut builder = app.updater_builder().timeout(Duration::from_secs(30));
     if let Ok(endpoint) = std::env::var("CULPRIT_UPDATE_ENDPOINT") {
-        let url = endpoint.parse().map_err(|_| Error::invalid("CULPRIT_UPDATE_ENDPOINT isn't a URL"))?;
+        let url =
+            endpoint.parse().map_err(|_| Error::invalid(culprit_core::message!("ui.updates.endpoint_invalid")))?;
         builder = builder.endpoints(vec![url]).map_err(failed)?;
     }
     builder.build().map_err(failed)
@@ -833,10 +814,12 @@ fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater> {
 /// Whether a newer release is out. Only ever asked by the app itself, at most once a day, or when the person checks.
 #[tauri::command]
 async fn check_update(app: AppHandle, pending: State<'_, PendingUpdate>) -> Result<Option<UpdateInfo>> {
-    let update = updater(&app)?
-        .check()
-        .await
-        .map_err(|e| Error::new(ErrorCode::ConnectionFailed, format!("Couldn't check for updates: {e}")))?;
+    let update = updater(&app)?.check().await.map_err(|e| {
+        Error::new(
+            ErrorCode::ConnectionFailed,
+            culprit_core::message!("ui.updates.check_failed", error = e.to_string()),
+        )
+    })?;
     let info = update.as_ref().map(|u| UpdateInfo {
         version: u.version.clone(),
         current: u.current_version.clone(),
@@ -855,7 +838,7 @@ async fn install_update(app: AppHandle, pending: State<'_, PendingUpdate>) -> Re
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .ok_or_else(|| Error::not_found("No update is waiting. Check for updates again."))?;
+        .ok_or_else(|| Error::not_found(culprit_core::message!("ui.updates.no_pending")))?;
     let mut downloaded = 0u64;
     let mut reported = 0u64;
     update
@@ -872,7 +855,9 @@ async fn install_update(app: AppHandle, pending: State<'_, PendingUpdate>) -> Re
             || {},
         )
         .await
-        .map_err(|e| Error::new(ErrorCode::Internal, format!("Couldn't install the update: {e}")))?;
+        .map_err(|e| {
+            Error::new(ErrorCode::Internal, culprit_core::message!("ui.updates.install_failed", error = e.to_string()))
+        })?;
     Ok(())
 }
 

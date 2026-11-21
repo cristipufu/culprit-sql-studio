@@ -583,3 +583,29 @@ fn source_labels_follow_the_reader_without_changing_counter_identity() {
     assert!(workload.source_label.is_none());
     assert_eq!(workload.source_name(), "private collector");
 }
+
+#[test]
+fn session_id_numbers_preserve_existing_trimming_digits_and_range_policy() {
+    for (input, expected) in
+        [("42", 42u64), (" 42\n", 42), ("00042", 42), ("0", 0), ("9999999999999999999", 9_999_999_999_999_999_999)]
+    {
+        assert_eq!(session_number(input).unwrap(), expected);
+    }
+}
+
+#[test]
+fn session_id_errors_keep_english_bytes_and_can_render_the_original_error_in_each_language() {
+    for input in ["", "  ", "42;KILL 7", "-1", "１２", "١٢", "18446744073709551615", " id "] {
+        let error = crate::i18n::scope("en", || session_number(input).unwrap_err());
+        assert_eq!(error.code, crate::ErrorCode::InvalidInput);
+        assert_eq!(error.message, format!("'{}' is not a session id", input.trim()));
+        assert!(error.detail.is_none() && error.hint.is_none());
+        for language in ["es", "fr", "de"] {
+            crate::i18n::scope(language, || {
+                let rendered = error.message_source().render();
+                assert_eq!(rendered, crate::t!("core.model.session_id", session = input.trim()));
+                assert_ne!(rendered, error.message);
+            });
+        }
+    }
+}
