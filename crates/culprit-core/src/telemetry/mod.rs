@@ -802,6 +802,13 @@ impl TelemetryRecord {
                     (SourceObservation::FullTextPopulations { .. }, _) => false,
                     (_, OperationalFact::MssqlCdc(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::MssqlChangeFeed(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::CounterSet(sample)) if numa_node_candidate(sample) => {
+                        accepted
+                            && numa_node_header_is_valid(source)
+                            && MssqlNumaNodePoint::from_sample(sample)
+                                .is_ok_and(|point| row.source == point.kind().source())
+                    }
+                    (SourceObservation::Snapshot(header), _) if header.dataset == SnapshotDataset::NumaNodes => false,
                     (_, OperationalFact::CounterSet(sample)) if database_performance_candidate(sample) => {
                         accepted && database_performance_sample_fits_source(sample, source)
                     }

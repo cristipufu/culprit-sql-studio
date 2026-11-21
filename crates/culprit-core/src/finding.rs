@@ -380,6 +380,9 @@ pub struct Report {
     pub index_configuration: Vec<crate::IndexConfigurationReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub numa_nodes: Option<Vec<crate::InstanceResourceReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub cdc: Option<Vec<crate::CdcReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

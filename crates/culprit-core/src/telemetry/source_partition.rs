@@ -69,6 +69,9 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
+        if self.observation.collection() == TelemetryCollection::Snapshot(SnapshotDataset::NumaNodes) {
+            return numa_node_header_is_valid(self);
+        }
         if let SourceObservation::MssqlManagedInstanceResources(history) = &self.observation {
             return history.matches_source(self);
         }

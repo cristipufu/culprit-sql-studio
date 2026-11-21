@@ -1,4 +1,5 @@
 //! Real shared-state capture uses the owned loopback fixture, never a production endpoint.
+mod numa_nodes;
 mod suspect_rows;
 use super::*;
 use crate::{
@@ -32,6 +33,7 @@ async fn instance(provider: &MssqlProvider) -> SharedResourceIdentity {
             TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
             TelemetryCollection::DeadlockHistory,
             TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
+            TelemetryCollection::Snapshot(SnapshotDataset::NumaNodes),
             TelemetryCollection::Snapshot(SnapshotDataset::Operational),
         ]
     );

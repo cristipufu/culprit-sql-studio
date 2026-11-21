@@ -72,6 +72,8 @@ pub struct OperationalStats {
     pub full_text_populations: Vec<crate::telemetry::RecordedOperationalRead>,
     /// Independent original native histories; current scan membership supplies no historical ownership.
     pub cdc_history: Vec<crate::telemetry::RecordedOperationalRead>,
+    /// Independently captured original NUMA node populations, never merged with the later scan.
+    pub numa_nodes: Vec<crate::telemetry::RecordedOperationalRead>,
     pub change_feed_history: Vec<crate::telemetry::RecordedOperationalRead>,
     /// Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -227,6 +229,7 @@ impl OperationalStats {
             galera: _,
             full_text_populations: _,
             cdc_history: _,
+            numa_nodes: _,
             change_feed_history: _,
             tempdb_metadata_memory: _,
             storage: _,

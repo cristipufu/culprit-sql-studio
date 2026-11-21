@@ -1,16 +1,17 @@
 //! A native scalar counter carries its meaning separately from its name and current value.
 use super::*;
+mod native_fields;
 mod process_cpu;
 mod ratios;
 mod schedulers;
+pub use native_fields::{MssqlNativeField, MssqlNativeFieldKind, MssqlNativeFieldRoster, MssqlNativeFieldValue};
 pub use process_cpu::{
     MAX_MSSQL_PROCESSOR_OBSERVATIONS, MSSQL_PROCESS_CPU_COUNTERS, MSSQL_PROCESS_CPU_KIND, MSSQL_PROCESS_CPU_OBJECT,
     MssqlProcessCpuPoint,
 };
 pub use ratios::{CounterRatioGap, CounterRatioIssue, CounterRatioKind, CounterRatioSupport, NativeCounterRatio};
 pub use schedulers::{
-    MAX_MSSQL_SCHEDULERS, MSSQL_SCHEDULER_FIELDS, MSSQL_SCHEDULER_OBJECT, MssqlSchedulerField, MssqlSchedulerFieldKind,
-    MssqlSchedulerPoint, MssqlSchedulerValue, scheduler_candidate,
+    MAX_MSSQL_SCHEDULERS, MSSQL_SCHEDULER_FIELDS, MSSQL_SCHEDULER_OBJECT, MssqlSchedulerPoint, scheduler_candidate,
 };
 
 /// The existing generic set ceiling also bounds each native performance-counter acquisition.
@@ -150,3 +151,9 @@ impl NativeCounterSet {
             && (!self.counters.is_empty() || !self.properties.is_empty() || !self.ratio_gaps.is_empty())
     }
 }
+
+mod numa_nodes;
+pub use numa_nodes::{
+    MSSQL_CPU_NODES_SOURCE, MSSQL_MEMORY_NODES_SOURCE, MSSQL_NUMA_NODES_SOURCE, MssqlNumaNodeKind, MssqlNumaNodePoint,
+    numa_node_candidate, numa_node_header_is_valid,
+};

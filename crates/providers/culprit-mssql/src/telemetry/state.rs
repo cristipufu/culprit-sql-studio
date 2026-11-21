@@ -14,6 +14,8 @@ const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
 #[cfg(test)]
 mod database_counters;
 mod local_point;
+mod numa_nodes;
+pub(super) use numa_nodes::bounded_budget as numa_nodes_budget;
 mod pool_settings;
 mod settings;
 pub(super) use pool_settings::bounded_budget as pool_settings_budget;
@@ -24,7 +26,9 @@ pub(super) use settings::bounded_budget as settings_budget;
 pub(super) use tuning::bounded_budget as tuning_budget;
 
 fn native_budget(request: &CollectionRequest) -> CollectionBudget {
-    if pool_settings::selected(request) {
+    if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::NumaNodes }) {
+        numa_nodes_budget(&request.budget)
+    } else if pool_settings::selected(request) {
         pool_settings_budget(&request.budget)
     } else if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::MemoryFailures }) {
         memory_failure_budget(&request.budget)
@@ -62,6 +66,7 @@ pub(super) struct StateSource<R = ReadSession> {
     description: Option<CollectionDescription>,
     identity: Option<subject::Identity>,
     database_authority: subject::DatabaseAuthority,
+    numa_generation: Option<u64>,
     rows: Vec<TelemetryRecord>,
     pool_settings_point: Option<MssqlPoolSettingsPoint>,
     offset: usize,
@@ -87,7 +92,8 @@ impl<R: NativeRead> StateSource<R> {
         let mut request = request.clone();
         if matches!(
             dataset,
-            SnapshotDataset::Tuning
+            SnapshotDataset::NumaNodes
+                | SnapshotDataset::Tuning
                 | SnapshotDataset::Settings
                 | SnapshotDataset::DatabasePerformanceCounters
                 | SnapshotDataset::SuspectPages
@@ -103,6 +109,7 @@ impl<R: NativeRead> StateSource<R> {
             description: None,
             identity: None,
             database_authority,
+            numa_generation: None,
             rows: vec![],
             pool_settings_point: None,
             offset: 0,
@@ -251,6 +258,14 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             local_point::require_profile(&read.identity)?;
         }
         let target = read.identity.target();
+        if dataset == SnapshotDataset::NumaNodes {
+            self.numa_generation = Some(
+                self.io
+                    .connection_generation()
+                    .filter(|generation| *generation > 0)
+                    .ok_or_else(|| CollectionStop::SourceUnavailable.error())?,
+            );
+        }
         self.identity = Some(read.identity);
         let (mut observed_from, metadata_visible, properties) = if !shared && dataset == SnapshotDataset::Operational {
             let read = crate::database_properties::read(&mut self.io).await?;
@@ -319,7 +334,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         let description = CollectionDescription {
             partition: self.identity.as_ref().ok_or_else(invalid_data)?.partition()?,
             target,
-            source: if pool_settings::selected(&self.request) {
+            source: if dataset == SnapshotDataset::NumaNodes {
+                MSSQL_NUMA_NODES_SOURCE
+            } else if pool_settings::selected(&self.request) {
                 MSSQL_POOL_SETTINGS_SOURCE
             } else if shared {
                 if dataset == SnapshotDataset::MemoryFailures {
@@ -338,7 +355,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     SnapshotDataset::PlanCacheSummary => "plan-cache-state",
                     SnapshotDataset::MissingIndexes => "missing-index-state",
                     SnapshotDataset::Tuning => "tuning-state",
-                    SnapshotDataset::HyperscaleLogComponents
+                    SnapshotDataset::NumaNodes
+                    | SnapshotDataset::HyperscaleLogComponents
                     | SnapshotDataset::StatementCounters
                     | SnapshotDataset::RuntimeDistributions
                     | SnapshotDataset::StatementDefinitions
@@ -449,8 +467,12 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             return Err(invalid_data());
         }
         self.progress = Progress::Failed;
-        let identity =
-            self.identity.as_ref().ok_or_else(invalid_data)?.recheck(&mut self.io, &self.host, self.port).await?;
+        let owner = self.identity.as_ref().ok_or_else(invalid_data)?;
+        let (identity, final_at) = if self.numa_generation.is_some() {
+            owner.recheck_clock(&mut self.io, &self.host, self.port).await?
+        } else {
+            (owner.recheck(&mut self.io, &self.host, self.port).await?, None)
+        };
         let until = &self
             .description
             .as_ref()
@@ -458,7 +480,10 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             .ok_or_else(invalid_data)?
             .observed_until;
         let description = self.description.as_ref().ok_or_else(invalid_data)?;
-        let confirmed = self.identity.as_ref().ok_or_else(invalid_data)?.confirmed_by(&identity, until)
+        let confirmed = self.numa_generation.is_none_or(|generation| {
+            self.io.connection_generation() == Some(generation)
+                && final_at.as_deref().is_some_and(|at| ObservationBounds::new(until, at).is_some())
+        }) && self.identity.as_ref().ok_or_else(invalid_data)?.confirmed_by(&identity, until)
             && pool_settings::confirmed_by(description, &identity);
         self.progress = Progress::Finished;
         Ok(culprit_core::telemetry::SourceCompletion::verified_if(confirmed))
@@ -477,3 +502,6 @@ mod native_tests;
 mod shared_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod numa_node_tests;

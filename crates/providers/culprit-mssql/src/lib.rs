@@ -43,6 +43,8 @@ pub use qualification::assess_recipe_qualification;
 mod memory_clerks;
 mod memory_failures;
 mod missing_indexes;
+mod native_counter_fields;
+mod numa_nodes;
 mod oom_events;
 mod open_transactions;
 mod operations;

@@ -17,6 +17,7 @@ fn report() -> InstanceResourceReport {
         reset: Some(culprit_core::ResetMarker::Unknown),
     };
     InstanceResourceReport {
+        numa_nodes: None,
         process_cpu: None,
         context: None,
         native_source: None,
@@ -138,4 +139,34 @@ fn compact_spinlock_diagnostics_keep_the_raw_value_but_withhold_the_measurement_
     assert_eq!(field["availability"], "instrumentation-unqualified");
     assert_eq!(field["unqualified"]["native_value"], "0");
     assert_eq!(field["unqualified"]["required_global_trace_flag"], 8134);
+}
+
+#[test]
+fn original_numa_child_preserves_independent_coverage_bounds_nulls_and_bounded_native_fields() {
+    use culprit_collector::analytical::test_support::{NumaNodeCase, numa_node_evidence};
+    for case in [NumaNodeCase::Exact, NumaNodeCase::NativeNull, NumaNodeCase::CpuDenied, NumaNodeCase::Limited] {
+        let (source, rows) = numa_node_evidence(case);
+        let rows = rows
+            .into_iter()
+            .map(|row| match row {
+                culprit_core::telemetry::TelemetryRecord::Operational(row) => row,
+                _ => panic!(),
+            })
+            .collect::<Vec<_>>();
+        let report = culprit_checks::instance_resources::explain_source(&source, &rows, true).unwrap();
+        let value = super::value(&report);
+        let nodes = &value["numa_nodes"];
+        assert_eq!(nodes["scope"], "server");
+        assert_eq!(nodes["populations"].as_array().unwrap().len(), 2);
+        assert_eq!(nodes["original_read_bounds"]["from"], source.observation.snapshot().unwrap().observed_from);
+        for population in nodes["populations"].as_array().unwrap() {
+            assert!(population["entries"].as_array().unwrap().len() <= 5);
+            for entry in population["entries"].as_array().unwrap() {
+                assert!(entry["fields"].as_array().unwrap().len() <= 13);
+            }
+        }
+        for private in ["source_sha256", "original-instance", "manifest_sha256"] {
+            assert!(!value.to_string().contains(private));
+        }
+    }
 }

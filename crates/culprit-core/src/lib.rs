@@ -289,6 +289,9 @@ pub use managed_instance_resource_report::{
     ManagedInstanceResourceField, ManagedInstanceResourceInterval, ManagedInstanceResourceReport,
 };
 
+pub use instance_resource_report::{
+    NumaNodeEntry, NumaNodeField, NumaNodeFieldAvailability, NumaNodePopulationReport, NumaNodeReport,
+};
 mod index_configuration_report;
 pub use index_configuration_report::{
     IndexConfigurationEntry, IndexConfigurationField, IndexConfigurationReport, PartitionConfigurationEntry,

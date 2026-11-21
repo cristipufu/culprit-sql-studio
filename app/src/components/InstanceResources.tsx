@@ -1,5 +1,7 @@
 import type { InstanceResourceGroup } from "../gen/InstanceResourceGroup";
 import type { InstanceResourceReport } from "../gen/InstanceResourceReport";
+import type { NumaNodeEntry } from "../gen/NumaNodeEntry";
+import type { NumaNodeReport } from "../gen/NumaNodeReport";
 import type { SchedulerEntry } from "../gen/SchedulerEntry";
 import type { SchedulerField } from "../gen/SchedulerField";
 import { digits } from "../lib/format";
@@ -17,9 +19,9 @@ export function InstanceResources({ report }: { report: InstanceResourceReport }
   const cpu = report.process_cpu;
   return (
     <>
-      <ObservationList
+      {(!report.numa_nodes || report.numa_nodes.populations.length === 0) && <ObservationList
         collapseEntries
-        source={t("view.instance_resources.source")}
+        source={report.numa_nodes ? report.title : t("view.instance_resources.source")}
         scope={t("ui.beyond_time.scope.server")}
         time={
           <>
@@ -35,8 +37,9 @@ export function InstanceResources({ report }: { report: InstanceResourceReport }
         }
         report={{ ...report, entries: report.groups, source_reason: null }}
         renderEntry={renderResourceGroup}
-      />
+      />}
       {report.schedulers && <SchedulerDetails report={report.schedulers} />}
+      {report.numa_nodes && <NumaDetails report={report.numa_nodes} />}
       {cpu && (
         <ObservationList
           collapseEntries
@@ -98,4 +101,25 @@ function schedulerValue(field: SchedulerField) {
     case "column-unavailable": return t("view.schedulers.value.unavailable");
     case "instrumentation-unqualified": return field.unqualified ? t("view.schedulers.value.unqualified", { value: digits(field.unqualified.native_value) }) : t("view.schedulers.value.unavailable");
   }
+}
+
+const MAX_NUMA_FIELDS = 13;
+/** A read interval is not a per-row timestamp or a physical CPU/memory-node continuity claim. */
+function NumaDetails({ report }: { report: NumaNodeReport }) {
+  const bounds = report.context?.kind === "native" ? report.context.context : report.context;
+  return <>{report.populations.map((population) => <ObservationList key={population.kind} collapseEntries
+    source={population.native_source.source} scope={t("ui.beyond_time.scope.server")}
+    time={bounds && t("ui.memory_failures.read_between", { from: bounds.observed_from, until: bounds.observed_until })}
+    report={{ title: population.title, summary: population.summary, source_state: population.source_state, source_reason: null, limitations: report.limitations, entries: population.entries }}
+    renderEntry={renderNumaNode}>
+    {population.entries_limited && <p className="muted">{t("view.schedulers.limit.presentation")}</p>}
+  </ObservationList>)}</>;
+}
+
+function renderNumaNode(entry: NumaNodeEntry) {
+  return <article className="operational-card" key={entry.observation_key}>
+    <h4>{entry.title}</h4>
+    <dl>{entry.fields.slice(0, MAX_NUMA_FIELDS).map((field) => <NativeValue key={field.native_name} label={field.label}
+      value={field.availability === "native-null" ? t("view.schedulers.value.null") : field.availability === "column-unavailable" ? t("view.schedulers.value.unavailable") : field.value} />)}</dl>
+  </article>;
 }

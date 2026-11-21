@@ -13,17 +13,17 @@ fn sample(id: u32) -> NativeCounterSet {
     };
     for field in MSSQL_SCHEDULER_FIELDS {
         match field.kind {
-            MssqlSchedulerFieldKind::Identity => (),
-            MssqlSchedulerFieldKind::IntegerProperty | MssqlSchedulerFieldKind::BooleanProperty => {
+            MssqlNativeFieldKind::Identity => (),
+            MssqlNativeFieldKind::IntegerProperty | MssqlNativeFieldKind::BooleanProperty => {
                 sample.properties.insert(field.name.into(), "0".into());
             }
-            MssqlSchedulerFieldKind::TextProperty => {
+            MssqlNativeFieldKind::TextProperty => {
                 sample.properties.insert(field.name.into(), "HIDDEN ONLINE".into());
             }
-            MssqlSchedulerFieldKind::UnqualifiedCounter { .. } => {
+            MssqlNativeFieldKind::UnqualifiedCounter { .. } => {
                 sample.properties.insert(field.name.into(), "0".into());
             }
-            MssqlSchedulerFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
+            MssqlNativeFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
                 key: field.name.into(),
                 value: MeasurementValue::Integer(
                     if field.name == "work_queue_count" { "9007199254740993" } else { "0" }.into(),
@@ -227,7 +227,7 @@ fn modern_counters_keep_native_populations_while_unqualified_zero_and_positive_s
         let mut sample = sample(0);
         for field in MSSQL_SCHEDULER_FIELDS
             .iter()
-            .filter(|field| matches!(field.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }))
+            .filter(|field| matches!(field.kind, MssqlNativeFieldKind::UnqualifiedCounter { .. }))
         {
             sample.properties.insert(field.name.into(), value.into());
         }

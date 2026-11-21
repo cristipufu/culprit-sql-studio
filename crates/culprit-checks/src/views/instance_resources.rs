@@ -3,8 +3,10 @@ use culprit_core::{
     InstanceResourceField, InstanceResourceGroup, InstanceResourceReport, Result, Snapshot, SourceState, t,
     telemetry::*,
 };
+mod numa_nodes;
 mod process_cpu;
 mod schedulers;
+pub use numa_nodes::unavailable as unavailable_numa_nodes;
 pub use process_cpu::explain_source as explain_process_cpu_source;
 
 pub fn explain_source(
@@ -12,6 +14,9 @@ pub fn explain_source(
     observations: &[OperationalObservation],
     read_complete: bool,
 ) -> Result<InstanceResourceReport> {
+    if source.observation.snapshot().is_some_and(|header| header.dataset == SnapshotDataset::NumaNodes) {
+        return numa_nodes::explain_source(source, observations, read_complete);
+    }
     let mut report = explain(&InstanceResourceRead::from_source(source, observations, read_complete)?)?;
     if let Some(coverage) = source.observation.snapshot().and_then(|snapshot| {
         snapshot.sources.iter().find(|source| source.source == culprit_core::source_id::PROCESSOR_TOPOLOGY)
@@ -102,6 +107,7 @@ pub fn explain(read: &InstanceResourceRead) -> Result<InstanceResourceReport> {
 
 fn unavailable() -> InstanceResourceReport {
     InstanceResourceReport {
+        numa_nodes: None,
         process_cpu: None,
         schedulers: None,
         context: None,
@@ -278,3 +284,15 @@ fn value(key: &str, label: String, value: &Option<String>) -> InstanceResourceFi
 
 #[cfg(test)]
 mod tests;
+
+pub fn explain_numa_recorded(recorded: &RecordedOperationalRead) -> Result<InstanceResourceReport> {
+    match recorded {
+        RecordedOperationalRead::Captured { read } => {
+            if !read.is_valid() || !numa_node_header_is_valid(&read.description) {
+                return Err(CollectionStop::InvalidPage.error());
+            }
+            explain_captured(read)
+        }
+        RecordedOperationalRead::Unavailable { reason } => Ok(unavailable_numa_nodes(reason)),
+    }
+}

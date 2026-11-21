@@ -37,6 +37,7 @@ mod instance_resources;
 mod jobs;
 mod maintenance_progress;
 mod memory_clerks;
+mod numa_nodes;
 mod page_server_reads;
 mod performance_counters;
 mod pool_settings;
@@ -318,6 +319,7 @@ impl Pipeline {
         let index_configuration = index_configuration::explain(&mut snapshot);
         let storage = storage::explain(&mut snapshot);
         let instance_resources = instance_resources::explain(&mut snapshot);
+        let numa_nodes = numa_nodes::explain(&snapshot);
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
         let page_server_reads = page_server_reads::explain(&mut snapshot);
@@ -424,6 +426,7 @@ impl Pipeline {
             index_configuration,
             storage,
             instance_resources,
+            numa_nodes,
             snapshot,
             findings,
             locked,

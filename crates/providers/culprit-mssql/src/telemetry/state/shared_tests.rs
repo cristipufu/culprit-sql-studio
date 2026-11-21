@@ -5,7 +5,7 @@ use crate::{
     value::{Rec, Val},
 };
 
-fn request() -> CollectionRequest {
+pub(super) fn request() -> CollectionRequest {
     CollectionRequest {
         subject: CollectionSubject::Shared {
             resource: SharedResourceIdentity {

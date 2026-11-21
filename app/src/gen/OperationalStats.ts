@@ -60,7 +60,11 @@ galera: Array<RecordedOperationalRead>, full_text_populations: Array<RecordedOpe
 /**
  * Independent original native histories; current scan membership supplies no historical ownership.
  */
-cdc_history: Array<RecordedOperationalRead>, change_feed_history: Array<RecordedOperationalRead>, 
+cdc_history: Array<RecordedOperationalRead>, 
+/**
+ * Independently captured original NUMA node populations, never merged with the later scan.
+ */
+numa_nodes: Array<RecordedOperationalRead>, change_feed_history: Array<RecordedOperationalRead>, 
 /**
  * Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
  */

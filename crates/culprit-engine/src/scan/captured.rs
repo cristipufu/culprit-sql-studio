@@ -8,6 +8,7 @@ use culprit_core::{
 use culprit_core::telemetry::{CachedRuntimeRead, CachedRuntimeReadOrigin};
 
 pub(crate) enum CapturedScanEvidence {
+    NumaNodes(Box<CapturedOperationalRead>),
     IndexConfiguration(Box<CapturedOperationalRead>),
     ChangeCapture {
         family: culprit_core::telemetry::MssqlChangeCaptureFamily,
@@ -29,6 +30,14 @@ pub(crate) enum CapturedScanEvidence {
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
 }
 impl CapturedScanEvidence {
+    pub(crate) fn numa_nodes(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        if !culprit_core::telemetry::numa_node_header_is_valid(&read.description) {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        culprit_checks::instance_resources::explain_captured(&read)?;
+        Ok(Self::NumaNodes(read))
+    }
+
     pub(crate) fn index_configuration(read: Box<CapturedOperationalRead>) -> Result<Self> {
         culprit_checks::index_configuration::explain_captured(&read)?;
         Ok(Self::IndexConfiguration(read))
@@ -109,6 +118,9 @@ impl CapturedScanEvidence {
     }
     pub(crate) fn attach(self, snapshot: &mut Snapshot) -> Result<()> {
         match self {
+            Self::NumaNodes(read) => {
+                culprit_core::telemetry::append_recorded_operational_read(&mut snapshot.operations.numa_nodes, read)?;
+            }
             Self::IndexConfiguration(read) => {
                 culprit_checks::index_configuration::explain_captured(&read)?;
                 culprit_core::telemetry::append_recorded_operational_read(
@@ -251,3 +263,6 @@ fn retain_history_original(
     *slot = Some(Box::new(RecordedQueryHistoryRead::Captured { read }));
     Ok(())
 }
+
+#[cfg(all(test, feature = "collector"))]
+mod numa_node_tests;

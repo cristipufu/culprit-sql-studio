@@ -848,7 +848,7 @@
         "table": "orders"
       }
     ],
-    "format": 45,
+    "format": 46,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -1016,7 +1016,8 @@
       "sequences": [],
       "spaces": [],
       "sqlite": null,
-      "table_memory": []
+      "table_memory": [],
+      "numa_nodes": []
     },
     "options": {
       "collect_memory_failures": false,

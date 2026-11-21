@@ -77,6 +77,27 @@ fn generate() -> Result<(), Box<dyn std::error::Error>> {
         let report = culprit_checks::instance_resources::explain_source(&source, &rows, true)?;
         cases.insert(name, serde_json::json!({"read":read,"report":report}));
     }
+    for (name, case) in [
+        ("numa_exact", culprit_collector::analytical::test_support::NumaNodeCase::Exact),
+        ("numa_zero", culprit_collector::analytical::test_support::NumaNodeCase::Zero),
+        ("numa_null", culprit_collector::analytical::test_support::NumaNodeCase::NativeNull),
+        ("numa_unavailable", culprit_collector::analytical::test_support::NumaNodeCase::ColumnUnavailable),
+        ("numa_partial", culprit_collector::analytical::test_support::NumaNodeCase::PartialMemory),
+        ("numa_cpu_denied", culprit_collector::analytical::test_support::NumaNodeCase::CpuDenied),
+        ("numa_both_denied", culprit_collector::analytical::test_support::NumaNodeCase::BothDenied),
+        ("numa_limited", culprit_collector::analytical::test_support::NumaNodeCase::Limited),
+    ] {
+        let (source, records) = culprit_collector::analytical::test_support::numa_node_evidence(case);
+        let rows = records
+            .into_iter()
+            .map(|row| match row {
+                TelemetryRecord::Operational(row) => Ok(row),
+                _ => Err(DeliveryProblem::Integrity.error()),
+            })
+            .collect::<culprit_core::Result<Vec<_>>>()?;
+        let report = culprit_checks::instance_resources::explain_source(&source, &rows, true)?;
+        cases.insert(name, serde_json::json!({"source":source,"report":report}));
+    }
     let path = std::env::args_os().nth(1).map(PathBuf::from).unwrap_or_else(|| {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/instance-resources.sample.json")
     });

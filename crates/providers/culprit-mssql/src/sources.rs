@@ -224,6 +224,18 @@ pub const MEMORY_FAILURES: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.memory_failures"),
     delivers: &[],
 };
+/// Manual node-profile sources do not expand ordinary snapshot acquisition.
+pub const CPU_NODES: Source = Source {
+    name: culprit_core::telemetry::MSSQL_CPU_NODES_SOURCE,
+    reads: culprit_core::key!("view.numa_nodes.source.cpu"),
+    delivers: &[],
+};
+pub const MEMORY_NODES: Source = Source {
+    name: culprit_core::telemetry::MSSQL_MEMORY_NODES_SOURCE,
+    reads: culprit_core::key!("view.numa_nodes.source.memory"),
+    delivers: &[],
+};
+
 pub const SCHEDULERS: Source = Source {
     name: source_id::SCHEDULERS,
     reads: culprit_core::key!("provider.mssql.source.schedulers"),
@@ -528,6 +540,8 @@ pub const ALL: &[Source] = &[
     TEMPDB_METADATA_MEMORY,
     INSTANCE_RESOURCES,
     SCHEDULERS,
+    CPU_NODES,
+    MEMORY_NODES,
     FORWARDED_FETCHES,
     QUERY_FAMILIES,
     PLAN_CACHE_USE,

@@ -19,10 +19,10 @@ fn sample() -> NativeCounterSet {
             TextProperty => {
                 sample.properties.insert(field.name.into(), "VISIBLE ONLINE".into());
             }
-            MssqlSchedulerFieldKind::UnqualifiedCounter { .. } => {
+            MssqlNativeFieldKind::UnqualifiedCounter { .. } => {
                 sample.properties.insert(field.name.into(), "0".into());
             }
-            MssqlSchedulerFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
+            MssqlNativeFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
                 key: field.name.into(),
                 value: MeasurementValue::Integer("9007199254740993".into()),
                 unit,
@@ -38,7 +38,7 @@ fn sample() -> NativeCounterSet {
     }
     sample
 }
-fn field(name: &str) -> &'static MssqlSchedulerField {
+fn field(name: &str) -> &'static MssqlNativeField {
     MSSQL_SCHEDULER_FIELDS.iter().find(|field| field.name == name).unwrap()
 }
 
@@ -49,9 +49,9 @@ fn native_scheduler_fields_preserve_exact_integer_values_and_do_not_create_reset
     assert_eq!(point.scheduler_id(), "0");
     assert!(matches!(
         point.field(field("work_queue_count")).unwrap(),
-        MssqlSchedulerValue::Observed("9007199254740993")
+        MssqlNativeFieldValue::Observed("9007199254740993")
     ));
-    assert!(matches!(point.field(field("is_idle")).unwrap(), MssqlSchedulerValue::Observed("0")));
+    assert!(matches!(point.field(field("is_idle")).unwrap(), MssqlNativeFieldValue::Observed("0")));
     assert!(sample.counters.iter().all(|counter| counter.reset == crate::ResetMarker::Unknown));
     let bytes = serde_json::to_vec(&sample).unwrap();
     let restored = serde_json::from_slice(&bytes).unwrap();
@@ -66,9 +66,9 @@ fn native_null_and_unavailable_columns_are_distinct_from_observed_zero() {
     sample.counters.retain(|counter| counter.key != "ideal_workers_limit");
     sample.properties.insert("unavailable_columns".into(), "[\"ideal_workers_limit\"]".into());
     let point = MssqlSchedulerPoint::from_sample(&sample).unwrap();
-    assert!(matches!(point.field(field("failed_to_create_worker")).unwrap(), MssqlSchedulerValue::NativeNull));
-    assert!(matches!(point.field(field("ideal_workers_limit")).unwrap(), MssqlSchedulerValue::ColumnUnavailable));
-    assert!(matches!(point.field(field("is_online")).unwrap(), MssqlSchedulerValue::Observed("0")));
+    assert!(matches!(point.field(field("failed_to_create_worker")).unwrap(), MssqlNativeFieldValue::NativeNull));
+    assert!(matches!(point.field(field("ideal_workers_limit")).unwrap(), MssqlNativeFieldValue::ColumnUnavailable));
+    assert!(matches!(point.field(field("is_online")).unwrap(), MssqlNativeFieldValue::Observed("0")));
 }
 
 #[test]
@@ -188,12 +188,12 @@ fn modern_native_semantics_are_typed_without_turning_spinlock_raw_values_into_me
         "total_waits_completed",
         "total_completed_tasks",
     ] {
-        assert!(matches!(point.field(field(name)).unwrap(), MssqlSchedulerValue::Observed("9007199254740993")));
+        assert!(matches!(point.field(field(name)).unwrap(), MssqlNativeFieldValue::Observed("9007199254740993")));
     }
     for name in ["spinlock_wait_time_ms", "spinlock_max_wait_time_ms", "spinlock_wait_count"] {
         assert!(matches!(
             point.field(field(name)).unwrap(),
-            MssqlSchedulerValue::Unqualified { native_value: "0", required_global_trace_flag: 8134 }
+            MssqlNativeFieldValue::Unqualified { native_value: "0", required_global_trace_flag: 8134 }
         ));
         assert!(!sample.counters.iter().any(|counter| counter.key == name));
     }
@@ -207,11 +207,14 @@ fn catalog_absence_native_null_and_raw_unknown_instrumentation_are_independent_s
     sample.properties.remove("spinlock_max_wait_time_ms");
     sample.properties.insert("unavailable_columns".into(), "[\"spinlock_max_wait_time_ms\"]".into());
     let point = MssqlSchedulerPoint::from_sample(&sample).unwrap();
-    assert!(matches!(point.field(field("spinlock_wait_time_ms")).unwrap(), MssqlSchedulerValue::NativeNull));
-    assert!(matches!(point.field(field("spinlock_max_wait_time_ms")).unwrap(), MssqlSchedulerValue::ColumnUnavailable));
+    assert!(matches!(point.field(field("spinlock_wait_time_ms")).unwrap(), MssqlNativeFieldValue::NativeNull));
+    assert!(matches!(
+        point.field(field("spinlock_max_wait_time_ms")).unwrap(),
+        MssqlNativeFieldValue::ColumnUnavailable
+    ));
     assert!(matches!(
         point.field(field("spinlock_wait_count")).unwrap(),
-        MssqlSchedulerValue::Unqualified { native_value: "0", .. }
+        MssqlNativeFieldValue::Unqualified { native_value: "0", .. }
     ));
 }
 

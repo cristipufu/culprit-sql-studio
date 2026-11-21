@@ -22,6 +22,7 @@ pub(super) enum Family {
     TempdbMetadataMemory,
     InstanceResources,
     Schedulers,
+    NumaNodes(MssqlNumaNodeKind),
     MemoryFailures,
     PlanCacheSummary,
     MissingIndexes,
@@ -67,7 +68,8 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         SnapshotDataset::Tuning => crate::query_store::tuning::Kind::ALL.into_iter().map(Family::Tuning).collect(),
         SnapshotDataset::WaitCounters => vec![Family::WaitCounters],
         SnapshotDataset::Settings => crate::settings::Kind::ALL.into_iter().map(Family::Settings).collect(),
-        SnapshotDataset::HyperscaleLogComponents
+        SnapshotDataset::NumaNodes
+        | SnapshotDataset::HyperscaleLogComponents
         | SnapshotDataset::StatementCounters
         | SnapshotDataset::RuntimeDistributions
         | SnapshotDataset::StatementDefinitions
@@ -116,6 +118,9 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
 }
 
 pub(super) fn shared_families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
+    if dataset == SnapshotDataset::NumaNodes {
+        return Ok(MssqlNumaNodeKind::ALL.into_iter().map(Family::NumaNodes).collect());
+    }
     if dataset == SnapshotDataset::MemoryFailures {
         return Ok(vec![Family::MemoryFailures]);
     }
@@ -152,6 +157,8 @@ impl Family {
             Self::TempdbMetadataMemory => &sources::TEMPDB_METADATA_MEMORY,
             Self::InstanceResources => &sources::INSTANCE_RESOURCES,
             Self::Schedulers => &sources::SCHEDULERS,
+            Self::NumaNodes(MssqlNumaNodeKind::Cpu) => &sources::CPU_NODES,
+            Self::NumaNodes(MssqlNumaNodeKind::Memory) => &sources::MEMORY_NODES,
             Self::MemoryFailures => &sources::MEMORY_FAILURES,
             Self::PlanCacheSummary => &sources::PLAN_CACHE_USE,
             Self::MissingIndexes => &sources::MISSING_INDEXES,
@@ -248,6 +255,9 @@ impl Family {
                 }));
             }
             Self::Schedulers => counter_sets(self.source().name, crate::schedulers::read(reader, limit).await?)?,
+            Self::NumaNodes(kind) => {
+                counter_sets(self.source().name, crate::numa_nodes::read(reader, kind, limit).await?)?
+            }
             Self::Tuning(kind) => {
                 let layout = tuning_layout.ok_or_else(crate::read::invalid_data)?.as_ref().map_err(Clone::clone)?;
                 let Some(facts) = crate::query_store::tuning::read_kind(reader, kind, layout, limit).await? else {

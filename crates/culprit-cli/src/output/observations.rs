@@ -36,7 +36,7 @@ pub(crate) use blocking::blocking;
 mod configured_log_rates;
 mod connection_outcomes;
 mod instance_resources;
-pub(crate) use instance_resources::instance_resources;
+pub(crate) use instance_resources::{compact_numa_nodes, instance_resources};
 mod table_full_text;
 mod table_temporal;
 pub(crate) use table_full_text::table_full_text;

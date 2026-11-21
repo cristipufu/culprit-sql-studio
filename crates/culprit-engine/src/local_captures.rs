@@ -122,11 +122,11 @@ impl LocalCaptureAnalysisKind {
             Self::SessionCensus => Activity,
             Self::MemoryClerks
             | Self::TempdbMetadataMemory
-            | Self::InstanceResources
             | Self::DatabaseProperties
             | Self::ConfiguredLogRates
             | Self::ConnectionOutcomes
             | Self::Storage => Snapshot(&[Dataset::Operational]),
+            Self::InstanceResources => Snapshot(&[Dataset::Operational, Dataset::NumaNodes]),
             Self::PerformanceCounters => Snapshot(&[Dataset::Operational, Dataset::DatabasePerformanceCounters]),
             Self::HyperscaleLogComponents => Snapshot(&[Dataset::HyperscaleLogComponents]),
             Self::SuspectPages => Snapshot(&[Dataset::SuspectPages]),

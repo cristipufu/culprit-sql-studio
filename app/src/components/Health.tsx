@@ -184,6 +184,8 @@ export function HealthTab({
   const databasePropertiesIssue = observationReadIssue("database-properties", report.snapshot.sources ?? [], Boolean(databasePropertiesRead || databasePropertiesRecorded));
   const cdcHistory = changeCaptureHistoryState(report.cdc, report.snapshot.operations.cdc_history.length, CDC_HISTORY_SOURCES, report.snapshot.sources ?? []);
   const changeFeedHistory = changeCaptureHistoryState(report.change_feed, report.snapshot.operations.change_feed_history.length, CHANGE_FEED_HISTORY_SOURCES, report.snapshot.sources ?? []);
+  const numaNodes = report.numa_nodes ?? [];
+  const numaRecorded = report.snapshot.operations.numa_nodes.length > 0 || (report.snapshot.sources ?? []).some((source) => source.source === "cpu-node-state" || source.source === "memory-node-state");
   const tableMemory = report.table_memory ?? [];
   const indexConfiguration = report.index_configuration;
   const queryWaitFragments = report.query_wait_fragments;
@@ -217,7 +219,7 @@ export function HealthTab({
   const cleanupSources = new Set(["persistent version store", "open transactions", ...cleanupReads.map((read) => read.source), ...(retention?.sources.map((source) => source.source) ?? [])]);
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
-  const hasDetailedEvidence = [cdcHistory.present, changeFeedHistory.present, memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
+  const hasDetailedEvidence = [numaNodes.length > 0, numaRecorded, cdcHistory.present, changeFeedHistory.present, memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
     sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, runtimeFragments, queryWaitFragments, indexConfiguration.length > 0, tableMemory.length > 0, groupReplication.length > 0, galera.length > 0, fullTextPopulations.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, suspectPages, suspectRecorded, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, managedInstanceResources, managedInstanceResourcesRead, poolSettings, poolSettingsRead, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
   const hasReadIssue = [cdcHistory.issue, changeFeedHistory.issue, memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, suspectIssue, databasePropertiesIssue, memoryClerkIssue, tempdbMetadataIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
@@ -302,6 +304,8 @@ export function HealthTab({
       {!performanceCounters.some((counters) => counters.ratios) && counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
       {!hasSharedPerformanceCounters && !counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
       {!hasSharedPerformanceCounters && !counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
+      {numaNodes.map((nodes, index) => <InstanceResources key={`${report.snapshot.id}:numa:${index}`} report={nodes} />)}
+      {numaNodes.length === 0 && numaRecorded && <ObservationExplanationIssue title={t("view.numa_nodes.title")} reason={t("view.numa_nodes.invalid")} />}
       {instanceResources && <InstanceResources key={report.snapshot.id} report={instanceResources} />}
       {!instanceResources && instanceResourceIssue && <ObservationSourceIssue source={instanceResourceIssue} title={t("view.instance_resources.title")} />}
       {!instanceResources && (instanceResourceRead || instanceResourceRecorded) && !instanceResourceIssue && <ObservationExplanationIssue title={t("view.instance_resources.title")} reason={t("view.instance_resources.invalid")} />}

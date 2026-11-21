@@ -1098,5 +1098,7 @@ pub use managed_instance_resources::{
     ManagedInstanceResourceCase, managed_instance_resource_case, managed_instance_resource_evidence,
 };
 
+mod numa_nodes;
+pub use numa_nodes::{NumaNodeCase, numa_node_evidence};
 mod index_configuration;
 pub use index_configuration::{IndexConfigurationCase, index_configuration_evidence};

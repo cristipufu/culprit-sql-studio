@@ -1475,7 +1475,7 @@
         "table": "order_items"
       }
     ],
-    "format": 45,
+    "format": 46,
     "histograms": null,
     "id": "20261011T160540.394Z",
     "identity": {
@@ -1914,7 +1914,8 @@
       "sequences": [],
       "spaces": [],
       "sqlite": null,
-      "table_memory": []
+      "table_memory": [],
+      "numa_nodes": []
     },
     "options": {
       "collect_memory_failures": false,

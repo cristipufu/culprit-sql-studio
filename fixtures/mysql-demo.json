@@ -14,7 +14,8 @@
     "galera": [],
     "cdc_history": [],
     "change_feed_history": [],
-    "index_configuration": []
+    "index_configuration": [],
+    "numa_nodes": []
   },
   "sources": [
     {
@@ -53,7 +54,7 @@
       "reason": null
     }
   ],
-  "format": 45,
+  "format": 46,
   "id": "20261011T120900.394Z",
   "connection": "mysql-demo",
   "environment": "local",

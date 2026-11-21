@@ -443,6 +443,9 @@ impl Out {
         if let Some(pool) = &report.pool_settings {
             println!("\n{}", observations::pool_settings(pool));
         }
+        for nodes in report.numa_nodes.as_deref().unwrap_or_default() {
+            println!("\n{}", observations::instance_resources(nodes));
+        }
         for history in report.cdc.as_deref().unwrap_or_default() {
             println!("\n{}", observations::cdc(history));
         }
@@ -814,6 +817,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "locked": report.locked,
         "assessments": report.assessments,
         "engine_limitations": s.server.engine.spec().limitations(),
+        "numa_nodes":report.numa_nodes.as_ref().map(|reports|reports.iter().map(observations::compact_numa_nodes).collect::<Vec<_>>()),
         "cdc":report.cdc.as_ref().map(|reports|reports.iter().map(|report|observations::compact_change_capture((&report.title,&report.summary),report.source_state,report.read_complete,report.context.as_ref(),&report.limitations,&report.entries,&report.sources)).collect::<Vec<_>>()),
         "change_feed":report.change_feed.as_ref().map(|reports|reports.iter().map(|report|observations::compact_change_capture((&report.title,&report.summary),report.source_state,report.read_complete,report.context.as_ref(),&report.limitations,&report.entries,&report.sources)).collect::<Vec<_>>()),
         "runtime_fragments": report.runtime_fragments.as_deref().map(observations::compact_runtime_fragments),
@@ -868,6 +872,9 @@ pub(super) fn markdown_report(report: &Report) -> String {
     if !stopped.is_empty() {
         out.push_str(&format!("\n## {}\n\n", t!("cli.findings.history", count = stopped.len().to_string())));
         table(&mut out, &stopped, active.len());
+    }
+    for nodes in report.numa_nodes.as_deref().unwrap_or_default() {
+        out.push_str(&markdown_text_block(&observations::instance_resources(nodes)));
     }
     for history in report.cdc.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::cdc(history)));

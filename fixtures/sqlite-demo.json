@@ -13,7 +13,8 @@
     "galera": [],
     "cdc_history": [],
     "change_feed_history": [],
-    "index_configuration": []
+    "index_configuration": [],
+    "numa_nodes": []
   },
   "sources": [
     {
@@ -42,7 +43,7 @@
       "reason": null
     }
   ],
-  "format": 45,
+  "format": 46,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",

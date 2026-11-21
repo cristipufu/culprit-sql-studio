@@ -243,7 +243,7 @@ async fn modern_scheduler_originals_keep_layout_absence_nulls_and_unqualified_sp
                 || case == SchedulerCase::Sql2022Layout && spec.introduced_in == Some(17)
             {
                 assert_eq!(field.availability, culprit_core::SchedulerFieldAvailability::ColumnUnavailable);
-            } else if matches!(spec.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }) {
+            } else if matches!(spec.kind, MssqlNativeFieldKind::UnqualifiedCounter { .. }) {
                 assert_eq!(field.availability, culprit_core::SchedulerFieldAvailability::InstrumentationUnqualified);
                 assert!(field.value.is_none());
                 let raw = field.unqualified.as_ref().unwrap();
@@ -256,5 +256,96 @@ async fn modern_scheduler_originals_keep_layout_absence_nulls_and_unqualified_sp
             }
         }
         assert_eq!(fixture.recovery_object_reads(), opened);
+    }
+}
+
+#[tokio::test]
+async fn original_numa_populations_keep_exact_fields_coverage_clocks_and_nulls_without_source_or_recovery() {
+    use culprit_collector::analytical::test_support::{NumaNodeCase, numa_node_evidence};
+    for case in NumaNodeCase::ALL {
+        let (source, rows) = numa_node_evidence(case);
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture =
+            fixture.read_families(&[culprit_collector::analytical::evidence::EvidenceFamily::OperationalSamples]).await;
+        let analysis = culprit_engine::collected_resources::instance_resources(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.context.records.len(), rows.len());
+        assert_eq!(fixture.recovery_object_reads(), opened);
+        let nodes = analysis.report.numa_nodes.as_ref().unwrap();
+        assert_eq!(nodes.populations.len(), 2);
+        assert_eq!(nodes.context.as_ref().unwrap().native().unwrap().partition, source.partition);
+        assert!(analysis.report.groups.is_empty() && analysis.report.observed_at.is_none());
+        for population in &nodes.populations {
+            for entry in &population.entries {
+                for field in &entry.fields {
+                    if field.unit.is_some() {
+                        assert_eq!(field.nature, Some(CounterNature::Gauge));
+                        assert_eq!(field.reset, Some(culprit_core::ResetMarker::Unknown));
+                    }
+                }
+            }
+        }
+        if case == NumaNodeCase::ColumnUnavailable {
+            assert!(nodes.populations[1].entries[0].fields.iter().any(|field| field.native_name == "target_kb"
+                && field.availability == culprit_core::NumaNodeFieldAvailability::ColumnUnavailable));
+        }
+        if case == NumaNodeCase::Limited {
+            assert_eq!(nodes.populations[0].observed_rows, 257);
+            assert_eq!(nodes.populations[0].entries.len(), 256);
+            assert!(nodes.populations[0].entries_limited);
+        }
+    }
+}
+#[tokio::test]
+async fn missing_original_numa_body_keeps_native_counts_and_withdraws_complete_read_instead_of_zero() {
+    let (source, rows) = culprit_collector::analytical::test_support::numa_node_evidence(
+        culprit_collector::analytical::test_support::NumaNodeCase::Exact,
+    );
+    let fixture = Fixture::new(source, rows).await;
+    fixture.remove_row(TelemetryStream::OperationalSamples, 1);
+    let capture =
+        fixture.read_families(&[culprit_collector::analytical::evidence::EvidenceFamily::OperationalSamples]).await;
+    let report = culprit_engine::collected_resources::instance_resources(&capture).unwrap().report;
+    let nodes = report.numa_nodes.unwrap();
+    assert!(!nodes.read_complete);
+    assert_eq!(nodes.populations[1].native_rows, 1);
+    assert_eq!(nodes.populations[1].observed_rows, 0);
+    assert_eq!(nodes.populations[1].source_state, culprit_core::SourceState::Partial);
+}
+#[test]
+fn foreign_or_unknown_native_node_owner_dataset_or_counter_semantics_cannot_export() {
+    use culprit_collector::analytical::test_support::{NumaNodeCase, numa_node_evidence};
+    for change in ["foreign", "unknown", "dataset", "unit"] {
+        let (mut source, mut rows) = numa_node_evidence(NumaNodeCase::Exact);
+        match change {
+            "foreign" => {
+                let CollectionTarget::Shared(resource) = &mut source.target else { panic!() };
+                resource.engine = culprit_core::Engine::Postgres;
+                let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut source.partition else {
+                    panic!()
+                };
+                member.engine = culprit_core::Engine::Postgres;
+            }
+            "unknown" => source.partition = SourcePartition::InstanceLocal { member: None, epoch: None },
+            "dataset" => {
+                let SourceObservation::Snapshot(header) = &mut source.observation else { panic!() };
+                header.dataset = SnapshotDataset::Operational;
+            }
+            _ => {
+                let TelemetryRecord::Operational(row) = &mut rows[0] else { panic!() };
+                let OperationalFact::CounterSet(sample) = &mut row.fact else { panic!() };
+                sample.counters[0].unit = CounterUnit::Bytes;
+            }
+        }
+        assert!(
+            ExportedRecord::new(
+                &source,
+                &CaptureIdentity { observation_id: "original-nodes".into(), revision: None },
+                rows.remove(0)
+            )
+            .is_err(),
+            "{change}"
+        );
     }
 }

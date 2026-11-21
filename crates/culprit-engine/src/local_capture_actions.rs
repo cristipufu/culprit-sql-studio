@@ -4,6 +4,24 @@ use culprit_core::{Report, Result, SnapshotOptions, telemetry::DeliveryProblem};
 use std::path::Path;
 
 impl Workspace {
+    pub async fn scan_with_captured_numa_nodes(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&Path>,
+        captured: crate::LocalSnapshotAnalysis,
+    ) -> Result<Report> {
+        if captured.original().connection() != name
+            || captured.report().kind() != crate::LocalCaptureAnalysisKind::InstanceResources
+        {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let evidence = crate::scan::CapturedScanEvidence::numa_nodes(captured.into_read())?;
+        Box::pin(self.scan_observation(name, options, query_log, Some(evidence)))
+            .await
+            .map(|reports| *reports.requested)
+    }
+
     /// Retain one authenticated catalog original after the ordinary scan settles, independently of current objects.
     pub async fn scan_with_captured_index_configuration(
         &self,

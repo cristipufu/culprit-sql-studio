@@ -24,6 +24,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         instance_resources: &'a Option<Box<culprit_core::InstanceResourceReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        numa_nodes: &'a Option<Vec<culprit_core::InstanceResourceReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         counter_ratios: &'a Option<Box<culprit_core::CounterRatioReport>>,
         performance_counters: &'a [culprit_core::PerformanceCounterReport],
         index_configuration: &'a [culprit_core::IndexConfigurationReport],
@@ -110,6 +112,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
     let Report {
         storage,
         instance_resources,
+        numa_nodes,
         completed_spills,
         page_server_reads,
         query_wait_fragments,
@@ -160,6 +163,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
     View {
         storage,
         instance_resources,
+        numa_nodes,
         completed_spills,
         page_server_reads,
         query_wait_fragments,

@@ -178,3 +178,65 @@ fn modern_scheduler_cli_never_words_raw_spinlock_zero_or_positive_as_measured_ac
         assert!(text.contains(&t!("view.schedulers.field.total_completed_tasks")));
     }
 }
+
+#[test]
+fn numa_cli_keeps_both_original_populations_exact_values_and_separate_null_or_unavailable_fields() {
+    use culprit_collector::analytical::test_support::{NumaNodeCase, numa_node_evidence};
+    for case in NumaNodeCase::ALL {
+        let (source, rows) = numa_node_evidence(case);
+        let rows = rows
+            .into_iter()
+            .map(|row| {
+                let TelemetryRecord::Operational(row) = row else { panic!() };
+                row
+            })
+            .collect::<Vec<_>>();
+        let report = culprit_checks::instance_resources::explain_source(&source, &rows, true).unwrap();
+        let nodes = report.numa_nodes.as_ref().unwrap();
+        let text = instance_resources(&report);
+        for population in &nodes.populations {
+            assert!(text.contains(&population.title));
+        }
+        if case == NumaNodeCase::Exact {
+            assert!(text.contains("-9223372036854775808") && text.contains("9007199254740993"));
+            let (from, until) = nodes.context.as_ref().unwrap().bounds();
+            assert!(text.contains(from) && text.contains(until));
+        }
+        if case == NumaNodeCase::NativeNull {
+            assert!(text.contains(&t!("view.schedulers.value.null")));
+        }
+        if case == NumaNodeCase::ColumnUnavailable {
+            assert!(text.contains(&t!("view.schedulers.value.unavailable")));
+        }
+        assert!(text.len() < 32_768, "{case:?}:{}", text.len());
+        assert!(!text.contains("source_sha256") && !text.contains("native-process-a"));
+    }
+}
+#[test]
+fn numa_cli_bounds_each_field_and_entry_without_hiding_the_other_native_population() {
+    use culprit_collector::analytical::test_support::{NumaNodeCase, numa_node_evidence};
+    let (source, rows) = numa_node_evidence(NumaNodeCase::Limited);
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            let TelemetryRecord::Operational(row) = row else { panic!() };
+            row
+        })
+        .collect::<Vec<_>>();
+    let mut report = culprit_checks::instance_resources::explain_source(&source, &rows, true).unwrap();
+    let nodes = report.numa_nodes.as_mut().unwrap();
+    nodes.populations[0].entries[0].fields[0].value = Some(format!("\x1b[31m\n{}", "x".repeat(4096)));
+    let extra = nodes.populations[0].entries[0].fields[0].clone();
+    nodes.populations[0].entries[0].fields.extend(vec![extra; 100]);
+    let text = instance_resources(&report);
+    assert!(!text.contains('\x1b'));
+    assert!(!text.contains(&"x".repeat(141)));
+    assert!(text.contains("9007199254740993"));
+    assert!(!text.contains(&t!("view.numa_nodes.entry", id = "3")));
+    let compact = compact_numa_nodes(&report);
+    let populations = compact["populations"].as_array().unwrap();
+    assert_eq!(populations.len(), 2);
+    assert_eq!(populations[0]["entries"].as_array().unwrap().len(), 3);
+    assert_eq!(populations[0]["entries"][0]["fields"].as_array().unwrap().len(), 13);
+    assert!(populations[0]["entries"][0]["fields"][0]["value"].as_str().unwrap().chars().count() <= 141);
+}

@@ -237,11 +237,11 @@ async fn canonical_scheduler_contract_accepts_actual_decoder_fields_nulls_and_un
         assert_eq!(point.scheduler_id(), "0");
         for field in MSSQL_SCHEDULER_FIELDS {
             match point.field(field).unwrap() {
-                MssqlSchedulerValue::ColumnUnavailable => assert!(missing.contains(&field.name)),
-                MssqlSchedulerValue::NativeNull => assert_eq!(field.name, "failed_to_create_worker"),
-                MssqlSchedulerValue::Observed(_) => assert!(!missing.contains(&field.name)),
-                MssqlSchedulerValue::Unqualified { native_value, required_global_trace_flag } => {
-                    assert!(matches!(field.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }));
+                MssqlNativeFieldValue::ColumnUnavailable => assert!(missing.contains(&field.name)),
+                MssqlNativeFieldValue::NativeNull => assert_eq!(field.name, "failed_to_create_worker"),
+                MssqlNativeFieldValue::Observed(_) => assert!(!missing.contains(&field.name)),
+                MssqlNativeFieldValue::Unqualified { native_value, required_global_trace_flag } => {
+                    assert!(matches!(field.kind, MssqlNativeFieldKind::UnqualifiedCounter { .. }));
                     assert_eq!(native_value, "0");
                     assert_eq!(required_global_trace_flag, 8134);
                 }
@@ -267,15 +267,15 @@ async fn sql2019_2022_and_2025_layouts_share_two_bounded_reads_and_no_instrument
         let point = MssqlSchedulerPoint::from_sample(&samples[0]).unwrap();
         for field in MSSQL_SCHEDULER_FIELDS.iter().filter(|field| field.introduced_in.is_some()) {
             if missing.contains(&field.name) {
-                assert!(matches!(point.field(field).unwrap(), MssqlSchedulerValue::ColumnUnavailable));
-            } else if matches!(field.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }) {
+                assert!(matches!(point.field(field).unwrap(), MssqlNativeFieldValue::ColumnUnavailable));
+            } else if matches!(field.kind, MssqlNativeFieldKind::UnqualifiedCounter { .. }) {
                 assert!(matches!(
                     point.field(field).unwrap(),
-                    MssqlSchedulerValue::Unqualified { native_value: "0", required_global_trace_flag: 8134 }
+                    MssqlNativeFieldValue::Unqualified { native_value: "0", required_global_trace_flag: 8134 }
                 ));
                 assert!(!samples[0].counters.iter().any(|counter| counter.key == field.name));
             } else {
-                assert!(matches!(point.field(field).unwrap(), MssqlSchedulerValue::Observed(_)));
+                assert!(matches!(point.field(field).unwrap(), MssqlNativeFieldValue::Observed(_)));
             }
         }
         assert_eq!(reader.calls.len(), 2);
@@ -300,7 +300,7 @@ async fn modern_native_nulls_and_nonfinite_or_negative_values_never_become_obser
     for name in &fields {
         assert!(matches!(
             point.field(MSSQL_SCHEDULER_FIELDS.iter().find(|field| field.name == *name).unwrap()).unwrap(),
-            MssqlSchedulerValue::NativeNull
+            MssqlNativeFieldValue::NativeNull
         ));
     }
     for name in fields {

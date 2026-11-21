@@ -20,6 +20,7 @@ pub enum SnapshotDataset {
     Galera,
     FullTextPopulations,
     Operational,
+    NumaNodes,
     DatabasePerformanceCounters,
     SuspectPages,
     HyperscaleLogComponents,
@@ -77,6 +78,7 @@ impl SnapshotDataset {
             | Self::Galera
             | Self::FullTextPopulations
             | Self::Operational
+            | Self::NumaNodes
             | Self::DatabasePerformanceCounters
             | Self::SuspectPages
             | Self::HyperscaleLogComponents
@@ -773,6 +775,9 @@ impl OperationalObservation {
             && self.fact.is_valid()
             && self.fact.matches_key(&self.key)
             && match &self.fact {
+                OperationalFact::CounterSet(sample) if numa_node_candidate(sample) => {
+                    MssqlNumaNodePoint::from_sample(sample).is_ok_and(|point| self.source == point.kind().source())
+                }
                 OperationalFact::CounterSet(sample) if resource_governor_candidate(sample) => {
                     self.source == crate::source_id::PERFORMANCE_COUNTERS
                 }

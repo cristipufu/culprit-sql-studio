@@ -379,6 +379,7 @@ async fn native_resource_discovery_derives_its_routes_from_registrations_and_obs
             TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
             TelemetryCollection::DeadlockHistory,
             TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
+            TelemetryCollection::Snapshot(SnapshotDataset::NumaNodes),
             TelemetryCollection::Snapshot(SnapshotDataset::Operational),
         ];
         if edition == crate::probe::ENGINE_EDITION_MANAGED_INSTANCE {
@@ -662,4 +663,30 @@ fn change_feed_recipe_is_independent_manual_unqualified_and_pays_one_setup_insid
     assert_eq!(recipe.budget.total_bytes, 256 * 1024);
     assert_eq!(recipe.budget.statement_timeout_ms, 1000);
     assert_eq!(recipe.budget.total_timeout_ms, 5000);
+}
+
+#[test]
+fn numa_node_recipe_is_one_explicit_shared_instance_profile_with_setup_inside_its_manual_unqualified_total() {
+    let selector = RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::NumaNodes));
+    let recipes = declarations();
+    let selected = recipes.iter().filter(|recipe| recipe.selector == selector).collect::<Vec<_>>();
+    assert_eq!(selected.len(), 1);
+    let recipe = selected[0];
+    assert_eq!(recipe.id, "mssql.numa-nodes");
+    assert_eq!(recipe.version, 1);
+    assert_eq!(recipe.subjects, [RecipeSubject::Shared(SharedResourceKind::Instance)]);
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.budget.max_queries, 11);
+    assert_eq!(crate::read::ReadSession::budget_after_setup(recipe.budget.clone()).unwrap().max_queries, 10);
+    assert_eq!(recipe.budget.statement_timeout_ms, 1000);
+    assert_eq!(recipe.budget.total_timeout_ms, 5000);
+    assert_eq!(recipe.budget.max_snapshot_rows, 500);
+    assert_eq!(recipe.budget.page_bytes, 256 * 1024);
+    assert_eq!(recipe.budget.total_bytes, 4 * 1024 * 1024);
+    let ordinary = recipes.iter().find(|recipe| recipe.id == "mssql.shared-operational").unwrap();
+    assert_eq!(
+        ordinary.selector,
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Operational))
+    );
 }

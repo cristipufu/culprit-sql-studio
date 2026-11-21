@@ -23,6 +23,8 @@ pub struct InstanceResourceGroup {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct InstanceResourceReport {
+    /// Two independently visible native node populations, never merged with scheduler or aggregate clocks.
+    pub numa_nodes: Option<Box<NumaNodeReport>>,
     /// A separate processor-source point, never merged into the resource point's clock or populations.
     pub process_cpu: Option<Box<ProcessCpuReport>>,
     /// Per-scheduler rows are an independent source population, never the aggregate resource point.
@@ -118,4 +120,56 @@ pub struct SchedulerReport {
     pub summary: String,
     pub limitations: Vec<String>,
     pub entries: Vec<SchedulerEntry>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum NumaNodeFieldAvailability {
+    Observed,
+    NativeNull,
+    ColumnUnavailable,
+}
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct NumaNodeField {
+    pub native_name: String,
+    pub label: String,
+    pub value: Option<String>,
+    pub availability: NumaNodeFieldAvailability,
+    pub unit: Option<CounterUnit>,
+    pub nature: Option<CounterNature>,
+    pub reset: Option<crate::ResetMarker>,
+}
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct NumaNodeEntry {
+    pub observation_key: String,
+    pub node_id: String,
+    pub title: String,
+    pub fields: Vec<NumaNodeField>,
+}
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct NumaNodePopulationReport {
+    pub kind: MssqlNumaNodeKind,
+    pub native_source: StateSourceCoverage,
+    pub source_state: SourceState,
+    pub native_rows: u32,
+    pub observed_rows: u32,
+    pub entries_limited: bool,
+    pub title: String,
+    pub summary: String,
+    pub entries: Vec<NumaNodeEntry>,
+}
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct NumaNodeReport {
+    pub scope: crate::MeasurementScope,
+    pub context: Option<ObservationReadContext>,
+    pub read_complete: bool,
+    pub title: String,
+    pub summary: String,
+    pub limitations: Vec<String>,
+    pub populations: Vec<NumaNodePopulationReport>,
 }

@@ -20,7 +20,7 @@ async fn native_scheduler_columns_preserve_states_nullable_flags_and_exact_share
         assert!(sample.is_valid());
         let original = MssqlSchedulerPoint::from_sample(&sample).unwrap();
         for field in MSSQL_SCHEDULER_FIELDS.iter().filter(|field| field.introduced_in.is_some()) {
-            if let MssqlSchedulerValue::Unqualified { native_value, required_global_trace_flag } =
+            if let MssqlNativeFieldValue::Unqualified { native_value, required_global_trace_flag } =
                 original.field(field).unwrap()
             {
                 assert_eq!(required_global_trace_flag, 8134);

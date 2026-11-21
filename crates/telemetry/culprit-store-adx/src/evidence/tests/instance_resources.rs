@@ -230,3 +230,25 @@ async fn changed_scheduler_identity_status_null_or_exact_counter_cannot_borrow_i
         assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
     }
 }
+
+#[tokio::test]
+async fn original_numa_node_fields_replay_from_the_same_canonical_store_source_without_recovery() {
+    for case in test_support::NumaNodeCase::ALL {
+        let (fixture, source, rows) = collected_original(test_support::numa_node_evidence(case)).await;
+        let read_budget = EvidenceReadBudget { page_rows: 3, ..EvidenceReadBudget::default() };
+        fixture.replies(fixture.rows.chunks(read_budget.page_rows as usize).map(<[_]>::to_vec).collect());
+        let opened = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        let capture = fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], read_budget, None)
+            .await
+            .unwrap_or_else(|error| panic!("{case:?}: {error}"));
+        test_support::assert_operational_capture(&capture, &source, &rows);
+        assert_eq!(capture.source().partition, source.partition);
+        assert_eq!(capture.metrics().recovery_objects, 0);
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), opened);
+        for (actual, original) in capture.records().iter().zip(&rows) {
+            assert_eq!(actual.row(), &ExportedRecord::new(&source, capture.capture(), original.clone()).unwrap());
+        }
+    }
+}

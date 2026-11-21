@@ -67,7 +67,7 @@ impl OwnedCaptures {
         selection: CollectionSelection,
         cancellation: &CollectionCancellation,
     ) -> Result<Captured> {
-        self.capture_owned(selection, cancellation, None).await
+        self.capture_owned(selection, CollectionSubject::Database, cancellation, None).await
     }
 
     pub async fn capture_with_factory(
@@ -76,22 +76,30 @@ impl OwnedCaptures {
         cancellation: &CollectionCancellation,
         factory: &dyn SourceFactory,
     ) -> Result<Captured> {
-        self.capture_owned(selection, cancellation, Some(factory)).await
+        self.capture_owned(selection, CollectionSubject::Database, cancellation, Some(factory)).await
     }
 
+    /// A genuinely observed shared subject remains in the original lease/request; never rebound in a factory.
+    pub async fn capture_with_subject(
+        &mut self,
+        selection: CollectionSelection,
+        subject: CollectionSubject,
+        cancellation: &CollectionCancellation,
+        factory: &dyn SourceFactory,
+    ) -> Result<Captured> {
+        self.capture_owned(selection, subject, cancellation, Some(factory)).await
+    }
     async fn capture_owned(
         &mut self,
         selection: CollectionSelection,
+        subject: CollectionSubject,
         cancellation: &CollectionCancellation,
         factory: Option<&dyn SourceFactory>,
     ) -> Result<Captured> {
         // The same heap-owned phase retains its lease, collector, final verification and cleanup.
         Box::pin(async {
-            let provisional = CollectionRequest {
-                subject: CollectionSubject::Database,
-                selection: selection.clone(),
-                budget: CollectionBudget::default(),
-            };
+            let provisional =
+                CollectionRequest { subject, selection: selection.clone(), budget: CollectionBudget::default() };
             let recipe = crate::telemetry::recipes()
                 .into_iter()
                 .find(|recipe| recipe.selector.matches(&provisional))

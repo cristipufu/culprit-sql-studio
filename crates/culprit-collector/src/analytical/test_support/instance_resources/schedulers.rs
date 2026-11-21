@@ -82,24 +82,24 @@ fn scheduler(id: u32, case: SchedulerCase) -> NativeCounterSet {
     };
     for field in MSSQL_SCHEDULER_FIELDS {
         match field.kind {
-            MssqlSchedulerFieldKind::Identity => (),
-            MssqlSchedulerFieldKind::IntegerProperty => {
+            MssqlNativeFieldKind::Identity => (),
+            MssqlNativeFieldKind::IntegerProperty => {
                 sample
                     .properties
                     .insert(field.name.into(), if field.name == "cpu_id" { id.to_string() } else { "3".into() });
             }
-            MssqlSchedulerFieldKind::BooleanProperty => {
+            MssqlNativeFieldKind::BooleanProperty => {
                 sample.properties.insert(field.name.into(), u8::from(field.name == "is_online").to_string());
             }
-            MssqlSchedulerFieldKind::TextProperty => {
+            MssqlNativeFieldKind::TextProperty => {
                 sample
                     .properties
                     .insert(field.name.into(), if id == 0 { "VISIBLE ONLINE" } else { "HIDDEN ONLINE" }.into());
             }
-            MssqlSchedulerFieldKind::UnqualifiedCounter { .. } => {
+            MssqlNativeFieldKind::UnqualifiedCounter { .. } => {
                 sample.properties.insert(field.name.into(), "0".into());
             }
-            MssqlSchedulerFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
+            MssqlNativeFieldKind::Counter { unit, nature } => sample.counters.push(NativeCounterSample {
                 key: field.name.into(),
                 value: MeasurementValue::Integer(
                     if case == SchedulerCase::MeasuredZero || field.name == "pending_disk_io_count" {
@@ -167,7 +167,7 @@ fn scheduler(id: u32, case: SchedulerCase) -> NativeCounterSet {
     if case == SchedulerCase::SpinlockRawPositive {
         for field in MSSQL_SCHEDULER_FIELDS
             .iter()
-            .filter(|field| matches!(field.kind, MssqlSchedulerFieldKind::UnqualifiedCounter { .. }))
+            .filter(|field| matches!(field.kind, MssqlNativeFieldKind::UnqualifiedCounter { .. }))
         {
             sample.properties.insert(field.name.into(), "7".into());
         }

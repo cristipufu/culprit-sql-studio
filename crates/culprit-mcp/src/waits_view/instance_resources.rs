@@ -1,11 +1,15 @@
 use culprit_core::{Report, telemetry::INSTANCE_RESOURCES_SOURCE};
 use serde_json::{Value, json};
 const ENTRY_LIMIT: usize = 5;
+const NUMA_FIELD_LIMIT: usize = 13;
 const SCHEDULER_FIELD_LIMIT: usize = culprit_core::telemetry::MSSQL_SCHEDULER_FIELDS.len() - 1;
 const NATIVE_TEXT_LIMIT: usize = 512;
 const LIMITATION_LIMIT: usize = 8;
 
 pub(super) fn attach(response: &mut Value, report: &Report) {
+    if let Some(originals) = &report.numa_nodes {
+        response["numa_nodes"] = json!(originals.iter().map(value).collect::<Vec<_>>());
+    }
     if let Some(point) = report.instance_resources.as_deref() {
         response["instance_resources"] = value(point);
     } else if report.snapshot.pressure.as_ref().is_some_and(|pressure| pressure.instance_resources.is_some())
@@ -25,6 +29,7 @@ pub(crate) fn value(report: &culprit_core::InstanceResourceReport) -> Value {
         "read_complete":report.read_complete,"observed_at":report.observed_at,
         "native_populations_complete":report.native_populations_complete,"limitations":report.limitations,
         "schedulers":report.schedulers.as_deref().map(scheduler_value),
+        "numa_nodes":report.numa_nodes.as_deref().map(numa_value),
         "process_cpu":report.process_cpu.as_ref().map(|cpu|json!({
             "title":cpu.title,"summary":cpu.summary,"source_state":cpu.source_state,"native_source":cpu.native_source,
             "read_complete":cpu.read_complete,"observed_at":cpu.observed_at,"limitations":cpu.limitations,
@@ -42,6 +47,17 @@ pub(crate) fn value(report: &culprit_core::InstanceResourceReport) -> Value {
         })).collect::<Vec<_>>(),
         "groups_available":report.groups.len(),"groups_presented":report.groups.len().min(ENTRY_LIMIT),
         "groups_omitted":report.groups.len().saturating_sub(ENTRY_LIMIT),
+    })
+}
+
+fn numa_value(nodes: &culprit_core::NumaNodeReport) -> Value {
+    json!({
+        "scope":nodes.scope,"read_complete":nodes.read_complete,"title":nodes.title,"summary":nodes.summary,"limitations":nodes.limitations,
+        "original_read_bounds":nodes.context.as_ref().map(|context|{let(from,until)=context.bounds();json!({"from":from,"until":until})}),
+        "populations":nodes.populations.iter().take(2).map(|population|json!({"kind":population.kind,"title":population.title,"summary":population.summary,"native_source":population.native_source,"source_state":population.source_state,"native_rows":population.native_rows,"observed_rows":population.observed_rows,"entries_limited":population.entries_limited,
+            "entries_available":population.entries.len(),"entries_presented":population.entries.len().min(ENTRY_LIMIT),
+            "entries":population.entries.iter().take(ENTRY_LIMIT).map(|entry|json!({"node_id":bounded(&entry.node_id),"title":bounded(&entry.title),"fields":entry.fields.iter().take(NUMA_FIELD_LIMIT).map(|field|json!({"native_name":bounded(&field.native_name),"label":bounded(&field.label),"value":field.value.as_deref().map(bounded),"availability":field.availability,"unit":field.unit,"nature":field.nature,"reset":field.reset})).collect::<Vec<_>>()})).collect::<Vec<_>>()
+        })).collect::<Vec<_>>()
     })
 }
 

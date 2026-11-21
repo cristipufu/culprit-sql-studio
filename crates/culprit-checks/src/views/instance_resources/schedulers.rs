@@ -137,21 +137,20 @@ fn empty(state: SourceState) -> SchedulerReport {
 }
 fn entry(point: &MssqlSchedulerPoint<'_>) -> Result<SchedulerEntry> {
     let mut fields = Vec::with_capacity(MSSQL_SCHEDULER_FIELDS.len() - 1);
-    for field in MSSQL_SCHEDULER_FIELDS.iter().filter(|field| !matches!(field.kind, MssqlSchedulerFieldKind::Identity))
-    {
+    for field in MSSQL_SCHEDULER_FIELDS.iter().filter(|field| !matches!(field.kind, MssqlNativeFieldKind::Identity)) {
         let (value, unqualified, availability) = match point.field(field)? {
-            MssqlSchedulerValue::Observed(value) => (Some(value.into()), None, SchedulerFieldAvailability::Observed),
-            MssqlSchedulerValue::Unqualified { native_value, required_global_trace_flag } => (
+            MssqlNativeFieldValue::Observed(value) => (Some(value.into()), None, SchedulerFieldAvailability::Observed),
+            MssqlNativeFieldValue::Unqualified { native_value, required_global_trace_flag } => (
                 None,
                 Some(SchedulerUnqualifiedValue { native_value: native_value.into(), required_global_trace_flag }),
                 SchedulerFieldAvailability::InstrumentationUnqualified,
             ),
-            MssqlSchedulerValue::NativeNull => (None, None, SchedulerFieldAvailability::NativeNull),
-            MssqlSchedulerValue::ColumnUnavailable => (None, None, SchedulerFieldAvailability::ColumnUnavailable),
+            MssqlNativeFieldValue::NativeNull => (None, None, SchedulerFieldAvailability::NativeNull),
+            MssqlNativeFieldValue::ColumnUnavailable => (None, None, SchedulerFieldAvailability::ColumnUnavailable),
         };
         let (unit, nature, reset) = match field.kind {
-            MssqlSchedulerFieldKind::Counter { unit, nature }
-            | MssqlSchedulerFieldKind::UnqualifiedCounter { unit, nature, .. } => {
+            MssqlNativeFieldKind::Counter { unit, nature }
+            | MssqlNativeFieldKind::UnqualifiedCounter { unit, nature, .. } => {
                 (Some(unit), Some(nature), Some(ResetMarker::Unknown))
             }
             _ => (None, None, None),
@@ -163,7 +162,7 @@ fn entry(point: &MssqlSchedulerPoint<'_>) -> Result<SchedulerEntry> {
             availability,
             unqualified,
             explanation: match field.kind {
-                MssqlSchedulerFieldKind::UnqualifiedCounter { required_global_trace_flag, .. } => Some(t!(
+                MssqlNativeFieldKind::UnqualifiedCounter { required_global_trace_flag, .. } => Some(t!(
                     "view.schedulers.counter.instrumentation",
                     flag = format::digits(required_global_trace_flag.to_string())
                 )),

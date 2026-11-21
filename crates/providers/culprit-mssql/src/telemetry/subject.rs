@@ -68,6 +68,19 @@ impl Identity {
             _ => self == after,
         }
     }
+    /// Preserve the already-paid instance observation clock for profiles requiring a final UTC boundary.
+    pub async fn recheck_clock<R: NativeRead>(
+        &self,
+        reader: &mut R,
+        host: &str,
+        port: u16,
+    ) -> Result<(Self, Option<String>)> {
+        if matches!(self, Self::Instance(_)) {
+            let (identity, at) = instance::read(reader).await?;
+            return Ok((Self::Instance(identity), Some(at)));
+        }
+        self.recheck(reader, host, port).await.map(|identity| (identity, None))
+    }
     pub async fn recheck<R: NativeRead>(&self, reader: &mut R, host: &str, port: u16) -> Result<Self> {
         match self {
             Self::ResourcePoolSettings(original) => {
@@ -180,6 +193,11 @@ pub(super) fn is_shared(subject: &CollectionSubject) -> Result<bool> {
 
 pub(super) fn validate_dataset(subject: &CollectionSubject, dataset: SnapshotDataset) -> Result<()> {
     is_shared(subject)?;
+    if dataset == SnapshotDataset::NumaNodes
+        && !matches!(subject,CollectionSubject::Shared{resource} if resource.engine==culprit_core::Engine::Mssql && resource.kind==SharedResourceKind::Instance)
+    {
+        return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+    }
     if (matches!(subject, CollectionSubject::Shared { resource } if resource.kind == SharedResourceKind::Pool)
         && !matches!(dataset, SnapshotDataset::MemoryFailures | SnapshotDataset::Settings))
         || (dataset == SnapshotDataset::MemoryFailures && matches!(subject, CollectionSubject::Database))
