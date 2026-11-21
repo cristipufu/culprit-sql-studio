@@ -15,6 +15,7 @@ use std::{collections::BTreeMap, panic::AssertUnwindSafe, time::Duration};
 use super::super::{chronological, context, mapped_target, rows::PageAddress};
 
 mod branch;
+mod reuse;
 
 const TREE: &str = "page_fixture_topology_tree";
 const HEAP: &str = "page_fixture_topology_heap";

@@ -35,7 +35,7 @@ impl HeaderWitness {
     }
 }
 
-fn tree(locators: &BTreeMap<PageAddress, LocatedPage>) -> Result<&LocatedPage> {
+pub(super) fn tree(locators: &BTreeMap<PageAddress, LocatedPage>) -> Result<&LocatedPage> {
     let mut pages = locators.values().filter(|page| page.table == TREE);
     let first = pages.next().ok_or_else(|| invalid("owned native tree locator missing"))?;
     if pages.any(|page| !first.same_index(page)) {

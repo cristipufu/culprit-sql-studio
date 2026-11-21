@@ -83,6 +83,47 @@ async fn authenticated_page_targets_reuse_scan_explanations_and_reference_origin
     }
 }
 
+#[tokio::test]
+async fn changed_original_index_points_survive_recovery_without_becoming_a_current_page_or_leaf_remedy() {
+    let cases = page_wait_evidence_cases()
+        .into_iter()
+        .filter(|(_, records)| {
+            observations(records).iter().any(|row| {
+                matches!(
+                    row.index_operations.as_ref(),
+                    Some(PageIndexOperations::Observed {
+                        relation: PageIndexOperationRelation::ChangedTarget
+                            | PageIndexOperationRelation::UnverifiedTarget,
+                        ..
+                    })
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 2, "both existing original-generation refusal cases must be exercised");
+    for (source, records) in cases {
+        let original = (*observations(&records)[0]).clone();
+        assert_eq!(original.resolution, PageWaitResolution::ChangedMetadata);
+        assert!(original.target.is_none());
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let captured = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let before = fixture.recovery_object_reads();
+        let analysis = collected_resources::page_waits(&captured, None).unwrap();
+        assert_eq!(fixture.recovery_object_reads(), before, "analysis must use only its authenticated original");
+        assert_eq!(analysis.report.entries.len(), 1);
+        let entry = &analysis.report.entries[0];
+        assert_eq!(entry.investigation, culprit_core::t!("view.page_waits.investigation.unresolved"));
+        assert!(entry.explanation.contains(&culprit_core::t!("view.page_waits.unresolved.changed_metadata")));
+        assert_eq!(entry.request_key, original.request.key);
+        assert_eq!(entry.resource, original.resource);
+        let retained = &analysis.context.records[0].row;
+        assert_eq!(retained, &ExportedRecord::new(&source, captured.capture(), records[0].clone()).unwrap());
+        let TelemetryRecord::Operational(row) = &retained.record else { panic!() };
+        let OperationalFact::PageWait(retained) = &row.fact else { panic!() };
+        assert_eq!(retained.as_ref(), &original, "later interpretation cannot repair or erase stale native fields");
+    }
+}
+
 fn task_cases() -> impl Iterator<Item = (CollectionDescription, Vec<TelemetryRecord>)> {
     page_wait_evidence_cases()
         .into_iter()
