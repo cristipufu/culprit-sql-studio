@@ -13,7 +13,10 @@ autotests = false
 doctest = false
 
 [features]
-default = ["mssql", "postgres", "yugabyte", "mysql", "sqlite"]
+default = ["mssql", "postgres", "yugabyte", "mysql", "sqlite", "auth-aws", "auth-azure"]
+# Built-in authentication and cloud composition; embedders can supply the existing interfaces independently.
+auth-aws = ["dep:culprit-auth-aws"]
+auth-azure = ["dep:culprit-auth-azure", "dep:ureq"]
 mssql = ["dep:culprit-mssql"]
 postgres = ["dep:culprit-postgres"]
 yugabyte = ["dep:culprit-yugabyte"]
@@ -34,8 +37,8 @@ path = "tests/all.rs"
 culprit-cloud.workspace = true
 culprit-read.workspace = true
 culprit-auth.workspace = true
-culprit-auth-aws.workspace = true
-culprit-auth-azure.workspace = true
+culprit-auth-aws = { workspace = true, optional = true }
+culprit-auth-azure = { workspace = true, optional = true }
 async-trait.workspace = true
 zeroize.workspace = true
 culprit-core.workspace = true
@@ -64,7 +67,7 @@ sha2.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 toml.workspace = true
 ts-rs.workspace = true
-ureq.workspace = true
+ureq = { workspace = true, optional = true }
 
 [dev-dependencies]
 culprit-collector = { workspace = true, features = ["test-support"] }

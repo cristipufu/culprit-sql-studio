@@ -177,6 +177,7 @@ fn recovery_plugins_use_the_same_runtime_registration_without_builtin_configurat
     assert!(!config.state.exists());
 }
 
+#[cfg(feature = "auth-aws")]
 #[test]
 fn one_fleet_can_bind_azure_and_aws_sources_to_distinct_credential_profiles_offline() {
     let root = tempfile::tempdir().unwrap();

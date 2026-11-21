@@ -385,5 +385,5 @@ impl FleetBackend for EnrolledBackend<'_> {
     }
 }
 
-#[cfg(all(test, feature = "store-adx", feature = "recovery-azure"))]
+#[cfg(all(test, feature = "store-adx", feature = "recovery-azure", feature = "auth-azure"))]
 mod tests;

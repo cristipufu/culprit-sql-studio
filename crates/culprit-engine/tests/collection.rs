@@ -797,12 +797,20 @@ async fn fleet_refuses_implicit_cli_sign_in_before_resolving_a_provider() {
     .unwrap();
     assert!(FleetBackend::validate_target(&ws, "azure").is_err());
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
-    let ws = ws.with_database_tokens(Arc::new(
-        culprit_auth_azure::AzureCredential::new(culprit_auth_azure::IdentityConfig::ManagedIdentity {
-            client_id: None,
-        })
-        .unwrap(),
-    ));
+    struct ExplicitIdentity;
+    #[async_trait::async_trait]
+    impl culprit_auth::DatabaseTokenProvider for ExplicitIdentity {
+        fn auth_kind(&self) -> AuthKind {
+            AuthKind::Entra
+        }
+        async fn database_token(
+            &self,
+            _: culprit_auth::DatabaseTokenRequest<'_>,
+        ) -> Result<culprit_auth::DatabaseCredential> {
+            panic!("target validation must not acquire the explicitly supplied credential")
+        }
+    }
+    let ws = ws.with_database_tokens(Arc::new(ExplicitIdentity));
     FleetBackend::validate_target(&ws, "azure").unwrap();
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
 }

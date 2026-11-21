@@ -11,9 +11,6 @@ use culprit_core::{Engine, Error, ErrorCode, Result, aws_iam_host_allowed, t};
 /// Amazon's public CA bundle for RDS and Aurora endpoints (truststore.pki.rds.amazonaws.com/global/global-bundle.pem).
 const RDS_CA_BUNDLE: &[u8] = include_bytes!("../certs/rds-global-bundle.pem");
 
-/// Connection option value that stands for the bundled RDS certificate authorities.
-pub const RDS_CA: &str = "rds";
-
 /// What to do when the AWS CLI isn't signed in.
 pub fn sign_in_hint() -> String {
     t!("engine.aws.sign_in_hint")

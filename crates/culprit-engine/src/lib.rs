@@ -8,6 +8,7 @@ mod archived_advice;
 pub mod catalog;
 pub mod changes;
 pub mod cloud;
+#[cfg(any(test, feature = "auth-azure", feature = "auth-aws"))]
 mod cloud_process;
 #[cfg(feature = "collector")]
 mod collected_context;
@@ -33,6 +34,7 @@ pub mod files;
 #[cfg(feature = "collector")]
 mod fleet;
 pub mod history;
+#[cfg(feature = "auth-azure")]
 mod http;
 pub mod import;
 pub mod incident_history;

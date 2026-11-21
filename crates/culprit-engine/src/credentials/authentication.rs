@@ -1,6 +1,6 @@
 //! Provider selection and lifecycle dispatch; no native token, tenant or sign-in policy lives here.
 use culprit_auth::{AuthenticationService, DatabaseAuthentication, DatabaseCredential, SecretStore, SignInHandler};
-use culprit_core::{ConnectionSpec, Error, Result, t};
+use culprit_core::{ConnectionSpec, Error, ErrorCode, Result, t};
 use std::sync::Arc;
 
 pub(crate) struct AuthenticationRegistry(Vec<Arc<dyn DatabaseAuthentication>>);
@@ -19,7 +19,7 @@ impl AuthenticationService for AuthenticationRegistry {
         self.0
             .iter()
             .find(|provider| provider.auth_kind() == connection.auth)
-            .ok_or_else(|| Error::invalid(t!("engine.credentials.invalid_profile")))?
+            .ok_or_else(|| Error::new(ErrorCode::Unsupported, t!("engine.credentials.auth_unavailable")))?
             .credential(connection, secrets)
             .await
     }
@@ -41,3 +41,6 @@ impl AuthenticationService for AuthenticationRegistry {
         Ok(removed)
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -8,7 +8,7 @@ mod runtime;
 pub use runtime::CollectorRuntime;
 #[cfg(test)]
 mod startup_tests;
-#[cfg(all(test, feature = "store-adx", feature = "recovery-azure"))]
+#[cfg(all(test, feature = "store-adx", feature = "recovery-azure", feature = "auth-azure"))]
 mod tests;
 use crate::Workspace;
 use config::*;

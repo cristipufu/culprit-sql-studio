@@ -31,6 +31,12 @@ with a fixture.
 | `culprit-cloud` | Pluggable discovery and metrics with injected authentication, commands, HTTP and cache storage. |
 | `culprit-cli`, `culprit-mcp`, `app/` | Surfaces: the same report, worded for a terminal, a coding agent, a window. |
 
+Built-in database providers and built-in authentication adapters have independent Cargo features. The engine's
+shipped defaults include `auth-aws` and `auth-azure`; a build without them keeps the authentication and cloud
+injection contracts and registers no corresponding built-in adapter. Disabled native profile kinds are refused
+when configuration is decoded. An unresolved bundled RDS certificate marker also refuses before credential or
+native acquisition; an explicit certificate file remains its own input.
+
 ### Workspace services
 
 `Workspace` keeps the public API and owns its configured stores, checks, authentication and provider factories.

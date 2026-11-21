@@ -1,10 +1,18 @@
 //! Cloud adapter composition and private filesystem cache. Native discovery, metrics and assessment live outside the engine.
-use crate::{ConnectionInfo, credentials, private_fs};
-use culprit_cloud::{CloudConnection, CloudHttp, CloudServices, JsonReply, MetricsCache};
+#[cfg(any(feature = "auth-azure", feature = "auth-aws"))]
+use crate::credentials;
+use crate::{ConnectionInfo, private_fs};
+use culprit_cloud::{CloudConnection, CloudServices, MetricsCache};
+#[cfg(feature = "auth-azure")]
+use culprit_cloud::{CloudHttp, JsonReply};
 use culprit_core::{CloudSignals, Result};
-use std::{path::Path, sync::Arc};
+use std::path::Path;
+#[cfg(any(feature = "auth-azure", feature = "auth-aws"))]
+use std::sync::Arc;
 
+#[cfg(feature = "auth-azure")]
 struct Http;
+#[cfg(feature = "auth-azure")]
 #[async_trait::async_trait]
 impl CloudHttp for Http {
     async fn get_bearer(&self, url: &str, token: &str, max_bytes: u64) -> Result<JsonReply> {
@@ -13,17 +21,22 @@ impl CloudHttp for Http {
     }
 }
 pub(crate) fn services() -> CloudServices {
-    let azure = Arc::new(culprit_cloud::AzureCloud::new(
-        credentials::azure_commands(),
-        Arc::new(credentials::azure_cli()),
-        Arc::new(Http),
-    ));
-    let aws = Arc::new(culprit_cloud::AwsCloud::new(Arc::new(credentials::aws())));
-    CloudServices::default()
-        .with_discovery_provider(azure.clone())
-        .with_metrics_provider(azure)
-        .with_discovery_provider(aws.clone())
-        .with_metrics_provider(aws)
+    let services = CloudServices::default();
+    #[cfg(feature = "auth-azure")]
+    let services = {
+        let azure = Arc::new(culprit_cloud::AzureCloud::new(
+            credentials::azure_commands(),
+            Arc::new(credentials::azure_cli()),
+            Arc::new(Http),
+        ));
+        services.with_discovery_provider(azure.clone()).with_metrics_provider(azure)
+    };
+    #[cfg(feature = "auth-aws")]
+    let services = {
+        let aws = Arc::new(culprit_cloud::AwsCloud::new(Arc::new(credentials::aws())));
+        services.with_discovery_provider(aws.clone()).with_metrics_provider(aws)
+    };
+    services
 }
 pub(crate) fn metadata(info: &ConnectionInfo) -> CloudConnection {
     CloudConnection {
@@ -54,3 +67,6 @@ pub(crate) async fn signals(
 ) -> Result<CloudSignals> {
     services.signals(&Cache(dir), &metadata(info), start, end, refresh).await
 }
+
+#[cfg(test)]
+mod tests;

@@ -2,7 +2,7 @@
 //! query execution do not belong to this service.
 
 use culprit_auth::AuthenticationService;
-use culprit_auth_aws as aws;
+use culprit_core::cloud::aws;
 use culprit_core::{
     AuthKind, ConnectionSpec, Engine, Environment, Error, ErrorCode, Provider, Result, ServerInfo, entra_host_allowed,
     t,
@@ -263,9 +263,9 @@ impl Connections<'_> {
         let mut spec = route.stored.spec();
         culprit_core::apply_connection_security(&mut spec, &settings.security)?;
         spec.environment = settings.environment;
+        self.materialize_certificates(&mut spec)?;
         self.ssh.attach(&mut spec)?;
         self.resolve_secrets(name, &route.stored, &mut spec).await?;
-        self.materialize_certificates(&mut spec)?;
         self.require_current_route(&route)?;
         Ok(spec)
     }
@@ -606,11 +606,18 @@ impl Connections<'_> {
         if keys.is_empty() {
             return Ok(());
         }
-        let path = crate::credentials::rds_ca_file(&self.paths.data)?.to_string_lossy().into_owned();
-        for key in keys {
-            spec.options.insert(key, path.clone());
+        #[cfg(feature = "auth-aws")]
+        {
+            let path = crate::credentials::rds_ca_file(&self.paths.data)?.to_string_lossy().into_owned();
+            for key in keys {
+                spec.options.insert(key, path.clone());
+            }
+            Ok(())
         }
-        Ok(())
+        #[cfg(not(feature = "auth-aws"))]
+        {
+            Err(Error::new(ErrorCode::Unsupported, t!("engine.credentials.rds_ca_unavailable")))
+        }
     }
 
     /// Open a provider for a saved connection, resolving the password from the keychain or a fresh Entra token.
@@ -707,9 +714,9 @@ impl Connections<'_> {
     ) -> Result<ConnectionSpec> {
         let mut spec = stored.spec();
         spec.ssh = ssh;
+        self.materialize_certificates(&mut spec)?;
         self.ssh.attach(&mut spec)?;
         self.resolve_secrets(name, stored, &mut spec).await?;
-        self.materialize_certificates(&mut spec)?;
         Ok(spec)
     }
 
@@ -739,10 +746,10 @@ impl Connections<'_> {
     }
     async fn spec_for(&self, new: &NewConnection) -> Result<ConnectionSpec> {
         let mut spec = merge(new)?;
+        self.materialize_certificates(&mut spec)?;
         self.ssh.attach(&mut spec)?;
         spec.environment = new.environment;
         self.resolve_token(None, &mut spec).await?;
-        self.materialize_certificates(&mut spec)?;
         Ok(spec)
     }
     pub(crate) async fn probe(
@@ -1040,9 +1047,17 @@ mod tests {
         assert_eq!(stored.options.get("sslmode").map(String::as_str), Some("verify-full"));
 
         let mut spec = stored.spec();
-        ws.connection_service().materialize_certificates(&mut spec).unwrap();
-        let ca = std::path::PathBuf::from(spec.option("sslrootcert").unwrap());
-        assert!(std::fs::read_to_string(&ca).unwrap().contains("BEGIN CERTIFICATE"));
+        #[cfg(feature = "auth-aws")]
+        {
+            ws.connection_service().materialize_certificates(&mut spec).unwrap();
+            let ca = std::path::PathBuf::from(spec.option("sslrootcert").unwrap());
+            assert!(std::fs::read_to_string(&ca).unwrap().contains("BEGIN CERTIFICATE"));
+        }
+        #[cfg(not(feature = "auth-aws"))]
+        assert_eq!(
+            ws.connection_service().materialize_certificates(&mut spec).unwrap_err().code,
+            ErrorCode::Unsupported
+        );
 
         let password = ws.add_discovered(&rds_row("events", Engine::Mysql, AuthKind::Password)).unwrap();
         assert_eq!(

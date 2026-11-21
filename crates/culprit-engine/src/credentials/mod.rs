@@ -3,39 +3,50 @@ mod authentication;
 pub(crate) use authentication::AuthenticationRegistry;
 #[cfg(feature = "collector")]
 mod profiles;
-use crate::{
-    private_fs,
-    program::{self, Cli},
-};
+#[cfg(feature = "auth-aws")]
+use crate::private_fs;
+#[cfg(any(feature = "auth-azure", feature = "auth-aws"))]
+use crate::program::{self, Cli};
+#[cfg(any(feature = "auth-azure", feature = "auth-aws"))]
 use culprit_auth::CommandRunner;
+#[cfg(feature = "auth-aws")]
 use culprit_core::Result;
 #[cfg(feature = "collector")]
 pub use profiles::{ConfiguredCredentials, CredentialProfile};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+#[cfg(feature = "auth-aws")]
+use std::path::{Path, PathBuf};
+#[cfg(any(feature = "auth-azure", feature = "auth-aws"))]
+use std::sync::Arc;
 
+#[cfg(any(feature = "auth-azure", feature = "auth-aws"))]
 struct CloudCommand(Cli);
+#[cfg(any(feature = "auth-azure", feature = "auth-aws"))]
 #[async_trait::async_trait]
 impl CommandRunner for CloudCommand {
-    async fn output(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Result<std::process::Output> {
+    async fn output(
+        &self,
+        arguments: &[&str],
+        environment: &[(&str, &str)],
+    ) -> culprit_core::Result<std::process::Output> {
         let mut command = program::command(self.0)?;
         command.args(arguments).envs(environment.iter().copied());
         crate::cloud_process::output(command).await
     }
 }
+#[cfg(feature = "auth-azure")]
 pub(crate) fn entra() -> culprit_auth_azure::entra::EntraAuth {
     culprit_auth_azure::entra::EntraAuth::new(Arc::new(CloudCommand(Cli::Azure)))
 }
-#[cfg(feature = "collector")]
+#[cfg(all(feature = "collector", feature = "auth-aws"))]
 pub(crate) fn aws_profile(profile: Option<String>) -> Result<culprit_auth_aws::AwsCli> {
     culprit_auth_aws::AwsCli::with_profile(Arc::new(CloudCommand(Cli::Aws)), profile)
 }
+#[cfg(feature = "auth-aws")]
 pub(crate) fn aws() -> culprit_auth_aws::AwsCli {
     culprit_auth_aws::AwsCli::new(Arc::new(CloudCommand(Cli::Aws)))
 }
 /// Write the bundled RDS certificate authorities next to Culprit's data, once, and return the file.
+#[cfg(feature = "auth-aws")]
 pub(crate) fn rds_ca_file(data_dir: &Path) -> Result<PathBuf> {
     let dir = data_dir.join("certs");
     let path = dir.join("rds-global-bundle.pem");
@@ -52,13 +63,20 @@ pub(crate) fn rds_ca_file(data_dir: &Path) -> Result<PathBuf> {
 mod tests;
 
 pub(crate) fn authentication() -> AuthenticationRegistry {
-    AuthenticationRegistry::builtins(vec![Arc::new(entra()), Arc::new(aws())])
+    AuthenticationRegistry::builtins(vec![
+        #[cfg(feature = "auth-azure")]
+        Arc::new(entra()),
+        #[cfg(feature = "auth-aws")]
+        Arc::new(aws()),
+    ])
 }
 
+#[cfg(feature = "auth-azure")]
 pub(crate) fn azure_cli() -> culprit_auth_azure::cli::AzureCliCredential {
     culprit_auth_azure::cli::AzureCliCredential::new(Arc::new(CloudCommand(Cli::Azure)))
 }
 
+#[cfg(feature = "auth-azure")]
 pub(crate) fn azure_commands() -> Arc<dyn CommandRunner> {
     Arc::new(CloudCommand(Cli::Azure))
 }

@@ -1,4 +1,7 @@
 //! Pure AWS endpoint and regional identity facts, shared by authentication and cloud adapters.
+/// Connection-option marker for the built-in RDS certificate authorities. It never weakens TLS validation.
+pub const RDS_CA: &str = "rds";
+
 /// `shop.abc123.us-east-1.rds.amazonaws.com` → `us-east-1`.
 pub fn region_from_host(host: &str) -> Option<String> {
     let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
