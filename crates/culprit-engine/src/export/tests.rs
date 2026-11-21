@@ -184,17 +184,24 @@ fn shared_fixes_keep_generated_sql_constants_and_mask_unrechecked_plugin_values(
 
 #[test]
 fn shared_findings_explain_deadlock_collection_limits_without_exposing_private_notes() {
-    for (fixture, expected) in [
-        (include_str!("../../../../fixtures/mariadb-demo.report.json"), "innodb_print_all_deadlocks"),
-        (include_str!("../../../../fixtures/pg-demo.report.json"), "server log"),
+    for (fixture, expected, database_scoped) in [
+        (include_str!("../../../../fixtures/mariadb-demo.report.json"), "most recent deadlock", false),
+        (include_str!("../../../../fixtures/pg-demo.report.json"), "server log", true),
     ] {
         let mut report: Report = serde_json::from_str(fixture).unwrap();
         report.snapshot.deadlocks.as_mut().unwrap().note = Some("private-collector-endpoint".into());
         let shared = shared_report(&report);
-        let finding = shared.findings.iter().find(|f| f.check == "deadlocks").unwrap();
-        let markdown = finding_markdown(&shared, finding, &ExportOptions::default());
-        assert!(markdown.contains(expected), "{markdown}");
-        assert!(!markdown.contains("private-collector-endpoint"));
+        let note = shared.snapshot.deadlocks.as_ref().unwrap().note.as_deref().unwrap();
+        assert!(note.contains(expected), "{note}");
+        assert!(!note.contains("private-collector-endpoint"));
+        let finding = shared.findings.iter().find(|f| f.check == "deadlocks");
+        if database_scoped {
+            let markdown = finding_markdown(&shared, finding.unwrap(), &ExportOptions::default());
+            assert!(markdown.contains(expected), "{markdown}");
+            assert!(!markdown.contains("private-collector-endpoint"));
+        } else {
+            assert!(finding.is_none(), "a shared server deadlock must not grade the selected database");
+        }
     }
 }
 
