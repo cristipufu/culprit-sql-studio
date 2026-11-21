@@ -243,7 +243,7 @@ jobs:
         with:
           persist-credentials: false
       # Advisories, licenses, duplicate versions and sources, as deny.toml says.
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      - uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Audit the UI's packages
         working-directory: app
