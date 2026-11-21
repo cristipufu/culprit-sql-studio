@@ -197,11 +197,19 @@ fn bounded_database_property_disclosure_retains_recorded_check_metadata_without_
         // File reanalysis invokes the production pure interpretation without a provider or new dependency.
         let report = workspace.analyze_file(&path).unwrap().database_properties.unwrap();
         let value = database_properties(&report);
-        assert_eq!(value["fields_available"], 30);
+        assert_eq!(value["fields_available"], 37);
         assert_eq!(value["fields_presented"], ENTRY_LIMIT);
-        assert_eq!(value["fields_omitted"], 25);
+        assert_eq!(value["fields_omitted"], 32);
         assert_eq!(value["fields"][4]["key"], "last_good_checkdb_without_offset");
         assert_eq!(value["fields"][4]["value"], json!(expected));
+        assert_eq!(value["native_origin_fields"].as_array().unwrap().len(), 7);
+        assert_eq!(value["native_origin_fields_available"], 7);
+        assert_eq!(value["native_origin_fields_limited"], false);
+        assert_eq!(value["native_origin_fields"][0]["key"], "native_database_id");
+        assert_eq!(value["native_origin_fields"][0]["value"], "5");
+        assert_eq!(value["native_origin_fields"][1]["key"], "catalog_database_id");
+        assert_eq!(value["native_origin_fields"][1]["value"], "5");
+        assert_eq!(value["native_origin_fields"][2]["value"], "2019-12-01T08:30:00.003");
         assert_eq!(value["observed_at"], "2020-01-01T12:00:00.0000001Z");
         assert!(
             value["limitations"]

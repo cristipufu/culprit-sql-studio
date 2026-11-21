@@ -35,6 +35,19 @@ async fn genuine_collected_sealed_published_property_points_retain_all_original_
                 panic!()
             };
             assert_eq!(point.native_database_id, "5");
+            assert_eq!(
+                point.catalog_database_id,
+                if case == DatabasePropertiesCase::AzureCatalogNamespace { "42" } else { "5" }
+            );
+            assert_eq!(
+                point.catalog_created_without_offset.as_deref(),
+                if matches!(case, DatabasePropertiesCase::UnknownValues | DatabasePropertiesCase::CatalogCreatedUnknown)
+                {
+                    None
+                } else {
+                    Some("2019-12-01T08:30:00.003")
+                }
+            );
             assert_eq!(point.database, "sample");
             assert_eq!(point.catalog_read_only, Some(false));
             assert_eq!(
@@ -141,6 +154,13 @@ async fn native_code_clock_database_flag_and_null_projection_tampering_never_bor
         ("/containment/description", json!("PARTIAL")),
         ("/query_store_enabled", Value::Null),
         ("/native_database_id", json!("6")),
+        ("/catalog_database_id", json!("42")),
+        ("/catalog_created_without_offset", json!("2019-12-01T08:30:00.007")),
+        ("/catalog_created_without_offset", Value::Null),
+        (
+            "/local_replica_role",
+            json!({"state":"unavailable", "observed_at":"2020-01-01T12:00:00.0000001Z", "reason":"permission-denied", "native_error_number":229}),
+        ),
         ("/last_good_checkdb_without_offset", Value::Null),
         ("/last_good_checkdb_without_offset", json!("2019-12-28T23:10:00.007")),
     ] {

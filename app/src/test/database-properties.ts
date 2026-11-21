@@ -29,7 +29,14 @@ export function databasePropertiesReport(): DatabasePropertiesReport {
       { key: "merge_published", label: t("view.database_properties.field.merge_published"), value: t("view.database_properties.no"), native_code: null, native_description: null },
       { key: "distributor", label: t("view.database_properties.field.distributor"), value: t("view.database_properties.no"), native_code: null, native_description: null },
       { key: "accelerated_recovery_enabled", label: t("view.database_properties.field.accelerated_recovery_enabled"), value: t("view.database_properties.disabled"), native_code: null, native_description: null },
-    ], limitations: [t("view.database_properties.limit.scope"), t("view.database_properties.limit.state"), t("view.database_properties.limit.read"), t("view.database_properties.limit.features"), t("core.engines.mssql.integrity_history")],
+      { key: "native_database_id", label: t("view.database_properties.field.native_database_id"), value: "5", native_code: null, native_description: null },
+      { key: "catalog_database_id", label: t("view.database_properties.field.catalog_database_id"), value: "42", native_code: null, native_description: null },
+      { key: "catalog_created_without_offset", label: t("view.database_properties.field.catalog_created_without_offset"), value: "2019-12-01T08:30:00.003", native_code: null, native_description: null },
+      { key: "local_replica_role", label: t("view.database_properties.field.local_replica_role"), value: t("view.database_properties.role.local_primary"), native_code: null, native_description: null },
+      { key: "local_replica_role_source", label: t("view.database_properties.field.local_replica_role_source"), value: "sys.dm_hadr_database_replica_states", native_code: null, native_description: null },
+      { key: "local_replica_role_observed_at", label: t("view.database_properties.field.local_replica_role_observed_at"), value: "2020-01-01T12:00:00Z", native_code: null, native_description: null },
+      { key: "local_replica_role_error_number", label: t("view.database_properties.field.local_replica_role_error_number"), value: null, native_code: null, native_description: null },
+    ], limitations: [t("view.database_properties.limit.catalog_origin"), t("view.database_properties.limit.local_replica_role"), t("view.database_properties.limit.scope"), t("view.database_properties.limit.state"), t("view.database_properties.limit.read"), t("view.database_properties.limit.features"), t("core.engines.mssql.integrity_history")],
   });
 }
 export function databasePropertiesHealthReport(view: DatabasePropertiesReport | null = databasePropertiesReport()): Report {

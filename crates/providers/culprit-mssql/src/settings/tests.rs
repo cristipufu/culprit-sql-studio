@@ -256,3 +256,25 @@ async fn catalog_features_and_replication_states_reuse_the_same_property_read_wi
         assert_eq!(io.calls.len(), 1);
     }
 }
+
+#[test]
+fn scan_properties_retain_the_original_role_and_catalog_points_in_one_native_interval() {
+    use culprit_core::telemetry::*;
+    let mut point: DatabasePropertiesObservation = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../fixtures/database-properties.native.json"
+    )))
+    .unwrap();
+    point.local_replica_role =
+        Some(MssqlDatabaseReplicaRole::NotInAvailabilityGroup { observed_at: "2020-01-01T12:00:00Z".into() });
+    let mut coverage = Coverage::default();
+    let read =
+        retain_properties(target(), Ok(point.clone()), std::time::UNIX_EPOCH, std::time::UNIX_EPOCH, &mut coverage)
+            .unwrap();
+    assert!(read.is_valid());
+    let context = read.context.native().unwrap();
+    assert_eq!(context.observed_from, point.observed_from());
+    assert_eq!(context.observed_until, point.observed_at);
+    assert_eq!(read.observation.as_deref(), Some(&point));
+    assert_eq!(read.source.records, 1);
+}

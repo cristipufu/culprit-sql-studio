@@ -383,7 +383,7 @@ fn retain_properties(
             let context = NativeReadContext {
                 target: target.clone(),
                 partition: SourcePartition::Target,
-                observed_from: point.observed_at.clone(),
+                observed_from: point.observed_from().to_owned(),
                 observed_until: point.observed_at.clone(),
                 database_writable: point.writable(),
             };

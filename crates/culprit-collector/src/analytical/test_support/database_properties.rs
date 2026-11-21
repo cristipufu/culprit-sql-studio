@@ -3,6 +3,14 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabasePropertiesCase {
     Exact,
+    AzureCatalogNamespace,
+    CatalogCreatedUnknown,
+    NotInAvailabilityGroup,
+    LocalPrimary,
+    LocalSecondary,
+    NativeLocalRoleNull,
+    LocalRolePermissionDenied,
+    LocalRoleUnsupported,
     Encrypted,
     LedgerEnabled,
     ChangeFeedEnabled,
@@ -26,8 +34,16 @@ pub enum DatabasePropertiesCase {
     NotApplicable,
 }
 impl DatabasePropertiesCase {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 30] = [
         Self::Exact,
+        Self::AzureCatalogNamespace,
+        Self::CatalogCreatedUnknown,
+        Self::NotInAvailabilityGroup,
+        Self::LocalPrimary,
+        Self::LocalSecondary,
+        Self::NativeLocalRoleNull,
+        Self::LocalRolePermissionDenied,
+        Self::LocalRoleUnsupported,
         Self::Encrypted,
         Self::LedgerEnabled,
         Self::ChangeFeedEnabled,
@@ -60,6 +76,42 @@ pub fn database_properties_evidence(case: DatabasePropertiesCase) -> (Collection
     )))
     .unwrap();
     match case {
+        DatabasePropertiesCase::AzureCatalogNamespace => {
+            point.catalog_database_id = "42".into();
+            point.local_replica_role = Some(MssqlDatabaseReplicaRole::Unavailable {
+                observed_at: point.observed_at.clone(),
+                reason: MssqlDatabaseReplicaRoleUnavailable::UnqualifiedObserver,
+                native_error_number: None,
+            });
+        }
+        DatabasePropertiesCase::CatalogCreatedUnknown => point.catalog_created_without_offset = None,
+        DatabasePropertiesCase::NotInAvailabilityGroup => {
+            point.local_replica_role =
+                Some(MssqlDatabaseReplicaRole::NotInAvailabilityGroup { observed_at: point.observed_at.clone() });
+        }
+        DatabasePropertiesCase::LocalPrimary
+        | DatabasePropertiesCase::LocalSecondary
+        | DatabasePropertiesCase::NativeLocalRoleNull => {
+            point.local_replica_role = Some(MssqlDatabaseReplicaRole::LocalAvailabilityGroup {
+                source: MssqlDatabaseReplicaRoleSource::HadrDatabaseReplicaStates,
+                observed_at: point.observed_at.clone(),
+                replica_id: "91487244-730d-4b83-8e49-d482241c7288".into(),
+                group_database_id: "71bd65c3-bd16-4d08-b5ae-d72e3bf2f6d4".into(),
+                is_primary: (case != DatabasePropertiesCase::NativeLocalRoleNull)
+                    .then_some(case == DatabasePropertiesCase::LocalPrimary),
+            });
+        }
+        DatabasePropertiesCase::LocalRolePermissionDenied | DatabasePropertiesCase::LocalRoleUnsupported => {
+            point.local_replica_role = Some(MssqlDatabaseReplicaRole::Unavailable {
+                observed_at: point.observed_at.clone(),
+                reason: if case == DatabasePropertiesCase::LocalRolePermissionDenied {
+                    MssqlDatabaseReplicaRoleUnavailable::PermissionDenied
+                } else {
+                    MssqlDatabaseReplicaRoleUnavailable::UnsupportedLayout
+                },
+                native_error_number: (case == DatabasePropertiesCase::LocalRolePermissionDenied).then_some(229),
+            });
+        }
         DatabasePropertiesCase::Encrypted => point.encrypted = Some(true),
         DatabasePropertiesCase::LedgerEnabled => point.ledger_enabled = Some(true),
         DatabasePropertiesCase::ChangeFeedEnabled => point.change_feed_enabled = Some(true),
@@ -83,6 +135,8 @@ pub fn database_properties_evidence(case: DatabasePropertiesCase) -> (Collection
         DatabasePropertiesCase::ReadOnlyConnection => point.updateability = Some("READ_ONLY".into()),
         DatabasePropertiesCase::UnknownValues => {
             point.last_good_checkdb_without_offset = None;
+            point.catalog_created_without_offset = None;
+            point.local_replica_role = None;
             point.collation = None;
             point.compatibility_level = None;
             point.query_store_enabled = None;

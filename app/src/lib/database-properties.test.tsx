@@ -125,3 +125,24 @@ test("feature and replication catalog facts stay folded, nullable and informatio
     }
   }
 });
+
+
+test("native catalog namespaces and local-role points stay folded and distinct from updateability", () => {
+  const report = databasePropertiesReport();
+  const html = renderToStaticMarkup(<DatabasePropertyFields report={report} />);
+  for (const key of ["native_database_id", "catalog_database_id", "catalog_created_without_offset", "local_replica_role", "local_replica_role_source", "local_replica_role_observed_at"]) {
+    const field = report.fields.find((field) => field.key === key)!;
+    expect(html).toContain(field.label);
+    expect(html).toContain(field.value!);
+    expect(renderToStaticMarkup(<DatabaseProperties report={report} />)).not.toContain(field.label);
+  }
+  expect(html).toContain(t("view.database_properties.read_only"));
+  expect(html).toContain(t("view.database_properties.role.local_primary"));
+  expect(html).not.toContain("sig-dot");
+  expect(html).not.toContain("ALTER DATABASE");
+  report.fields.find((field) => field.key === "local_replica_role")!.value = null;
+  report.fields.find((field) => field.key === "catalog_created_without_offset")!.value = null;
+  const unknown = renderToStaticMarkup(<DatabasePropertyFields report={report} />);
+  expect(unknown).toContain(t("ui.memory_failures.not_reported"));
+  expect(unknown).not.toContain(t("view.database_properties.role.local_primary"));
+});

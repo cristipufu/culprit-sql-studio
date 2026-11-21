@@ -3,6 +3,8 @@ use super::*;
 
 pub const DATABASE_PROPERTIES_SOURCE: &str = "database-properties";
 const MAX_NATIVE_TEXT_BYTES: usize = 512;
+mod replica_role;
+pub use replica_role::{MssqlDatabaseReplicaRole, MssqlDatabaseReplicaRoleSource, MssqlDatabaseReplicaRoleUnavailable};
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -76,8 +78,16 @@ pub enum DatabasePropertyState {
 pub struct DatabasePropertiesObservation {
     pub profile: DatabasePropertiesProfile,
     pub database: String,
-    /// Native database_id is local to this observation; it is not an incarnation or a replica identity.
+    /// Original connected DB_ID()/DMV namespace, not an incarnation or a replica identity.
     pub native_database_id: String,
+    /// The original sys.databases row's ID. Azure catalog IDs can differ from DB_ID()/DMV IDs.
+    pub catalog_database_id: String,
+    /// Native sys.databases.create_date: created or renamed, without an established UTC offset.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub catalog_created_without_offset: Option<String>,
+    /// An independent native local-AG point, never a geo/distributed-primary or updateability verdict.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub local_replica_role: Option<MssqlDatabaseReplicaRole>,
     pub observed_at: String,
     pub catalog_state: DatabasePropertyCode,
     pub user_access: DatabasePropertyCode,
@@ -138,6 +148,13 @@ impl DatabasePropertiesObservation {
         valid_native_text(&self.database)
             && canonical_positive(&self.native_database_id)
             && self.native_database_id.parse::<i32>().is_ok()
+            && canonical_positive(&self.catalog_database_id)
+            && self.catalog_database_id.parse::<i32>().is_ok()
+            && self
+                .catalog_created_without_offset
+                .as_deref()
+                .is_none_or(|value| super::catalog::mssql_datetime(value).is_some())
+            && self.local_replica_role.as_ref().is_none_or(|role| role.is_valid_for(self))
             && self.observed_at.len() <= 64
             && ObservationBounds::new(&self.observed_at, &self.observed_at).is_some()
             && [
@@ -158,6 +175,11 @@ impl DatabasePropertiesObservation {
                 .last_good_checkdb_without_offset
                 .as_deref()
                 .is_none_or(|value| super::catalog::mssql_datetime(value).is_some())
+    }
+
+    /// Earliest original native point in this one dispatch; local role and catalog clocks remain independent.
+    pub fn observed_from(&self) -> &str {
+        self.local_replica_role.as_ref().map(MssqlDatabaseReplicaRole::observed_at).unwrap_or(&self.observed_at)
     }
 
     /// Distinguish the documented no-record sentinel from a recorded native time and unavailable metadata.
@@ -184,8 +206,10 @@ impl DatabasePropertiesObservation {
                 .target
                 .database()
                 .is_some_and(|database| database.engine == crate::Engine::Mssql && database.database == self.database)
-            && ObservationBounds::new(&context.observed_from, &context.observed_until)
-                .is_some_and(|bounds| bounds.contains(&self.observed_at))
+            && ObservationBounds::new(&context.observed_from, &context.observed_until).is_some_and(|bounds| {
+                bounds.contains(&self.observed_at)
+                    && self.local_replica_role.as_ref().is_none_or(|role| bounds.contains(role.observed_at()))
+            })
             && context.database_writable.zip(self.writable()).is_none_or(|(scope, point)| scope == point)
     }
 

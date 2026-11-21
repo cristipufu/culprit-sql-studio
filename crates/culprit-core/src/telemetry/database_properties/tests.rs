@@ -276,3 +276,75 @@ fn containment_keeps_the_native_code_separate_from_description_and_availability(
     missing.as_object_mut().unwrap().remove("containment");
     assert!(serde_json::from_value::<DatabasePropertiesObservation>(missing).is_err());
 }
+
+#[test]
+fn current_and_catalog_ids_and_created_or_renamed_time_are_independent_native_fields_without_incarnation_proof() {
+    let mut point = point();
+    point.catalog_database_id = "42".into();
+    point.catalog_created_without_offset = Some("2019-12-01T08:30:00.003".into());
+    assert!(point.is_valid());
+    assert_eq!(point.native_database_id, "5");
+    for value in ["", "0", "042", "-1"] {
+        let mut changed = point.clone();
+        changed.catalog_database_id = value.into();
+        assert!(!changed.is_valid(), "{value}");
+    }
+    for value in ["2019-12-01T08:30:00Z", "2019-12-01T08:30:00+02:00", "2019-02-30T08:30:00"] {
+        let mut changed = point.clone();
+        changed.catalog_created_without_offset = Some(value.into());
+        assert!(!changed.is_valid(), "{value}");
+    }
+    let mut value = serde_json::to_value(&point).unwrap();
+    for field in ["catalog_database_id", "catalog_created_without_offset", "local_replica_role"] {
+        let saved = value.as_object_mut().unwrap().remove(field).unwrap();
+        assert!(serde_json::from_value::<DatabasePropertiesObservation>(value.clone()).is_err(), "{field}");
+        value.as_object_mut().unwrap().insert(field.into(), saved);
+    }
+}
+
+#[test]
+fn native_local_role_keeps_null_and_its_own_original_clock_and_cannot_expand_the_read_interval() {
+    let mut read = read();
+    let point = read.observation.as_mut().unwrap();
+    point.local_replica_role = Some(MssqlDatabaseReplicaRole::LocalAvailabilityGroup {
+        source: MssqlDatabaseReplicaRoleSource::HadrDatabaseReplicaStates,
+        observed_at: "2020-01-01T12:00:00Z".into(),
+        replica_id: "91487244-730d-4b83-8e49-d482241c7288".into(),
+        group_database_id: "71bd65c3-bd16-4d08-b5ae-d72e3bf2f6d4".into(),
+        is_primary: None,
+    });
+    assert!(read.is_valid());
+    let restored: DatabasePropertiesRead = serde_json::from_value(serde_json::to_value(&read).unwrap()).unwrap();
+    assert_eq!(restored, read);
+    for at in ["2020-01-01T11:59:59Z", "2020-01-01T12:00:00.0000002Z"] {
+        let mut changed = read.clone();
+        let Some(MssqlDatabaseReplicaRole::LocalAvailabilityGroup { observed_at, .. }) =
+            &mut changed.observation.as_mut().unwrap().local_replica_role
+        else {
+            panic!()
+        };
+        *observed_at = at.into();
+        assert!(!changed.is_valid(), "{at}");
+    }
+}
+
+#[test]
+fn not_in_group_retains_its_original_verdict_independently_of_later_catalog_state_and_updateability() {
+    let mut point = point();
+    point.local_replica_role =
+        Some(MssqlDatabaseReplicaRole::NotInAvailabilityGroup { observed_at: "2020-01-01T12:00:00Z".into() });
+    point.updateability = Some("READ_ONLY".into());
+    assert!(point.is_valid());
+    point.catalog_database_id = "42".into();
+    assert!(!point.is_valid(), "boxed/MI membership does not mix catalog and DMV namespaces");
+    point.catalog_database_id = point.native_database_id.clone();
+    point.catalog_state.code = None;
+    assert!(point.is_valid(), "the earlier native role verdict does not borrow the later catalog state");
+    assert!(matches!(point.local_replica_role, Some(MssqlDatabaseReplicaRole::NotInAvailabilityGroup { .. })));
+    point.local_replica_role = Some(MssqlDatabaseReplicaRole::Unavailable {
+        observed_at: "2020-01-01T12:00:00Z".into(),
+        reason: MssqlDatabaseReplicaRoleUnavailable::PermissionDenied,
+        native_error_number: Some(229),
+    });
+    assert!(point.is_valid(), "optional role denial preserves independently available catalog fields");
+}

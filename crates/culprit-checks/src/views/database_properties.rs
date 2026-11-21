@@ -3,6 +3,8 @@ use culprit_core::{
     DatabasePropertiesReport, DatabasePropertyField, Result, Snapshot, SourceState, format, t, telemetry::*,
 };
 
+mod origin;
+
 pub fn explain_snapshot(snapshot: &Snapshot) -> Result<Option<DatabasePropertiesReport>> {
     if let Some(read) = snapshot.operations.database_properties.as_deref() {
         return explain(read).map(Some);
@@ -42,6 +44,7 @@ pub fn explain(read: &DatabasePropertiesRead) -> Result<DatabasePropertiesReport
     report.native_database_id = Some(point.native_database_id.clone());
     report.summary = t!("view.database_properties.summary.recorded");
     report.fields = fields(point);
+    report.limitations.extend(origin::limitations(point));
     if let Some(note) = read.target.engine().spec().integrity_history_note() {
         report.limitations.push(culprit_core::i18n::t(note, &[]));
     }
@@ -73,7 +76,7 @@ fn unavailable() -> DatabasePropertiesReport {
 
 fn fields(point: &DatabasePropertiesObservation) -> Vec<DatabasePropertyField> {
     use DatabasePropertyCodeKind as C;
-    vec![
+    let mut fields = vec![
         coded(
             "catalog_state",
             t!("view.database_properties.field.catalog_state"),
@@ -241,7 +244,9 @@ fn fields(point: &DatabasePropertiesObservation) -> Vec<DatabasePropertyField> {
             None,
             None,
         ),
-    ]
+    ];
+    fields.extend(origin::fields(point));
+    fields
 }
 fn field(
     key: &str,

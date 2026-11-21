@@ -88,13 +88,32 @@ fn database_properties(report: &culprit_core::DatabasePropertiesReport) -> Value
     json!({
         "title":report.title,"summary":report.summary,"source_state":report.source_state,
         "read_complete":report.read_complete,"observed_at":report.observed_at,"limitations":report.limitations,
-        "fields":report.fields.iter().take(ENTRY_LIMIT).map(|field|json!({
-            "key":field.key,"label":field.label,"value":field.value,
-            "native_code":field.native_code,"native_description":field.native_description,
-        })).collect::<Vec<_>>(),"fields_available":report.fields.len(),
+        "fields":report.fields.iter().take(ENTRY_LIMIT).map(database_property_field).collect::<Vec<_>>(),
+        "native_origin_fields":report.fields.iter().filter(|field|database_property_origin(field))
+            .take(DATABASE_PROPERTY_ORIGIN_FIELDS.len()).map(database_property_field).collect::<Vec<_>>(),
+        "native_origin_fields_available":report.fields.iter().filter(|field|database_property_origin(field)).count(),
+        "native_origin_fields_limited":report.fields.iter().filter(|field|database_property_origin(field)).count()>DATABASE_PROPERTY_ORIGIN_FIELDS.len(),
+        "fields_available":report.fields.len(),
         "fields_presented":report.fields.len().min(ENTRY_LIMIT),"fields_omitted":report.fields.len().saturating_sub(ENTRY_LIMIT),
         "fields_limited":report.fields.len()>ENTRY_LIMIT,
     })
+}
+
+const DATABASE_PROPERTY_ORIGIN_FIELDS: [&str; 7] = [
+    "native_database_id",
+    "catalog_database_id",
+    "catalog_created_without_offset",
+    "local_replica_role",
+    "local_replica_role_source",
+    "local_replica_role_observed_at",
+    "local_replica_role_error_number",
+];
+fn database_property_origin(field: &culprit_core::DatabasePropertyField) -> bool {
+    DATABASE_PROPERTY_ORIGIN_FIELDS.contains(&field.key.as_str())
+}
+fn database_property_field(field: &culprit_core::DatabasePropertyField) -> Value {
+    json!({"key":field.key,"label":field.label,"value":field.value,
+        "native_code":field.native_code,"native_description":field.native_description})
 }
 
 fn compilation(analysis: &LocalSnapshotAnalysis, report: &culprit_core::CompilationReport) -> Value {

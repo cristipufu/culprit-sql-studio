@@ -57,8 +57,9 @@ fn properties() -> Rec {
     replace(
         &crate::settings::tests::database(),
         &[
-            ("database_id", Val::Int(7)),
             ("selected_database_id", Val::Int(7)),
+            ("catalog_database_id", Val::Int(7)),
+            ("local_role_catalog_id", Val::Int(7)),
             ("database_name", Val::Text("shop".into())),
             ("selected_database", Val::Text("shop".into())),
         ],

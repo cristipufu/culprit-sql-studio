@@ -2583,7 +2583,7 @@
     "indexed_views": null,
     "indexed_view_originals": []
   },
-  "format": 49,
+  "format": 50,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

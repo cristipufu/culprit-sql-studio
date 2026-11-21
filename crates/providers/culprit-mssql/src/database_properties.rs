@@ -5,8 +5,10 @@ use crate::{
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 
-const PREFIX: &str = "CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,CAST(0 AS int) AS property_error_number,DB_ID() AS selected_database_id,DB_NAME() AS selected_database,d.database_id,d.name AS database_name,d.state,d.state_desc,d.user_access,d.user_access_desc,CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(128)) AS updateability,d.is_read_only,d.is_in_standby,d.is_broker_enabled,d.collation_name,d.compatibility_level,d.snapshot_isolation_state,d.snapshot_isolation_state_desc,d.is_read_committed_snapshot_on,d.is_auto_shrink_on,d.is_auto_create_stats_on,d.is_auto_update_stats_on,d.is_auto_update_stats_async_on,d.is_parameterization_forced";
-const SUFFIX: &str = ",d.page_verify_option,d.page_verify_option_desc,d.recovery_model,d.recovery_model_desc,d.target_recovery_time_in_seconds,CONVERT(varchar(23),CONVERT(datetime,DATABASEPROPERTYEX(DB_NAME(),'LastGoodCheckDbTime')),126) AS last_good_checkdb_without_offset FROM (VALUES(1)) AS selected_database(only_row) LEFT JOIN sys.databases AS d ON d.database_id=DB_ID() OPTION(MAXDOP 1)";
+mod replica_role;
+
+const PREFIX: &str = "CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,CAST(0 AS int) AS property_error_number,@culprit_properties_database_id AS selected_database_id,@culprit_properties_database_name AS selected_database,CONVERT(int,SERVERPROPERTY('EngineEdition')) AS native_engine_edition,d.database_id AS catalog_database_id,d.name AS database_name,CONVERT(varchar(23),d.create_date,126) AS catalog_created_without_offset,d.state,d.state_desc,d.user_access,d.user_access_desc,CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(128)) AS updateability,d.is_read_only,d.is_in_standby,d.is_broker_enabled,d.collation_name,d.compatibility_level,d.snapshot_isolation_state,d.snapshot_isolation_state_desc,d.is_read_committed_snapshot_on,d.is_auto_shrink_on,d.is_auto_create_stats_on,d.is_auto_update_stats_on,d.is_auto_update_stats_async_on,d.is_parameterization_forced";
+const SUFFIX: &str = ",d.page_verify_option,d.page_verify_option_desc,d.recovery_model,d.recovery_model_desc,d.target_recovery_time_in_seconds,CONVERT(varchar(23),CONVERT(datetime,DATABASEPROPERTYEX(DB_NAME(),'LastGoodCheckDbTime')),126) AS last_good_checkdb_without_offset FROM (VALUES(1)) AS selected_database(only_row) LEFT JOIN sys.databases AS d ON d.name=@culprit_properties_database_name OPTION(MAXDOP 1)";
 const FALLBACK: &str = "CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility,DB_NAME() AS selected_database,ERROR_NUMBER() AS property_error_number";
 
 /// Fixed SQL only. Dynamic compilation keeps pre-2016 servers and hidden columns out of an invalid binding;
@@ -17,7 +19,9 @@ pub(crate) fn query() -> String {
 
 /// Only fixed provider-owned projection columns may be supplied; the native catalog decoder is unchanged.
 pub(crate) fn query_with_context(context_columns: &str, execution_parameters: &str) -> String {
-    let prefix = format!("SELECT /* culprit */ {context_columns}{PREFIX}").replace('\'', "''");
+    let role = replica_role::batch();
+    let role_columns = replica_role::columns();
+    let prefix = format!("{role}\nSELECT /* culprit */ {context_columns}{role_columns}{PREFIX}").replace('\'', "''");
     let suffix = SUFFIX.replace('\'', "''");
     let fallback = format!("SELECT /* culprit */ {context_columns}{FALLBACK}");
     let query_store = optional_columns(&[("is_query_store_on", "bit")]);
@@ -87,6 +91,7 @@ pub(crate) fn decode_read(rows: &[Rec]) -> Result<Read> {
     canonical_time(&observed_at)?;
     let metadata_visible = integer(row, "metadata_visibility")? == 1;
     let properties = decode(row, &observed_at);
+    let observed_at = properties.as_ref().map(|point| point.observed_from().to_owned()).unwrap_or(observed_at);
     Ok(Read { database: text(row, "selected_database")?, observed_at, metadata_visible, properties })
 }
 
@@ -97,15 +102,23 @@ fn decode(row: &Rec, at: &str) -> Result<DatabasePropertiesObservation> {
         229 | 297 | 300 => return Err(unavailable(ErrorCode::PermissionDenied)),
         _ => return Err(invalid_data()),
     }
-    let Some(id) = optional_integer(row, "database_id")? else { return Err(unavailable(ErrorCode::PermissionDenied)) };
+    let Some(catalog_id) = optional_integer(row, "catalog_database_id")? else {
+        return Err(unavailable(ErrorCode::PermissionDenied));
+    };
+    let current_id = integer(row, "selected_database_id")?;
     let database = text(row, "database_name")?;
-    if id != integer(row, "selected_database_id")? || database != text(row, "selected_database")? {
+    if database != text(row, "selected_database")?
+        || (integer(row, "native_engine_edition")? != 5 && catalog_id != current_id)
+    {
         return Err(CollectionStop::SourceChanged.error());
     }
     let point = DatabasePropertiesObservation {
         profile: DatabasePropertiesProfile::MssqlSysDatabases,
         database,
-        native_database_id: id.to_string(),
+        native_database_id: current_id.to_string(),
+        catalog_database_id: catalog_id.to_string(),
+        catalog_created_without_offset: optional_text(row, "catalog_created_without_offset")?,
+        local_replica_role: Some(replica_role::decode(row)?),
         observed_at: at.into(),
         catalog_state: code(row, "state", "state_desc")?,
         user_access: code(row, "user_access", "user_access_desc")?,

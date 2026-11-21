@@ -178,6 +178,13 @@ fn canonical_catalog_features_keep_their_exact_field_values_and_limits_in_plain_
         let report = culprit_checks::database_properties::explain(&read).unwrap();
         let rendered = database_properties(&report);
         for key in [
+            "native_database_id",
+            "catalog_database_id",
+            "catalog_created_without_offset",
+            "local_replica_role",
+            "local_replica_role_source",
+            "local_replica_role_observed_at",
+            "local_replica_role_error_number",
             "containment",
             "encrypted",
             "ledger_enabled",
@@ -196,6 +203,8 @@ fn canonical_catalog_features_keep_their_exact_field_values_and_limits_in_plain_
             )));
         }
         assert!(rendered.contains(&t!("view.database_properties.limit.features")));
+        assert!(rendered.contains(&t!("view.database_properties.limit.catalog_origin")));
+        assert!(rendered.contains(&t!("view.database_properties.limit.local_replica_role")));
         for command in ["ALTER DATABASE", "sp_replicationdboption", "DBCC", "fixture.invalid"] {
             assert!(!rendered.contains(command));
         }

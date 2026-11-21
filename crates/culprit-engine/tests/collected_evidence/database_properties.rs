@@ -33,7 +33,7 @@ async fn database_properties_replay_keeps_original_native_namespace_codes_unknow
         assert_eq!(serde_json::to_value(&analysis.report).unwrap(), serde_json::to_value(expected).unwrap());
         assert_eq!(fixture.recovery_object_reads(), opened);
         if case == DatabasePropertiesCase::Exact {
-            assert_eq!(analysis.report.fields.len(), 30);
+            assert_eq!(analysis.report.fields.len(), 37);
             assert_eq!(analysis.report.native_database_id.as_deref(), Some("5"));
             assert_eq!(
                 analysis
@@ -48,6 +48,29 @@ async fn database_properties_replay_keeps_original_native_namespace_codes_unknow
             );
         }
         if let Some(point) = &read.observation {
+            for (key, expected) in [
+                ("native_database_id", Some(point.native_database_id.clone())),
+                ("catalog_database_id", Some(point.catalog_database_id.clone())),
+                ("catalog_created_without_offset", point.catalog_created_without_offset.clone()),
+            ] {
+                assert_eq!(
+                    analysis.report.fields.iter().find(|field| field.key == key).unwrap().value,
+                    expected,
+                    "{case:?}/{key}"
+                );
+            }
+            assert!(
+                analysis
+                    .report
+                    .limitations
+                    .contains(&culprit_core::t!("view.database_properties.limit.catalog_origin"))
+            );
+            assert!(
+                analysis
+                    .report
+                    .limitations
+                    .contains(&culprit_core::t!("view.database_properties.limit.local_replica_role"))
+            );
             for (name, native, enabled_case, enabled_wording) in [
                 ("encrypted", point.encrypted, DatabasePropertiesCase::Encrypted, true),
                 ("ledger_enabled", point.ledger_enabled, DatabasePropertiesCase::LedgerEnabled, false),

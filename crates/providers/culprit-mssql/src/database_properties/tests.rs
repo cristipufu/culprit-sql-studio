@@ -12,7 +12,21 @@ pub(crate) fn row(at: &str) -> Rec {
         ("property_error_number", Val::Int(0)),
         ("selected_database_id", Val::Int(5)),
         ("selected_database", Val::Text("sample".into())),
-        ("database_id", Val::Int(5)),
+        ("catalog_database_id", Val::Int(5)),
+        ("native_engine_edition", Val::Int(3)),
+        ("catalog_created_without_offset", Val::Text("2019-12-01T08:30:00.003".into())),
+        ("local_role_state", Val::Int(1)),
+        ("local_role_interface", Val::Null),
+        ("local_role_observed_at", Val::Text(at.into())),
+        ("local_role_error_number", Val::Null),
+        ("local_role_catalog_id", Val::Int(5)),
+        ("local_role_catalog_state", Val::Int(0)),
+        ("local_role_metadata_visibility", Val::Int(1)),
+        ("local_role_rows", Val::Null),
+        ("local_role_replica_id", Val::Null),
+        ("local_role_group_database_id", Val::Null),
+        ("local_role_observer_replica_id", Val::Null),
+        ("local_role_is_primary", Val::Null),
         ("database_name", Val::Text("sample".into())),
         ("state", Val::Int(0)),
         ("state_desc", Val::Text("ONLINE".into())),
@@ -72,7 +86,7 @@ async fn the_one_selected_catalog_read_keeps_native_codes_zeroes_and_connection_
     assert_eq!(io.calls.len(), 1);
     assert_eq!(io.calls[0].limit, 2, "second native row is an ambiguity witness");
     assert!(io.calls[0].parameters.is_empty());
-    assert!(io.calls[0].sql.contains("d.database_id=DB_ID()"));
+    assert!(io.calls[0].sql.contains("d.name=@culprit_properties_database_name"));
 }
 
 #[tokio::test]
@@ -118,7 +132,7 @@ async fn foreign_rows_duplicates_malformed_values_and_terminal_native_errors_do_
     for rows in [
         vec![],
         vec![row(at()), row(at())],
-        vec![replace(&row(at()), &[("database_id", Val::Int(6))])],
+        vec![replace(&row(at()), &[("catalog_database_id", Val::Int(6))])],
         vec![replace(&row(at()), &[("database_name", Val::Text("foreign".into()))])],
         vec![replace(&row(at()), &[("is_read_only", Val::Int(2))])],
         vec![replace(&row(at()), &[("is_auto_shrink_on", Val::Int(2))])],
@@ -153,7 +167,7 @@ fn optional_columns_bind_only_inside_fixed_native_sql_and_the_default_authority_
     assert!(sql.contains("sys.sp_executesql @culprit_database_properties"));
     assert!(sql.contains("IF ERROR_NUMBER() NOT IN(207,208,229,297,300) THROW"));
     assert!(!sql.contains("sys.database_query_store_options"), "independent Query Store modes keep their own source");
-    assert!(!sql.contains("sys.dm_hadr_database_replica_states"), "catalog state is not a guessed member health read");
+    assert!(!sql.contains("synchronization_health"), "the optional local-role point is not member health");
 }
 
 #[tokio::test]
@@ -216,7 +230,7 @@ async fn selected_database_auto_shrink_is_a_nullable_native_bit_in_the_same_sing
         assert_eq!(io.calls.len(), 1);
         assert_eq!(io.calls[0].limit, 2);
         assert!(io.calls[0].sql.contains("d.is_auto_shrink_on"));
-        assert!(io.calls[0].sql.contains("d.database_id=DB_ID()"));
+        assert!(io.calls[0].sql.contains("d.name=@culprit_properties_database_name"));
     }
 }
 
@@ -273,7 +287,7 @@ async fn service_broker_native_bit_keeps_null_and_same_selected_database_clock_w
         assert_eq!(io.calls.len(), 1);
         assert_eq!(io.calls[0].limit, 2);
         assert!(io.calls[0].sql.contains("d.is_broker_enabled"));
-        assert!(io.calls[0].sql.contains("d.database_id=DB_ID()"));
+        assert!(io.calls[0].sql.contains("d.name=@culprit_properties_database_name"));
     }
 }
 
@@ -372,8 +386,8 @@ fn new_catalog_capabilities_share_the_same_fixed_singleton_dispatch_and_guard_in
         assert!(sql.contains(&format!(",d.{column}")), "{column}");
     }
     assert!(sql.contains("COL_LENGTH(N'sys.databases',N'containment') IS NULL OR COL_LENGTH(N'sys.databases',N'containment_desc') IS NULL"));
-    assert_eq!(sql.matches("sys.sp_executesql").count(), 1);
-    assert_eq!(sql.matches("LEFT JOIN sys.databases AS d ON d.database_id=DB_ID()").count(), 1);
+    assert_eq!(sql.matches("sys.sp_executesql @culprit_database_properties").count(), 1);
+    assert_eq!(sql.matches("LEFT JOIN sys.databases AS d ON d.name=@culprit_properties_database_name").count(), 1);
     assert!(!sql.contains("dm_tran_persistent_version_store_stats"));
     assert!(!sql.contains("sys.tables"));
 }

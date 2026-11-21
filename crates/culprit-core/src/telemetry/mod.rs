@@ -24,7 +24,8 @@ pub use suspect_pages::{
 mod database_properties;
 pub use database_properties::{
     DATABASE_PROPERTIES_SOURCE, DatabasePropertiesObservation, DatabasePropertiesProfile, DatabasePropertiesRead,
-    DatabasePropertyCode, DatabasePropertyCodeKind, DatabasePropertyState,
+    DatabasePropertyCode, DatabasePropertyCodeKind, DatabasePropertyState, MssqlDatabaseReplicaRole,
+    MssqlDatabaseReplicaRoleSource, MssqlDatabaseReplicaRoleUnavailable,
 };
 mod captured_snapshot;
 pub use cached_runtime_read::{

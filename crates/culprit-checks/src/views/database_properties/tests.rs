@@ -34,7 +34,7 @@ fn one_interpretation_preserves_native_codes_zero_unknown_and_independent_connec
     point.catalog_state.code = Some(255);
     point.auto_update_statistics_async = None;
     let report = explain(&read).unwrap();
-    assert_eq!(report.fields.len(), 30);
+    assert_eq!(report.fields.len(), 37);
     assert_eq!(field(&report, "catalog_read_only").value.as_deref(), Some(t!("view.database_properties.no").as_str()));
     assert_eq!(
         field(&report, "updateability").value.as_deref(),
@@ -54,6 +54,14 @@ fn persisted_raw_properties_reanalyze_to_the_same_report_and_sharing_keeps_an_ex
             .unwrap();
     let mut read = read();
     read.observation.as_mut().unwrap().collation = Some("private-collation-canary".into());
+    let point = read.observation.as_mut().unwrap();
+    point.local_replica_role = Some(MssqlDatabaseReplicaRole::LocalAvailabilityGroup {
+        source: MssqlDatabaseReplicaRoleSource::HadrDatabaseReplicaStates,
+        observed_at: point.observed_at.clone(),
+        replica_id: "91487244-730d-4b83-8e49-d482241c7288".into(),
+        group_database_id: "71bd65c3-bd16-4d08-b5ae-d72e3bf2f6d4".into(),
+        is_primary: Some(true),
+    });
     snapshot.operations.database_properties = Some(Box::new(read));
     let before = explain_snapshot(&snapshot).unwrap().unwrap();
     let restored: Snapshot = serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
@@ -62,6 +70,7 @@ fn persisted_raw_properties_reanalyze_to_the_same_report_and_sharing_keeps_an_ex
     let shared = culprit_core::redact::redact_snapshot(&snapshot);
     assert!(shared.operations.database_properties.is_none());
     assert!(!serde_json::to_string(&shared).unwrap().contains("private-collation-canary"));
+    assert!(!serde_json::to_string(&shared).unwrap().contains("91487244-730d-4b83-8e49-d482241c7288"));
     let shared_report = explain_snapshot(&shared).unwrap().unwrap();
     assert_eq!(shared_report.source_state, Some(SourceState::Unavailable));
     assert!(shared_report.fields.is_empty());
@@ -256,5 +265,88 @@ fn containment_interpretation_uses_only_the_original_native_code_and_retains_unk
         assert_eq!(property.native_code, code.map(|value| value.to_string()));
         assert_eq!(property.native_description.as_deref(), Some("PARTIAL"));
         assert_eq!(report.observed_at, Some(original.observation.as_ref().unwrap().observed_at.clone()));
+    }
+}
+
+#[test]
+fn original_catalog_id_and_created_or_renamed_time_do_not_borrow_current_or_utc_identity() {
+    let mut original = read();
+    let point = original.observation.as_mut().unwrap();
+    point.catalog_database_id = "42".into();
+    let created = point.catalog_created_without_offset.clone();
+    let report = explain(&original).unwrap();
+    assert_eq!(report.native_database_id.as_deref(), Some("5"));
+    assert_eq!(field(&report, "native_database_id").value.as_deref(), Some("5"));
+    assert_eq!(field(&report, "catalog_database_id").value.as_deref(), Some("42"));
+    assert_eq!(field(&report, "catalog_created_without_offset").value, created);
+    assert!(report.limitations.contains(&t!("view.database_properties.limit.catalog_origin")));
+    assert!(field(&report, "local_replica_role").value.is_none());
+    assert!(!serde_json::to_string(&report).unwrap().contains("age_seconds"));
+    original.observation.as_mut().unwrap().catalog_created_without_offset = None;
+    assert!(field(&explain(&original).unwrap(), "catalog_created_without_offset").value.is_none());
+}
+
+#[test]
+fn original_local_role_and_native_null_are_separate_from_updateability_and_geo_or_distributed_primary() {
+    let mut original = read();
+    let point = original.observation.as_mut().unwrap();
+    point.updateability = Some("READ_ONLY".into());
+    let at = point.observed_at.clone();
+    for (native, expected) in [
+        (Some(true), Some(t!("view.database_properties.role.local_primary"))),
+        (Some(false), Some(t!("view.database_properties.role.local_secondary"))),
+        (None, None),
+    ] {
+        original.observation.as_mut().unwrap().local_replica_role =
+            Some(MssqlDatabaseReplicaRole::LocalAvailabilityGroup {
+                source: MssqlDatabaseReplicaRoleSource::HadrDatabaseReplicaStates,
+                observed_at: at.clone(),
+                replica_id: "91487244-730d-4b83-8e49-d482241c7288".into(),
+                group_database_id: "71bd65c3-bd16-4d08-b5ae-d72e3bf2f6d4".into(),
+                is_primary: native,
+            });
+        let report = explain(&original).unwrap();
+        assert_eq!(field(&report, "local_replica_role").value, expected);
+        assert_eq!(
+            field(&report, "local_replica_role_source").value.as_deref(),
+            Some("sys.dm_hadr_database_replica_states")
+        );
+        assert_eq!(field(&report, "local_replica_role_observed_at").value.as_deref(), Some(at.as_str()));
+        assert_eq!(field(&report, "updateability").value, Some(t!("view.database_properties.read_only")));
+        assert!(report.limitations.contains(&t!("view.database_properties.limit.local_replica_role")));
+        assert_eq!(report.summary, t!("view.database_properties.summary.recorded"));
+    }
+    original.observation.as_mut().unwrap().local_replica_role =
+        Some(MssqlDatabaseReplicaRole::NotInAvailabilityGroup { observed_at: at });
+    let report = explain(&original).unwrap();
+    assert_eq!(field(&report, "local_replica_role").value, Some(t!("view.database_properties.role.not_in_group")));
+    assert_eq!(field(&report, "local_replica_role_source").value.as_deref(), Some("sys.databases"));
+}
+
+#[test]
+fn role_denial_layout_and_missing_or_ambiguous_rows_leave_other_original_properties_available() {
+    use MssqlDatabaseReplicaRoleUnavailable as R;
+    for (reason, expected) in [
+        (R::PermissionDenied, t!("view.database_properties.role.unavailable.permission")),
+        (R::UnsupportedLayout, t!("view.database_properties.role.unavailable.layout")),
+        (R::MissingLocalRow, t!("view.database_properties.role.unavailable.missing")),
+        (R::AmbiguousLocalRows, t!("view.database_properties.role.unavailable.ambiguous")),
+    ] {
+        let mut original = read();
+        let point = original.observation.as_mut().unwrap();
+        point.local_replica_role = Some(MssqlDatabaseReplicaRole::Unavailable {
+            observed_at: point.observed_at.clone(),
+            reason,
+            native_error_number: (reason == R::PermissionDenied).then_some(229),
+        });
+        let report = explain(&original).unwrap();
+        assert!(field(&report, "local_replica_role").value.is_none());
+        assert!(report.limitations.contains(&expected));
+        assert_eq!(field(&report, "catalog_database_id").value.as_deref(), Some("5"));
+        assert_eq!(
+            field(&report, "local_replica_role_error_number").value,
+            (reason == R::PermissionDenied).then_some("229".into())
+        );
+        assert_eq!(report.source_state, Some(SourceState::Collected));
     }
 }

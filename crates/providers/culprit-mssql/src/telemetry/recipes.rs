@@ -316,7 +316,7 @@ const REGISTRATIONS: &[Registration] = &[
     .bounded(backup_history::bounded_budget)
     .on_editions(&[2, 3, 4, 5, 8])
     .version(2),
-    state!("mssql.operational", Operational).baseline().version(8),
+    state!("mssql.operational", Operational).baseline().version(9),
     state!("mssql.numa-nodes", NumaNodes)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .on_editions(crate::instance::SUPPORTED_EDITIONS)
@@ -347,7 +347,7 @@ const REGISTRATIONS: &[Registration] = &[
     .bounded(replication::bounded_budget)
     .baseline()
     .version(4),
-    state!("mssql.settings", Settings).bounded(state::settings_budget).baseline().version(5),
+    state!("mssql.settings", Settings).bounded(state::settings_budget).baseline().version(6),
     Registration::database(
         "mssql.resource-pool-settings",
         RecipeSelector::ResourcePoolSettings,
