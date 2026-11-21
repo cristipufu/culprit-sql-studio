@@ -1,14 +1,15 @@
 //! Statement counters, families and safe plan capture from pg_stat_statements.
+use crate::read::QueryRead;
 use crate::{
     plan_json,
     probe::{Probe, StatementsAccess},
-    rows::{iso, query, query_one},
+    read::{query, query_one},
+    rows::iso,
 };
 use culprit_core::i18n::{Message, MessageValue};
 use culprit_core::{
     Engine, PlanKind, QueryFamily, QueryStat, Result, Setting, SnapshotOptions, Spread, WaitStat, Workload, t,
 };
-use tokio_postgres::Client;
 
 pub(crate) struct CollectedWorkload {
     pub(crate) workload: Workload,
@@ -23,7 +24,7 @@ pub(crate) struct CollectedWorkload {
 }
 
 pub(crate) async fn collect_workload(
-    client: &Client,
+    client: &mut impl QueryRead,
     probe: &Probe,
     options: &SnapshotOptions,
 ) -> Result<Option<CollectedWorkload>> {
@@ -41,7 +42,7 @@ pub(crate) async fn collect_workload(
 }
 
 async fn collect_with_base(
-    client: &Client,
+    client: &mut impl QueryRead,
     probe: &Probe,
     options: &SnapshotOptions,
     base: &str,
@@ -198,7 +199,7 @@ async fn collect_with_base(
 /// server that discards its statistics at shutdown (`pg_stat_statements.save = off`) bounds it: they started at the
 /// last start or later. With `save` on (the default) they outlive restarts, so the start time says nothing: the window
 /// is unknown (`window_start` empty, 0 hours) and Culprit's earlier scans of the database narrow it down.
-async fn window(client: &Client, reset: Option<&str>) -> Result<(Option<String>, Option<String>, f64)> {
+async fn window(client: &mut impl QueryRead, reset: Option<&str>) -> Result<(Option<String>, Option<String>, f64)> {
     let start = match reset {
         Some(reset) => format!("'{reset}'::timestamptz"),
         None => {
@@ -231,7 +232,7 @@ fn base_relation(base: &str) -> Option<&str> {
 /// `IN ($1, $2, $3)`) or a VALUES clause a different number of rows: each is planned and tracked on its own. A family
 /// counts the texts that differ before their lists are collapsed: the same text under several statement ids (one per
 /// schema a tenant's search_path resolves to) is one variant, not a value-list split.
-async fn query_families(client: &Client, base: &str) -> Result<Vec<QueryFamily>> {
+async fn query_families(client: &mut impl QueryRead, base: &str) -> Result<Vec<QueryFamily>> {
     Ok(query(client, &families_sql(base)).await?.iter().map(family_of).collect())
 }
 
@@ -270,7 +271,7 @@ use crate::native::statements::{statements_base, statements_base_legacy};
 /// Attach generic plans to the heaviest plannable statements. Returns a note when some could not be planned, or why
 /// this login plans none here.
 async fn attach_plans(
-    client: &Client,
+    client: &mut impl QueryRead,
     queries: &mut [QueryStat],
     own: &std::collections::HashMap<String, String>,
     probe: &Probe,
@@ -355,7 +356,7 @@ fn plan_notes(planned: u32, attempted: u32, others: u32) -> Option<Message> {
     (!notes.is_empty()).then(|| Message::paragraph(notes))
 }
 
-async fn generic_plan_json(client: &Client, statement: &str, probe: &Probe) -> Option<String> {
+async fn generic_plan_json(client: &mut impl QueryRead, statement: &str, probe: &Probe) -> Option<String> {
     // Statement text was written by whoever ran it; it must lex as exactly one statement before it reaches EXPLAIN.
     let statement = culprit_core::sql::single_statement(statement, Engine::Postgres).ok()?;
     let (version_num, elevated) = (probe.version_num, probe.elevated);

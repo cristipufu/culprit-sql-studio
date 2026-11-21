@@ -122,6 +122,27 @@ Operational sources cover independent database/table MultiXact ages, shared arch
 
 Counters retain their own reset clocks. New event findings require a comparable interval inside the requested period. Catalog-only retention does not establish retained application rows. Generic plans do not identify the plan used by historical requests, or prove that every listed partition ran.
 
+### Normal read ownership and limits
+
+Normal probes, snapshot metadata, plans and scan enrichments use the same owned PostgreSQL wire reader as
+telemetry. Existing queries, bound plan-metadata parameters and typed decoders are reused. The original read-only
+setup keeps the collector statement limit of 20 seconds, the 2-second lock limit and catalog search path;
+interactive enrichments retain their 10-second statement limit. Each text result retains at most 10,000 rows and
+8 MiB of value bytes. Parameterized table metadata now observes these same retention limits without interpolating
+names into SQL.
+
+A normal snapshot's existing parallel readers share an additional ceiling of 512 admitted query/setup batches and
+60 seconds. Optional readers retain any stricter original limit; probes and enrichments also retain their shorter
+caller deadline. Aggregate exhaustion is explicit, rather than a complete successful scan. This is a client safety
+limit, not a measurement or approval of database CPU, memory grants or source cost.
+
+Errors are drained to the original response's completion before reuse. Cancellation keeps the original client and
+route owned until ReadyForQuery or an explicitly unconfirmed shutdown; interrupted normal sessions are retired
+without an automatic replacement login. An unavailable acknowledgement fences subsequent native work. Transaction
+trust checks and their existing rollback/deallocation statements use that same owner. Detailed metrics for normal
+scan/probe acquisitions remain separate from retained telemetry-capture overhead; this change supplies no historical
+capture or cost qualification.
+
 ### Background telemetry
 
 The CLI can archive 16 snapshot datasets and persistent activity through the shared collector service. See the

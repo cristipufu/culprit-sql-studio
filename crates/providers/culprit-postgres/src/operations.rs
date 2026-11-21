@@ -1,13 +1,10 @@
 //! Operational failures and allocation limits from the current database's catalogs and statistics.
-use crate::{
-    rows::{iso, query},
-    sources,
-};
+use crate::read::QueryRead;
+use crate::{read::query, rows::iso, sources};
 use culprit_core::operations::{FreezeAge, OperationalCounter, OperationalCounterKind as Kind};
 use culprit_core::{Coverage, FileScope, Snapshot};
-use tokio_postgres::Client;
 
-pub async fn collect(client: &Client, version: u32, snapshot: &mut Snapshot) {
+pub async fn collect(client: &mut impl QueryRead, version: u32, snapshot: &mut Snapshot) {
     let mut coverage = Coverage::default();
     let age_sql = "SELECT current_database() AS subject, mxid_age(datminmxid)::float8 AS age,
  current_setting('autovacuum_multixact_freeze_max_age')::float8 AS freeze_max

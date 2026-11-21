@@ -3,6 +3,7 @@ use crate::{
     catalog::{columns, foreign_keys, indexes, settings, tables},
     connect::{COLLECTOR, Connector},
     probe::probe,
+    read::{ApplicationReadScope, ReadSession},
     rows::quote_ident,
     sources,
     workload::collect_workload,
@@ -21,22 +22,27 @@ pub async fn snapshot(
     options: &SnapshotOptions,
 ) -> Result<Snapshot> {
     let started = Instant::now();
-    let primary = connector.connect(COLLECTOR).await?;
-    let probe = probe(&primary, &connector.host).await?;
+    let scope = ApplicationReadScope::new();
+    let mut primary = ReadSession::application(connector.clone(), COLLECTOR, scope.clone());
+    let probe = match probe(&mut primary, &connector.host).await {
+        Ok(probe) => probe,
+        Err(error) => return primary.finish(Err(error)).await,
+    };
 
     let (workload, schema, misc, shared_resources) = tokio::join!(
-        collect_workload(&primary, &probe, options),
+        collect_workload(&mut primary, &probe, options),
         async {
-            let client = connector.connect(COLLECTOR).await?;
-            Ok::<_, culprit_core::Error>((
-                tables(&client, probe.version_num).await,
-                indexes(&client, &probe).await,
-                foreign_keys(&client).await,
-                columns(&client, probe.version_num).await,
-            ))
+            let mut client = ReadSession::application(connector.clone(), COLLECTOR, scope.clone());
+            let result = Ok::<_, culprit_core::Error>((
+                tables(&mut client, probe.version_num).await,
+                indexes(&mut client, &probe).await,
+                foreign_keys(&mut client).await,
+                columns(&mut client, probe.version_num).await,
+            ));
+            client.finish(result).await
         },
         async {
-            let client = connector.connect(COLLECTOR).await?;
+            let mut client = ReadSession::application(connector.clone(), COLLECTOR, scope.clone());
             let target = culprit_core::DatabaseIdentity::server(
                 Engine::Postgres,
                 &probe.database,
@@ -44,14 +50,15 @@ pub async fn snapshot(
                 connector.port,
                 None,
             );
-            Ok::<_, culprit_core::Error>((
-                settings(&client).await,
-                crate::pressure::collect(&client, &probe, target).await,
-            ))
+            let result = Ok::<_, culprit_core::Error>((
+                settings(&mut client).await,
+                crate::pressure::collect(&mut client, &probe, target).await,
+            ));
+            client.finish(result).await
         },
         async {
             if options.collect_shared_resources {
-                crate::memory::collect(connector, probe.version_num).await
+                crate::memory::collect(connector, probe.version_num, scope.clone()).await
             } else {
                 let mut coverage = Coverage::default();
                 coverage.not_applicable(
@@ -231,11 +238,11 @@ pub async fn snapshot(
         connector.port,
         None,
     ));
-    crate::signals::collect(&primary, &probe, &mut snapshot).await;
-    crate::timescale::collect(&primary, &probe, &mut snapshot).await;
+    crate::signals::collect(&mut primary, &probe, &mut snapshot).await;
+    crate::timescale::collect(&mut primary, &probe, &mut snapshot).await;
     if options.collect_native_failures {
-        crate::jobs::collect(connector, &mut snapshot).await;
+        crate::jobs::collect(connector, &mut snapshot, scope.clone()).await;
     }
     snapshot.duration_ms = started.elapsed().as_secs_f64() * 1000.0;
-    Ok(snapshot)
+    primary.finish(Ok(snapshot)).await
 }

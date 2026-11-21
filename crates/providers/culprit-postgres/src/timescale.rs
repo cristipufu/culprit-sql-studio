@@ -2,21 +2,17 @@
 //! neither its row count nor its physical size. Managed chunks remain linked to their owner; internal compressed and
 //! continuous-aggregate materialization tables never receive application schema/index advice.
 
-use crate::{
-    probe::Probe,
-    rows::{Row, query},
-    sources,
-};
+use crate::read::QueryRead;
+use crate::{probe::Probe, read::query, rows::Row, sources};
 use culprit_core::signals::{HypertableChunk, HypertableStorage};
 use culprit_core::{Coverage, Snapshot, TableStorage};
 use std::collections::{BTreeMap, BTreeSet};
-use tokio_postgres::Client;
 
 fn managed_schema(schema: &str) -> bool {
     schema.starts_with("_timescaledb_") || schema == "timescaledb_information"
 }
 
-pub async fn collect(client: &Client, probe: &Probe, snapshot: &mut Snapshot) {
+pub async fn collect(client: &mut impl QueryRead, probe: &Probe, snapshot: &mut Snapshot) {
     let Some(schema) = probe.timescale_schema.as_deref() else { return };
     let api = culprit_core::Engine::Postgres.dialect().quote(schema);
     let mut coverage = Coverage::default();
@@ -267,7 +263,7 @@ mod tests {
         };
         let provider = crate::PostgresProvider::new(&spec).unwrap();
         let client = provider.connector.connect(crate::connect::COLLECTOR).await.unwrap();
-        let probe = crate::probe::probe(&client, &spec.host).await.unwrap();
+        let probe = crate::probe::probe(&mut &client, &spec.host).await.unwrap();
         let api = Engine::Postgres.dialect().quote(probe.timescale_schema.as_deref().unwrap());
         let row = crate::rows::query_one(&client, &format!(
             "SELECT {api}.approximate_row_count(to_regclass('public.culprit_absent_relation')) AS rows,

@@ -4,7 +4,10 @@
 use culprit_core::{ConnectionSpec, Engine, ExplainMode, Plan, Provider, Result, ResultSet};
 
 pub use crate::connect::{COLLECTOR, Connector, EXECUTION, INTERACTIVE, ObservedSession, SessionLimits, map_error};
-pub use crate::read::{NativeRead, QueryRead, ReadSession};
+pub use crate::read::{
+    NativeRead, NativeReadFailure, NativeResult, QueryRead, ReadSession, query as read_query,
+    query_bounded as read_query_bounded, query_one as read_query_one,
+};
 /// Distributed native observations must carry warning counts alongside bounded wire reads.
 #[async_trait::async_trait]
 pub trait NoticeRead: QueryRead {

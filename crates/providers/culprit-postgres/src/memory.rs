@@ -11,7 +11,11 @@ use culprit_core::{Coverage, Result, telemetry::*};
 const MAX_MEMORY_SNAPSHOT_ROWS: u32 = 4096;
 const MAX_MEMORY_SNAPSHOT_QUERIES: u32 = 5;
 
-pub(crate) async fn collect(connector: &Connector, version: u32) -> (Option<Vec<NativeCounterSet>>, Coverage) {
+pub(crate) async fn collect(
+    connector: &Connector,
+    version: u32,
+    scope: crate::read::ApplicationReadScope,
+) -> (Option<Vec<NativeCounterSet>>, Coverage) {
     let mut coverage = Coverage::default();
     if !native::memory::supported(version) {
         coverage.not_applicable(
@@ -25,7 +29,7 @@ pub(crate) async fn collect(connector: &Connector, version: u32) -> (Option<Vec<
         max_snapshot_rows: MAX_MEMORY_SNAPSHOT_ROWS,
         ..Default::default()
     };
-    let mut reader = ReadSession::new(connector.clone(), budget);
+    let mut reader = ReadSession::new(connector.clone(), budget).under_scope(scope);
     let result = read_snapshot(&mut reader, &connector.host, connector.port).await;
     let result = if reader.close().await == SourceShutdown::Unconfirmed {
         Err(CollectionStop::CancellationUnconfirmed.error())

@@ -1,16 +1,22 @@
+use super::response::{ReadOutput, ReadRow, ReadRows};
 use super::*;
-use crate::{connect::map_error, rows::monitoring};
+use crate::rows::monitoring;
 use culprit_core::telemetry::{ReadProgress, ReadTaskOutcome};
 use futures_util::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_postgres::SimpleQueryMessage;
 
 const CANCELLATION_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) enum ReadDispatch {
+    Simple,
+    TextArray(Vec<String>),
+}
 pub(super) struct ReadRequest {
     pub sql: String,
     pub row_limit: usize,
     pub byte_limit: usize,
     pub timeout: Duration,
+    pub dispatch: ReadDispatch,
 }
 pub(super) struct ReadTask {
     pub client: Client,
@@ -26,17 +32,17 @@ struct QueryProgress {
     started: AtomicBool,
 }
 struct TaskResult {
-    result: Result<Vec<Row>>,
+    result: NativeResult<ReadRows>,
     confirmed: bool,
     interrupted: bool,
     outcome: ReadTaskOutcome,
 }
 impl ReadTask {
     // Kept outside the source future: cleanup continues when the controller retires that future.
-    pub(super) async fn run(self, output: RowOutput<Row>, cancellation: oneshot::Receiver<()>) -> CompletedRead {
+    pub(super) async fn run(self, output: ReadOutput, cancellation: oneshot::Receiver<()>) -> CompletedRead {
         let lifetime = match self.fence.start_work() {
             Ok(lifetime) => lifetime,
-            Err(error) => return CompletedRead { client: None, result: Err(error), confirmed: false },
+            Err(error) => return CompletedRead { client: None, result: Err(error.into()), confirmed: false },
         };
         let progress = QueryProgress::default();
         let started = std::time::Instant::now();
@@ -49,7 +55,7 @@ impl ReadTask {
     }
     async fn settle(
         &self,
-        output: RowOutput<Row>,
+        output: ReadOutput,
         progress: &QueryProgress,
         cancellation: oneshot::Receiver<()>,
     ) -> TaskResult {
@@ -64,7 +70,7 @@ impl ReadTask {
             Some(reason) = limit_reached.recv() => reason,
             result = &mut query => {
                 let confirmed = progress.counters.drained.load(Ordering::Acquire);
-                let timed_out = result.as_ref().err().is_some_and(|error| error.code == culprit_core::ErrorCode::Timeout);
+                let timed_out = result.as_ref().err().is_some_and(|error| error.error.code == culprit_core::ErrorCode::Timeout);
                 // A limit can be signalled during this same final poll, before a later protocol error returns.
                 let mut outcome = limit_reached.try_recv().ok().map(ReadTaskOutcome::stopped).unwrap_or_default();
                 outcome.failed = result.is_err();
@@ -93,7 +99,7 @@ impl ReadTask {
         };
         let outcome = ReadTaskOutcome { unconfirmed: !confirmed, ..ReadTaskOutcome::stopped(reason) };
         TaskResult {
-            result: Err(if confirmed { reason.error() } else { CollectionStop::CancellationUnconfirmed.error() }),
+            result: Err(if confirmed { reason.error() } else { CollectionStop::CancellationUnconfirmed.error() }.into()),
             confirmed,
             interrupted: true,
             outcome,
@@ -101,57 +107,96 @@ impl ReadTask {
     }
 }
 
+enum Message {
+    Description,
+    Row(ReadRow),
+    Other,
+}
 async fn drain(
     client: &Client,
     request: &ReadRequest,
     progress: &QueryProgress,
     limits: mpsc::Sender<CollectionStop>,
-    mut output: RowOutput<Row>,
-) -> Result<Vec<Row>> {
+    output: ReadOutput,
+) -> NativeResult<ReadRows> {
     progress.started.store(true, Ordering::Release);
-    let stream = client.simple_query_raw(&monitoring(&request.sql)).await.map_err(map_error)?;
+    let sql = monitoring(&request.sql);
+    match &request.dispatch {
+        ReadDispatch::Simple => {
+            let stream = client.simple_query_raw(&sql).await.map_err(NativeReadFailure::from)?;
+            let stream = stream.map(|message| {
+                message.map(|message| match message {
+                    SimpleQueryMessage::RowDescription(_) => Message::Description,
+                    SimpleQueryMessage::Row(row) => Message::Row(ReadRow::Text(row)),
+                    _ => Message::Other,
+                })
+            });
+            drain_messages(stream, request, progress, limits, output).await
+        }
+        ReadDispatch::TextArray(values) => {
+            let parameters = [values as &(dyn tokio_postgres::types::ToSql + Sync)];
+            let stream = client.query_raw(sql.as_str(), parameters).await.map_err(NativeReadFailure::from)?;
+            let stream = stream.map(|row| row.map(|row| Message::Row(ReadRow::Native(row))));
+            drain_messages(stream, request, progress, limits, output).await
+        }
+    }
+}
+async fn drain_messages(
+    stream: impl futures_util::Stream<Item = std::result::Result<Message, tokio_postgres::Error>>,
+    request: &ReadRequest,
+    progress: &QueryProgress,
+    limits: mpsc::Sender<CollectionStop>,
+    mut output: ReadOutput,
+) -> NativeResult<ReadRows> {
     tokio::pin!(stream);
     let mut budget = culprit_read::ReadBudget::new(request.row_limit, request.byte_limit);
-    let mut failure = None;
+    let mut failure: Option<NativeReadFailure> = None;
     let mut sets = 0;
     while let Some(message) = stream.next().await {
         match message {
-            Ok(SimpleQueryMessage::RowDescription(_)) => {
+            Ok(Message::Description) => {
                 sets += 1;
                 if sets > 1 && failure.is_none() {
-                    failure = Some(CollectionStop::InvalidPage.error());
+                    failure = Some(CollectionStop::InvalidPage.error().into());
                     let _ = limits.try_send(CollectionStop::InvalidPage);
                 }
             }
-            Ok(SimpleQueryMessage::Row(row)) => {
+            Ok(Message::Row(row)) => {
                 if failure.is_some() || output.discarding() {
                     continue;
                 }
-                let bytes = (0..row.len())
-                    .fold(0usize, |total, index| total.saturating_add(row.get(index).map_or(0, str::len)));
+                let bytes = match row.value_bytes() {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        let _ = limits.try_send(CollectionStop::from_error(&error));
+                        output.discard();
+                        failure = Some(error.into());
+                        continue;
+                    }
+                };
                 progress.counters.rows.fetch_add(1, Ordering::Relaxed);
                 progress.counters.bytes.fetch_add(bytes as u64, Ordering::Relaxed);
                 let retained = match budget.row_started().and_then(|_| budget.charge_values(bytes)) {
-                    Ok(()) => output.push(Row::from_native(row), bytes).await,
+                    Ok(()) => output.push(row, bytes).await,
                     Err(error) => Err(error),
                 };
                 if let Err(error) = retained {
                     let _ = limits.try_send(CollectionStop::from_error(&error));
                     output.discard();
-                    failure = Some(error);
+                    failure = Some(error.into());
                 }
             }
-            Ok(_) => (),
+            Ok(Message::Other) => (),
             Err(error) => {
-                // A PostgreSQL ErrorResponse is followed by ReadyForQuery. Continue polling after that error.
-                // Transport/decoding errors have no such completion proof and must not be treated as quiescent.
+                // Both native protocols return ErrorResponse before ReadyForQuery. Preserve the exact original
+                // SQLSTATE while draining; a transport error has no such completion proof.
                 let database_error = error.as_db_error().is_some();
-                let mapped = map_error(error);
+                let error = NativeReadFailure::from(error);
                 if !database_error {
-                    return Err(mapped);
+                    return Err(error);
                 }
                 if failure.is_none() {
-                    failure = Some(mapped);
+                    failure = Some(error);
                 }
             }
         }

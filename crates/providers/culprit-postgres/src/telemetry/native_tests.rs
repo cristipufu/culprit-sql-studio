@@ -9,6 +9,7 @@ mod case;
 mod copy;
 mod jobs;
 mod maintenance_waits;
+mod normal_reads;
 mod owned_fixture;
 mod replication;
 mod retained_activity;
@@ -186,27 +187,27 @@ async fn native_streamed_statements_definitions_and_health_pass_through_common_c
        CREATE TRIGGER reject_writes BEFORE INSERT ON culprit_native.child FOR EACH ROW EXECUTE FUNCTION culprit_native.reject_writes();
        ANALYZE culprit_native.child; ANALYZE culprit_native.parent;
        SELECT pg_catalog.pg_create_physical_replication_slot('culprit_native_slot',false);")).await.unwrap();
-    let columns = crate::catalog::columns(&admin, 180_000).await.unwrap();
+    let columns = crate::catalog::columns(&mut &admin, 180_000).await.unwrap();
     assert!(columns.iter().any(|column| column.schema == "culprit_native"
         && column.name == "note"
         && column.default.as_deref().is_some_and(|value| value.contains("private-literal"))));
     assert!(
-        crate::catalog::foreign_keys(&admin)
+        crate::catalog::foreign_keys(&mut &admin)
             .await
             .unwrap()
             .iter()
             .any(|key| key.schema == "culprit_native" && key.ref_table == "parent")
     );
-    let probe = crate::probe::probe(&admin, "127.0.0.1").await.unwrap();
+    let probe = crate::probe::probe(&mut &admin, "127.0.0.1").await.unwrap();
     assert!(
-        crate::catalog::indexes(&admin, &probe)
+        crate::catalog::indexes(&mut &admin, &probe)
             .await
             .unwrap()
             .iter()
             .any(|index| index.schema == "culprit_native" && index.is_primary_key)
     );
     assert!(
-        crate::catalog::tables(&admin, probe.version_num)
+        crate::catalog::tables(&mut &admin, probe.version_num)
             .await
             .unwrap()
             .iter()
@@ -540,9 +541,9 @@ async fn native_temporary_work_matches_scan_and_capture_without_executing_applic
         )
         .await
         .unwrap();
-    let probe = crate::probe::probe(&admin, "127.0.0.1").await.unwrap();
+    let probe = crate::probe::probe(&mut &admin, "127.0.0.1").await.unwrap();
     let workload = crate::workload::collect_workload(
-        &admin,
+        &mut &admin,
         &probe,
         &culprit_core::SnapshotOptions { plans: 0, top_queries: 100, ..Default::default() },
     )

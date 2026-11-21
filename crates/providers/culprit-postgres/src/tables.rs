@@ -9,10 +9,8 @@
 
 use std::collections::HashMap;
 
+use crate::read::QueryRead;
 use culprit_core::{NodeKind, Plan, PlanNode, t};
-use tokio_postgres::Client;
-
-use crate::rows::tagged;
 
 const SIZES_SQL: &str =
     "SELECT n.nspname || '.' || c.relname AS qualified, c.relname AS name, c.reltuples::float8 AS rows,
@@ -44,7 +42,7 @@ fn counted_rows(reltuples: f64, relpages: Option<f64>) -> Option<f64> {
 
 /// Fill `table_rows` on the plan's scans, and `rows_read` on sequential scans an estimated plan left without one.
 /// Best effort: a failed lookup leaves the plan as it was.
-pub async fn fill(client: &Client, plan: &mut Plan) {
+pub async fn fill(client: &mut impl QueryRead, plan: &mut Plan) {
     let mut names: Vec<String> = plan
         .nodes()
         .into_iter()
@@ -57,7 +55,9 @@ pub async fn fill(client: &Client, plan: &mut Plan) {
         return;
     }
     // The names are bound as one text[] parameter, never spliced into the SQL.
-    let Ok(rows) = client.query(tagged(SIZES_SQL).as_str(), &[&names]).await else { return };
+    let Ok(rows) = client.query_text_array(SIZES_SQL, names, culprit_core::limits::MAX_RESULT_ROWS).await else {
+        return;
+    };
     let mut collected: HashMap<String, Option<Size>> = HashMap::new();
     for row in rows {
         let (Ok(qualified), Ok(name), Ok(count)) =

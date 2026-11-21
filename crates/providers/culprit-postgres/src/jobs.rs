@@ -8,9 +8,9 @@ use crate::{
 use culprit_core::{Coverage, Result, Snapshot, message, telemetry::*};
 use culprit_read::{FrozenObservation, FrozenSource, ObservationReader};
 
-pub(crate) async fn collect(connector: &Connector, snapshot: &mut Snapshot) {
+pub(crate) async fn collect(connector: &Connector, snapshot: &mut Snapshot, scope: crate::read::ApplicationReadScope) {
     let budget = native::jobs::bounded_budget(&CollectionBudget::default());
-    let mut reader = ReadSession::new(connector.clone(), budget.clone());
+    let mut reader = ReadSession::new(connector.clone(), budget.clone()).under_scope(scope);
     let (captured, coverage) = collect_from(&mut reader, &connector.host, connector.port, &budget).await;
     snapshot.operations.jobs = captured
         .map(|snapshot| Box::new(JobsSnapshot::Timescale { snapshot: Box::new(snapshot), read_complete: true }));

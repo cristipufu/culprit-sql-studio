@@ -12,7 +12,7 @@ use culprit_core::{
 };
 use tokio_postgres::Client;
 
-use crate::rows::{iso, query, query_one};
+use crate::rows::{iso, query};
 
 /// The lock each waiting backend asked for. A row-lock wait is a wait on another transaction's id; the table comes from
 /// the tuple lock the waiter holds (or queues on), or else the table it is changing.
@@ -49,8 +49,8 @@ pub(crate) async fn lock_waits(client: &Client) -> Result<Vec<LockWait>> {
     Ok(out)
 }
 
-pub(crate) async fn recent(client: &Client, since_hours: f64) -> Result<DeadlockReport> {
-    let row = query_one(
+pub(crate) async fn recent(client: &mut impl crate::read::QueryRead, since_hours: f64) -> Result<DeadlockReport> {
+    let row = crate::read::query_one(
         client,
         &format!(
             "SELECT deadlocks, {} AS since, current_setting('log_lock_waits') AS log_lock_waits

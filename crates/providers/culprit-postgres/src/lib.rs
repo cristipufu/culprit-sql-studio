@@ -34,7 +34,7 @@ use async_trait::async_trait;
 use culprit_core::{
     ConnectionSpec, Engine, Environment, Error, ExplainMode, LiveState, Plan, PlanKind, Provider, Result, ResultSet,
     ServerInfo, Session, SessionAction, SessionActionOutcome, SessionActionTarget, Snapshot, SnapshotOptions, WaitStat,
-    t,
+    limits::OBSERVE_TIMEOUT, t,
 };
 use serde_json::Value;
 use tokio_postgres::Client;
@@ -123,7 +123,7 @@ impl PostgresProvider {
             let elevated = trust::elevated(&client).await?;
             // Registration can reach expression/operator code too. Apply the planner trust and read-only
             // boundary before invoking HypoPG; virtual indexes live in session memory across this rollback.
-            trust::begin(&client, elevated).await?;
+            trust::begin(&mut &client, elevated).await?;
             cleanup_needed = true;
             let registered = async {
                 client.batch_execute(&tagged(&reset_sql)).await.map_err(map_error)?;
@@ -151,11 +151,11 @@ impl PostgresProvider {
                 Ok(virtual_names)
             }
             .await;
-            trust::end(&client).await;
+            trust::end(&mut &client).await;
             let virtual_names = registered?;
             let parameters = parameter_count(&client, statement).await?;
             let mut plan = if parameters == 0 {
-                trust::begin(&client, elevated).await?;
+                trust::begin(&mut &client, elevated).await?;
                 let explained = explain_text(
                     &client,
                     &format!("EXPLAIN (FORMAT JSON, VERBOSE) {statement}"),
@@ -163,14 +163,15 @@ impl PostgresProvider {
                     statement,
                 )
                 .await;
-                trust::end(&client).await;
+                trust::end(&mut &client).await;
                 explained?
             } else {
-                let json = generic::plan_json(&client, statement, server_version(&client).await?, elevated).await?;
+                let json =
+                    generic::plan_json(&mut &client, statement, server_version(&client).await?, elevated).await?;
                 plan_json::parse(&json, PlanKind::Generic, Some(statement))?
             };
             if fill_table_sizes {
-                tables::fill(&client, &mut plan).await;
+                tables::fill(&mut &client, &mut plan).await;
             }
             if !virtual_names.is_empty() {
                 plan.facts_mut().virtual_indexes = virtual_names.clone();
@@ -204,7 +205,7 @@ impl PostgresProvider {
                 // Planning runs the code a statement reaches, with this login's privileges (`trust`).
                 let elevated = trust::elevated(&client).await?;
                 let mut plan = if parameters == 0 {
-                    trust::begin(&client, elevated).await?;
+                    trust::begin(&mut &client, elevated).await?;
                     let explained = explain_text(
                         &client,
                         &format!("EXPLAIN (FORMAT JSON, VERBOSE) {statement}"),
@@ -212,15 +213,16 @@ impl PostgresProvider {
                         statement,
                     )
                     .await;
-                    trust::end(&client).await;
+                    trust::end(&mut &client).await;
                     explained?
                 } else {
                     // Placeholders ($1, $2… as pg_stat_statements records statements): the generic plan, never run.
-                    let json = generic::plan_json(&client, statement, server_version(&client).await?, elevated).await?;
+                    let json =
+                        generic::plan_json(&mut &client, statement, server_version(&client).await?, elevated).await?;
                     plan_json::parse(&json, PlanKind::Generic, Some(statement))?
                 };
                 if fill_table_sizes {
-                    tables::fill(&client, &mut plan).await;
+                    tables::fill(&mut &client, &mut plan).await;
                 }
                 Ok(plan)
             }
@@ -284,9 +286,10 @@ impl Provider for PostgresProvider {
     }
 
     async fn probe(&self) -> Result<ServerInfo> {
-        let client = self.connector.connect(COLLECTOR).await?;
-        let probe = probe::probe(&client, &self.connector.host).await?;
-        Ok(probe.server_info())
+        let scope = read::ApplicationReadScope::until(tokio::time::Instant::now() + OBSERVE_TIMEOUT);
+        let mut reader = read::ReadSession::application(self.connector.clone(), COLLECTOR, scope);
+        let result = probe::probe(&mut reader, &self.connector.host).await.map(|probe| probe.server_info());
+        reader.finish(result).await
     }
 
     async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot> {
@@ -315,18 +318,22 @@ impl Provider for PostgresProvider {
     }
 
     async fn deadlocks(&self, since_hours: f64) -> Result<culprit_core::DeadlockReport> {
-        let client = self.connector.connect(INTERACTIVE).await?;
-        deadlocks::recent(&client, since_hours).await
+        let scope = read::ApplicationReadScope::until(tokio::time::Instant::now() + OBSERVE_TIMEOUT);
+        let mut reader = read::ReadSession::application(self.connector.clone(), INTERACTIVE, scope);
+        let result = deadlocks::recent(&mut reader, since_hours).await;
+        reader.finish(result).await
     }
 
     async fn recorded_changes(&self, since: &str) -> Result<Vec<culprit_core::ChangeEvent>> {
-        let client = self.connector.connect(INTERACTIVE).await?;
-        recorded::changes(&client, since).await
+        let scope = read::ApplicationReadScope::until(tokio::time::Instant::now() + OBSERVE_TIMEOUT);
+        let mut reader = read::ReadSession::application(self.connector.clone(), INTERACTIVE, scope);
+        let result = recorded::changes(&mut reader, since).await;
+        reader.finish(result).await
     }
 
     async fn wait_sample(&self, seconds: u32) -> Result<culprit_core::WaitSample> {
         let client = self.connector.connect(INTERACTIVE).await?;
-        crate::pressure::sample(&client, seconds).await
+        crate::pressure::sample(&mut &client, seconds).await
     }
 
     async fn explain_recorded(&self, sql: &str, query_id: Option<&str>) -> Result<Plan> {

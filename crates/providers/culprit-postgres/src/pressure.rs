@@ -4,13 +4,13 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use crate::read::QueryRead;
 use culprit_core::{
     CleanupHolder, Coverage, Engine, Pressure, Result, Signal, SignalScope, SignalUnit, WaitSample, WaitStat, t,
 };
-use tokio_postgres::Client;
 
 use crate::probe::Probe;
-use crate::rows::{query, query_one};
+use crate::read::{query, query_one};
 use crate::sources;
 
 /// pg_stat_statements I/O time columns per version (milliseconds; zero unless track_io_timing is on).
@@ -123,14 +123,17 @@ fn database_signals(read: &culprit_core::ConnectionOutcomeSnapshot, p: &mut Pres
 }
 
 /// The pressure counters, each source read through `Coverage::read` (`crate::sources`).
-pub async fn collect(client: &Client, probe: &Probe, target: culprit_core::DatabaseIdentity) -> (Pressure, Coverage) {
+pub async fn collect(
+    client: &mut impl QueryRead,
+    probe: &Probe,
+    target: culprit_core::DatabaseIdentity,
+) -> (Pressure, Coverage) {
     let mut p = Pressure::default();
     let mut coverage = Coverage::default();
     // One existing database-counter statement also retains session outcomes. A database reset belongs to this
     // point; it is never replaced by a shared writer/archiver reset or published as table/index counter authority.
     let from = std::time::SystemTime::now();
-    let mut reader = client;
-    let acquired = crate::native::sessions::acquire(&mut reader, target.clone()).await;
+    let acquired = crate::native::sessions::acquire(client, target.clone()).await;
     match acquired {
         Ok(read) => {
             coverage.completed(&sources::DATABASE_STATS, read.observations.len());
@@ -272,13 +275,12 @@ fn project_cleanup(p: &mut Pressure, retention: culprit_core::telemetry::Retenti
 /// and a session in another database doesn't hold this one's tables back, so neither is listed. Autovacuum's own
 /// workers are ignored by VACUUM.
 async fn cleanup_holders(
-    client: &Client,
+    client: &mut impl QueryRead,
     probe: &Probe,
     coverage: &mut Coverage,
 ) -> culprit_core::telemetry::RetentionSnapshot {
     use crate::native::cleanup::{self, Kind};
     use culprit_core::{SourceState, telemetry::*};
-    let mut reader = client;
     let mut holders = vec![];
     let mut native_sources = vec![];
     for (kind, source) in [
@@ -295,7 +297,7 @@ async fn cleanup_holders(
         } else if remaining == 0 {
             Err(CollectionStop::RowLimit.error())
         } else {
-            cleanup::read(&mut reader, kind, probe.version_num, remaining).await
+            cleanup::read(client, kind, probe.version_num, remaining).await
         };
         let state = if let Some(reading) = coverage.read(source, result) {
             let state = cleanup_coverage(coverage, source, kind.source(), probe.standby, &reading);
@@ -359,7 +361,7 @@ pub fn category(event_type: Option<&str>, event: Option<&str>) -> &'static str {
 }
 
 /// Sessions sampled every second for `seconds`: each observation of a busy session counts as one second of its time.
-pub async fn sample(client: &Client, seconds: u32) -> Result<WaitSample> {
+pub async fn sample(client: &mut impl QueryRead, seconds: u32) -> Result<WaitSample> {
     let started = Instant::now();
     let taken_at = query_one(client, &format!("SELECT {} AS now", crate::rows::iso("now()")))
         .await?

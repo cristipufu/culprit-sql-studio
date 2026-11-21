@@ -5,7 +5,7 @@ use culprit_core::{
 };
 use tokio_postgres::{Client, SimpleQueryMessage, SimpleQueryRow};
 
-use crate::connect::map_error;
+use crate::read::{NativeReadFailure, NativeResult};
 
 /// Appended to every statement Culprit sends, so its own queries can be told apart in pg_stat_statements
 /// (which keeps trailing comments but drops leading ones).
@@ -80,9 +80,17 @@ pub async fn query(client: &Client, sql: &str) -> Result<Vec<Row>> {
 }
 
 pub(crate) async fn checked_query(client: &Client, sql: &str, limit: usize) -> Result<Vec<Row>> {
-    let (rows, stopped) = bounded_rows(client, sql, limit).await?;
+    let (rows, stopped) = bounded_rows(client, sql, limit).await.map_err(|failure| failure.error)?;
     if let Some(stopped) = stopped {
         return Err(stopped.error());
+    }
+    Ok(rows)
+}
+
+pub(crate) async fn checked_query_with_state(client: &Client, sql: &str, limit: usize) -> NativeResult<Vec<Row>> {
+    let (rows, stopped) = bounded_rows(client, sql, limit).await?;
+    if let Some(stopped) = stopped {
+        return Err(stopped.error().into());
     }
     Ok(rows)
 }
@@ -90,18 +98,18 @@ pub(crate) async fn checked_query(client: &Client, sql: &str, limit: usize) -> R
 /// Retain a bounded prefix of collector rows, draining completion and late errors after retention stops. The caller
 /// must record partial coverage when truncated; dropping rows never establishes absence or a complete catalog.
 pub async fn query_bounded(client: &Client, sql: &str, limit: usize) -> Result<(Vec<Row>, bool)> {
-    let (rows, stopped) = bounded_rows(client, sql, limit).await?;
+    let (rows, stopped) = bounded_rows(client, sql, limit).await.map_err(|failure| failure.error)?;
     Ok((rows, stopped.is_some()))
 }
 
-async fn bounded_rows(client: &Client, sql: &str, limit: usize) -> Result<(Vec<Row>, Option<CollectionStop>)> {
+async fn bounded_rows(client: &Client, sql: &str, limit: usize) -> NativeResult<(Vec<Row>, Option<CollectionStop>)> {
     use futures_util::TryStreamExt;
-    let stream = client.simple_query_raw(&tagged(sql)).await.map_err(map_error)?;
+    let stream = client.simple_query_raw(&tagged(sql)).await.map_err(NativeReadFailure::from)?;
     tokio::pin!(stream);
     let mut budget = culprit_read::ReadBudget::new(limit.min(MAX_RESULT_ROWS), MAX_RESULT_BYTES);
     let mut rows = Vec::new();
     let mut stopped = None;
-    while let Some(message) = stream.try_next().await.map_err(map_error)? {
+    while let Some(message) = stream.try_next().await.map_err(NativeReadFailure::from)? {
         if let SimpleQueryMessage::Row(row) = message {
             if stopped.is_some() {
                 continue;

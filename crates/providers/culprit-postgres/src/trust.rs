@@ -22,7 +22,7 @@ use culprit_core::{Error, ErrorCode, Result};
 use tokio_postgres::Client;
 
 use crate::connect::map_error;
-use crate::rows::{query, tagged};
+use crate::rows::tagged;
 
 /// Culprit's own statements here: the catalog first and only, temporary objects last.
 pub const CATALOG_PATH: &str = "SET LOCAL search_path = pg_catalog, pg_temp";
@@ -82,8 +82,8 @@ pub async fn elevated(client: &Client) -> Result<bool> {
 /// functions and operators. Trigger functions are never called while planning. An extension's code is its authors'
 /// only when a superuser or this login owns the extension: its owner can add a function of theirs to it. At most five
 /// names. Called on [`CATALOG_PATH`].
-pub async fn foreign_code(client: &Client) -> Result<Vec<String>> {
-    let rows = query(
+pub async fn foreign_code(client: &mut impl crate::read::QueryRead) -> Result<Vec<String>> {
+    let rows = crate::read::query(
         client,
         "SELECT DISTINCT r.rolname::text AS owner
            FROM (SELECT p.proowner AS owner, p.oid AS obj, 'pg_catalog.pg_proc'::pg_catalog.regclass AS class
@@ -197,11 +197,8 @@ pub async fn session_is_own(client: &Client, pid: i32) -> Result<bool> {
 /// Start planning: a read-only transaction; for an elevated login, no other role's code in reach (checked on
 /// [`CATALOG_PATH`]); then the database's own search_path for the statement. Whatever planning does next, [`end`]
 /// follows.
-pub async fn begin(client: &Client, elevated: bool) -> Result<()> {
-    client
-        .batch_execute(&format!("{}; {}", tagged("BEGIN READ ONLY"), tagged(CATALOG_PATH)))
-        .await
-        .map_err(map_error)?;
+pub async fn begin(client: &mut impl crate::read::QueryRead, elevated: bool) -> Result<()> {
+    client.batch_execute(&format!("{}; {}", tagged("BEGIN READ ONLY"), tagged(CATALOG_PATH))).await?;
     if elevated {
         let refused = match foreign_code(client).await {
             Ok(owners) if owners.is_empty() => None,
@@ -213,23 +210,50 @@ pub async fn begin(client: &Client, elevated: bool) -> Result<()> {
             return Err(e);
         }
     }
-    if let Err(e) = client.batch_execute(&tagged("SET LOCAL search_path TO DEFAULT")).await {
+    if let Err(e) = client.batch_execute("SET LOCAL search_path TO DEFAULT").await {
         end(client).await;
-        return Err(map_error(e));
+        return Err(e);
     }
     Ok(())
 }
 
 /// End planning: roll back, and release session-level advisory locks the planner's code may have taken (a rollback
 /// keeps those).
-pub async fn end(client: &Client) {
-    let _ = client.batch_execute(&tagged("ROLLBACK")).await;
-    let _ = client.batch_execute(&tagged("SELECT pg_catalog.pg_advisory_unlock_all()")).await;
+pub async fn end(client: &mut impl crate::read::QueryRead) {
+    let _ = client.batch_execute("ROLLBACK").await;
+    let _ = client.batch_execute("SELECT pg_catalog.pg_advisory_unlock_all()").await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn planning_transaction_dispatch_preserves_original_batches_tags_and_cleanup_order() {
+        #[derive(Default)]
+        struct Reader {
+            calls: Vec<String>,
+        }
+        #[async_trait::async_trait]
+        impl crate::read::QueryRead for Reader {
+            async fn query(&mut self, sql: &str, _limit: usize) -> Result<Vec<crate::rows::Row>> {
+                self.calls.push(sql.to_owned());
+                Ok(vec![])
+            }
+        }
+        let mut reader = Reader::default();
+        begin(&mut reader, false).await.unwrap();
+        end(&mut reader).await;
+        assert_eq!(
+            reader.calls,
+            [
+                format!("{}; {}", tagged("BEGIN READ ONLY"), tagged(CATALOG_PATH)),
+                "SET LOCAL search_path TO DEFAULT".to_owned(),
+                "ROLLBACK".to_owned(),
+                "SELECT pg_catalog.pg_advisory_unlock_all()".to_owned(),
+            ]
+        );
+    }
 
     // Why a login doesn't plan, word for word.
     #[test]

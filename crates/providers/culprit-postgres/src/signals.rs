@@ -6,19 +6,20 @@
 
 use std::collections::HashMap;
 
+use crate::read::QueryRead;
 use culprit_core::{
     ConstraintIssue, Coverage, FileIo, FileKind, Pressure, QueryStat, Setting, Signal, SignalScope, SignalUnit,
     Snapshot, TableStorage,
 };
-use tokio_postgres::Client;
 
 use crate::probe::{Probe, StatementsAccess};
-use crate::rows::{Row, iso, query, query_one};
+use crate::read::{query, query_one};
+use crate::rows::{Row, iso};
 use crate::sources;
 
 /// Collect every signal into `snapshot`, each source read through `Coverage::read` (`crate::sources`): these add
 /// detail and lock nothing, so a failure is a note.
-pub async fn collect(client: &Client, probe: &Probe, snapshot: &mut Snapshot) {
+pub async fn collect(client: &mut impl QueryRead, probe: &Probe, snapshot: &mut Snapshot) {
     crate::operations::collect(client, probe.version_num, snapshot).await;
     let mut coverage = Coverage::default();
     if let StatementsAccess::Usable { relation, .. } = &probe.statements
@@ -49,10 +50,9 @@ pub async fn collect(client: &Client, probe: &Probe, snapshot: &mut Snapshot) {
     if let Some(files) = coverage.read(&sources::FILE_LATENCY, files(client, probe.version_num).await) {
         pressure.files = files;
     }
-    let mut replication_io = client;
     if probe.version_num >= 100_000
-        && let Some(acquired) = coverage
-            .read(&sources::REPLICATION, crate::native::replication::acquire(&mut replication_io, probe.platform).await)
+        && let Some(acquired) =
+            coverage.read(&sources::REPLICATION, crate::native::replication::acquire(client, probe.platform).await)
     {
         if acquired.profile_unavailable {
             coverage.not_applicable(
@@ -101,7 +101,7 @@ fn costs_columns(version_num: u32) -> Vec<&'static str> {
 }
 
 async fn attach_costs(
-    client: &Client,
+    client: &mut impl QueryRead,
     relation: &str,
     version_num: u32,
     queries: &mut [QueryStat],
@@ -168,7 +168,10 @@ fn statement_costs(
 
 /// HOT and new-page updates and fillfactor per table, how long its counters have counted and the planner's row count,
 /// plus a bloat estimate for tables over 10 MB.
-async fn storage(client: &Client, version_num: u32) -> culprit_core::Result<HashMap<(String, String), TableStorage>> {
+async fn storage(
+    client: &mut impl QueryRead,
+    version_num: u32,
+) -> culprit_core::Result<HashMap<(String, String), TableStorage>> {
     let new_page = if version_num >= 160_000 { "s.n_tup_newpage_upd" } else { "NULL::float8" };
     let partition_bound = if version_num >= 100_000 {
         "CASE WHEN c.relispartition THEN pg_get_expr(c.relpartbound, c.oid) END"
@@ -338,7 +341,7 @@ fn bloat_estimates(rows: &[Row]) -> HashMap<(String, String), f64> {
 
 /// CHECK constraints added NOT VALID, and whether their table is a legacy inheritance child: the one place the
 /// planner reads CHECK constraints by default (constraint exclusion), and only validated ones.
-async fn constraints(client: &Client, _version_num: u32) -> culprit_core::Result<Vec<ConstraintIssue>> {
+async fn constraints(client: &mut impl QueryRead, _version_num: u32) -> culprit_core::Result<Vec<ConstraintIssue>> {
     let kind = crate::native::catalog::Kind::UnvalidatedChecks;
     let readings = query(client, &crate::native::catalog::query(kind, 0, false, 100_001))
         .await?
@@ -358,7 +361,7 @@ async fn constraints(client: &Client, _version_num: u32) -> culprit_core::Result
 
 /// Settings the signals' advice depends on, as pg_settings has them (absent on versions without them): whether WAL
 /// full-page images are already compressed, where the planner reads CHECK constraints, and what caps a slot's WAL.
-async fn advice_settings(client: &Client) -> culprit_core::Result<Vec<Setting>> {
+async fn advice_settings(client: &mut impl QueryRead) -> culprit_core::Result<Vec<Setting>> {
     let rows = query(client, &crate::native::settings::query(crate::native::settings::ADVICE, 1000)).await?;
     rows.iter()
         .map(crate::native::settings::decode)
@@ -370,7 +373,7 @@ async fn advice_settings(client: &Client) -> culprit_core::Result<Vec<Setting>> 
 
 /// Read and write latency since statistics were reset. PostgreSQL 16+ splits I/O by object (pg_stat_io); older
 /// servers have database-wide read time. Times exist only with track_io_timing (and track_wal_io_timing for WAL).
-async fn files(client: &Client, version_num: u32) -> culprit_core::Result<Vec<FileIo>> {
+async fn files(client: &mut impl QueryRead, version_num: u32) -> culprit_core::Result<Vec<FileIo>> {
     let timing = query_one(client, "SELECT current_setting('track_io_timing') = 'on' AS io")
         .await?
         .is_some_and(|r| r.flag("io"));

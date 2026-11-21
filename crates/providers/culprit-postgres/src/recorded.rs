@@ -2,15 +2,16 @@
 //! SYSTEM or an RDS parameter group take effect then) and, with `track_commit_timestamp` on, when each index was created
 //! or rebuilt. Other schema changes carry no date in Postgres; Culprit's scans find those.
 
+use crate::read::QueryRead;
 use culprit_core::changes::epoch;
 use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, Result, message};
-use tokio_postgres::Client;
 
-use crate::rows::{iso, query, query_one};
+use crate::read::{query, query_one};
+use crate::rows::iso;
 
 const MAX_INDEXES: usize = 200;
 
-pub async fn changes(client: &Client, since: &str) -> Result<Vec<ChangeEvent>> {
+pub async fn changes(client: &mut impl QueryRead, since: &str) -> Result<Vec<ChangeEvent>> {
     let Some(since_t) = epoch(since) else { return Ok(Vec::new()) };
     let mut out = Vec::new();
     let row = query_one(

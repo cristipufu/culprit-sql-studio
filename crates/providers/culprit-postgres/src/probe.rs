@@ -1,11 +1,10 @@
 //! Server identity, capabilities and source availability, before collection begins.
 use crate::{
-    connect::sql_state,
-    rows::{iso, query_one, quote_ident},
+    read::{QueryRead, query_one},
+    rows::{iso, quote_ident},
 };
 use culprit_core::i18n::Message;
 use culprit_core::{Capability, Engine, MissingCapability, Platform, Result, ServerInfo, t};
-use tokio_postgres::Client;
 
 const CREATE_STATEMENTS_EXTENSION: &str = "CREATE EXTENSION pg_stat_statements;";
 
@@ -177,7 +176,7 @@ pub(crate) fn ensure_postgres(build: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn probe(client: &Client, spec_host: &str) -> Result<Probe> {
+pub async fn probe(client: &mut impl QueryRead, spec_host: &str) -> Result<Probe> {
     let build = query_one(client, "SELECT version() AS build")
         .await?
         .ok_or_else(|| culprit_core::Error::internal(t!("provider.postgres.error.probe_no_version")))?;
@@ -240,14 +239,10 @@ pub async fn probe(client: &Client, spec_host: &str) -> Result<Probe> {
     Ok(probe)
 }
 
-async fn statements_access(client: &Client, schema: &str, version_num: u32) -> StatementsAccess {
+async fn statements_access(client: &mut impl QueryRead, schema: &str, version_num: u32) -> StatementsAccess {
     let relation = format!("{}.pg_stat_statements", quote_ident(schema));
-    if let Err(e) = client.simple_query(&crate::rows::tagged(&format!("SELECT 1 FROM {relation} LIMIT 1"))).await {
-        let message = e.as_db_error().map(|d| d.message().to_string()).unwrap_or_else(|| e.to_string());
-        return match sql_state(&e) {
-            Some("55000") => StatementsAccess::NotLoaded(message),
-            _ => StatementsAccess::Failed(message),
-        };
+    if let Err(e) = client.query_with_state(&format!("SELECT 1 FROM {relation} LIMIT 1"), 1).await {
+        return statement_access_failure(e);
     }
     let mut info = None;
     if version_num >= 140_000 {
@@ -258,6 +253,13 @@ async fn statements_access(client: &Client, schema: &str, version_num: u32) -> S
         }
     }
     StatementsAccess::Usable { relation, info }
+}
+
+fn statement_access_failure(failure: crate::read::NativeReadFailure) -> StatementsAccess {
+    match failure.sql_state.as_ref().map(|state| state.code()) {
+        Some("55000") => StatementsAccess::NotLoaded(failure.error.message),
+        _ => StatementsAccess::Failed(failure.error.message),
+    }
 }
 
 /// The managed service from what the server says about itself (its settings' prefixes, Aurora's own function), else
@@ -289,6 +291,29 @@ fn detect_platform(settings: &str, aurora: bool, host: &str) -> Option<Platform>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_statement_access_uses_the_original_native_sqlstate() {
+        let failure = crate::read::NativeReadFailure {
+            error: culprit_core::Error::new(culprit_core::ErrorCode::QueryFailed, "native prerequisite"),
+            sql_state: Some(tokio_postgres::error::SqlState::OBJECT_NOT_IN_PREREQUISITE_STATE),
+        };
+        assert!(
+            matches!(statement_access_failure(failure), StatementsAccess::NotLoaded(message) if message == "native prerequisite")
+        );
+    }
+    #[test]
+    fn unknown_or_different_native_state_cannot_be_promoted_by_error_message_text() {
+        for sql_state in [None, Some(tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE)] {
+            let failure = crate::read::NativeReadFailure {
+                error: culprit_core::Error::new(culprit_core::ErrorCode::QueryFailed, "native 55000 prerequisite"),
+                sql_state,
+            };
+            assert!(
+                matches!(statement_access_failure(failure), StatementsAccess::Failed(message) if message == "native 55000 prerequisite")
+            );
+        }
+    }
 
     #[test]
     fn cloud_detection() {

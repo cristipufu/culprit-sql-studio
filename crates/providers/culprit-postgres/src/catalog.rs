@@ -1,12 +1,12 @@
 //! Tables, indexes, columns, foreign keys and configuration. No workload planning or scan orchestration.
+use crate::read::QueryRead;
 use crate::{
     probe::Probe,
-    rows::{query, query_one},
+    read::{query, query_one},
 };
 use culprit_core::{ColumnInfo, ForeignKey, IndexStat, Result, Setting, TableStat};
-use tokio_postgres::Client;
 
-pub(crate) async fn tables(client: &Client, version_num: u32) -> Result<Vec<TableStat>> {
+pub(crate) async fn tables(client: &mut impl QueryRead, version_num: u32) -> Result<Vec<TableStat>> {
     let sql = crate::native::relations::table_query;
     let rows = match query(client, &sql(version_num, crate::native::relations::SizeRead::Physical, None)).await {
         Ok(rows) => rows,
@@ -21,7 +21,7 @@ pub(crate) async fn tables(client: &Client, version_num: u32) -> Result<Vec<Tabl
         .collect()
 }
 
-pub(crate) async fn indexes(client: &Client, probe: &Probe) -> Result<Vec<IndexStat>> {
+pub(crate) async fn indexes(client: &mut impl QueryRead, probe: &Probe) -> Result<Vec<IndexStat>> {
     let sql = crate::native::indexes::query(probe.version_num, probe.timescale_version.is_some(), true, None);
     let rows = query(client, &sql).await?;
     let mut indexes = rows
@@ -49,7 +49,7 @@ pub(crate) async fn indexes(client: &Client, probe: &Probe) -> Result<Vec<IndexS
     Ok(indexes)
 }
 
-pub(crate) async fn columns(client: &Client, version: u32) -> Result<Vec<ColumnInfo>> {
+pub(crate) async fn columns(client: &mut impl QueryRead, version: u32) -> Result<Vec<ColumnInfo>> {
     let kind = crate::native::catalog::Kind::Columns;
     query(client, &crate::native::catalog::query(kind, version, true, 100_001))
         .await?
@@ -66,7 +66,7 @@ pub(crate) async fn columns(client: &Client, version: u32) -> Result<Vec<ColumnI
         .map(|result| result.and_then(crate::native::catalog::column))
         .collect()
 }
-pub(crate) async fn foreign_keys(client: &Client) -> Result<Vec<ForeignKey>> {
+pub(crate) async fn foreign_keys(client: &mut impl QueryRead) -> Result<Vec<ForeignKey>> {
     let kind = crate::native::catalog::Kind::ForeignKeys;
     query(client, &crate::native::catalog::query(kind, 110_000, false, 100_001))
         .await?
@@ -84,7 +84,7 @@ pub(crate) async fn foreign_keys(client: &Client) -> Result<Vec<ForeignKey>> {
         .collect()
 }
 
-pub(crate) async fn settings(client: &Client) -> Result<Vec<Setting>> {
+pub(crate) async fn settings(client: &mut impl QueryRead) -> Result<Vec<Setting>> {
     let rows = query(client, &crate::native::settings::query(crate::native::settings::SETTINGS, 1000)).await?;
     let mut out = rows
         .iter()

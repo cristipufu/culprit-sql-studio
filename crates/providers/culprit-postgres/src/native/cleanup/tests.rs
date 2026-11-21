@@ -235,11 +235,11 @@ async fn live_native_cleanup_preserves_lifecycles_and_effective_permissions() {
     limited.password = Some(std::env::var("CULPRIT_SMOKE_LIMITED_PASSWORD").unwrap());
     let limited = crate::PostgresProvider::new(&limited).unwrap();
     let client = limited.connector.connect(COLLECTOR).await.unwrap();
-    let probe = crate::probe::probe(&client, "127.0.0.1").await;
+    let probe = crate::probe::probe(&mut &client, "127.0.0.1").await;
     let pressure = match &probe {
         Ok(probe) => Some(
             crate::pressure::collect(
-                &client,
+                &mut &client,
                 probe,
                 culprit_core::DatabaseIdentity::server(
                     culprit_core::Engine::Postgres,
