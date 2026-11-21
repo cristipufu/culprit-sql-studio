@@ -6,7 +6,7 @@ use super::*;
 #[ts(export)]
 pub enum RecipeCostScope {
     Activity(DiagnosticScope),
-    NativeRead(NativeSourceReadScope),
+    NativeRead(SourceReadExecutionScope),
     SharedResource { target: SharedResourceIdentity, partition: SourcePartition, source: String },
 }
 
@@ -41,7 +41,7 @@ impl RecipeCostScope {
     pub fn target(&self) -> CollectionTarget {
         match self {
             Self::Activity(scope) => scope.target.clone(),
-            Self::NativeRead(scope) => CollectionTarget::Database(scope.target.clone()),
+            Self::NativeRead(scope) => CollectionTarget::Database(scope.target().clone()),
             Self::SharedResource { target, .. } => CollectionTarget::Shared(target.clone()),
         }
     }
@@ -63,7 +63,7 @@ impl RecipeCostScope {
     pub fn partition(&self) -> &SourcePartition {
         match self {
             Self::Activity(scope) => &scope.partition,
-            Self::NativeRead(scope) => &scope.partition,
+            Self::NativeRead(scope) => scope.partition(),
             Self::SharedResource { partition, .. } => partition,
         }
     }
@@ -79,7 +79,7 @@ impl RecipeCostScope {
     pub fn native_epoch(&self) -> Option<&str> {
         match self {
             Self::Activity(scope) => scope.native_epoch.as_deref(),
-            Self::NativeRead(scope) => scope.partition.native_epoch(),
+            Self::NativeRead(scope) => scope.partition().native_epoch(),
             Self::SharedResource { partition: SourcePartition::InstanceLocal { epoch, .. }, .. } => epoch.as_deref(),
             Self::SharedResource { .. } => None,
         }
@@ -94,12 +94,8 @@ impl RecipeCostScope {
             Self::Activity(expected) => {
                 DiagnosticScope::from_source(source).is_ok_and(|current| current.key().ok() == expected.key().ok())
             }
-            Self::NativeRead(expected) => match &source.observation {
-                SourceObservation::Activity(_) => {
-                    NativeReadContext::from_activity(source).is_ok_and(|context| expected.matches_context(&context))
-                }
-                _ => source.observation.execution_context().is_some_and(|context| expected.matches_context(context)),
-            },
+            Self::NativeRead(expected) => SourceReadExecutionScope::context_from_source(source)
+                .is_ok_and(|context| expected.matches_context(&context)),
             Self::SharedResource { target, partition, source: expected } => {
                 source.target == CollectionTarget::Shared(target.clone())
                     && source.partition == *partition

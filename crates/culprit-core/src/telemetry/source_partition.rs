@@ -105,10 +105,26 @@ impl CollectionDescription {
         {
             return false;
         }
+        if let SourceObservation::LocalResource { snapshot, .. } = &self.observation {
+            return local_resource_header_is_valid(snapshot)
+                && self.target.database().is_some()
+                && matches!(&self.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) })
+                && self.partition.is_qualified();
+        }
         if let Some(execution) = self.observation.execution_context() {
-            let Ok(scope) = NativeSourceReadScope::from_context(execution) else {
+            let Some(question) = self
+                .observation
+                .snapshot()
+                .map(|snapshot| snapshot.dataset)
+                .or_else(|| match &self.observation {
+                    SourceObservation::PagedSourceRead { snapshot, .. } => Some(snapshot.dataset),
+                    _ => None,
+                })
+                .and_then(SourceReadQuestion::for_dataset)
+            else {
                 return false;
             };
+            let Ok(scope) = SourceReadExecutionScope::from_context(question, execution) else { return false };
             let header_valid = match &self.observation {
                 SourceObservation::SourceRead { .. } => self.observation.covers_request(),
                 SourceObservation::PagedSourceRead { snapshot, focus_key, .. } => {

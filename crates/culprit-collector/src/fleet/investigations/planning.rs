@@ -34,7 +34,7 @@ struct EvidencePlanner<'a> {
     recovery: Option<&'a dyn RecoveryStore>,
     cancellation: &'a CollectionCancellation,
     population_frames: BTreeMap<String, DiagnosticInput>,
-    execution_owners: BTreeMap<String, NativeSourceReadScope>,
+    execution_owners: BTreeMap<String, SourceReadExecutionScope>,
 }
 
 struct SelectedRoute {
@@ -129,6 +129,14 @@ async fn bounded(
                         | DiagnosticSignal::RequestMemory { .. }
                         | DiagnosticSignal::CompilationAdmission { .. }
                         | DiagnosticSignal::LogRateGovernance { .. }
+                        | DiagnosticSignal::OriginalObservation {
+                            condition: DiagnosticOriginalCondition::MssqlQueryHistory { .. },
+                            ..
+                        }
+                        | DiagnosticSignal::OriginalObservation {
+                            condition: DiagnosticOriginalCondition::MssqlCleanupBoundary { .. },
+                            ..
+                        }
                         | DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. }
                 )
             {
@@ -190,7 +198,9 @@ async fn bounded(
                     } else {
                         None
                     };
-                    let Some(focus) = evidence.focus(outbox, target, episode, requested).await? else { continue };
+                    let Some(focus) = evidence.focus(outbox, target, episode, binding, requested).await? else {
+                        continue;
+                    };
                     // A trigger without its own original token cannot consume a valid sibling's population.
                     if let Some(stage) = population_stage {
                         populations.insert(stage);

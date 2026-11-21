@@ -96,13 +96,16 @@ impl<R: NativeRead> culprit_read::ObservationReader for CleanupReader<R> {
             partition: context.source_partition()?,
             source: "mssql-cleanup".into(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::Cleanup,
-                observed_from: context.activity.at.clone(),
-                observed_until: until,
-                records: records.len().try_into().map_err(|_| invalid_data())?,
-                sources,
-            }),
+            observation: SourceObservation::LocalResource {
+                snapshot: StateSnapshotDescription {
+                    dataset: SnapshotDataset::Cleanup,
+                    observed_from: context.activity.at.clone(),
+                    observed_until: until,
+                    records: records.len().try_into().map_err(|_| invalid_data())?,
+                    sources,
+                },
+                database_writable: context.activity.writable.ok_or_else(invalid_data)?,
+            },
         };
         self.context = Some(context);
         Ok(culprit_read::FrozenObservation { description, records })

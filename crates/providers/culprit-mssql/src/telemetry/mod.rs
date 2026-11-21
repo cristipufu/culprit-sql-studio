@@ -56,6 +56,16 @@ pub(crate) fn source(
     recipes::open(pool, request, host, port)
 }
 
+pub(crate) fn profile_source(
+    pool: Arc<Pool>,
+    request: &CollectionRequest,
+    host: String,
+    port: u16,
+    profile: &culprit_core::telemetry::SourceProfileAdmission,
+) -> Result<Box<dyn TelemetrySource>> {
+    Ok(Box::new(activity::ActivitySource::for_profile(pool, request, host, port, profile)?))
+}
+
 #[cfg(test)]
 pub(crate) fn page_wait_source_from_reader<R: crate::read::NativeRead + 'static>(
     reader: crate::activity::ActivityReader<R>,

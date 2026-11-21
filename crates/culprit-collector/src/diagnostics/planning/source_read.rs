@@ -7,16 +7,36 @@ pub(super) fn qualify(
     update: &mut DiagnosticUpdate,
 ) -> Result<()> {
     for episode in &mut update.checkpoint.episodes {
+        if episode.lifecycle == DiagnosticLifecycle::Resolved {
+            if matches!(
+                episode.signal,
+                DiagnosticSignal::OriginalObservation {
+                    condition: DiagnosticOriginalCondition::MssqlCleanupBoundary { .. },
+                    ..
+                }
+            ) {
+                continue;
+            }
+        }
         if episode.source_read.as_deref().is_some_and(|stage| !stage.needs_admission()) {
             continue;
         }
         let Some(focus) = episode.source_read_focus()? else { continue };
         let original_input = match &focus.prerequisite {
             SourceReadPrerequisite::CompilationAdmission { report } => report.observation.capture_ref(),
-            SourceReadPrerequisite::ObservedLogRateWait => episode.first.capture_ref(),
+            SourceReadPrerequisite::ObservedQueryHistoryFailure { .. }
+            | SourceReadPrerequisite::ObservedLogRateWait => episode.first.capture_ref(),
+            SourceReadPrerequisite::ObservedCleanupBoundary { .. } => focus.basis.capture_ref(),
         };
         if episode.source_read.is_none() && original_input != input.parent {
             continue;
+        }
+        if episode.source_read.is_none() && focus.question == SourceReadQuestion::TemporarySpaceContributors {
+            let Some(row) = input.rows.iter().find(|row| row.reference == *focus.basis) else { continue };
+            // The native body, not boundary presence or cost qualification, satisfies the shared attention policy.
+            if !focus.matches_original(&input.source, &row.row) {
+                continue;
+            }
         }
         let recipe = assignment.recipes.as_deref().and_then(|recipes| {
             recipes.iter().find(|recipe| {

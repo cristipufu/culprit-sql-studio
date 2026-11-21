@@ -2,6 +2,7 @@
 use super::*;
 use crate::telemetry::compilation::QueryCompilation;
 mod measurement;
+mod selected;
 
 const FIRST: &str = "2020-01-01T08:01:00Z";
 const LAST: &str = "2020-01-01T08:01:01Z";
@@ -26,7 +27,7 @@ fn request() -> CollectionRequest {
                 question: SourceReadQuestion::CompilationHistory,
                 prerequisite: SourceReadPrerequisite::CompilationAdmission { report: Box::new(prerequisite) },
             }),
-            execution: Box::new(NativeSourceReadScope::from_context(&context).unwrap()),
+            execution: Box::new(NativeSourceReadScope::from_context(&context).unwrap().into()),
         },
     }
 }

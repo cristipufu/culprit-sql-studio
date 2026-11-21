@@ -1213,7 +1213,7 @@ analytical projections expose only opaque scope keys. See [SQL Server replica co
 for the current native identity gates and remaining source restrictions.
 
 Baseline sources preserve stricter caller budgets and cap retained rows at 500, statement time at one second and
-total native time at five seconds. Their native phase ceilings are seven for SQL Server, six for PostgreSQL,
+total native time at five seconds. Their native phase ceilings are eight for SQL Server, six for PostgreSQL,
 twenty for MySQL/MariaDB and eight for YugabyteDB. Setup and prepared-statement phases count toward those limits;
 the counts are not a claim about server work per SQL statement. These hard bounds do not establish production
 overhead under representative load.
@@ -1296,6 +1296,29 @@ identifiers, outcomes and recovery references while omitting private source targ
 Built-in recipe costs remain unqualified, so this protocol does not enable automatic extra production reads.
 Saving an episode or declaring a recipe does not establish a completed root-cause investigation or measured source
 cost. Existing explicit page-target collection remains separately bounded.
+
+### Finite questions from retained signals
+
+Retained non-session signals use the same scheduler, source admission, capture and offline answer worker:
+
+- A native SQL Server cleanup boundary at least 30 minutes old can owe one bounded task-space capture. The first
+  qualifying original pins its session and transaction generations. Short or unknown-age transactions remain
+  observations and trigger no follow-up. Allocation counters and snapshot participants provide context; spills,
+  version generation, capacity and the allocating query still require their own evidence.
+- An aborted or exceptional Query Store population can owe compilation context for its exact original query
+  incarnation. Later totals retain independent clocks and acquisition ownership. They establish neither the
+  historical executor nor harmful parameter reuse, TVP behavior or the plan used by the failed executions.
+
+Each answer keeps its original receipts and explicit evidence gaps. Recovery stops unadmitted cleanup work while
+preserving admitted work and retained answers. Repeated observations cannot reopen a terminal question. Canonical
+reading verifies every original row and EOF even when it retains only selected query rows and their original ordinals.
+Public warehouse fields carry consistency metadata; reconstructing private scope or an answer requires authenticated
+original recovery payloads.
+
+Approved SQL Server and PostgreSQL Activity profiles bind their original native owner, known role and held
+connection inside the existing reader. Approval retirement is permanent for that source lifetime and is checked
+before routing, login, session setup, internal dispatch and final acceptance. This does not qualify built-in costs
+or add a fallback to ordinary collection.
 
 ## PostgreSQL source coverage
 

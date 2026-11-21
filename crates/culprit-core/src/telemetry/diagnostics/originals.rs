@@ -13,6 +13,21 @@ pub enum DiagnosticSourceKind {
     TaskSpace,
     QueryHistory,
 }
+impl DiagnosticSourceKind {
+    /// Eligible collection families only; native original headers/rows still establish actual applicability.
+    pub fn supports_collection(collection: TelemetryCollection) -> bool {
+        matches!(
+            collection,
+            TelemetryCollection::QueryHistory
+                | TelemetryCollection::Snapshot(
+                    SnapshotDataset::Cleanup
+                        | SnapshotDataset::TaskSpace
+                        | SnapshotDataset::MemoryFailures
+                        | SnapshotDataset::NativeFailures
+                )
+        )
+    }
+}
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]

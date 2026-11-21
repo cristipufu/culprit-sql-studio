@@ -106,6 +106,62 @@ async fn selected_incident_revisions_survive_recovery_even_when_resolved_episode
             .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
             .await
             .unwrap();
+        let captured = if captured.is_read_complete() {
+            captured
+        } else {
+            assert!(captured.records().is_empty());
+            assert!(captured.gaps().iter().all(|gap| gap.reason == EvidenceGapReason::NativeRepresentationRequired));
+            *fixture.recovery.fault.lock().unwrap() = Fault::None;
+            fixture.replies(vec![fixture.rows.clone()]);
+            let restored = fixture
+                .reader
+                .read_capture(
+                    &fixture.range,
+                    &[EvidenceFamily::OperationalSamples],
+                    EvidenceReadBudget {
+                        recovery_payloads: Some(RecoveryPayloadBudget::default()),
+                        ..EvidenceReadBudget::default()
+                    },
+                    Some(fixture.recovery.as_ref()),
+                )
+                .await
+                .unwrap();
+            assert_eq!(restored.metrics().recovery_objects, 1);
+            restored
+        };
         test_support::assert_incident_history_capture(&captured, &source, &rows);
+    }
+}
+
+#[tokio::test]
+async fn automatic_query_compilation_answers_require_original_recovery_and_preserve_context() {
+    for case in test_support::QueryCompilationFollowupCase::ALL {
+        let (source, records) = test_support::query_compilation_followup_evidence(*case);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.replies(vec![fixture.rows.clone()]);
+        let preview = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
+            .await
+            .unwrap();
+        assert!(!preview.is_read_complete());
+        assert!(preview.gaps().iter().any(|gap| gap.reason == EvidenceGapReason::NativeRepresentationRequired));
+        *fixture.recovery.fault.lock().unwrap() = Fault::None;
+        fixture.replies(vec![fixture.rows.clone()]);
+        let restored = fixture
+            .reader
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget {
+                    recovery_payloads: Some(RecoveryPayloadBudget::default()),
+                    ..EvidenceReadBudget::default()
+                },
+                Some(fixture.recovery.as_ref()),
+            )
+            .await
+            .unwrap();
+        test_support::assert_query_compilation_followup_capture(&restored, &source, &records, *case);
+        assert_eq!(restored.metrics().recovery_objects, 1);
     }
 }

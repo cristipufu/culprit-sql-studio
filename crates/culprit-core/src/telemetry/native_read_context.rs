@@ -71,7 +71,8 @@ impl NativeReadContext {
             database_writable: match &source.observation {
                 SourceObservation::MssqlPoolCurrent { authority, .. } => Some(authority.before.database_writable),
                 SourceObservation::MssqlPoolSettings { membership, .. } => Some(membership.database_writable),
-                SourceObservation::MssqlReplication { database_writable, .. }
+                SourceObservation::LocalResource { database_writable, .. }
+                | SourceObservation::MssqlReplication { database_writable, .. }
                 | SourceObservation::SuspectPages { database_writable, .. }
                 | SourceObservation::DatabasePerformanceCounters { database_writable, .. }
                 | SourceObservation::BackupHistory { database_writable, .. }

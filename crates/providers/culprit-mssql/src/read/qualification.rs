@@ -82,6 +82,7 @@ impl Admission {
 /// The existing Pool calls this only immediately before its real SET batch.
 pub(crate) struct SetupWork {
     admission: Option<Arc<Admission>>,
+    profile: Option<culprit_read::SourceProfileGuard>,
     metrics: crate::read_metrics::Metrics,
     queries: std::sync::atomic::AtomicU32,
 }
@@ -89,6 +90,7 @@ impl SetupWork {
     fn new(admission: Arc<Admission>) -> Self {
         Self {
             admission: Some(admission),
+            profile: None,
             metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
             queries: Default::default(),
         }
@@ -96,14 +98,25 @@ impl SetupWork {
     pub(crate) fn observation() -> Self {
         Self {
             admission: None,
+            profile: None,
             metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
             queries: Default::default(),
+        }
+    }
+    pub(crate) fn for_profile(profile: culprit_read::SourceProfileGuard) -> Self {
+        Self { profile: Some(profile), ..Self::observation() }
+    }
+    pub(crate) fn check_profile(&self) -> Result<()> {
+        match &self.profile {
+            Some(profile) => profile.ensure_active(),
+            None => Ok(()),
         }
     }
     pub(crate) fn snapshot(&self) -> (u32, Option<culprit_core::telemetry::ReadWorkMetrics>) {
         (self.queries.load(std::sync::atomic::Ordering::Acquire), self.metrics.snapshot())
     }
     pub(crate) fn begin(&self, sql: &str) -> Result<SetupTask<'_>> {
+        self.check_profile()?;
         if let Some(admission) = &self.admission {
             admission.start().map_err(CollectionStop::error)?;
         }

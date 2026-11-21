@@ -162,7 +162,11 @@ async fn open_tcp(
     endpoint: Option<&ConnectionEndpoint>,
     work: &mut ConnectionWork<'_>,
     attempt: Option<&ReadConnectionAttemptRecorder>,
-) -> tiberius::Result<MsClient> {
+    accounting: Option<&crate::read::qualification::SetupWork>,
+) -> Result<tiberius::Result<MsClient>> {
+    if let Some(accounting) = accounting {
+        accounting.check_profile()?;
+    }
     let addr = config.get_addr();
     let dial = endpoint.map_or_else(|| addr.clone(), |endpoint| endpoint.address.to_string());
     let tcp = native_phase(attempt, ReadConnectionStage::Transport, async {
@@ -174,10 +178,19 @@ async fn open_tcp(
             })?
             .map_err(tiberius::error::Error::from)
     })
-    .await?;
-    tcp.set_nodelay(true)?;
+    .await;
+    let tcp = match tcp {
+        Ok(tcp) => tcp,
+        Err(error) => return Ok(Err(error)),
+    };
+    if let Err(error) = tcp.set_nodelay(true) {
+        return Ok(Err(error.into()));
+    }
+    if let Some(accounting) = accounting {
+        accounting.check_profile()?;
+    }
     work.begin_login();
-    native_phase(attempt, ReadConnectionStage::HandshakeAndLogin, Client::connect(config, tcp.compat_write())).await
+    Ok(native_phase(attempt, ReadConnectionStage::HandshakeAndLogin, Client::connect(config, tcp.compat_write())).await)
 }
 
 /// The TCP connection to `addr` didn't open in time: the message of the I/O error it becomes.
@@ -199,9 +212,12 @@ async fn connect(
     accounting: Option<&crate::read::qualification::SetupWork>,
     observed: Option<&ReadConnectionAttemptRecorder>,
 ) -> Result<MsClient> {
+    if let Some(accounting) = accounting {
+        accounting.check_profile()?;
+    }
     let mut endpoint =
         core_phase(observed, ReadConnectionStage::RouteSelection, endpoint_for(config, transport)).await?;
-    let attempt = match open_tcp(config.clone(), endpoint.as_ref(), work, observed).await {
+    let attempt = match open_tcp(config.clone(), endpoint.as_ref(), work, observed, accounting).await? {
         Err(tiberius::error::Error::Routing { host, port }) => {
             // A typed routing response completed at the gateway before a database session was admitted.
             work.confirmed();
@@ -211,9 +227,12 @@ async fn connect(
             let mut routed = config.clone();
             routed.host(&host);
             routed.port(port);
+            if let Some(accounting) = accounting {
+                accounting.check_profile()?;
+            }
             endpoint =
                 core_phase(observed, ReadConnectionStage::RouteSelection, endpoint_for(&routed, transport)).await?;
-            open_tcp(routed, endpoint.as_ref(), work, observed).await
+            open_tcp(routed, endpoint.as_ref(), work, observed, accounting).await?
         }
         other => other,
     };
@@ -311,6 +330,9 @@ impl Pool {
         observed: Option<&ReadConnectionAttemptRecorder>,
     ) -> Result<MsClient> {
         self.ensure_available()?;
+        if let Some(accounting) = accounting {
+            accounting.check_profile()?;
+        }
         if let Some(client) = self.take_idle() {
             if let Some(observed) = observed {
                 observed.connection_use(ReadConnectionUse::AuthenticatedReuse);

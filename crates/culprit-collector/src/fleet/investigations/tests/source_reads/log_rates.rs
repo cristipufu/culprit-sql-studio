@@ -44,7 +44,8 @@ async fn fixture(cost_qualified: bool) -> Harness {
         NativeSourceReadScope::from_context(
             &NativeReadContext::from_activity(&harness.backend.activity.source).unwrap(),
         )
-        .unwrap(),
+        .unwrap()
+        .into(),
     );
     if !cost_qualified {
         harness.backend.recipe.cost = RecipeCostQualification::Unqualified;

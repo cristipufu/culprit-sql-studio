@@ -229,7 +229,7 @@ impl DiagnosticInvestigationIntent {
         episode: &DiagnosticEpisode,
         recipe: &RecipeDescriptor,
         focus: SourceReadFocus,
-        execution: NativeSourceReadScope,
+        execution: impl Into<SourceReadExecutionScope>,
         component: &ComponentVersion,
         caller_budget: &CollectionBudget,
     ) -> Result<Self> {
@@ -242,7 +242,7 @@ impl DiagnosticInvestigationIntent {
             recipe_id: recipe.id.clone(),
             recipe_version: recipe.version,
             focus: DiagnosticFocus::SourceRead { focus: Box::new(focus) },
-            execution: DiagnosticExecutionBinding::NativeRead { execution: Box::new(execution) },
+            execution: DiagnosticExecutionBinding::NativeRead { execution: Box::new(execution.into()) },
             budget: receipt.tested_budget.clone(),
             qualification: receipt.as_ref().clone(),
         };

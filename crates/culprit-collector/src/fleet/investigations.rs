@@ -61,10 +61,11 @@ impl Investigations {
             }
             self.bindings.observe_shared(&job.target, source, owner, revision)?;
         }
-        if matches!(job.schedule.collection, ScheduledCollection::Activity { .. })
+        if (matches!(job.schedule.collection, ScheduledCollection::Activity { .. })
+            || DiagnosticSourceKind::supports_collection(job.schedule.collection.collection()))
             && result.event.status == CollectionStatus::Complete
             && let (Some(source), Some(revision)) = (&result.source, route)
-            && source.observation.activity().is_some_and(|frame| frame.epoch.is_some())
+            && RouteBindings::accepts_source(source)
         {
             self.bindings.observe(&job.target, source, revision)?;
         }
@@ -73,7 +74,9 @@ impl Investigations {
 }
 
 pub(super) fn is_baseline(job: &Job) -> bool {
-    matches!(job.schedule.collection, ScheduledCollection::Activity { .. }) || shared_owner_baseline(job)
+    matches!(job.schedule.collection, ScheduledCollection::Activity { .. })
+        || DiagnosticSourceKind::supports_collection(job.schedule.collection.collection())
+        || shared_owner_baseline(job)
 }
 
 fn shared_owner_baseline(job: &Job) -> bool {

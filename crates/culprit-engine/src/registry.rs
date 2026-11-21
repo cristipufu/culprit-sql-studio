@@ -40,13 +40,7 @@ pub fn registration(engine: Engine) -> Result<ProviderRegistration> {
         #[cfg(feature = "mssql")]
         Engine::Mssql => mssql_registration(),
         #[cfg(feature = "postgres")]
-        Engine::Postgres => ProviderRegistration::new(
-            Arc::new(|spec, context| {
-                Ok(Box::new(culprit_postgres::PostgresProvider::new(spec)?.with_read_context(context)?))
-            }),
-            crate::ProviderConstructionPolicy::DeferredNativeWork,
-            culprit_postgres::telemetry_recipes(),
-        ),
+        Engine::Postgres => postgres_registration(),
         #[cfg(feature = "yugabyte")]
         Engine::Yugabyte => ProviderRegistration::new(
             Arc::new(|spec, context| {
@@ -76,6 +70,30 @@ pub fn registration(engine: Engine) -> Result<ProviderRegistration> {
     }
 }
 
+#[cfg(feature = "postgres")]
+fn postgres_registration() -> Result<ProviderRegistration> {
+    let registration = ProviderRegistration::new(
+        Arc::new(|spec, context| {
+            Ok(Box::new(culprit_postgres::PostgresProvider::new(spec)?.with_read_context(context)?))
+        }),
+        crate::ProviderConstructionPolicy::DeferredNativeWork,
+        culprit_postgres::telemetry_recipes(),
+    )?;
+    profile_intake(registration)
+}
+
+#[cfg(any(feature = "mssql", feature = "postgres"))]
+fn profile_intake(registration: ProviderRegistration) -> Result<ProviderRegistration> {
+    #[cfg(feature = "collector")]
+    let registration = registration.with_profile_source(
+        vec![culprit_core::telemetry::RecipeSelector::Collection(
+            culprit_core::telemetry::TelemetryCollection::Activity,
+        )],
+        Arc::new(|provider, request, profile| provider.telemetry_source_for_profile(request, profile)),
+    )?;
+    Ok(registration)
+}
+
 #[cfg(feature = "mssql")]
 fn mssql_registration() -> Result<ProviderRegistration> {
     let registration = ProviderRegistration::new(
@@ -88,7 +106,7 @@ fn mssql_registration() -> Result<ProviderRegistration> {
         Arc::new(|spec, request| culprit_mssql::MssqlProvider::new(spec)?.qualification_source(request)),
         Arc::new(|evidence| culprit_mssql::assess_recipe_qualification(evidence.manifest, evidence.captured.source())),
     );
-    Ok(registration)
+    profile_intake(registration)
 }
 
 #[cfg(test)]
@@ -137,6 +155,32 @@ mod tests {
         ];
         for &(engine, catalog) in catalogs {
             assert_eq!(registration(engine).unwrap().telemetry_recipes(), catalog(), "{engine:?}");
+        }
+    }
+
+    #[cfg(feature = "collector")]
+    #[test]
+    fn baseline_profile_intake_is_explicit_activity_only_without_approving_builtin_costs() {
+        use culprit_core::telemetry::*;
+        for engine in Engine::ALL {
+            let Ok(registration) = registration(engine) else { continue };
+            let native_activity = match engine {
+                #[cfg(feature = "mssql")]
+                Engine::Mssql => true,
+                #[cfg(feature = "postgres")]
+                Engine::Postgres => true,
+                _ => false,
+            };
+            assert_eq!(
+                registration.supports_profile_source(RecipeSelector::Collection(TelemetryCollection::Activity)),
+                native_activity
+            );
+            for recipe in registration.telemetry_recipes() {
+                assert!(matches!(recipe.cost, RecipeCostQualification::Unqualified));
+                if recipe.selector != RecipeSelector::Collection(TelemetryCollection::Activity) {
+                    assert!(!registration.supports_profile_source(recipe.selector));
+                }
+            }
         }
     }
 

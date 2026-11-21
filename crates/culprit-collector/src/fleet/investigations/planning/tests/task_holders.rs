@@ -59,6 +59,7 @@ async fn missing_original_task_page_never_chooses_a_current_actor_or_opens_a_sou
                 &mut harness.outbox,
                 &harness.inventory.targets[0],
                 &episode,
+                harness.bindings.get("target").unwrap(),
                 RecipeSelector::FocusedPageTaskHolders,
             )
             .await

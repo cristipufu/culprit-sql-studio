@@ -249,7 +249,7 @@ fn restored_originals_stay_on_their_checksummed_journal_path_without_reopening_l
             source: input.source.clone(),
             investigation: input.investigation.clone(),
             connection: input.connection.clone(),
-            rows: input.rows.iter().map(|row| row.row.clone()).collect(),
+            rows: input.rows.iter().map(|row| (row.reference.row_ordinal, row.row.clone())).collect(),
         })
         .unwrap();
     let cold = restored.diagnostic_input(&capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();

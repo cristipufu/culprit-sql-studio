@@ -28,6 +28,7 @@ enum PublicObservation<'a> {
         closure: &'a BlockingClosureDescription,
     },
     Snapshot(&'a StateSnapshotDescription),
+    LocalResourceContext(LocalPointContext<'a>),
     SourceReadContext {
         snapshot: &'a StateSnapshotDescription,
         focus_key: &'a str,
@@ -209,10 +210,18 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
             closure: &result.closure,
         },
         SourceObservation::Snapshot(value) => PublicObservation::Snapshot(value),
+        SourceObservation::LocalResource { snapshot, database_writable } => {
+            PublicObservation::LocalResourceContext(LocalPointContext::new(snapshot, *database_writable))
+        }
         SourceObservation::SourceRead { snapshot, focus_key, execution } => PublicObservation::SourceReadContext {
             snapshot,
             focus_key,
-            execution_key: NativeSourceReadScope::from_context(execution)?.key()?,
+            execution_key: SourceReadExecutionScope::from_context(
+                SourceReadQuestion::for_dataset(snapshot.dataset)
+                    .ok_or_else(|| culprit_core::telemetry::CollectionStop::InvalidPage.error())?,
+                execution,
+            )?
+            .key()?,
         },
         SourceObservation::PageWaitTargets { snapshot, database_writable, original_activity } => {
             PublicObservation::PageWaitTargetsContext {

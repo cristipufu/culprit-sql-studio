@@ -1,6 +1,15 @@
 //! Finite source questions keep logical data identity separate from the qualified execution/cost owner.
 use super::*;
 
+mod scope;
+pub use scope::*;
+mod answer;
+pub use answer::*;
+mod temporary;
+pub use temporary::*;
+mod query_compilation;
+pub use query_compilation::*;
+
 /// Native updateability qualifies this exact execution expectation. It names neither a replica role nor a
 /// query/execution population, and cannot supply a member or process identity that the source did not report.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -54,14 +63,17 @@ impl NativeSourceReadScope {
 pub enum SourceReadQuestion {
     CompilationHistory,
     HyperscaleLogComponents,
+    TemporarySpaceContributors,
 }
 impl SourceReadQuestion {
-    pub const ALL: &'static [Self] = &[Self::CompilationHistory, Self::HyperscaleLogComponents];
+    pub const ALL: &'static [Self] =
+        &[Self::CompilationHistory, Self::HyperscaleLogComponents, Self::TemporarySpaceContributors];
 
     pub const fn dataset(self) -> SnapshotDataset {
         match self {
             Self::CompilationHistory => SnapshotDataset::QueryCompilation,
             Self::HyperscaleLogComponents => SnapshotDataset::HyperscaleLogComponents,
+            Self::TemporarySpaceContributors => SnapshotDataset::TaskSpace,
         }
     }
     pub const fn selector(self) -> RecipeSelector {
@@ -83,6 +95,8 @@ impl SourceReadQuestion {
 pub enum SourceReadPrerequisite {
     CompilationAdmission { report: Box<CompilationAdmissionReport> },
     ObservedLogRateWait,
+    ObservedCleanupBoundary { session: NativeActivityIdentity, transaction: NativeActivityIdentity },
+    ObservedQueryHistoryFailure { query: NativeQueryIdentity },
 }
 impl SourceReadPrerequisite {
     pub fn references(&self) -> impl Iterator<Item = &DiagnosticEvidenceRef> {
@@ -92,13 +106,39 @@ impl SourceReadPrerequisite {
     pub fn compilation_admission(&self) -> Option<&CompilationAdmissionReport> {
         match self {
             Self::CompilationAdmission { report } => Some(report),
-            Self::ObservedLogRateWait => None,
+            Self::ObservedLogRateWait
+            | Self::ObservedCleanupBoundary { .. }
+            | Self::ObservedQueryHistoryFailure { .. } => None,
+        }
+    }
+    fn matches_cleanup_condition(&self, condition: &DiagnosticOriginalCondition) -> bool {
+        match (self, condition) {
+            (
+                Self::ObservedCleanupBoundary { session, transaction },
+                DiagnosticOriginalCondition::MssqlCleanupBoundary {
+                    session: actual_session,
+                    transaction: actual_transaction,
+                },
+            ) => session == actual_session && transaction == actual_transaction,
+            _ => false,
         }
     }
     fn is_valid_for(&self, question: SourceReadQuestion) -> bool {
         match (self, question) {
             (Self::CompilationAdmission { report }, SourceReadQuestion::CompilationHistory) => report.is_valid(),
+            (Self::ObservedQueryHistoryFailure { query }, SourceReadQuestion::CompilationHistory) => {
+                query_store_query_identity_is_complete(query)
+            }
             (Self::ObservedLogRateWait, SourceReadQuestion::HyperscaleLogComponents) => true,
+            (
+                Self::ObservedCleanupBoundary { session, transaction },
+                SourceReadQuestion::TemporarySpaceContributors,
+            ) => {
+                session.is_valid()
+                    && transaction.is_valid()
+                    && !session.generation.trim().is_empty()
+                    && !transaction.generation.trim().is_empty()
+            }
             _ => false,
         }
     }
@@ -120,8 +160,23 @@ impl SourceReadFocus {
     pub fn is_valid(&self) -> bool {
         self.basis.is_valid()
             && self.prerequisite.is_valid_for(self.question)
-            && self.basis.stream == TelemetryStream::ActivityObservations
-            && matches!(self.basis.native_key, NativeRecordIdentity::Activity(_))
+            && match (&self.prerequisite, self.question) {
+                (
+                    SourceReadPrerequisite::ObservedQueryHistoryFailure { .. },
+                    SourceReadQuestion::CompilationHistory,
+                ) => {
+                    self.basis.stream == TelemetryStream::QueryRuntime
+                        && matches!(self.basis.native_key, NativeRecordIdentity::Runtime(_))
+                }
+                (_, SourceReadQuestion::TemporarySpaceContributors) => {
+                    self.basis.stream == TelemetryStream::OperationalSamples
+                        && matches!(self.basis.native_key, NativeRecordIdentity::Operational { .. })
+                }
+                _ => {
+                    self.basis.stream == TelemetryStream::ActivityObservations
+                        && matches!(self.basis.native_key, NativeRecordIdentity::Activity(_))
+                }
+            }
             && self.target.is_valid()
             && self.target.database().is_some()
     }
@@ -149,7 +204,7 @@ impl SourceReadFocus {
         else {
             return false;
         };
-        let Ok(execution) = NativeSourceReadScope::from_context(&original) else { return false };
+        let Ok(execution) = SourceReadExecutionScope::from_context(self.question, &original) else { return false };
         let Some(statement) = &actor.statement_identity else { return false };
         let participant = &result.focus;
         let context = NativeReadContext {
@@ -168,40 +223,106 @@ impl SourceReadFocus {
                 .is_some_and(|(left, right)| left == right)
             && prerequisite.matches_input(source, rows)
     }
-    pub fn matches_basis(
-        &self,
-        source: &CollectionDescription,
-        row: &ExportedRecord,
-        execution: &NativeSourceReadScope,
-    ) -> bool {
-        self.is_valid()
-            && execution.matches_target(&self.target)
-            && source.target.telemetry_id().ok() == self.target.telemetry_id().ok()
-            && matches!(&row.record, TelemetryRecord::Activity(original)
+    /// Only closed, bounded answer families materialize their original rows for offline diagnosis.
+    pub fn retains_result_rows(&self) -> bool {
+        matches!(
+            self.prerequisite,
+            SourceReadPrerequisite::ObservedCleanupBoundary { .. }
+                | SourceReadPrerequisite::ObservedQueryHistoryFailure { .. }
+        )
+    }
+    /// The existing canonical reader verifies every original row and byte before retaining this selection.
+    /// Query-number candidates include changed incarnations, which the answer must explicitly refuse.
+    pub fn retains_result_record(&self, record: &TelemetryRecord) -> bool {
+        match &self.prerequisite {
+            SourceReadPrerequisite::ObservedQueryHistoryFailure { query } => match record {
+                TelemetryRecord::Operational(OperationalObservation {
+                    source,
+                    fact: OperationalFact::MssqlQueryCompilation(point),
+                    ..
+                }) if source == crate::source_id::QUERY_COMPILATION => point.identity.query_id == query.query_id,
+                // Omit only known unrelated queries. A foreign family/source survives selection for refusal.
+                _ => true,
+            },
+            _ => self.retains_result_rows(),
+        }
+    }
+    pub fn selects_result_rows(&self) -> bool {
+        matches!(self.prerequisite, SourceReadPrerequisite::ObservedQueryHistoryFailure { .. })
+    }
+    pub fn original_context(&self, source: &CollectionDescription) -> Result<NativeReadContext> {
+        if matches!(self.prerequisite, SourceReadPrerequisite::ObservedQueryHistoryFailure { .. }) {
+            return SourceReadExecutionScope::context_from_source(source);
+        }
+        match self.question {
+            SourceReadQuestion::TemporarySpaceContributors => NativeReadContext::from_snapshot(source),
+            _ => NativeReadContext::from_activity(source),
+        }
+    }
+    fn original_condition_matches(&self, source: &CollectionDescription, row: &TelemetryRecord) -> bool {
+        if let SourceReadPrerequisite::ObservedQueryHistoryFailure { query } = &self.prerequisite {
+            let Some(DiagnosticOriginalCondition::MssqlQueryHistory { query: original, .. }) =
+                DiagnosticOriginalCondition::from_record(source, row)
+            else {
+                return false;
+            };
+            return query_store_query_incarnation_key(query).ok()
+                == query_store_query_incarnation_key(&NativeQueryIdentity {
+                    query_id: original.id,
+                    qualifiers: original.qualifiers,
+                })
+                .ok();
+        }
+        match self.question {
+            SourceReadQuestion::TemporarySpaceContributors => {
+                let Some(condition) = DiagnosticOriginalCondition::from_record(source, row) else {
+                    return false;
+                };
+                self.prerequisite.matches_cleanup_condition(&condition) && cleanup_attention(row)
+            }
+            question => matches!(row, TelemetryRecord::Activity(original)
             if original.has_session_generation_authority()
                 && original.scope == ActivityScopeBasis::RequestDatabase
-                && original.wait.as_ref().is_some_and(|wait| wait.class == Some(match self.question {
+                && original.wait.as_ref().is_some_and(|wait| wait.class == Some(match question {
                     SourceReadQuestion::CompilationHistory => ActivityWaitClass::CompilationAdmission,
                     SourceReadQuestion::HyperscaleLogComponents => ActivityWaitClass::LogRateGovernance,
-                })))
-            && NativeReadContext::from_activity(source).is_ok_and(|context| execution.matches_context(&context))
+                    SourceReadQuestion::TemporarySpaceContributors => return false,
+                }))),
+        }
+    }
+    /// Authenticate the exact retained prerequisite independently of the new read's native admission.
+    pub fn matches_original(&self, source: &CollectionDescription, row: &ExportedRecord) -> bool {
+        self.is_valid()
+            && source.target.telemetry_id().ok() == self.target.telemetry_id().ok()
+            && self.original_condition_matches(source, &row.record)
             && self.basis.validate_canonical_record(source, &row.record).is_ok()
             && self.basis.capture == row.capture
             && row.batch_id == self.basis.batch_id
             && row.payload_sha256().is_ok_and(|digest| digest == self.basis.payload_sha256)
     }
+    pub fn matches_basis(
+        &self,
+        source: &CollectionDescription,
+        row: &ExportedRecord,
+        execution: &SourceReadExecutionScope,
+    ) -> bool {
+        self.matches_original(source, row)
+            && execution.matches_target(&self.target)
+            && execution.accepts_question(self.question)
+            && self.original_context(source).is_ok_and(|context| execution.matches_original_context(&context))
+    }
 }
 
 /// The completed waiter/gateway answer stays immutable. This separately owed question transitions only through
 /// revision/event history, and retains one successful capture rather than a per-row compiler roster.
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct SourceReadStage {
     pub focus: SourceReadFocus,
     pub state: SourceReadStageState,
 }
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum SourceReadStageState {
@@ -209,14 +330,22 @@ pub enum SourceReadStageState {
     Deferred { issue: DiagnosticAnalysisIssue },
     Collecting,
     Captured { capture: DiagnosticCaptureRef },
+    Answered { answer: Box<SourceReadAnswer> },
+    Recovered,
     Stopped { issue: DiagnosticAnalysisIssue },
 }
 impl SourceReadStage {
     pub fn is_valid(&self) -> bool {
         self.focus.is_valid()
             && match &self.state {
+                SourceReadStageState::Answered { answer } => {
+                    self.focus.question == answer.question()
+                        && answer.is_valid()
+                        && answer.basis() == self.focus.basis.as_ref()
+                }
                 SourceReadStageState::Captured { capture } => {
-                    capture.is_valid()
+                    !self.focus.retains_result_rows()
+                        && capture.is_valid()
                         && capture.capture != self.focus.basis.capture
                         && capture.source_scope_id != self.focus.basis.source_scope_id
                 }
@@ -243,22 +372,53 @@ impl SourceReadStage {
     pub fn result(&self) -> Option<&DiagnosticCaptureRef> {
         match &self.state {
             SourceReadStageState::Captured { capture } => Some(capture),
+            SourceReadStageState::Answered { answer } => Some(answer.result()),
             _ => None,
         }
     }
     pub fn matches_episode(&self, episode: &DiagnosticEpisode) -> bool {
         self.is_valid()
-            && self.focus.basis.as_ref() == &episode.first
+            && self.basis_matches_episode(episode)
             && self.focus.target.telemetry_id().ok() == episode.scope.target.telemetry_id().ok()
+            && (!matches!(self.state, SourceReadStageState::Recovered)
+                || self.focus.question == SourceReadQuestion::TemporarySpaceContributors
+                    && episode.lifecycle == DiagnosticLifecycle::Resolved)
             && match (&episode.signal, &self.focus.prerequisite, &episode.report) {
                 (
                     DiagnosticSignal::CompilationAdmission { .. },
                     SourceReadPrerequisite::CompilationAdmission { report },
                     Some(DiagnosticReport::CompilationAdmission { report: original }),
                 ) => report == original,
+                (
+                    DiagnosticSignal::OriginalObservation {
+                        condition: DiagnosticOriginalCondition::MssqlQueryHistory { query: original, .. },
+                        ..
+                    },
+                    SourceReadPrerequisite::ObservedQueryHistoryFailure { query },
+                    Some(DiagnosticReport::OriginalObservation { .. }),
+                ) => query.native() == *original,
                 (DiagnosticSignal::LogRateGovernance { .. }, SourceReadPrerequisite::ObservedLogRateWait, None) => true,
+                (
+                    DiagnosticSignal::OriginalObservation {
+                        condition: DiagnosticOriginalCondition::MssqlCleanupBoundary { session, transaction },
+                        ..
+                    },
+                    SourceReadPrerequisite::ObservedCleanupBoundary {
+                        session: expected_session,
+                        transaction: expected_transaction,
+                    },
+                    Some(DiagnosticReport::OriginalObservation { .. }),
+                ) => session == expected_session && transaction == expected_transaction,
                 _ => false,
             }
+    }
+    fn basis_matches_episode(&self, episode: &DiagnosticEpisode) -> bool {
+        if self.focus.question == SourceReadQuestion::TemporarySpaceContributors {
+            self.focus.basis.source_scope_id == episode.first.source_scope_id
+                && self.focus.basis.native_key == episode.first.native_key
+        } else {
+            self.focus.basis.as_ref() == &episode.first
+        }
     }
     pub fn transition(&self, state: SourceReadStageState) -> Result<Self> {
         if !self.is_valid() {
@@ -272,18 +432,28 @@ impl SourceReadStage {
                 state,
                 SourceReadStageState::Deferred { .. }
                     | SourceReadStageState::Collecting
+                    | SourceReadStageState::Recovered
                     | SourceReadStageState::Stopped { .. }
             ),
             SourceReadStageState::Deferred { .. } => matches!(
                 state,
                 SourceReadStageState::Deferred { .. }
                     | SourceReadStageState::Collecting
+                    | SourceReadStageState::Recovered
                     | SourceReadStageState::Stopped { .. }
             ),
             SourceReadStageState::Collecting => {
-                matches!(state, SourceReadStageState::Captured { .. } | SourceReadStageState::Stopped { .. })
+                matches!(
+                    state,
+                    SourceReadStageState::Captured { .. }
+                        | SourceReadStageState::Answered { .. }
+                        | SourceReadStageState::Stopped { .. }
+                )
             }
-            SourceReadStageState::Captured { .. } | SourceReadStageState::Stopped { .. } => false,
+            SourceReadStageState::Captured { .. }
+            | SourceReadStageState::Answered { .. }
+            | SourceReadStageState::Recovered
+            | SourceReadStageState::Stopped { .. } => false,
         };
         let next = Self { focus: self.focus.clone(), state };
         if !permitted || !next.is_valid() {
@@ -299,6 +469,9 @@ impl DiagnosticEpisode {
         if !self.is_valid() {
             return Err(invalid());
         }
+        if let Some(stage) = &self.source_read {
+            return Ok(Some(stage.focus.clone()));
+        }
         let (question, prerequisite) = match (&self.signal, &self.report) {
             (
                 DiagnosticSignal::CompilationAdmission { .. },
@@ -307,13 +480,42 @@ impl DiagnosticEpisode {
                 SourceReadQuestion::CompilationHistory,
                 SourceReadPrerequisite::CompilationAdmission { report: report.clone() },
             ),
+            (
+                DiagnosticSignal::OriginalObservation {
+                    condition: DiagnosticOriginalCondition::MssqlQueryHistory { query, .. },
+                    ..
+                },
+                Some(DiagnosticReport::OriginalObservation { .. }),
+            ) => (
+                SourceReadQuestion::CompilationHistory,
+                SourceReadPrerequisite::ObservedQueryHistoryFailure {
+                    query: NativeQueryIdentity { query_id: query.id.clone(), qualifiers: query.qualifiers.clone() },
+                },
+            ),
             (DiagnosticSignal::LogRateGovernance { .. }, None) => {
                 (SourceReadQuestion::HyperscaleLogComponents, SourceReadPrerequisite::ObservedLogRateWait)
             }
+            (
+                DiagnosticSignal::OriginalObservation {
+                    condition: DiagnosticOriginalCondition::MssqlCleanupBoundary { session, transaction },
+                    ..
+                },
+                Some(DiagnosticReport::OriginalObservation { .. }),
+            ) => (
+                SourceReadQuestion::TemporarySpaceContributors,
+                SourceReadPrerequisite::ObservedCleanupBoundary {
+                    session: session.clone(),
+                    transaction: transaction.clone(),
+                },
+            ),
             _ => return Ok(None),
         };
         Ok(Some(SourceReadFocus {
-            basis: Box::new(self.first.clone()),
+            basis: Box::new(if question == SourceReadQuestion::TemporarySpaceContributors {
+                self.latest.clone()
+            } else {
+                self.first.clone()
+            }),
             target: self.scope.target.clone(),
             question,
             prerequisite,
@@ -321,6 +523,13 @@ impl DiagnosticEpisode {
     }
 
     pub fn has_owed_question(&self) -> bool {
+        if self.lifecycle == DiagnosticLifecycle::Resolved
+            && self.source_read.as_deref().is_some_and(|stage| {
+                stage.focus.question == SourceReadQuestion::TemporarySpaceContributors && stage.needs_admission()
+            })
+        {
+            return false;
+        }
         self.source_read.as_deref().map_or_else(|| self.analysis.needs_work(), SourceReadStage::needs_work)
     }
 
@@ -335,7 +544,7 @@ impl DiagnosticEpisode {
             }
     }
 
-    /// Reuse the exact first, caller-authenticated Activity receipt. A later same-key request or source cannot
+    /// Reuse the exact first, caller-authenticated receipt. A later same-key request or source cannot
     /// supply the missing original member, native process, database incarnation or updateability.
     pub fn plan_source_read_focus(
         &self,
@@ -349,15 +558,38 @@ impl DiagnosticEpisode {
             return Ok(DiagnosticFocusPlan::NotRequired);
         }
         let Some(focus) = self.source_read_focus()? else { return Ok(DiagnosticFocusPlan::NotRequired) };
-        self.first.validate_canonical_record(source, &row.record)?;
-        let context = NativeReadContext::from_activity(source)?;
-        let Ok(execution) = NativeSourceReadScope::from_context(&context) else {
+        let context = focus.original_context(source)?;
+        let Ok(execution) = SourceReadExecutionScope::from_context(focus.question, &context) else {
             return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
         };
-        if !focus.matches_basis(source, row, &execution)
+        self.plan_source_read_for_execution(source, row, &execution)
+    }
+
+    /// Execution authority is separately authenticated by the existing route/cost owner. It may record a newer
+    /// known role without changing the original role, clocks, native member or local database/process epoch.
+    pub fn plan_source_read_for_execution(
+        &self,
+        source: &CollectionDescription,
+        row: &ExportedRecord,
+        execution: &SourceReadExecutionScope,
+    ) -> Result<DiagnosticFocusPlan> {
+        if !self.is_valid() {
+            return Err(invalid());
+        }
+        if self.source_read.as_deref().is_some_and(|stage| !stage.needs_admission()) {
+            return Ok(DiagnosticFocusPlan::NotRequired);
+        }
+        let Some(focus) = self.source_read_focus()? else { return Ok(DiagnosticFocusPlan::NotRequired) };
+        if focus.question == SourceReadQuestion::TemporarySpaceContributors
+            && self.lifecycle == DiagnosticLifecycle::Resolved
+        {
+            return Ok(DiagnosticFocusPlan::NotRequired);
+        }
+        focus.basis.validate_canonical_record(source, &row.record)?;
+        if !focus.matches_basis(source, row, execution)
             || self.source_read.as_deref().is_some_and(|stage| stage.focus != focus)
         {
-            return Err(invalid());
+            return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
         }
         Ok(DiagnosticFocusPlan::Ready(Box::new(DiagnosticFocus::SourceRead { focus: Box::new(focus) })))
     }
@@ -367,7 +599,11 @@ impl DiagnosticEpisode {
             return Err(invalid());
         }
         let stage = SourceReadStage { focus, state: SourceReadStageState::Pending };
-        if !stage.matches_episode(self) {
+        if !stage.matches_episode(self)
+            || (self.source_read.is_none()
+                && stage.focus.question == SourceReadQuestion::TemporarySpaceContributors
+                && stage.focus.basis.as_ref() != &self.latest)
+        {
             return Err(invalid());
         }
         if let Some(existing) = &self.source_read {
@@ -415,6 +651,13 @@ impl DiagnosticEpisode {
         {
             return Err(invalid());
         }
+        if self
+            .source_read
+            .as_deref()
+            .is_some_and(|stage| stage.focus.question == SourceReadQuestion::TemporarySpaceContributors)
+        {
+            return Err(invalid());
+        }
         self.transition_source_read(SourceReadStageState::Captured { capture: capture.clone() })
     }
 
@@ -437,8 +680,15 @@ impl DiagnosticEpisode {
             (Some(before), Some(after)) => {
                 before.focus == after.focus
                     && before.transition(after.state.clone()).is_ok()
-                    && self.report == next.report
                     && self.analysis == next.analysis
+                    && match (&self.signal, &self.report, &next.report) {
+                        (
+                            DiagnosticSignal::OriginalObservation { .. },
+                            Some(DiagnosticReport::OriginalObservation { .. }),
+                            Some(DiagnosticReport::OriginalObservation { .. }),
+                        ) => self.issue == next.issue,
+                        _ => self.report == next.report,
+                    }
             }
             (Some(_), None) => false,
         }
@@ -452,6 +702,16 @@ impl SourceObservation {
             _ => None,
         }
     }
+}
+fn cleanup_attention(row: &TelemetryRecord) -> bool {
+    let TelemetryRecord::Operational(OperationalObservation {
+        fact: OperationalFact::MssqlCleanupHorizon(horizon),
+        ..
+    }) = row
+    else {
+        return false;
+    };
+    horizon.oldest_confirmed.as_deref().is_some_and(MssqlCleanupTransaction::needs_cleanup_investigation)
 }
 pub(super) fn same_time(left: &str, right: &str) -> bool {
     canonical_time(left).ok().zip(canonical_time(right).ok()).is_some_and(|(left, right)| left == right)

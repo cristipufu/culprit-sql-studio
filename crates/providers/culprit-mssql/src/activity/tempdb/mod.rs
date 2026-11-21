@@ -34,6 +34,7 @@ pub(crate) struct TaskSpaceCapture {
 enum TaskSpaceProfile {
     Scan,
     Collection,
+    Question,
 }
 
 struct RequestChecks {
@@ -43,22 +44,40 @@ struct RequestChecks {
 
 impl<R: NativeRead> ActivityReader<R> {
     pub(crate) async fn capture_task_space(&mut self) -> Result<TaskSpaceCapture> {
-        self.capture_task_space_for(TaskSpaceProfile::Scan).await
+        self.capture_task_space_for(TaskSpaceProfile::Scan, None).await
     }
 
     pub(crate) async fn capture_task_space_telemetry(&mut self) -> Result<TaskSpaceCapture> {
-        self.capture_task_space_for(TaskSpaceProfile::Collection).await
+        self.capture_task_space_for(TaskSpaceProfile::Collection, None).await
     }
 
-    async fn capture_task_space_for(&mut self, profile: TaskSpaceProfile) -> Result<TaskSpaceCapture> {
+    pub(crate) async fn capture_task_space_question(
+        &mut self,
+        expected: &LocalResourceReadScope,
+    ) -> Result<TaskSpaceCapture> {
+        self.capture_task_space_for(TaskSpaceProfile::Question, Some(expected)).await
+    }
+
+    async fn capture_task_space_for(
+        &mut self,
+        profile: TaskSpaceProfile,
+        expected: Option<&LocalResourceReadScope>,
+    ) -> Result<TaskSpaceCapture> {
         if self.observed {
             return Err(invalid_data());
         }
         self.observed = true;
         let initial = self.task_space_context(None).await?;
         admit_profile(&initial, profile)?;
+        if let Some(expected) = expected
+            && !expected.matches_context(&initial.completed(&initial)?)
+        {
+            return Err(CollectionStop::SourceChanged.error());
+        }
         self.options.identity = super::IdentityDetail::for_native_edition(initial.activity.edition);
-        if initial.activity.edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
+        if initial.activity.edition == crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE
+            && !matches!(profile, TaskSpaceProfile::Question)
+        {
             crate::read::require_primary(initial.activity.writable)?;
         }
         let limit = (self.options.budget.max_snapshot_rows as usize).min(MAX_NATIVE_ROWS);
@@ -207,7 +226,7 @@ fn admit_profile(context: &super::database_context::Context, profile: TaskSpaceP
     let activity = &context.activity;
     let supported = match profile {
         TaskSpaceProfile::Scan => matches!(activity.edition, 2 | 3 | 4 | 5 | 8) && activity.major >= 11,
-        TaskSpaceProfile::Collection => {
+        TaskSpaceProfile::Collection | TaskSpaceProfile::Question => {
             activity.edition == 5 && activity.major >= 11
                 || matches!(activity.edition, 2 | 3 | 4) && activity.major >= 16
         }
@@ -221,7 +240,7 @@ fn admit_profile(context: &super::database_context::Context, profile: TaskSpaceP
             culprit_core::t!("collection.unsupported"),
         ));
     }
-    if matches!(profile, TaskSpaceProfile::Collection)
+    if matches!(profile, TaskSpaceProfile::Collection | TaskSpaceProfile::Question)
         && context.connection_generation().is_none_or(|generation| generation == 0)
     {
         return Err(CollectionStop::SourceUnavailable.error());

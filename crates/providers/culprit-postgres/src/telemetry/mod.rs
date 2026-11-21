@@ -13,6 +13,7 @@ use crate::{
     read::{NativeRead, ReadSession},
     rows::Row,
 };
+pub(crate) use activity::profile_source;
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 use culprit_read::{ReadBatch, SnapshotReader, SnapshotRecheck, SnapshotRecord, SnapshotScope, SnapshotSource};
 pub(crate) use recipes::{declarations, open as source};

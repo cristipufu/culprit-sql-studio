@@ -7,6 +7,7 @@ impl EvidencePlanner<'_> {
         outbox: &mut Outbox,
         target: &FleetTarget,
         episode: &DiagnosticEpisode,
+        binding: &RouteBinding,
         requested: RecipeSelector,
     ) -> Result<Option<Box<DiagnosticFocus>>> {
         let Some(stage) = &episode.source_read else { return Err(DeliveryProblem::Integrity.error()) };
@@ -19,7 +20,18 @@ impl EvidencePlanner<'_> {
         else {
             return Ok(None);
         };
-        match episode.plan_source_read_focus(&source, &row)? {
+        let current = SourceReadExecutionScope::context_from_source(&binding.source)?;
+        let Ok(execution) = SourceReadExecutionScope::from_context(stage.focus.question, &current) else {
+            crate::diagnostics::set_source_read_issue(
+                outbox,
+                &stage.focus,
+                &episode.id,
+                DiagnosticAnalysisIssue::MissingNativeIdentity,
+            )
+            .await?;
+            return Ok(None);
+        };
+        match episode.plan_source_read_for_execution(&source, &row, &execution)? {
             DiagnosticFocusPlan::Ready(focus) => {
                 let DiagnosticFocus::SourceRead { focus: source_focus } = focus.as_ref() else {
                     return Err(DeliveryProblem::Integrity.error());
@@ -27,7 +39,6 @@ impl EvidencePlanner<'_> {
                 if self.execution_owners.len() >= MAX_QUESTIONS_PER_PASS {
                     return Err(DeliveryProblem::Capacity.error());
                 }
-                let execution = NativeSourceReadScope::from_context(&NativeReadContext::from_activity(&source)?)?;
                 self.execution_owners.insert(source_focus.key()?, execution);
                 Ok(Some(focus))
             }

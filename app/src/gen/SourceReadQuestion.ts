@@ -4,4 +4,4 @@
  * Only implemented questions can acquire automatic source work. Native providers declare supported routes;
  * engine identity and a generic Snapshot selector confer no additional admission or counter semantics.
  */
-export type SourceReadQuestion = "compilation-history" | "hyperscale-log-components";
+export type SourceReadQuestion = "compilation-history" | "hyperscale-log-components" | "temporary-space-contributors";

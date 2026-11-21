@@ -18,6 +18,7 @@ pub(super) struct TaskSpaceSource<R: NativeRead = ReadSession> {
 struct TaskSpaceReader<R: NativeRead> {
     reader: ActivityReader<R>,
     context: Option<Context>,
+    source_read: Option<(String, LocalResourceReadScope)>,
 }
 
 impl TaskSpaceSource {
@@ -30,8 +31,15 @@ impl TaskSpaceSource {
 fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
     request.validate()?;
     request.subject.require_database()?;
-    if request.selection != (CollectionSelection::Snapshot { dataset: SnapshotDataset::TaskSpace }) {
-        return Err(invalid_data());
+    match &request.selection {
+        CollectionSelection::Snapshot { dataset: SnapshotDataset::TaskSpace } => (),
+        CollectionSelection::SourceRead { focus, execution }
+            if focus.question == SourceReadQuestion::TemporarySpaceContributors
+                && matches!(execution.as_ref(), SourceReadExecutionScope::Local(_)) =>
+        {
+            ()
+        }
+        _ => return Err(invalid_data()),
     }
     let mut request = request.clone();
     request.budget = bounded_budget(&request.budget);
@@ -48,13 +56,25 @@ impl<R: NativeRead> TaskSpaceSource<R> {
     fn from_validated_io(io: R, request: CollectionRequest, host: String, port: u16) -> Result<Self> {
         let options = ReadOptions { budget: request.budget.clone(), identity: IdentityDetail::Endpoint };
         let reader = ActivityReader::new(io, options, host, port);
-        Ok(Self { inner: culprit_read::FrozenSource::new(TaskSpaceReader { reader, context: None }, &request)? })
+        let source_read = match &request.selection {
+            CollectionSelection::SourceRead { focus, execution } => {
+                let SourceReadExecutionScope::Local(execution) = execution.as_ref() else { return Err(invalid_data()) };
+                Some((focus.key()?, execution.clone()))
+            }
+            _ => None,
+        };
+        Ok(Self {
+            inner: culprit_read::FrozenSource::new(TaskSpaceReader { reader, context: None, source_read }, &request)?,
+        })
     }
 }
 #[async_trait::async_trait]
 impl<R: NativeRead> culprit_read::ObservationReader for TaskSpaceReader<R> {
     async fn observe(&mut self, _: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
-        let captured = self.reader.capture_task_space_telemetry().await?;
+        let captured = match &self.source_read {
+            Some((_, execution)) => self.reader.capture_task_space_question(execution).await?,
+            None => self.reader.capture_task_space_telemetry().await?,
+        };
         let snapshot = captured.snapshot;
         let complete = !captured.limited && captured.context_complete;
         let records = snapshot
@@ -71,18 +91,48 @@ impl<R: NativeRead> culprit_read::ObservationReader for TaskSpaceReader<R> {
         let mut coverage =
             StateSourceCoverage::observed(sources::TASK_SPACE.name.into(), records.len() as u32, complete);
         coverage.error_code = captured.context_error_code;
-        let description = CollectionDescription {
+        let snapshot = StateSnapshotDescription {
+            dataset: SnapshotDataset::TaskSpace,
+            observed_from: snapshot.observed_from,
+            observed_until: snapshot.observed_until,
+            records: records.len() as u32,
+            sources: vec![coverage],
+        };
+        let execution = NativeReadContext {
+            target: captured.context.activity.database.clone().into(),
             partition: captured.context.source_partition()?,
+            observed_from: snapshot.observed_from.clone(),
+            observed_until: snapshot.observed_until.clone(),
+            database_writable: captured.context.activity.writable,
+        };
+        let (partition, observation) = match &self.source_read {
+            Some((focus_key, expected)) => {
+                if !expected.matches_context(&execution) {
+                    return Err(CollectionStop::SourceChanged.error());
+                }
+                (
+                    SourcePartition::Target,
+                    SourceObservation::SourceRead {
+                        snapshot,
+                        focus_key: focus_key.clone(),
+                        execution: Box::new(execution),
+                    },
+                )
+            }
+            None => (
+                execution.partition.clone(),
+                SourceObservation::LocalResource {
+                    snapshot,
+                    database_writable: execution.database_writable.ok_or_else(invalid_data)?,
+                },
+            ),
+        };
+        let description = CollectionDescription {
+            partition,
             target: captured.context.activity.database.clone().into(),
             source: sources::TASK_SPACE.name.into(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::TaskSpace,
-                observed_from: snapshot.observed_from,
-                observed_until: snapshot.observed_until,
-                records: records.len() as u32,
-                sources: vec![coverage],
-            }),
+            observation,
         };
         self.context = Some(captured.context);
         Ok(culprit_read::FrozenObservation { description, records })

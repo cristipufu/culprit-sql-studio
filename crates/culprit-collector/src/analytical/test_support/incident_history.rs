@@ -8,11 +8,24 @@ pub enum IncidentHistoryCase {
     Uncertain,
     Prefix,
     Many,
+    TemporaryResources,
+    TemporaryResourcesPartial,
 }
 impl IncidentHistoryCase {
-    pub const ALL: &'static [Self] = &[Self::Ongoing, Self::Resolved, Self::Uncertain, Self::Prefix, Self::Many];
+    pub const ALL: &'static [Self] = &[
+        Self::Ongoing,
+        Self::Resolved,
+        Self::Uncertain,
+        Self::Prefix,
+        Self::Many,
+        Self::TemporaryResources,
+        Self::TemporaryResourcesPartial,
+    ];
 }
 pub fn incident_history_evidence(case: IncidentHistoryCase) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    if matches!(case, IncidentHistoryCase::TemporaryResources | IncidentHistoryCase::TemporaryResourcesPartial) {
+        return super::temporary_resource_history(matches!(case, IncidentHistoryCase::TemporaryResourcesPartial));
+    }
     let (mut source, mut records) = diagnostic_evidence_cases().remove(0);
     let TelemetryRecord::Operational(first) = records.remove(0) else { unreachable!() };
     let OperationalFact::DiagnosticRevision(first) = first.fact else { unreachable!() };

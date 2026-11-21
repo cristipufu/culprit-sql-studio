@@ -25,7 +25,10 @@ pub(crate) use investigations::eligible_source as diagnostic_source_eligible;
 pub use investigations::{
     DiagnosticCheckpointPage, DiagnosticInput, DiagnosticInputRow, DiagnosticInputState, DiagnosticUpdate,
 };
-pub(crate) use investigations::{eligible_manifest as diagnostic_manifest_eligible, evidence_cache_source};
+pub(crate) use investigations::{
+    eligible_manifest as diagnostic_manifest_eligible, evidence_cache_source, source_read_result_focus,
+    source_read_retains_rows,
+};
 pub use qualifications::{
     IssuedQualification, NativeQualificationDecision, NativeQualificationEvidence, NativeQualificationOutcome,
     NativeQualificationRequest, NativeQualificationSource, QualificationBindingsRead,

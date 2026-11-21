@@ -61,3 +61,34 @@ test("the actual Health surface offers explicit file intake even when the curren
   expect(standalone).not.toContain("<article");
   expect(standalone).not.toContain("source_state");
 });
+
+test("tempdb context uses the existing historical disclosure with explicit competing and missing causes", () => {
+  for (const name of ["temporary", "temporary_partial"] as const) {
+    const entry = incidentHistoryCase(name).entries[0]!;
+    const html = renderToStaticMarkup(<IncidentRevision entry={entry} />);
+    expect(entry.analysis).toBe("unresolved");
+    expect(html).toContain(t("view.tempdb_question.summary"));
+    expect(html).toContain(t("view.tempdb_question.spill"));
+    expect(html).toContain(t("view.tempdb_question.role"));
+    expect(html).toContain(t("view.tempdb_question.coverage", { state: name === "temporary" ? "collected" : "partial" }));
+    expect(html).toContain(entry.title);
+    expect(html).toContain(t("view.incident_history.evidence.details"));
+    expect(html).not.toContain("<button");
+  }
+});
+
+test("the persisted compilation answer keeps exact lifetime context and competing unknowns in the shared history renderer", () => {
+  for (const name of ["compilation", "compilation_partial", "compilation_changed", "compilation_unavailable"] as const) {
+    const report = incidentHistoryCase(name);
+    const entry = report.entries[0]!;
+    const html = renderToStaticMarkup(<IncidentRevision entry={entry} />);
+    expect(entry.analysis).toBe("unresolved");
+    expect(entry.lifecycle).toBe("uncertain");
+    expect(html).toContain(t("view.incident_history.compilation.independent"));
+    expect(html).toContain(t("view.incident_history.compilation.gap.work"));
+    expect(html).toContain(t("view.incident_history.compilation.gap.inputs"));
+    expect(html).toContain(t("view.incident_history.compilation.gap.waits"));
+    expect(html).not.toContain(t("ui.health.empty"));
+    expect(html).not.toContain("<button");
+  }
+});

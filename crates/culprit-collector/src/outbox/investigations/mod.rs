@@ -107,7 +107,7 @@ pub(crate) struct RestoredInput {
     pub source: CollectionDescription,
     pub investigation: Option<DiagnosticInvestigationLineage>,
     pub connection: String,
-    pub rows: Vec<ExportedRecord>,
+    pub rows: Vec<(u32, ExportedRecord)>,
 }
 
 pub(crate) fn eligible_source(
@@ -257,24 +257,57 @@ fn controller_key(parent: &DiagnosticCaptureRef, target: &CollectionTarget, vers
     }
     .key()
 }
-fn row_references(
+fn positioned_references(
     parent: &DiagnosticCaptureRef,
     source: &CollectionDescription,
-    rows: Vec<ExportedRecord>,
+    rows: Vec<(u32, ExportedRecord)>,
+    investigation: Option<&DiagnosticInvestigationLineage>,
 ) -> Result<Vec<DiagnosticInputRow>> {
     if !parent.is_valid() || source.captured_range()?.scope_id != parent.source_scope_id {
         return Err(integrity());
     }
-    let mut ordinals = BTreeMap::<String, u32>::new();
+    let focus = if investigation.is_some() { source_read_result_focus(source, investigation)? } else { None };
+    let selected = focus.is_some_and(SourceReadFocus::selects_result_rows);
+    let mut positions = BTreeMap::<String, u32>::new();
     rows.into_iter()
-        .map(|row| {
-            if row.capture != parent.capture {
+        .map(|(ordinal, row)| {
+            if row.capture != parent.capture || focus.is_some_and(|focus| !focus.retains_result_record(&row.record)) {
                 return Err(integrity());
             }
-            let ordinal = ordinals.entry(row.batch_id.clone()).or_default();
-            let reference = DiagnosticEvidenceRef::from_export(source, &parent.manifest_sha256, &row, *ordinal)?;
-            *ordinal = ordinal.checked_add(1).ok_or_else(integrity)?;
+            let previous = positions.get(&row.batch_id).copied();
+            if selected {
+                if previous.is_some_and(|previous| ordinal <= previous) {
+                    return Err(integrity());
+                }
+            } else if ordinal != previous.map_or(0, |previous| previous + 1) {
+                return Err(integrity());
+            }
+            positions.insert(row.batch_id.clone(), ordinal);
+            let reference = DiagnosticEvidenceRef::from_export(source, &parent.manifest_sha256, &row, ordinal)?;
             Ok(DiagnosticInputRow { reference, row })
         })
         .collect()
+}
+
+/// The result selection comes from authenticated intent lineage, never a dataset or source-name guess.
+pub(crate) fn source_read_result_focus<'a>(
+    source: &CollectionDescription,
+    investigation: Option<&'a DiagnosticInvestigationLineage>,
+) -> Result<Option<&'a SourceReadFocus>> {
+    if !matches!(source.observation, SourceObservation::SourceRead { .. }) {
+        return Ok(None);
+    }
+    let intent = investigation_intent(source, investigation)?.ok_or_else(integrity)?;
+    let lineage = investigation.ok_or_else(integrity)?;
+    let DiagnosticFocus::SourceRead { focus } = &lineage.focus else { return Err(integrity()) };
+    if intent.focus != lineage.focus {
+        return Err(integrity());
+    }
+    Ok(focus.retains_result_rows().then_some(focus.as_ref()))
+}
+pub(crate) fn source_read_retains_rows(
+    source: &CollectionDescription,
+    investigation: Option<&DiagnosticInvestigationLineage>,
+) -> Result<bool> {
+    Ok(source_read_result_focus(source, investigation)?.is_some())
 }

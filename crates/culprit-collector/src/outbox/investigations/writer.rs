@@ -323,7 +323,7 @@ impl Files {
                 .checkpoint
                 .as_ref()
                 .and_then(|checkpoint| checkpoint.episodes.iter().find(|episode| episode.id == revision.episode.id));
-            self.validate_source_read_revision(prior, revision, source_read_result.as_ref())?;
+            self.validate_source_read_revision(prior, revision, source_read_result.as_ref(), &current)?;
             if revision.episode.lifecycle == DiagnosticLifecycle::Resolved
                 && prior.is_none_or(|episode| episode.lifecycle != DiagnosticLifecycle::Resolved)
             {

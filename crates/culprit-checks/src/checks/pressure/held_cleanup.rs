@@ -132,7 +132,11 @@ fn decide_holder<'s>(
     let behind = t.xid_age.unwrap_or(0.0);
     // How long it has been open is what tells a forgotten transaction from a busy one; a slot has no start time, so
     // it is how far behind it holds the horizon.
-    let old = if slot { behind >= SLOT_BEHIND } else { t.seconds >= 1800.0 };
+    let old = if slot {
+        behind >= SLOT_BEHIND
+    } else {
+        t.seconds >= culprit_core::telemetry::CLEANUP_ATTENTION_AGE_SECONDS as f64
+    };
     let big = semantics == CleanupEvidence::LoggedAndVersionedTransactions && held_gb >= 1.0 && t.seconds >= 300.0;
     if !old && !big {
         return None;

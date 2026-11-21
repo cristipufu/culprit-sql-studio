@@ -1,4 +1,4 @@
-//! A closed source result is one authenticated capture, never a diagnostic row roster.
+//! One authenticated result retains bounded original rows only for closed answer families.
 use super::*;
 
 impl Files {
@@ -49,7 +49,7 @@ impl Files {
         // committed-range recovery. It attests a capture, not that history rows have been materialized here.
         if !event.is_valid()
             || input.parent != *capture
-            || !input.rows.is_empty()
+            || !source_read_retains_rows(&input.source, input.investigation.as_ref())? && !input.rows.is_empty()
             || !matches!(input.source.observation, SourceObservation::SourceRead { .. })
             || !event.intent.matches_result_source(&input.source)
             || input
@@ -63,10 +63,11 @@ impl Files {
     }
 
     pub(super) fn validate_source_read_revision(
-        &self,
+        &mut self,
         before: Option<&DiagnosticEpisode>,
         revision: &DiagnosticRevision,
         result_source: Option<&CollectionDescription>,
+        input: &DiagnosticInput,
     ) -> Result<()> {
         let Some(stage) = &revision.episode.source_read else { return Ok(()) };
         if before.and_then(|episode| episode.source_read.as_deref()) == Some(stage.as_ref()) {
@@ -74,6 +75,13 @@ impl Files {
         }
         match &stage.state {
             SourceReadStageState::Pending | SourceReadStageState::Deferred { .. } => (),
+            SourceReadStageState::Recovered => {
+                if revision.episode.lifecycle != DiagnosticLifecycle::Resolved
+                    || stage.focus.question != SourceReadQuestion::TemporarySpaceContributors
+                {
+                    return Err(integrity());
+                }
+            }
             SourceReadStageState::Collecting => {
                 let event = revision.investigation.as_ref().ok_or_else(integrity)?;
                 if !matches!(event.intent.focus, DiagnosticFocus::SourceRead { .. })
@@ -87,6 +95,23 @@ impl Files {
                 if !matches!(event.intent.focus, DiagnosticFocus::SourceRead { .. })
                     || !matches!(&event.outcome, DiagnosticInvestigationOutcome::Stopped { issue: actual } if actual == issue)
                 {
+                    return Err(integrity());
+                }
+            }
+            SourceReadStageState::Answered { answer } => {
+                let event = revision.investigation.as_ref().ok_or_else(integrity)?;
+                let source = result_source.ok_or_else(integrity)?;
+                let (basis_source, basis) = self.diagnostic_reference(&stage.focus.basis)?;
+                let rows = input.rows.iter().map(|row| (&row.reference, &row.row)).collect::<Vec<_>>();
+                let expected = before.ok_or_else(integrity)?.complete_source_read_from_originals(
+                    &event.intent,
+                    &basis_source,
+                    &basis,
+                    source,
+                    answer.result(),
+                    &rows,
+                )?;
+                if expected.source_read != revision.episode.source_read {
                     return Err(integrity());
                 }
             }

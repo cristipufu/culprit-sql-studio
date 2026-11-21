@@ -48,6 +48,10 @@ impl From<tokio_postgres::Error> for NativeReadFailure {
 
 #[async_trait::async_trait]
 pub trait QueryRead: Send {
+    /// A held reader-local transport generation, never a native server/member identity.
+    fn connection_generation(&self) -> Option<u64> {
+        None
+    }
     async fn query(&mut self, sql: &str, row_limit: usize) -> Result<Vec<Row>>;
     async fn query_with_state(&mut self, sql: &str, row_limit: usize) -> NativeResult<Vec<Row>> {
         self.query(sql, row_limit).await.map_err(NativeReadFailure::from)
@@ -104,6 +108,7 @@ pub struct ReadSession {
     initialized: bool,
     setup: SessionSetup,
     application_scope: Option<ApplicationReadScope>,
+    profile: Option<culprit_read::SourceProfileGuard>,
     closed: bool,
     fence: culprit_read::ReadFence,
     metrics: ReadMetricsRecorder,
@@ -147,6 +152,7 @@ impl ReadSession {
             initialized: false,
             setup: SessionSetup::Telemetry,
             application_scope: None,
+            profile: None,
             closed: false,
             fence,
             metrics: ReadMetricsRecorder::new(engine),
@@ -172,6 +178,11 @@ impl ReadSession {
         reader.setup = SessionSetup::Application(limits);
         reader.application_scope = Some(scope);
         reader
+    }
+    pub(crate) fn with_profile(mut self, profile: culprit_read::SourceProfileGuard) -> Self {
+        self.connector.set_profile(profile.clone());
+        self.profile = Some(profile);
+        self
     }
     fn observe_work(&self) {
         if let Some(observer) = &self.observation {
@@ -319,6 +330,12 @@ impl ReadSession {
             None => self.acquire().await?,
         };
         let timeout = self.remaining()?;
+        if let Some(profile) = &self.profile
+            && let Err(error) = profile.check_connection(Some(self.connection_generation))
+        {
+            self.client = Some(client);
+            return Err(error.into());
+        }
         self.queries += 1;
         let (owner, cancellation) = tokio::sync::oneshot::channel();
         let template = self.metrics.begin(sql);
@@ -333,7 +350,14 @@ impl ReadSession {
             owned::ReadTask {
                 client,
                 connector: self.connector.clone(),
-                request: owned::ReadRequest { sql: sql.to_owned(), row_limit, byte_limit, timeout, dispatch },
+                request: owned::ReadRequest {
+                    sql: sql.to_owned(),
+                    row_limit,
+                    byte_limit,
+                    timeout,
+                    dispatch,
+                    profile: self.profile.clone(),
+                },
                 metrics: self.metrics.clone(),
                 template,
                 fence: self.fence.clone(),
@@ -398,6 +422,9 @@ impl ReadSession {
         if let Some(scope) = &self.application_scope {
             scope.ensure_available()?;
         }
+        if let Some(profile) = &self.profile {
+            profile.check_connection(self.client.as_ref().map(|_| self.connection_generation))?;
+        }
         if self.queries >= self.budget.max_queries {
             return Err(CollectionStop::QueryLimit.error());
         }
@@ -429,6 +456,9 @@ impl ReadSession {
 }
 #[async_trait::async_trait]
 impl QueryRead for ReadSession {
+    fn connection_generation(&self) -> Option<u64> {
+        (self.connection_generation > 0).then_some(self.connection_generation)
+    }
     async fn query(&mut self, sql: &str, row_limit: usize) -> Result<Vec<Row>> {
         self.initialize().await?;
         self.execute(sql, row_limit).await

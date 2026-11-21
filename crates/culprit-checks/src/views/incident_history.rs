@@ -4,6 +4,8 @@ use culprit_core::{
     MAX_INCIDENT_HISTORY_REVISIONS, Result, SourceState, format, t, telemetry::*,
 };
 use std::collections::BTreeMap;
+mod compilation;
+mod temporary_resources;
 
 /// Authenticated callers supply the receipt for this exact revision body. Imported rows deliberately have none.
 pub struct HistoryRevision<'a> {
@@ -144,7 +146,12 @@ fn entry(
         followup_recipe_version: revision.investigation.as_ref().map(|event| event.intent.recipe_version),
         issue: episode.issue.clone(),
         reasons,
-        next_step: if episode.analysis == DiagnosticAnalysisStatus::Analyzed {
+        next_step: if episode.source_read.as_deref().is_some_and(|stage| {
+            stage.focus.question == SourceReadQuestion::TemporarySpaceContributors
+                && matches!(stage.state, SourceReadStageState::Answered { .. })
+        }) {
+            t!("view.tempdb_question.next")
+        } else if episode.analysis == DiagnosticAnalysisStatus::Analyzed {
             t!("view.incident_history.next.analyzed")
         } else {
             t!("view.incident_history.next.incomplete")
@@ -176,7 +183,7 @@ fn evidence_links(
         });
     }
     if let Some(stage) = &episode.source_read
-        && let SourceReadStageState::Captured { capture } = &stage.state
+        && let Some(capture) = stage.result()
     {
         evidence.push(IncidentHistoryEvidence {
             label: t!("view.incident_history.evidence.followup"),
@@ -217,9 +224,23 @@ fn recorded_reasons(revision: &DiagnosticRevision, predecessor_selected: bool) -
                 SourceReadStageState::Deferred { .. } => "deferred",
                 SourceReadStageState::Collecting => "collecting",
                 SourceReadStageState::Captured { .. } => "captured",
+                SourceReadStageState::Answered { .. } => "answered",
+                SourceReadStageState::Recovered => "recovered",
                 SourceReadStageState::Stopped { .. } => "stopped",
             }
         ));
+        if stage.focus.question == SourceReadQuestion::TemporarySpaceContributors {
+            reasons.push(t!("view.tempdb_question.question"));
+        }
+        if matches!(stage.focus.prerequisite, SourceReadPrerequisite::ObservedQueryHistoryFailure { .. }) {
+            reasons.push(t!("view.incident_history.compilation.question"));
+        }
+        if let SourceReadStageState::Answered { answer } = &stage.state {
+            match answer.as_ref() {
+                SourceReadAnswer::TemporaryResources(answer) => reasons.extend(temporary_resources::explain(answer)),
+                SourceReadAnswer::QueryCompilation(answer) => compilation::append(answer, &mut reasons),
+            }
+        }
         match &stage.state {
             SourceReadStageState::Deferred { issue } | SourceReadStageState::Stopped { issue } => {
                 reasons.push(issue_message(issue))
@@ -264,6 +285,15 @@ fn link(label: String, reference: &DiagnosticEvidenceRef, availability: &str) ->
 }
 // Names the controller's existing typed question, without reinterpreting a native wait or attributing a cause.
 fn question_label(signal: &DiagnosticSignal) -> String {
+    if matches!(
+        signal,
+        DiagnosticSignal::OriginalObservation {
+            condition: DiagnosticOriginalCondition::MssqlCleanupBoundary { .. },
+            ..
+        }
+    ) {
+        return t!("view.tempdb_question.question");
+    }
     let kind = match signal {
         DiagnosticSignal::OriginalObservation { .. } => "other",
         DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. } => "long-running",

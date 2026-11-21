@@ -30,7 +30,7 @@ fn log_wait_justifies_its_own_finite_question_without_a_compiler_answer() {
     assert!(value.episode.report.is_none());
     assert_eq!(value.focus.question, SourceReadQuestion::HyperscaleLogComponents);
     assert_eq!(value.focus.prerequisite, SourceReadPrerequisite::ObservedLogRateWait);
-    assert!(value.focus.matches_basis(&value.source, &value.row, &value.execution));
+    assert!(value.focus.matches_basis(&value.source, &value.row, &value.execution.clone().into()));
     let DiagnosticFocusPlan::Ready(focus) = value.episode.plan_source_read_focus(&value.source, &value.row).unwrap()
     else {
         panic!()
@@ -53,8 +53,8 @@ fn question_and_prerequisite_are_closed_pairs_and_reject_cross_family_admission(
         focus.prerequisite = prerequisite;
         assert!(!focus.is_valid());
     }
-    assert!(!log.focus.matches_basis(&compiler.source, &compiler.row, &compiler.execution));
-    assert!(!compiler.focus.matches_basis(&log.source, &log.row, &log.execution));
+    assert!(!log.focus.matches_basis(&compiler.source, &compiler.row, &compiler.execution.clone().into()));
+    assert!(!compiler.focus.matches_basis(&log.source, &log.row, &log.execution.clone().into()));
     for question in SourceReadQuestion::ALL {
         assert_eq!(SourceReadQuestion::for_dataset(question.dataset()), Some(*question));
     }
@@ -66,10 +66,10 @@ fn log_followup_cannot_borrow_a_current_row_epoch_updateability_or_compiler_cost
     let value = original_log_wait();
     let mut changed = value.row.clone();
     changed.capture.observation_id = "later-same-request".into();
-    assert!(!value.focus.matches_basis(&value.source, &changed, &value.execution));
+    assert!(!value.focus.matches_basis(&value.source, &changed, &value.execution.clone().into()));
     let mut execution = value.execution.clone();
     execution.database_writable = !execution.database_writable;
-    assert!(!value.focus.matches_basis(&value.source, &value.row, &execution));
+    assert!(!value.focus.matches_basis(&value.source, &value.row, &execution.into()));
     let mut source = value.source.clone();
     let SourceObservation::Activity(frame) = &mut source.observation else { panic!() };
     frame.database_writable = None;

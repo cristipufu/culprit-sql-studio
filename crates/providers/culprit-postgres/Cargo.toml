@@ -26,5 +26,5 @@ webpki-roots.workspace = true
 
 [dev-dependencies]
 culprit-checks.workspace = true
-culprit-collector.workspace = true
+culprit-collector = { workspace = true, features = ["test-support"] }
 tempfile = "3.27.0"

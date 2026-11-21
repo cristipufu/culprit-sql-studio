@@ -40,6 +40,7 @@ pub struct Connector {
     config: tokio_postgres::Config,
     tls: MakeRustlsConnect,
     transport: Option<Arc<dyn ConnectionTransport>>,
+    profile: Option<culprit_read::SourceProfileGuard>,
     pub(crate) fence: culprit_read::ReadFence,
     pub(crate) observation: culprit_core::ProviderReadContext,
     pub host: String,
@@ -63,6 +64,15 @@ impl Connector {
     pub fn with_read_context(mut self, context: culprit_core::ProviderReadContext) -> Self {
         self.observation = context;
         self
+    }
+    pub(crate) fn set_profile(&mut self, profile: culprit_read::SourceProfileGuard) {
+        self.profile = Some(profile);
+    }
+    fn check_profile(&self) -> Result<()> {
+        match &self.profile {
+            Some(profile) => profile.ensure_active(),
+            None => Ok(()),
+        }
     }
     pub fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
         if self.fence.is_uncertain() {
@@ -122,12 +132,14 @@ impl Connector {
             config,
             tls,
             transport: spec.transport.clone(),
+            profile: None,
             host: spec.host.trim().to_string(),
             port,
         })
     }
 
     async fn dial_config(&self) -> Result<(tokio_postgres::Config, Option<ConnectionEndpoint>)> {
+        self.check_profile()?;
         self.fence.ensure_available()?;
         let mut config = self.config.clone();
         let endpoint = match &self.transport {
@@ -163,6 +175,7 @@ impl Connector {
     /// as every subsequent statistics query before returning any caller-requested data.
     pub(crate) async fn connect_unconfigured(&self) -> Result<ObservedSession> {
         let (config, endpoint) = self.dial_config().await?;
+        self.check_profile()?;
         let (client, mut connection) = tokio::time::timeout(CONNECT_TIMEOUT, config.connect(self.tls.clone()))
             .await
             .map_err(|_| {

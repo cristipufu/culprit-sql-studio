@@ -118,6 +118,7 @@ pub(in crate::fleet::investigations) struct Backend {
     pub(in crate::fleet::investigations) activity: Frame,
     pub(in crate::fleet::investigations) shared: Option<Frame>,
     pub(in crate::fleet::investigations) current_work: Option<Frame>,
+    pub(in crate::fleet::investigations) source_read_result: Option<Frame>,
     pub(in crate::fleet::investigations) compiler_gateways: Option<Vec<OperationalObservation>>,
     pub(in crate::fleet::investigations) page_tasks: Option<Frame>,
     pub(in crate::fleet::investigations) focus_request: PageWaitRequestState,
@@ -198,6 +199,12 @@ impl FleetBackend for Backend {
                     assert!(admission.investigation.is_none());
                     self.activity.clone()
                 }
+                CollectionSelection::Snapshot { dataset: SnapshotDataset::Cleanup }
+                    if self.activity.source.observation.collection() == request.collection() =>
+                {
+                    assert!(admission.investigation.is_none());
+                    self.activity.clone()
+                }
                 CollectionSelection::FocusedPageWait { focus } => {
                     let intent =
                         admission.investigation.as_ref().expect("automatic focus must retain its admitted intent");
@@ -238,12 +245,26 @@ impl FleetBackend for Backend {
                     let intent =
                         admission.investigation.as_ref().expect("source history retains its exact admitted question");
                     assert_eq!(intent.selection().unwrap(), request.selection);
-                    match focus.question {
-                        SourceReadQuestion::CompilationHistory => super::source_reads::frame(focus, execution),
-                        SourceReadQuestion::HyperscaleLogComponents => {
-                            super::source_reads::log_rates::frame(focus, execution)
+                    self.source_read_result.clone().unwrap_or_else(|| match focus.question {
+                        SourceReadQuestion::CompilationHistory => {
+                            if matches!(focus.prerequisite, SourceReadPrerequisite::ObservedQueryHistoryFailure { .. })
+                            {
+                                super::source_reads::query_history::frame(&self.activity, focus, execution)
+                            } else {
+                                super::source_reads::frame(
+                                    focus,
+                                    execution.logical().expect("logical compilation owner"),
+                                )
+                            }
                         }
-                    }
+                        SourceReadQuestion::HyperscaleLogComponents => super::source_reads::log_rates::frame(
+                            focus,
+                            execution.logical().expect("logical log owner"),
+                        ),
+                        SourceReadQuestion::TemporarySpaceContributors => {
+                            super::source_reads::temporary::frame(focus, execution)
+                        }
+                    })
                 }
                 CollectionSelection::FocusedCompilationAdmission { focus } => {
                     let intent =
@@ -335,6 +356,16 @@ impl Harness {
         Self::build(rows, fence, FixtureRoutes::Database, None).await
     }
 
+    pub(in crate::fleet::investigations) async fn with_query_history(source: Frame) -> Self {
+        assert!(matches!(source.source.observation, SourceObservation::QueryHistory(_)));
+        Self::build(0, None, FixtureRoutes::Database, Some(source)).await
+    }
+
+    pub(in crate::fleet::investigations) async fn with_archived_query_history(source: Frame, fence: &Fence) -> Self {
+        assert!(matches!(source.source.observation, SourceObservation::QueryHistory(_)));
+        Self::build(0, Some(fence), FixtureRoutes::Database, Some(source)).await
+    }
+
     pub(in crate::fleet::investigations) async fn with_activity(activity: Frame) -> Self {
         Self::build(0, None, FixtureRoutes::Database, Some(activity)).await
     }
@@ -417,6 +448,15 @@ impl Harness {
         frame.coverage.records = rows as u32;
         let activity = supplied.unwrap_or_else(|| Frame { source: source.clone(), records });
         source = activity.source.clone();
+        if let SourceObservation::LocalResource { snapshot, .. } = &source.observation {
+            inventory.targets[0].schedules[0].collection = ScheduledCollection::Snapshot { dataset: snapshot.dataset };
+        } else if matches!(source.observation, SourceObservation::QueryHistory(_)) {
+            let schedule = &mut inventory.targets[0].schedules[0];
+            schedule.collection = ScheduledCollection::QueryHistory {
+                lookback_seconds: schedule.every_seconds.max(3600),
+                reconcile_seconds: schedule.every_seconds,
+            };
+        }
         seal(&mut outbox, activity.clone()).await;
         let mut cost_frame = Frame { source: fixture.source.clone(), records: vec![fixture.record.record.clone()] };
         cost_frame.source.target = source.target.clone();
@@ -489,6 +529,7 @@ impl Harness {
                 activity,
                 shared,
                 current_work: None,
+                source_read_result: None,
                 compiler_gateways: None,
                 page_tasks: None,
                 focus_request: PageWaitRequestState::Missing,
@@ -664,6 +705,10 @@ async fn capture_artifact(outbox: &mut Outbox, frame: Frame) -> (CollectionManif
         },
         selection: match &frame.source.observation {
             SourceObservation::Activity(_) => CollectionSelection::Activity,
+            SourceObservation::QueryHistory(history) => CollectionSelection::QueryHistory {
+                from: history.interval.from.clone(),
+                until: history.interval.until.clone(),
+            },
             SourceObservation::PageWaitTargets { original_activity: Some(activity), .. } => {
                 let original = outbox
                     .diagnostic_input(&activity.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
@@ -679,7 +724,9 @@ async fn capture_artifact(outbox: &mut Outbox, frame: Frame) -> (CollectionManif
             SourceObservation::PageWaitTargets { .. } => {
                 CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets }
             }
-            SourceObservation::Snapshot(snapshot) => CollectionSelection::Snapshot { dataset: snapshot.dataset },
+            SourceObservation::Snapshot(snapshot) | SourceObservation::LocalResource { snapshot, .. } => {
+                CollectionSelection::Snapshot { dataset: snapshot.dataset }
+            }
             _ => panic!(),
         },
         budget: CollectionBudget { page_rows: 32, ..Default::default() },

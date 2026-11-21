@@ -84,3 +84,54 @@ fn malformed_reference_does_not_get_a_fabricated_hash_or_empty_success() {
     report.entries[0].evidence[0].capture.manifest_sha256.clear();
     assert!(value(&report, 0).is_err());
 }
+
+#[test]
+fn canonical_tempdb_answer_survives_the_existing_compact_history_projection_without_native_authority() {
+    use culprit_collector::analytical::test_support::{IncidentHistoryCase, incident_history_evidence};
+    let (source, rows) = incident_history_evidence(IncidentHistoryCase::TemporaryResources);
+    let capture = CaptureIdentity {
+        observation_id: "tempdb-history".into(),
+        revision: Some(CaptureRevision { outbox_id: "owner".into(), owner_epoch: "1".into(), sequence: "1".into() }),
+    };
+    let mut bytes = Vec::new();
+    for row in
+        rows.into_iter().filter(|row| row.stream() == culprit_core::telemetry::TelemetryStream::OperationalSamples)
+    {
+        serde_json::to_writer(
+            &mut bytes,
+            &culprit_core::telemetry::ExportedRecord::new(&source, &capture, row).unwrap(),
+        )
+        .unwrap();
+        bytes.push(b'\n');
+    }
+    let guard =
+        culprit_core::limits::OperationGuard::new(culprit_engine::incident_history::HISTORY_IMPORT_TIMEOUT).unwrap();
+    let report = culprit_engine::incident_history::import_reader(bytes.as_slice(), &guard.handle()).unwrap();
+    let result = value(&report, bytes.len() as u64).unwrap();
+    let entry = &result["incident_history"]["entries"][0];
+    let reasons = entry["reasons"].as_array().unwrap();
+    assert!(
+        reasons.contains(&serde_json::json!(culprit_core::t!("view.tempdb_question.internal", state = "unresolved")))
+    );
+    assert!(reasons.contains(&serde_json::json!(culprit_core::t!("view.tempdb_question.spill"))));
+    assert_eq!(entry["original"], serde_json::Value::Null);
+    assert!(entry.get("basis_context").is_none());
+    assert_eq!(result["incident_history"]["provenance"], "imported-artifact");
+}
+
+#[test]
+fn compact_history_keeps_canonical_compilation_context_and_all_competing_evidence_gaps() {
+    let mut report = report();
+    report.entries.truncate(1);
+    report.entries[0].reasons = vec![
+        culprit_core::t!("view.incident_history.compilation.independent"),
+        culprit_core::t!("view.incident_history.compilation.gap.actual_plan"),
+        culprit_core::t!("view.incident_history.compilation.gap.inputs"),
+        culprit_core::t!("view.incident_history.compilation.gap.work"),
+        culprit_core::t!("view.incident_history.compilation.gap.waits"),
+        culprit_core::t!("view.incident_history.compilation.gap.context"),
+    ];
+    let projected = value(&report, 0).unwrap();
+    assert_eq!(projected["incident_history"]["entries"][0]["reasons"], serde_json::json!(report.entries[0].reasons));
+    assert_eq!(projected["incident_history"]["entries"][0]["analysis"], "unresolved");
+}

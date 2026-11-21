@@ -37,3 +37,34 @@ impl TelemetrySource for ProfileSource {
         self.source.close().await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use culprit_collector::analytical::test_support::{
+        QualificationFixture, QualificationFixtureCase, baseline_profile_expectation,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    #[tokio::test]
+    async fn retirement_observed_by_the_outer_gate_cannot_be_healed_before_the_native_guard_or_close() {
+        let fixture = QualificationFixture::baseline_activity(QualificationFixtureCase::Unconfirmed);
+        let request = fixture.request();
+        let context = NativeReadContext::from_activity(&fixture.source).unwrap();
+        let active = Arc::new(AtomicBool::new(true));
+        let flag = active.clone();
+        let admission = baseline_profile_expectation(&request, &context, move || flag.load(Ordering::Acquire));
+        let cloned = admission.clone();
+        let mut source = ProfileSource::new(fixture.telemetry_source(), admission);
+        active.store(false, Ordering::Release);
+        assert_eq!(CollectionStop::from_error(&source.describe().await.unwrap_err()), CollectionStop::SourceChanged);
+        active.store(true, Ordering::Release);
+        assert!(!cloned.approval_is_active());
+        assert_eq!(CollectionStop::from_error(&source.describe().await.unwrap_err()), CollectionStop::SourceChanged);
+        assert_eq!(source.query_count(), 0);
+        assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
+        assert!(fixture.closed());
+    }
+}

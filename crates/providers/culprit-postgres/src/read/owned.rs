@@ -17,6 +17,7 @@ pub(super) struct ReadRequest {
     pub byte_limit: usize,
     pub timeout: Duration,
     pub dispatch: ReadDispatch,
+    pub profile: Option<culprit_read::SourceProfileGuard>,
 }
 pub(super) struct ReadTask {
     pub client: Client,
@@ -71,6 +72,17 @@ impl ReadTask {
         progress: &QueryProgress,
         cancellation: oneshot::Receiver<()>,
     ) -> TaskResult {
+        if let Some(profile) = &self.request.profile
+            && let Err(error) = profile.ensure_active()
+        {
+            // No driver call has started. Keep the original client for its existing close owner.
+            return TaskResult {
+                result: Err(error.into()),
+                confirmed: true,
+                interrupted: false,
+                outcome: ReadTaskOutcome::stopped(CollectionStop::SourceChanged),
+            };
+        }
         let retention = output.retention_control();
         let (limits, mut limit_reached) = mpsc::channel(1);
         let query = drain(&self.client, &self.request, progress, limits, output);

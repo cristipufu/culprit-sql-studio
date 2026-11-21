@@ -7,10 +7,11 @@ impl EvidencePlanner<'_> {
         outbox: &mut Outbox,
         target: &FleetTarget,
         episode: &DiagnosticEpisode,
+        binding: &RouteBinding,
         requested: RecipeSelector,
     ) -> Result<Option<Box<DiagnosticFocus>>> {
         if episode.source_read.is_some() {
-            return self.source_read(outbox, target, episode, requested).await;
+            return self.source_read(outbox, target, episode, binding, requested).await;
         }
         if matches!(episode.signal, DiagnosticSignal::PageTaskWait { .. }) {
             return self.task_holders(outbox, target, episode).await;

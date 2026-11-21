@@ -265,6 +265,13 @@ impl PostgresProvider {
 
 #[async_trait]
 impl Provider for PostgresProvider {
+    fn telemetry_source_for_profile(
+        &self,
+        request: &culprit_core::telemetry::CollectionRequest,
+        profile: &culprit_core::telemetry::SourceProfileAdmission,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        telemetry::profile_source(self.connector.clone(), request, profile)
+    }
     fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
         self.connector.source_shutdown()
     }

@@ -15,7 +15,9 @@ use std::sync::atomic::Ordering;
 
 mod failures;
 pub(super) mod log_rates;
+pub(super) mod query_history;
 mod recovery;
+pub(super) mod temporary;
 
 pub(super) fn frame(focus: &SourceReadFocus, execution: &NativeSourceReadScope) -> Frame {
     let (_, records) = query_compilation_evidence();
@@ -85,7 +87,8 @@ async fn configured_fixture(activity: Frame, fence: Option<&crate::delivery::rec
         NativeSourceReadScope::from_context(
             &NativeReadContext::from_activity(&fixture.backend.activity.source).unwrap(),
         )
-        .unwrap(),
+        .unwrap()
+        .into(),
     );
     fixture.backend.additional_recipes.push(history);
     fixture

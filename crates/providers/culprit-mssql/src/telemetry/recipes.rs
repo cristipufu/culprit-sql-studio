@@ -265,7 +265,7 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(task_space::TaskSpaceSource::new(pool, request, host, port)?)),
     )
     .bounded(task_space::bounded_budget)
-    .version(5),
+    .version(6),
     Registration::database(
         "mssql.cleanup",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Cleanup)),
@@ -273,7 +273,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(cleanup::bounded_budget)
     .on_editions(crate::instance::SUPPORTED_EDITIONS)
-    .version(3),
+    .version(4),
     Registration::database("mssql.table-memory", RecipeSelector::TableMemory, |pool, request, host, port| {
         Ok(Box::new(table_memory::TableMemorySource::new(pool, request, host, port)?))
     })
@@ -371,7 +371,7 @@ const REGISTRATIONS: &[Registration] = &[
     streamed!("mssql.statistics", Statistics, statistics::Statistics).version(2),
     streamed!("mssql.indexes", Indexes, indexes::Indexes).version(5),
     streamed!("mssql.check-constraints", CheckConstraints, check_constraints::CheckConstraints).version(2),
-    streamed!("mssql.query-compilation", QueryCompilation, compilation::QueryCompilation).version(5),
+    streamed!("mssql.query-compilation", QueryCompilation, compilation::QueryCompilation).version(6),
     streamed!("mssql.cached-runtime", CachedRuntime, cached_runtime::CachedRuntime).version(4),
     streamed!("mssql.objects", Objects, objects::Objects).version(2),
     streamed!("mssql.triggers", Triggers, triggers::Triggers).version(2),

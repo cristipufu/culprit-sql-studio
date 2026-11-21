@@ -328,6 +328,165 @@ async fn wrong_or_focused_selections_and_expanded_subjects_do_not_enter_the_task
         (200, 1000, 5000, 13 + ReadSession::SESSION_SETUP_QUERIES)
     );
     let recipe = crate::telemetry::recipes().into_iter().find(|recipe| recipe.id == "mssql.task-space").unwrap();
-    assert_eq!(recipe.version, 4);
+    assert_eq!(recipe.version, 6);
     assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+}
+
+// Controlled original facts exercise the production reader/profile seam; this is not native-cost approval.
+async fn question_request() -> CollectionRequest {
+    let mut io = SourceRead {
+        inner: FakeRead::new(vec![Ok(vec![platform(3, 16)]), Ok(vec![epoch(100)]), Ok(vec![authority(3, 16)])]),
+        trace: Arc::default(),
+        generation: Some(1),
+        change_generation_at: None,
+    };
+    let context = crate::local_source::Context::read(&mut io, "fixture.invalid", 1433).await.unwrap();
+    let execution = context.completed(&context).unwrap();
+    let (mut source, records) = culprit_collector::analytical::test_support::temporary_resource_basis();
+    source.target = execution.target.clone();
+    source.partition = execution.partition.clone();
+    let SourceObservation::LocalResource { snapshot, .. } = &mut source.observation else { panic!() };
+    snapshot.observed_from = execution.observed_from.clone();
+    snapshot.observed_until = execution.observed_until.clone();
+    let capture = CaptureIdentity {
+        observation_id: "original-cleanup".into(),
+        revision: Some(CaptureRevision {
+            outbox_id: "task-question-fixture".into(),
+            owner_epoch: "1".into(),
+            sequence: "1".into(),
+        }),
+    };
+    let row = ExportedRecord::new(&source, &capture, records[0].clone()).unwrap();
+    let basis = DiagnosticEvidenceRef::from_export(&source, &digest(b"original-cleanup-manifest"), &row, 0).unwrap();
+    let focus = SourceReadFocus {
+        basis: Box::new(basis),
+        target: source.target.clone(),
+        question: SourceReadQuestion::TemporarySpaceContributors,
+        prerequisite: match DiagnosticOriginalCondition::from_record(&source, &row.record).unwrap() {
+            DiagnosticOriginalCondition::MssqlCleanupBoundary { session, transaction } => {
+                SourceReadPrerequisite::ObservedCleanupBoundary { session, transaction }
+            }
+            _ => panic!(),
+        },
+    };
+    CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::SourceRead {
+            focus: Box::new(focus),
+            execution: Box::new(
+                SourceReadExecutionScope::from_context(SourceReadQuestion::TemporarySpaceContributors, &execution)
+                    .unwrap(),
+            ),
+        },
+        budget: request().budget,
+    }
+}
+fn with_native_role(mut rows: Vec<ReadResult<Vec<Rec>>>, role: Option<&str>) -> Vec<ReadResult<Vec<Rec>>> {
+    for result in &mut rows {
+        if let Ok(rows) = result {
+            for row in rows {
+                *row = replace(row, &[("updateability", role.map(|role| Val::Text(role.into())).unwrap_or(Val::Null))]);
+            }
+        }
+    }
+    rows
+}
+#[tokio::test]
+async fn source_question_reuses_native_task_reader_on_a_known_readable_member_without_changing_default_policy() {
+    for writable in [true, false] {
+        let mut request = question_request().await;
+        let CollectionSelection::SourceRead { execution, .. } = &mut request.selection else { panic!() };
+        let SourceReadExecutionScope::Local(scope) = execution.as_mut() else { panic!() };
+        scope.database_writable = writable;
+        let role = if writable { "READ_WRITE" } else { "READ_ONLY" };
+        let (mut source, trace) = self::source(FakeRead::new(with_native_role(replies(3, 16), Some(role))), &request);
+        let description = source.describe().await.unwrap();
+        assert!(description.matches_request(&request));
+        assert_eq!(description.observation.execution_context().unwrap().database_writable, Some(writable));
+        assert_eq!(drain(&mut source).await.len(), 2);
+        assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+        assert_eq!(source.query_count(), crate::task_space::MAX_BOXED_QUERIES);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert_eq!(trace.closed.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            trace.queries.lock().unwrap().iter().filter(|sql| sql.contains("FROM sys.dm_db_task_space_usage")).count(),
+            1
+        );
+    }
+    let (mut ordinary, _) =
+        self::source(FakeRead::new(with_native_role(replies(3, 16), Some("READ_ONLY"))), &request());
+    assert_eq!(ordinary.describe().await.unwrap_err().code, culprit_core::ErrorCode::Unsupported);
+    assert_eq!(ordinary.query_count(), 3);
+    assert_eq!(ordinary.close().await, SourceShutdown::Quiescent);
+}
+#[tokio::test]
+async fn source_question_rejects_a_before_after_role_sandwich_and_final_or_unknown_native_context() {
+    for defect in ["frame-role", "frame-unknown", "final-role", "unknown-initial"] {
+        let mut request = question_request().await;
+        let CollectionSelection::SourceRead { execution, .. } = &mut request.selection else { panic!() };
+        let SourceReadExecutionScope::Local(scope) = execution.as_mut() else { panic!() };
+        scope.database_writable = false;
+        let mut rows = with_native_role(replies(3, 16), Some("READ_ONLY"));
+        let index = match defect {
+            "frame-role" | "frame-unknown" => 3,
+            "final-role" => 12,
+            _ => 2,
+        };
+        if let Ok(native) = &mut rows[index] {
+            for row in native {
+                *row = replace(
+                    row,
+                    &[(
+                        "updateability",
+                        if defect.contains("unknown") { Val::Null } else { Val::Text("READ_WRITE".into()) },
+                    )],
+                );
+            }
+        }
+        let (mut source, trace) = self::source(FakeRead::new(rows), &request);
+        if defect == "final-role" {
+            source.describe().await.unwrap();
+            drain(&mut source).await;
+            assert_eq!(source.finish().await.unwrap(), SourceCompletion::Changed);
+        } else {
+            assert!(source.describe().await.is_err());
+            assert!(source.query_count() <= 4);
+        }
+        let before = source.query_count();
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert_eq!(source.query_count(), before);
+        assert_eq!(trace.closed.load(Ordering::SeqCst), 1);
+    }
+}
+#[tokio::test]
+async fn source_question_owner_mismatch_caller_limits_and_cancellation_cannot_restore_or_replace_native_authority() {
+    let mut wrong = question_request().await;
+    let CollectionSelection::SourceRead { execution, .. } = &mut wrong.selection else { panic!() };
+    let SourceReadExecutionScope::Local(scope) = execution.as_mut() else { panic!() };
+    let SourcePartition::InstanceLocal { epoch, .. } = &mut scope.partition else { panic!() };
+    *epoch = Some("foreign-native-process".into());
+    let (mut source, trace) = self::source(FakeRead::new(replies(3, 16)), &wrong);
+    assert_eq!(CollectionStop::from_error(&source.describe().await.unwrap_err()), CollectionStop::SourceChanged);
+    assert_eq!(source.query_count(), 3);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    assert!(trace.queries.lock().unwrap().iter().all(|sql| !sql.contains("FROM sys.dm_db_task_space_usage")));
+    let mut limited_request = question_request().await;
+    limited_request.budget.max_queries = 3;
+    let (mut limited, trace) = self::source(FakeRead::new(replies(3, 16)).with_query_limit(3), &limited_request);
+    assert_eq!(CollectionStop::from_error(&limited.describe().await.unwrap_err()), CollectionStop::QueryLimit);
+    assert_eq!(limited.query_count(), 3);
+    assert_eq!(limited.close().await, SourceShutdown::Quiescent);
+    assert_eq!(trace.closed.load(Ordering::SeqCst), 1);
+    for stop in [CollectionStop::TimedOut, CollectionStop::Cancelled, CollectionStop::CancellationUnconfirmed] {
+        let request = question_request().await;
+        let mut rows = replies(3, 16);
+        rows[3] = Err(ReadError::Stopped(stop));
+        let (mut source, trace) = self::source(FakeRead::new(rows), &request);
+        assert_eq!(CollectionStop::from_error(&source.describe().await.unwrap_err()), stop);
+        let calls = source.query_count();
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert!(source.finish().await.is_err());
+        assert_eq!(source.query_count(), calls);
+        assert_eq!(trace.closed.load(Ordering::SeqCst), 1);
+    }
 }

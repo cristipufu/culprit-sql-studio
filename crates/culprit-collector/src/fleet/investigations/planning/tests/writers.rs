@@ -30,7 +30,13 @@ async fn a_mapping_receipt_and_original_frame_are_authenticated_before_the_write
     let Some(DiagnosticReport::PageWait { observation, .. }) = &mut forged.report else { panic!() };
     observation.payload_sha256 = digest(b"different mapped page receipt");
     let result = evidence
-        .focus(&mut harness.outbox, &harness.inventory.targets[0], &forged, RecipeSelector::FocusedPageWaitWriters)
+        .focus(
+            &mut harness.outbox,
+            &harness.inventory.targets[0],
+            &forged,
+            harness.bindings.get("target").unwrap(),
+            RecipeSelector::FocusedPageWaitWriters,
+        )
         .await;
     assert!(result.is_err());
     assert_eq!(harness.backend.verified.load(Ordering::SeqCst), costs);
@@ -62,6 +68,7 @@ async fn unavailable_archived_page_evidence_withholds_the_optional_stage_without
                 &mut harness.outbox,
                 &harness.inventory.targets[0],
                 &episode,
+                harness.bindings.get("target").unwrap(),
                 RecipeSelector::FocusedPageWaitWriters,
             )
             .await

@@ -114,7 +114,7 @@ impl QualificationFixture {
     }
     /// Exact controlled native artifact meaning; neither elapsed time nor a returned-row ceiling grants approval.
     pub fn verifies(&self, receipt: &RecipeCostReceipt, source: &CollectionDescription, row: &ExportedRecord) -> bool {
-        receipt.scope == RecipeCostScope::NativeRead(self.scope.clone())
+        receipt.scope == RecipeCostScope::NativeRead(self.scope.clone().into())
             && source == &self.source
             && self.records.first() == Some(&row.record)
             && receipt.component == self.component
@@ -136,7 +136,7 @@ impl NativeQualificationSource for QualificationFixture {
             recipe_version: self.recipe.version,
             purpose: self.recipe.purpose,
             selector: self.recipe.selector,
-            scope: RecipeCostScope::NativeRead(self.scope.clone()),
+            scope: RecipeCostScope::NativeRead(self.scope.clone().into()),
             component: self.component.clone(),
             tested_budget: evidence.manifest.request.budget.clone(),
             evidence: evidence.captured.reference(0)?,

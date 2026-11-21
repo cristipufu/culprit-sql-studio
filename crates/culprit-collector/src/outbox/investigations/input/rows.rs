@@ -12,19 +12,31 @@ struct DiagnosticRows {
     rows: CanonicalRows,
     selection: RowSelection,
     selected: bool,
+    focus: Option<SourceReadFocus>,
 }
 impl VerificationObserver for DiagnosticRows {
     fn manifest(&mut self, manifest: &CollectionManifest) -> Result<()> {
         let source = manifest.description.as_ref().ok_or_else(integrity)?;
         self.selected = match self.selection {
             RowSelection::All => true,
-            RowSelection::Diagnostic => !matches!(source.observation, SourceObservation::SourceRead { .. }),
+            RowSelection::Diagnostic => {
+                !matches!(source.observation, SourceObservation::SourceRead { .. })
+                    || source_read_retains_rows(source, manifest.investigation.as_ref())?
+            }
             RowSelection::SharedOwner => shared_owner_source(source),
+        };
+        self.focus = if matches!(self.selection, RowSelection::Diagnostic) && self.selected {
+            source_read_result_focus(source, manifest.investigation.as_ref())?.cloned()
+        } else {
+            None
         };
         Ok(())
     }
     fn row(&mut self, row: &ExportedRecord, ordinal: u32) -> Result<()> {
-        if self.selected && !self.rows.retain(row, ordinal) {
+        if self.selected
+            && self.focus.as_ref().is_none_or(|focus| focus.retains_result_record(&row.record))
+            && !self.rows.retain(row, ordinal)
+        {
             return Err(integrity());
         }
         Ok(())
@@ -37,7 +49,8 @@ impl Files {
         id: &str,
         selection: RowSelection,
     ) -> Result<(ValidatedCapture, CanonicalRows)> {
-        let mut read = DiagnosticRows { rows: CanonicalRows::new(MAX_CANONICAL_ROWS), selection, selected: false };
+        let mut read =
+            DiagnosticRows { rows: CanonicalRows::new(MAX_CANONICAL_ROWS), selection, selected: false, focus: None };
         let validated = self.validated_observed(id, &mut read)?;
         Ok((validated, read.rows))
     }
@@ -47,13 +60,10 @@ pub(super) fn referenced_rows(
     parent: &DiagnosticCaptureRef,
     source: &CollectionDescription,
     rows: CanonicalRows,
+    investigation: Option<&DiagnosticInvestigationLineage>,
 ) -> Result<Vec<DiagnosticInputRow>> {
     let (records, ordinals) = rows.into_parts();
-    let rows = row_references(parent, source, records)?;
-    if rows.iter().zip(ordinals).any(|(row, ordinal)| row.reference.row_ordinal != ordinal) {
-        return Err(integrity());
-    }
-    Ok(rows)
+    positioned_references(parent, source, ordinals.into_iter().zip(records).collect(), investigation)
 }
 
 #[cfg(test)]
@@ -89,13 +99,13 @@ mod tests {
         for (ordinal, row) in rows.iter().enumerate() {
             assert!(all.retain(row, ordinal as u32));
         }
-        let references = referenced_rows(&parent, &source, all).unwrap();
+        let references = referenced_rows(&parent, &source, all, None).unwrap();
         assert_eq!(references[0].reference.row_ordinal, 0);
         assert_eq!(references[1].reference.row_ordinal, 1);
         let mut filtered = CanonicalRows::new(MAX_CANONICAL_ROWS);
         assert!(filtered.retain(&rows[1], 1));
         assert!(
-            referenced_rows(&parent, &source, filtered).is_err(),
+            referenced_rows(&parent, &source, filtered, None).is_err(),
             "a later row cannot be resigned as the first row merely because it is the only retained body"
         );
     }

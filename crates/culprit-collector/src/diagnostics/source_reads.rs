@@ -1,24 +1,32 @@
 //! A captured history read answers its finite question through the same offline queue and CAS owner.
 use super::*;
 
+pub(super) struct OriginalBasis {
+    source: CollectionDescription,
+    row: ExportedRecord,
+}
+
 pub(super) async fn parents(
     outbox: &mut Outbox,
     input: &DiagnosticInput,
     recovery: Option<&dyn RecoveryStore>,
     cancellation: &CollectionCancellation,
-) -> Result<bool> {
+) -> Result<Option<Box<OriginalBasis>>> {
     let intent = input.investigation_intent()?.ok_or_else(|| DeliveryProblem::Integrity.error())?;
     let DiagnosticFocus::SourceRead { focus } = &intent.focus else { return Err(DeliveryProblem::Integrity.error()) };
     for reference in intent.focus.references() {
         if resolve_evidence(outbox, &input.connection, reference, recovery, cancellation).await?.is_none() {
-            return Ok(false);
+            return Ok(None);
         }
     }
-    let (source, original) = outbox.diagnostic_evidence(&focus.basis).await?;
-    if !intent.matches_parent_record(&source, &original) {
+    let (source, row) = outbox.diagnostic_evidence(&focus.basis).await?;
+    let original = Box::new(OriginalBasis { source, row });
+    if !intent.matches_parent_record(&original.source, &original.row) {
         return Err(DeliveryProblem::Integrity.error());
     }
-    let Some(prerequisite) = focus.prerequisite.compilation_admission() else { return Ok(true) };
+    let Some(prerequisite) = focus.prerequisite.compilation_admission() else {
+        return Ok(Some(original));
+    };
     let context = outbox
         .diagnostic_input(&prerequisite.observation.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
         .await?;
@@ -26,7 +34,7 @@ pub(super) async fn parents(
         return Err(DeliveryProblem::Integrity.error());
     };
     if !verify_focus_parent(outbox, &input.connection, &result.focus, recovery, cancellation).await? {
-        return Ok(false);
+        return Ok(None);
     }
     let rows = context
         .rows
@@ -37,15 +45,18 @@ pub(super) async fn parents(
         })
         .collect::<Result<Vec<_>>>()?;
     if context.parent != prerequisite.observation.capture_ref()
-        || !focus.matches_prerequisite_input(&source, &original, &context.source, rows)
+        || !focus.matches_prerequisite_input(&original.source, &original.row, &context.source, rows)
     {
         return Err(DeliveryProblem::Integrity.error());
     }
-    Ok(true)
+    Ok(Some(original))
 }
 
-pub(super) fn analyze(input: &DiagnosticInput, at: &str) -> Result<Option<DiagnosticUpdate>> {
-    if !matches!(input.source.observation, SourceObservation::SourceRead { .. }) || !input.rows.is_empty() {
+pub(super) fn analyze(input: &DiagnosticInput, original: &OriginalBasis, at: &str) -> Result<Option<DiagnosticUpdate>> {
+    if !matches!(input.source.observation, SourceObservation::SourceRead { .. })
+        || !crate::outbox::source_read_retains_rows(&input.source, input.investigation.as_ref())?
+            && !input.rows.is_empty()
+    {
         return Err(DeliveryProblem::Integrity.error());
     }
     let intent = input.investigation_intent()?.ok_or_else(|| DeliveryProblem::Integrity.error())?;
@@ -61,9 +72,19 @@ pub(super) fn analyze(input: &DiagnosticInput, at: &str) -> Result<Option<Diagno
     let mut revisions = Vec::new();
     match &stage.state {
         SourceReadStageState::Captured { capture } if capture == &input.parent => (),
+        SourceReadStageState::Answered { answer } if answer.result() == &input.parent => (),
+        SourceReadStageState::Recovered => (),
         SourceReadStageState::Stopped { .. } => (),
         SourceReadStageState::Collecting => {
-            let next = before.complete_source_read(&intent, &input.source, &input.parent)?;
+            let rows = input.rows.iter().map(|row| (&row.reference, &row.row)).collect::<Vec<_>>();
+            let next = before.complete_source_read_from_originals(
+                &intent,
+                &original.source,
+                &original.row,
+                &input.source,
+                &input.parent,
+                &rows,
+            )?;
             let event = DiagnosticInvestigationEvent {
                 intent: Box::new(intent),
                 attempt: Some(DiagnosticAttemptReceipt {
@@ -81,7 +102,9 @@ pub(super) fn analyze(input: &DiagnosticInput, at: &str) -> Result<Option<Diagno
         // A missing earlier immutable admission/history head can arrive after the result range. It cannot be
         // reconstructed from a current same-ID actor or promoted from the captured data rows.
         SourceReadStageState::Pending | SourceReadStageState::Deferred { .. } => return Ok(None),
-        SourceReadStageState::Captured { .. } => return Err(DeliveryProblem::Integrity.error()),
+        SourceReadStageState::Captured { .. } | SourceReadStageState::Answered { .. } => {
+            return Err(DeliveryProblem::Integrity.error());
+        }
     }
     checkpoint.input = input.parent.clone();
     checkpoint.episodes.retain(DiagnosticEpisode::retained_in_checkpoint);
@@ -95,3 +118,6 @@ pub(super) fn analyze(input: &DiagnosticInput, at: &str) -> Result<Option<Diagno
         checkpoint,
     }))
 }
+
+#[cfg(test)]
+mod storage_tests;

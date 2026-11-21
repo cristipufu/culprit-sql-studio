@@ -12,7 +12,7 @@ const MAX_BASELINE_ROWS: u32 = 500;
 const MAX_BASELINE_READER_QUERIES: u32 = 7;
 const MAX_BASELINE_QUERIES: u32 = MAX_BASELINE_READER_QUERIES + crate::read::ReadSession::SESSION_SETUP_QUERIES;
 
-pub(super) fn bounded_budget(budget: &CollectionBudget) -> CollectionBudget {
+pub(crate) fn bounded_budget(budget: &CollectionBudget) -> CollectionBudget {
     let mut bounded = budget.clone();
     bounded.max_snapshot_rows = bounded.max_snapshot_rows.min(MAX_BASELINE_ROWS);
     bounded.page_rows = bounded.page_rows.min(MAX_BASELINE_ROWS);
@@ -28,6 +28,7 @@ pub(super) struct ActivitySource {
 struct NativeActivityReader {
     reader: ActivityReader,
     verified: Option<CollectionDescription>,
+    profile: Option<culprit_read::SourceProfileGuard>,
 }
 impl ActivitySource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
@@ -42,14 +43,39 @@ impl ActivitySource {
         let reader = NativeActivityReader {
             reader: ActivityReader::open_collection(pool, options, host, port)?,
             verified: None,
+            profile: None,
         };
         Ok(Self { inner: culprit_read::FrozenSource::new(reader, &request)? })
+    }
+    pub(super) fn for_profile(
+        pool: Arc<Pool>,
+        request: &CollectionRequest,
+        host: String,
+        port: u16,
+        admission: &SourceProfileAdmission,
+    ) -> Result<Self> {
+        request.validate()?;
+        request.subject.require_database()?;
+        if request.selection != CollectionSelection::Activity || bounded_budget(&request.budget) != request.budget {
+            return Err(culprit_core::Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+        }
+        let profile = culprit_read::SourceProfileGuard::new(request, admission)?;
+        let options = ReadOptions { budget: request.budget.clone(), identity: IdentityDetail::Endpoint };
+        let reader = NativeActivityReader {
+            reader: ActivityReader::open_profiled_collection(pool, options, host, port, profile.clone())?,
+            verified: None,
+            profile: Some(profile),
+        };
+        Ok(Self { inner: culprit_read::FrozenSource::new(reader, request)? })
     }
 }
 #[async_trait]
 impl culprit_read::ObservationReader for NativeActivityReader {
     async fn observe(&mut self, _: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
-        let (description, observations) = capture(&mut self.reader).await?;
+        let (description, observations) = match &self.profile {
+            Some(profile) => capture_with_profile(&mut self.reader, Some(profile)).await?,
+            None => capture(&mut self.reader).await?,
+        };
         self.verified = Some(description.clone());
         Ok(culprit_read::FrozenObservation {
             description,
@@ -57,6 +83,10 @@ impl culprit_read::ObservationReader for NativeActivityReader {
         })
     }
     async fn verify(&mut self, description: &CollectionDescription) -> Result<bool> {
+        if let Some(profile) = &self.profile {
+            profile
+                .verify_final(&NativeReadContext::from_activity(description)?, self.reader.connection_generation())?;
+        }
         Ok(self.verified.as_ref() == Some(description))
     }
     fn query_count(&self) -> u32 {
@@ -94,7 +124,16 @@ impl TelemetrySource for ActivitySource {
 pub(crate) async fn capture<R: crate::read::NativeRead>(
     reader: &mut ActivityReader<R>,
 ) -> Result<(CollectionDescription, Vec<ActivityObservation>)> {
-    let pending = crate::activity::capture::PendingActivityFrame::begin_census(reader).await?;
+    capture_with_profile(reader, None).await
+}
+async fn capture_with_profile<R: crate::read::NativeRead>(
+    reader: &mut ActivityReader<R>,
+    profile: Option<&culprit_read::SourceProfileGuard>,
+) -> Result<(CollectionDescription, Vec<ActivityObservation>)> {
+    let pending = match profile {
+        Some(profile) => crate::activity::capture::PendingActivityFrame::begin_profiled_census(reader, profile).await?,
+        None => crate::activity::capture::PendingActivityFrame::begin_census(reader).await?,
+    };
     if !matches!(pending.baseline.frame.context.edition, 2 | 3 | 4 | 5 | 8) || pending.baseline.frame.context.major < 11
     {
         return Err(culprit_core::Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));

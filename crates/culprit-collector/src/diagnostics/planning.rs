@@ -26,6 +26,9 @@ pub(super) fn qualify_questions(
     update: &mut DiagnosticUpdate,
 ) -> Result<()> {
     let Some(assignment) = assignment else { return Ok(()) };
+    if diagnostic_original_source_kind(&input.source).is_some() {
+        return source_read::qualify(input, assignment, update);
+    }
     if matches!(input.source.observation, SourceObservation::FocusedCompilationAdmission { .. }) {
         return source_read::qualify(input, assignment, update);
     }

@@ -238,6 +238,16 @@ impl ActivityReader {
         let io = ReadSession::collection(pool, options.budget.clone())?;
         Ok(Self::new(io, options, host, port))
     }
+    pub(crate) fn open_profiled_collection(
+        pool: Arc<Pool>,
+        options: ReadOptions,
+        host: String,
+        port: u16,
+        profile: culprit_read::SourceProfileGuard,
+    ) -> Result<Self> {
+        let io = ReadSession::collection(pool, options.budget.clone())?.with_profile(profile);
+        Ok(Self::new(io, options, host, port))
+    }
     pub(crate) fn open(pool: Arc<Pool>, options: ReadOptions, host: String, port: u16) -> Result<Self> {
         options.budget.validate()?;
         let io = ReadSession::new(pool, options.budget.clone());
@@ -257,6 +267,9 @@ impl<R: NativeRead> ActivityReader<R> {
     }
     pub(crate) fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
         self.io.read_metrics()
+    }
+    pub(crate) fn connection_generation(&self) -> Option<u64> {
+        self.io.connection_generation()
     }
     pub(crate) fn query_count(&self) -> u32 {
         self.io.queries()

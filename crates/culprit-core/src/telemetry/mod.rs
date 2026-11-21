@@ -135,8 +135,10 @@ mod settings;
 mod source_read;
 use source_read::same_time;
 pub use source_read::{
-    NativeSourceReadScope, SourceReadFocus, SourceReadPrerequisite, SourceReadQuestion, SourceReadStage,
-    SourceReadStageState,
+    LocalResourceReadScope, NativeSourceReadScope, QueryCompilationAnswer, QueryCompilationGap,
+    QueryCompilationSelection, SourceReadAnswer, SourceReadExecutionScope, SourceReadFocus, SourceReadPrerequisite,
+    SourceReadQuestion, SourceReadStage, SourceReadStageState, TemporaryResourceAnswer, TemporaryResourceContribution,
+    TemporaryResourceMechanism, local_resource_header_is_valid,
 };
 mod instance_resources;
 mod source_partition;
@@ -371,7 +373,10 @@ impl CollectionRequest {
             }
             CollectionSelection::SourceRead { focus, execution } => {
                 self.subject.require_database()?;
-                if !focus.is_valid() || !execution.matches_target(&focus.target) {
+                if !focus.is_valid()
+                    || !execution.accepts_question(focus.question)
+                    || !execution.matches_target(&focus.target)
+                {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }

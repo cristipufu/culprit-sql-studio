@@ -735,3 +735,5 @@ fn current_activity_frames_keep_current_dmv_filters_and_select_catalog_context_b
         assert_eq!(native.contains("g.database_id=DB_ID()"), identity == IdentityDetail::AzureDatabase);
     }
 }
+
+mod profile;

@@ -63,7 +63,7 @@ fn registered_source_versions_include_native_acquisition_policy_revisions() {
             ("mssql.statistics", 2),
             ("mssql.indexes", 5),
             ("mssql.check-constraints", 2),
-            ("mssql.query-compilation", 5),
+            ("mssql.query-compilation", 6),
             ("mssql.cached-runtime", 4),
             ("mssql.objects", 2),
             ("mssql.triggers", 2),

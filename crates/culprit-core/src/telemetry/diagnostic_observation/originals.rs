@@ -188,6 +188,11 @@ pub fn observe_diagnostic_original(
         if kind == DiagnosticSourceKind::Cleanup && evidence.can_resolve(episode) {
             episode.lifecycle = DiagnosticLifecycle::Resolved;
             episode.recovery = Some(DiagnosticRecoveryProof::CompleteScope { capture: input.clone() });
+            if episode.source_read.as_deref().is_some_and(|stage| {
+                stage.focus.question == SourceReadQuestion::TemporarySpaceContributors && stage.needs_admission()
+            }) {
+                *episode = episode.transition_source_read(SourceReadStageState::Recovered)?;
+            }
         } else {
             // Empty retained buffers, rollover, partial history and vanished task rows prove no recovery.
             episode.lifecycle = DiagnosticLifecycle::Uncertain;

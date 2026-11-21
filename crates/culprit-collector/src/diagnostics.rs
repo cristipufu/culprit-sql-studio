@@ -46,17 +46,24 @@ impl DiagnosticPolicies {
             .targets
             .iter()
             .filter(|target| target.shard == shard)
-            .flat_map(|target| {
-                target.schedules.iter().filter_map(|schedule| {
-                    let ScheduledCollection::Activity { policy } = &schedule.collection else {
-                        return None;
-                    };
-                    Some(DiagnosticAssignment {
-                        connection: target.connection.clone(),
-                        subject: target.subject.clone(),
-                        policy: policy.clone(),
-                        recipes: None,
-                    })
+            .filter_map(|target| {
+                let activity = target.schedules.iter().find_map(|schedule| match &schedule.collection {
+                    ScheduledCollection::Activity { policy } => Some(policy.clone()),
+                    _ => None,
+                });
+                let observes_originals = target
+                    .schedules
+                    .iter()
+                    .any(|schedule| DiagnosticSourceKind::supports_collection(schedule.collection.collection()));
+                if activity.is_none() && !observes_originals {
+                    return None;
+                }
+                Some(DiagnosticAssignment {
+                    connection: target.connection.clone(),
+                    subject: target.subject.clone(),
+                    // This policy is consumed only for Activity. Source-native conditions keep their own evidence rules.
+                    policy: activity.unwrap_or_default(),
+                    recipes: None,
                 })
             })
             .collect();
@@ -112,62 +119,74 @@ pub async fn analyze_pending(
         let Some(input) = outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await? else {
             break;
         };
-        if matches!(input.source.observation, SourceObservation::SourceRead { .. }) {
-            if !source_reads::parents(outbox, &input, recovery, cancellation).await? {
-                break;
-            }
-            let Some(update) = source_reads::analyze(&input, &chrono::Utc::now().to_rfc3339())? else {
-                break;
-            };
-            outbox.commit_diagnostics(input, update).await?;
-            processed += 1;
-            continue;
-        }
-        if let Some(focus) = input.source.observation.focus()
-            && !verify_focus_parent(outbox, &input.connection, focus, recovery, cancellation).await?
-        {
+        if !Box::pin(analyze_input(outbox, Box::new(input), policies, recovery, cancellation)).await? {
             break;
         }
-        if !writers::verify_parents(outbox, &input.connection, &input.source.observation, recovery, cancellation)
-            .await?
-        {
-            break;
-        }
-        let original = if let SourceObservation::PageWaitTargets { original_activity: Some(activity), .. } =
-            &input.source.observation
-        {
-            let Some(original) =
-                tasks::resolve_original_activity(outbox, &input.connection, activity, recovery, cancellation).await?
-            else {
-                break;
-            };
-            Some(original)
-        } else {
-            None
-        };
-        if let Some(intent) = input.investigation_intent()?
-            && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
-        {
-            let Some((source, row)) =
-                resolve_evidence(outbox, &input.connection, owner, recovery, cancellation).await?
-            else {
-                break;
-            };
-            if !intent.matches_shared_owner(&source, &row) {
-                return Err(DeliveryProblem::Integrity.error());
-            }
-        }
-        let analyzed_at = chrono::Utc::now().to_rfc3339();
-        let mut update = match &original {
-            Some(original) => tasks::analyze(&input, original, &analyzed_at)?,
-            None => analyze(&input, &policies.for_input(&input)?, &analyzed_at)?,
-        };
-        attach_page_contexts(outbox, &input, &mut update).await?;
-        planning::qualify_questions(&input, policies.assignment(&input)?, &mut update)?;
-        outbox.commit_diagnostics(input, update).await?;
         processed += 1;
     }
     Ok(processed)
+}
+
+/// One selected input retains its original evidence and commits before the bounded queue advances.
+/// Heap storage keeps all-family recovery branches out of the caller's suspended queue frame; it creates no
+/// task, parallel reader, renewed deadline or independent cancellation/commit owner.
+async fn analyze_input(
+    outbox: &mut Outbox,
+    input: Box<DiagnosticInput>,
+    policies: &DiagnosticPolicies,
+    recovery: Option<&dyn RecoveryStore>,
+    cancellation: &CollectionCancellation,
+) -> Result<bool> {
+    if matches!(input.source.observation, SourceObservation::SourceRead { .. }) {
+        let Some(original) = source_reads::parents(outbox, &input, recovery, cancellation).await? else {
+            return Ok(false);
+        };
+        let Some(update) = source_reads::analyze(&input, &original, &chrono::Utc::now().to_rfc3339())? else {
+            return Ok(false);
+        };
+        outbox.commit_diagnostics(*input, update).await?;
+        return Ok(true);
+    }
+    if let Some(focus) = input.source.observation.focus()
+        && !verify_focus_parent(outbox, &input.connection, focus, recovery, cancellation).await?
+    {
+        return Ok(false);
+    }
+    if !writers::verify_parents(outbox, &input.connection, &input.source.observation, recovery, cancellation).await? {
+        return Ok(false);
+    }
+    let original = if let SourceObservation::PageWaitTargets { original_activity: Some(activity), .. } =
+        &input.source.observation
+    {
+        let Some(original) =
+            tasks::resolve_original_activity(outbox, &input.connection, activity, recovery, cancellation).await?
+        else {
+            return Ok(false);
+        };
+        Some(original)
+    } else {
+        None
+    };
+    if let Some(intent) = input.investigation_intent()?
+        && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
+    {
+        let Some((source, row)) = resolve_evidence(outbox, &input.connection, owner, recovery, cancellation).await?
+        else {
+            return Ok(false);
+        };
+        if !intent.matches_shared_owner(&source, &row) {
+            return Err(DeliveryProblem::Integrity.error());
+        }
+    }
+    let analyzed_at = chrono::Utc::now().to_rfc3339();
+    let mut update = match &original {
+        Some(original) => tasks::analyze(&input, original, &analyzed_at)?,
+        None => analyze(&input, &policies.for_input(&input)?, &analyzed_at)?,
+    };
+    attach_page_contexts(outbox, &input, &mut update).await?;
+    planning::qualify_questions(&input, policies.assignment(&input)?, &mut update)?;
+    outbox.commit_diagnostics(*input, update).await?;
+    Ok(true)
 }
 
 async fn attach_page_contexts(

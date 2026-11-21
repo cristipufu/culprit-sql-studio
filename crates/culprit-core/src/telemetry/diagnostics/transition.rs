@@ -57,6 +57,15 @@ impl DiagnosticRevision {
         {
             inputs.push(stage.focus.basis.as_ref().clone());
         }
+        if let Some(SourceReadStage { state: SourceReadStageState::Answered { answer }, .. }) =
+            next.source_read.as_deref()
+        {
+            for reference in answer.references() {
+                if !inputs.contains(reference) {
+                    inputs.push(reference.clone())
+                }
+            }
+        }
         for reference in next.signal.references() {
             if !inputs.contains(reference) {
                 inputs.push(reference.clone());

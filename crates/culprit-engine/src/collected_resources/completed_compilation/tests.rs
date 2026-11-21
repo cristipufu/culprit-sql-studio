@@ -152,7 +152,7 @@ impl Fixture {
         let (_, attempt) = capture_frame(
             &mut outbox,
             Frame { source, rows, source_calls: source_calls.clone() },
-            CollectionSelection::SourceRead { focus: Box::new(focus), execution: Box::new(execution) },
+            CollectionSelection::SourceRead { focus: Box::new(focus), execution: Box::new(execution.into()) },
         )
         .await;
         Self { _root: root, outbox, attempt, source_calls }

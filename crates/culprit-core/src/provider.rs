@@ -129,6 +129,17 @@ pub trait Provider: Send + Sync {
         Err(Error::new(ErrorCode::Unsupported, crate::t!("collection.unsupported")))
     }
 
+    /// Open only an independently approved baseline profile through this selected deferred provider.
+    /// No normal-source fallback exists. The native reader must check the profile before login/setup and each
+    /// dispatch, bind the original native owner before population work, and preserve its final/close fences.
+    fn telemetry_source_for_profile(
+        &self,
+        _request: &crate::telemetry::CollectionRequest,
+        _profile: &crate::telemetry::SourceProfileAdmission,
+    ) -> Result<Box<dyn crate::telemetry::TelemetrySource>> {
+        Err(Error::new(ErrorCode::Unsupported, crate::t!("collection.unsupported")))
+    }
+
     /// Discover bounded native closed intervals for scheduling. Keep native boundaries, identity and reset evidence;
     /// an unavailable history source is an error. Owned native work must settle before returning a successful page.
     async fn telemetry_intervals(

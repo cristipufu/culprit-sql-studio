@@ -75,7 +75,14 @@ pub(super) trait SnapshotRecipe: Send + Sync {
         Ok(())
     }
     async fn layout<R: NativeRead>(&self, reader: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>>;
+    /// A recipe may narrow its existing query from a validated explicit request without acquiring native work.
+    fn select(&self, _layout: &mut Self::Layout, _request: &CollectionRequest) -> Result<()> {
+        Ok(())
+    }
     fn query(&self, layout: &Self::Layout) -> String;
+    fn parameters(&self, _layout: &Self::Layout, limit: usize) -> Result<Vec<Parameter>> {
+        Ok(limit_parameter(limit))
+    }
     fn decode(&self, row: &Rec, layout: &Self::Layout, source: &CollectionDescription) -> Result<TelemetryRecord>;
     /// Retain bounded native witnesses while rows stream. The reader owns this state; decoders keep a read-only
     /// layout view. No additional SQL may run while the native stream is active.
@@ -90,6 +97,11 @@ pub(super) trait SnapshotRecipe: Send + Sync {
     fn complete_record_scope(&self, _record: &TelemetryRecord) -> bool {
         true
     }
+}
+
+/// The existing native TOP parameter belongs to the common bounded reader, not a recipe-specific copy.
+pub(super) fn limit_parameter(limit: usize) -> Vec<Parameter> {
+    vec![Parameter::Integer(limit as i64)]
 }
 
 use std::sync::Arc;
@@ -134,7 +146,7 @@ impl SnapshotAuthority {
 }
 struct SourceReadRequest {
     focus_key: String,
-    execution: NativeSourceReadScope,
+    execution: SourceReadExecutionScope,
 }
 
 impl<D: SnapshotRecipe> StreamedSnapshot<D> {
@@ -205,7 +217,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
     fn supports_source_read(&self, question: SourceReadQuestion) -> bool {
         D::SOURCE_READ == Some(question)
     }
-    async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
+    async fn describe(&mut self, request: &CollectionRequest) -> Result<CollectionDescription> {
         let (target, partition, observed_from, metadata_visible) =
             if self.source_read.is_some() || self.purpose == SnapshotPurpose::NativeCostMeasurement {
                 description::ensure_supported(&mut self.io).await?;
@@ -253,6 +265,9 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         }
         self.authority.admit(&mut self.io).await?;
         self.layout = self.recipe.layout(&mut self.io, &self.budget).await?;
+        if let Some(layout) = &mut self.layout {
+            self.recipe.select(layout, request)?;
+        }
         let snapshot =
             PagedSnapshotDescription { dataset: D::DATASET, observed_from, sources: vec![D::SOURCE.name.into()] };
         let observation = match &self.source_read {
@@ -278,10 +293,8 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         let Some(layout) = &self.layout else { return Ok(()) };
         self.authority.admit(&mut self.io).await?;
         let limit = request.budget.max_snapshot_rows as usize + 1;
-        self.io
-            .begin_stream(&self.recipe.query(layout), vec![Parameter::Integer(limit as i64)], limit)
-            .await
-            .map_err(ReadError::into_error)
+        let parameters = self.recipe.parameters(layout, limit)?;
+        self.io.begin_stream(&self.recipe.query(layout), parameters, limit).await.map_err(ReadError::into_error)
     }
     async fn next_batch(&mut self) -> Result<culprit_read::ReadBatch<Rec>> {
         if self.layout.is_none() {

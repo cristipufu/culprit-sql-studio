@@ -79,8 +79,9 @@ async fn update_analysis(
     }
     let row =
         input.rows.iter().find(|row| row.reference == *parent).ok_or_else(|| DeliveryProblem::Integrity.error())?;
-    let TelemetryRecord::Activity(original) = &row.row.record else {
-        return Err(DeliveryProblem::Integrity.error());
+    let original = match &row.row.record {
+        TelemetryRecord::Activity(original) => Some(original),
+        _ => None,
     };
     let Some(mut checkpoint) = input.checkpoint.clone() else { return Ok(()) };
     let Some(episode) = checkpoint.episodes.iter_mut().find(|episode| episode.id == episode_id) else {
@@ -116,7 +117,14 @@ async fn update_analysis(
         }
         None => match task_question {
             Some(focus) => episode.matches_focus(&focus),
-            None => matches!(episode.plan_focus(&input.source, original, parent)?, DiagnosticFocusPlan::Ready(_)),
+            None => matches!(
+                episode.plan_focus(
+                    &input.source,
+                    original.ok_or_else(|| DeliveryProblem::Integrity.error())?,
+                    parent
+                )?,
+                DiagnosticFocusPlan::Ready(_)
+            ),
         },
     };
     if !matches_parent {

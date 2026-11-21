@@ -1,6 +1,9 @@
 //! The database's oldest qualifying cleanup holder is one current statistic, not a history of all transactions.
 use super::*;
 
+/// The existing held-cleanup attention age. This is an investigation policy, not proof of impact or pressure.
+pub const CLEANUP_ATTENTION_AGE_SECONDS: u64 = 30 * 60;
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct MssqlCleanupTransaction {
@@ -23,6 +26,14 @@ pub struct MssqlCleanupTransaction {
     pub versioning_age_seconds: Option<String>,
 }
 impl MssqlCleanupTransaction {
+    pub fn needs_cleanup_investigation(&self) -> bool {
+        self.is_valid()
+            && self
+                .age_seconds
+                .as_deref()
+                .and_then(|age| age.parse::<u64>().ok())
+                .is_some_and(|age| age >= CLEANUP_ATTENTION_AGE_SECONDS)
+    }
     pub fn has_database_evidence(&self) -> bool {
         self.snapshot_isolation == Some(true)
             || self.log_record_count.as_deref().is_some_and(|value| value.parse::<u64>().is_ok_and(|count| count > 0))

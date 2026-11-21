@@ -21,4 +21,5 @@ Database drivers use these primitives while retaining their own connections, SQL
 - [Row delivery](src/lib.rs): buffered and streaming output.
 - [Read fence](src/fence.rs): native work and shutdown state.
 - [Admission](src/admission.rs): shared source ownership.
+- [Source profiles](src/profile.rs): approval retirement and held connection checks inside native readers.
 - [Snapshots](src/snapshot.rs): bounded snapshot readers.

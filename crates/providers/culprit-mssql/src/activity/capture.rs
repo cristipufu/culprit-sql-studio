@@ -9,6 +9,7 @@ pub(crate) struct PendingActivityFrame {
     pub baseline: ActivityBaseline,
     before: AuthorityRead,
     authority: ActivityAuthorityPolicy,
+    profile: Option<culprit_read::SourceProfileGuard>,
 }
 pub(crate) struct CompletedActivityFrame {
     pub description: CollectionDescription,
@@ -32,27 +33,52 @@ impl PendingActivityFrame {
         reader: &mut ActivityReader<R>,
         authority: ActivityAuthorityPolicy,
     ) -> Result<Self> {
-        Self::begin_with_projection(reader, authority, MetadataProjection::Standard).await
+        Self::begin_with_projection(reader, authority, MetadataProjection::Standard, None).await
     }
     pub(crate) async fn begin_census<R: crate::read::NativeRead>(reader: &mut ActivityReader<R>) -> Result<Self> {
-        Self::begin_with_projection(reader, ActivityAuthorityPolicy::RetainPartialBaseline, MetadataProjection::Census)
-            .await
+        Self::begin_with_projection(
+            reader,
+            ActivityAuthorityPolicy::RetainPartialBaseline,
+            MetadataProjection::Census,
+            None,
+        )
+        .await
+    }
+    pub(crate) async fn begin_profiled_census<R: crate::read::NativeRead>(
+        reader: &mut ActivityReader<R>,
+        profile: &culprit_read::SourceProfileGuard,
+    ) -> Result<Self> {
+        Self::begin_with_projection(
+            reader,
+            ActivityAuthorityPolicy::RetainPartialBaseline,
+            MetadataProjection::Census,
+            Some(profile.clone()),
+        )
+        .await
     }
     async fn begin_with_projection<R: crate::read::NativeRead>(
         reader: &mut ActivityReader<R>,
         authority: ActivityAuthorityPolicy,
         projection: MetadataProjection,
+        profile: Option<culprit_read::SourceProfileGuard>,
     ) -> Result<Self> {
+        if let Some(profile) = &profile {
+            profile.ensure_active()?;
+        }
         let before = if authority != ActivityAuthorityPolicy::MetadataOnly {
             AuthorityRead::admit(database_context::initial(reader).await, authority)?
         } else {
             AuthorityRead::unobserved()
         };
+        if let Some(profile) = &profile {
+            let context = before.context.as_ref().ok_or_else(|| CollectionStop::SourceChanged.error())?;
+            profile.bind_native(&context.completed(context)?, reader.io.connection_generation())?;
+        }
         let baseline = match projection {
             MetadataProjection::Standard => reader.observe_baseline().await?,
             MetadataProjection::Census => reader.observe_census_baseline().await?,
         };
-        Ok(Self { baseline, before, authority })
+        Ok(Self { baseline, before, authority, profile })
     }
     pub(crate) fn require_complete(&self) -> Result<()> {
         if let Some(error) = &self.baseline.restriction {
@@ -67,7 +93,7 @@ impl PendingActivityFrame {
         self,
         reader: &mut ActivityReader<R>,
     ) -> Result<CompletedActivityFrame> {
-        let Self { mut baseline, before, authority } = self;
+        let Self { mut baseline, before, authority, profile } = self;
         let after = if authority == ActivityAuthorityPolicy::RetainPartialBaseline || before.context.is_some() {
             AuthorityRead::admit(
                 match &before.context {
@@ -173,6 +199,10 @@ impl PendingActivityFrame {
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Activity(activity),
         };
+        if let Some(profile) = profile {
+            profile
+                .verify_final(&NativeReadContext::from_activity(&description)?, reader.io.connection_generation())?;
+        }
         Ok(CompletedActivityFrame { description, frame: baseline.frame, action_context })
     }
 }

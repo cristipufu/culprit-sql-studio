@@ -9,7 +9,7 @@ fn source_read_public_context_keeps_only_snapshot_and_opaque_question_execution_
     member.namespace.id = "private-source-read-namespace".into();
     member.native.id = "private-source-read-native-member".into();
     let execution = NativeReadContext::from_activity(&source).unwrap();
-    let scope = NativeSourceReadScope::from_context(&execution).unwrap();
+    let scope = SourceReadExecutionScope::from_context(SourceReadQuestion::CompilationHistory, &execution).unwrap();
     let snapshot = StateSnapshotDescription {
         dataset: SnapshotDataset::QueryCompilation,
         records: 0,

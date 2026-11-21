@@ -27,36 +27,62 @@ impl RouteBinding {
                 && matches!(&scope.partition, SourcePartition::InstanceLocal { member: Some(member), .. }
                     if member == resource);
         }
+        if matches!(&scope.population, DiagnosticPopulation::Source { .. }) {
+            return SourceReadExecutionScope::context_from_source(&self.source).is_ok_and(|context| {
+                if !context.has_qualified_local_owner()
+                    || context.database_writable.is_none()
+                    || context.target != scope.target
+                {
+                    return false;
+                }
+                match scope.partition {
+                    // Historical logical data has no proven executor. Its independently qualified acquisition
+                    // owner may route a new read without becoming that historical population's member/clock.
+                    SourcePartition::Target => NativeSourceReadScope::from_context(&context).is_ok(),
+                    SourcePartition::InstanceLocal { .. } => context.partition == scope.partition,
+                }
+            });
+        }
         DiagnosticScope::from_source(&self.source).is_ok_and(|current| {
             current.native_epoch.is_some() && current.partition.is_qualified() && current.key().ok() == scope.key().ok()
         })
     }
 
     pub fn observed_after(&self, at: &str) -> bool {
-        let until = self
-            .source
-            .observation
-            .activity()
-            .map(|frame| frame.at.as_str())
-            .or_else(|| self.source.observation.snapshot().map(|frame| frame.observed_until.as_str()));
-        until.is_some_and(|until| ObservationBounds::new(at, until).is_some())
+        if self.shared_owner.is_some() {
+            return self
+                .source
+                .observation
+                .snapshot()
+                .is_some_and(|snapshot| ObservationBounds::new(at, &snapshot.observed_until).is_some());
+        }
+        SourceReadExecutionScope::context_from_source(&self.source)
+            .is_ok_and(|context| ObservationBounds::new(at, &context.observed_until).is_some())
     }
 
     pub fn budget<'a>(&self, target: &'a FleetTarget) -> Option<&'a CollectionBudget> {
         target.schedules.iter().find_map(|schedule| {
-            let matches = match (&schedule.collection, &self.source.observation) {
-                (ScheduledCollection::Activity { .. }, SourceObservation::Activity(_)) => true,
-                (ScheduledCollection::Snapshot { dataset }, SourceObservation::Snapshot(snapshot)) => {
-                    self.shared_owner.is_some() && dataset == &snapshot.dataset
-                }
-                _ => false,
-            };
+            let matches = schedule.collection.collection() == self.source.observation.collection()
+                && (self.shared_owner.is_some() || RouteBindings::accepts_source(&self.source));
             matches.then_some(&schedule.budget)
         })
     }
 }
 
 impl RouteBindings {
+    /// Activity keeps its native frame authority. Source-only questions additionally need a known acquisition
+    /// role; retained logical history must qualify that acquisition independently of its historical population.
+    pub fn accepts_source(source: &CollectionDescription) -> bool {
+        let Ok(scope) = DiagnosticScope::from_source(source) else { return false };
+        let local_scope = scope.native_epoch.is_some() && scope.partition.is_qualified();
+        let context = SourceReadExecutionScope::context_from_source(source);
+        let acquired_history = matches!(source.observation, SourceObservation::QueryHistory(_))
+            && context.as_ref().is_ok_and(|context| NativeSourceReadScope::from_context(context).is_ok());
+        let native_authority = source.observation.activity().is_some()
+            || context.is_ok_and(|context| context.has_qualified_local_owner() && context.database_writable.is_some());
+        native_authority && (local_scope || acquired_history)
+    }
+
     pub fn get(&self, target: &str) -> Option<&RouteBinding> {
         self.routes.get(target)
     }
@@ -66,9 +92,7 @@ impl RouteBindings {
     }
 
     pub fn observe(&mut self, target: &str, source: &CollectionDescription, revision: &str) -> Result<()> {
-        let scope = DiagnosticScope::from_source(source)?;
-        if scope.native_epoch.is_none()
-            || !scope.partition.is_qualified()
+        if !Self::accepts_source(source)
             || revision.is_empty()
             || revision.len() > 256
             || revision.chars().any(char::is_control)

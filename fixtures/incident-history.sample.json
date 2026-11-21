@@ -1,4 +1,942 @@
 {
+  "compilation": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "1 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 16,
+        "revision_id": "7e2354872cda8918629c3ad6dd83561c04d750b11dc2807bf66edcecd276a114",
+        "episode_id": "a69f97d76015c91df70d906b8826b47c20fac6661269a5ba3b21dc35167eeb2e",
+        "target_id": "fcfe294a3d4f5c47afc2d6c9c9b1d3e50a6fbf5f072ec23b411f747efdb57314",
+        "target_scope": "database",
+        "scope_id": "4294eac332da2604462f5c6987fc2b3e84081487defa0c9e8e8cdfdd560f55dd",
+        "source": "query_store",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "2",
+        "previous_revision": "1",
+        "predecessor_selected": false,
+        "lifecycle": "uncertain",
+        "analysis": "unresolved",
+        "title": "Recorded source-observation group · revision 2",
+        "phase": "Native continuity or recovery is uncertain. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:01Z",
+        "last_seen_at": "2020-01-01T12:00:01Z",
+        "recorded_at": "2020-01-01T12:00:04.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Historical source result",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-result",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "df512f744bed170f67790e1d0c1efb3b3d38464c4a8fd4ef67e916315dad5c81",
+              "source_scope_id": "11e2b27ac05748cd0c776bbc86effb02cb60318141eef4e97f16a776be464eff"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Typed analysis original",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Recorded follow-up capture",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-result",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "df512f744bed170f67790e1d0c1efb3b3d38464c4a8fd4ef67e916315dad5c81",
+              "source_scope_id": "11e2b27ac05748cd0c776bbc86effb02cb60318141eef4e97f16a776be464eff"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 2,
+        "followup_recipe": "fixture.query-history-compilation-context",
+        "followup_recipe_version": 1,
+        "issue": {
+          "kind": "unsupported"
+        },
+        "reasons": [
+          "This follow-up was unsupported.",
+          "The immediately preceding revision was not selected; the earlier transition chain remains incomplete.",
+          "A source question retained its bounded answer.",
+          "Read retained compilation context for the original Query Store query incarnation; this does not select an execution plan or test parameter sensitivity.",
+          "Query Store retained 9007199254740993 lifetime compilations for the original query incarnation, with a lifetime mean compilation time of 1500.5 µs. Last compilation: 2020-01-01T11:59:00.1533333Z.",
+          "These later compilation totals and their read clocks are independent of the original runtime interval. The acquisition member does not identify the historical executor or the plan used by the failed executions.",
+          "Compilation context acquisition: 2020-01-01T12:00:02.000000000Z to 2020-01-01T12:00:03.000000000Z. Original runtime interval: 2020-01-01T06:00:00Z to 2020-01-01T07:00:00Z.",
+          "The actual plan used by the failed execution population remains unestablished.",
+          "The original runtime parameter values and TVP input population remain unestablished.",
+          "Comparable measured execution work for the same supported inputs remains unavailable; plan count and cache reuse do not establish harmful reuse.",
+          "Blocking and competing execution-grant demand for the original execution interval remain unresolved.",
+          "Original statistics and applied forcing context remain unresolved; compilation totals do not establish an exclusive cause.",
+          "A follow-up capture was retained. The original work owner confirmed settlement.",
+          "A typed analysis reference is retained in this revision."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  },
+  "compilation_changed": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "1 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 16,
+        "revision_id": "a03101a29c33edd675ece12dd9ef7e07cd6ec7cba00b1e6f7c7539903cbeddfd",
+        "episode_id": "a69f97d76015c91df70d906b8826b47c20fac6661269a5ba3b21dc35167eeb2e",
+        "target_id": "fcfe294a3d4f5c47afc2d6c9c9b1d3e50a6fbf5f072ec23b411f747efdb57314",
+        "target_scope": "database",
+        "scope_id": "4294eac332da2604462f5c6987fc2b3e84081487defa0c9e8e8cdfdd560f55dd",
+        "source": "query_store",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "2",
+        "previous_revision": "1",
+        "predecessor_selected": false,
+        "lifecycle": "uncertain",
+        "analysis": "unresolved",
+        "title": "Recorded source-observation group · revision 2",
+        "phase": "Native continuity or recovery is uncertain. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:01Z",
+        "last_seen_at": "2020-01-01T12:00:01Z",
+        "recorded_at": "2020-01-01T12:00:04.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Historical source result",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-result",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "df512f744bed170f67790e1d0c1efb3b3d38464c4a8fd4ef67e916315dad5c81",
+              "source_scope_id": "11e2b27ac05748cd0c776bbc86effb02cb60318141eef4e97f16a776be464eff"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Typed analysis original",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Recorded follow-up capture",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-result",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "df512f744bed170f67790e1d0c1efb3b3d38464c4a8fd4ef67e916315dad5c81",
+              "source_scope_id": "11e2b27ac05748cd0c776bbc86effb02cb60318141eef4e97f16a776be464eff"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": "fixture.query-history-compilation-context",
+        "followup_recipe_version": 1,
+        "issue": {
+          "kind": "unsupported"
+        },
+        "reasons": [
+          "This follow-up was unsupported.",
+          "The immediately preceding revision was not selected; the earlier transition chain remains incomplete.",
+          "A source question retained its bounded answer.",
+          "Read retained compilation context for the original Query Store query incarnation; this does not select an execution plan or test parameter sensitivity.",
+          "The retained compilation row has the same query number but a different native incarnation. It cannot replace the original query.",
+          "These later compilation totals and their read clocks are independent of the original runtime interval. The acquisition member does not identify the historical executor or the plan used by the failed executions.",
+          "Compilation context acquisition: 2020-01-01T12:00:02.000000000Z to 2020-01-01T12:00:03.000000000Z. Original runtime interval: 2020-01-01T06:00:00Z to 2020-01-01T07:00:00Z.",
+          "The actual plan used by the failed execution population remains unestablished.",
+          "The original runtime parameter values and TVP input population remain unestablished.",
+          "Comparable measured execution work for the same supported inputs remains unavailable; plan count and cache reuse do not establish harmful reuse.",
+          "Blocking and competing execution-grant demand for the original execution interval remain unresolved.",
+          "Original statistics and applied forcing context remain unresolved; compilation totals do not establish an exclusive cause.",
+          "A follow-up capture was retained. The original work owner confirmed settlement.",
+          "A typed analysis reference is retained in this revision."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  },
+  "compilation_partial": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "1 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 16,
+        "revision_id": "21aac6ec4d9ee8e70fcd632292d2447bf0583503d54c42e62bbb7e2f8dafbbef",
+        "episode_id": "a69f97d76015c91df70d906b8826b47c20fac6661269a5ba3b21dc35167eeb2e",
+        "target_id": "fcfe294a3d4f5c47afc2d6c9c9b1d3e50a6fbf5f072ec23b411f747efdb57314",
+        "target_scope": "database",
+        "scope_id": "4294eac332da2604462f5c6987fc2b3e84081487defa0c9e8e8cdfdd560f55dd",
+        "source": "query_store",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "2",
+        "previous_revision": "1",
+        "predecessor_selected": false,
+        "lifecycle": "uncertain",
+        "analysis": "unresolved",
+        "title": "Recorded source-observation group · revision 2",
+        "phase": "Native continuity or recovery is uncertain. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:01Z",
+        "last_seen_at": "2020-01-01T12:00:01Z",
+        "recorded_at": "2020-01-01T12:00:04.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Historical source result",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-result",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "df512f744bed170f67790e1d0c1efb3b3d38464c4a8fd4ef67e916315dad5c81",
+              "source_scope_id": "11e2b27ac05748cd0c776bbc86effb02cb60318141eef4e97f16a776be464eff"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Typed analysis original",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Recorded follow-up capture",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-result",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "df512f744bed170f67790e1d0c1efb3b3d38464c4a8fd4ef67e916315dad5c81",
+              "source_scope_id": "11e2b27ac05748cd0c776bbc86effb02cb60318141eef4e97f16a776be464eff"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 2,
+        "followup_recipe": "fixture.query-history-compilation-context",
+        "followup_recipe_version": 1,
+        "issue": {
+          "kind": "unsupported"
+        },
+        "reasons": [
+          "This follow-up was unsupported.",
+          "The immediately preceding revision was not selected; the earlier transition chain remains incomplete.",
+          "A source question retained its bounded answer.",
+          "Read retained compilation context for the original Query Store query incarnation; this does not select an execution plan or test parameter sensitivity.",
+          "Query Store retained 9007199254740993 lifetime compilations for the original query incarnation, with a lifetime mean compilation time of 1500.5 µs. Last compilation: 2020-01-01T11:59:00.1533333Z.",
+          "These later compilation totals and their read clocks are independent of the original runtime interval. The acquisition member does not identify the historical executor or the plan used by the failed executions.",
+          "Compilation context acquisition: 2020-01-01T12:00:02.000000000Z to 2020-01-01T12:00:03.000000000Z. Original runtime interval: 2020-01-01T06:00:00Z to 2020-01-01T07:00:00Z.",
+          "The native read was partial. Additional retained query compilation entries may be missing.",
+          "The actual plan used by the failed execution population remains unestablished.",
+          "The original runtime parameter values and TVP input population remain unestablished.",
+          "Comparable measured execution work for the same supported inputs remains unavailable; plan count and cache reuse do not establish harmful reuse.",
+          "Blocking and competing execution-grant demand for the original execution interval remain unresolved.",
+          "Original statistics and applied forcing context remain unresolved; compilation totals do not establish an exclusive cause.",
+          "A follow-up capture was retained. The original work owner confirmed settlement.",
+          "A typed analysis reference is retained in this revision."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  },
+  "compilation_unavailable": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "1 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 16,
+        "revision_id": "a77bf21337a69a87d0724ad3e5452395aea4936f8f1f6085d99d329dbed71e74",
+        "episode_id": "a69f97d76015c91df70d906b8826b47c20fac6661269a5ba3b21dc35167eeb2e",
+        "target_id": "fcfe294a3d4f5c47afc2d6c9c9b1d3e50a6fbf5f072ec23b411f747efdb57314",
+        "target_scope": "database",
+        "scope_id": "4294eac332da2604462f5c6987fc2b3e84081487defa0c9e8e8cdfdd560f55dd",
+        "source": "query_store",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "2",
+        "previous_revision": "1",
+        "predecessor_selected": false,
+        "lifecycle": "uncertain",
+        "analysis": "unresolved",
+        "title": "Recorded source-observation group · revision 2",
+        "phase": "Native continuity or recovery is uncertain. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:01Z",
+        "last_seen_at": "2020-01-01T12:00:01Z",
+        "recorded_at": "2020-01-01T12:00:04.000000000Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Historical source result",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-result",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "df512f744bed170f67790e1d0c1efb3b3d38464c4a8fd4ef67e916315dad5c81",
+              "source_scope_id": "11e2b27ac05748cd0c776bbc86effb02cb60318141eef4e97f16a776be464eff"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Typed analysis original",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "query-history-compilation-basis",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "a9dca280bedbcbf2d6aabcc18fd3e2a8867619be71822309a443a83be6a6bb5d",
+              "source_scope_id": "198ed435b9fa25c842a6aad6889590c272a8bfccf017181d988620a82d363675",
+              "stream": "query-runtime",
+              "native_key": {
+                "kind": "runtime",
+                "data": {
+                  "id": "17",
+                  "qualifiers": {
+                    "execution_type": "4",
+                    "plan_id": "4",
+                    "replica_group_id": "1"
+                  }
+                }
+              },
+              "batch_id": "aae500dcd62418a6ada844eb8fceb872e231942da66e04cfef3540f9e99a3b6a",
+              "record_id": "28d1c3cccf96a8702eb053638272ff6ef0fe014427d07e5e397ad823c9fb2a0b",
+              "payload_sha256": "cc543823b79c789b3b33b9756a4238343684cda3f3bdf6ef2b9ca5af57fa05a1",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Recorded follow-up capture",
+            "capture": {
+              "capture": {
+                "observation_id": "query-history-compilation-result",
+                "revision": {
+                  "outbox_id": "query-history-compilation-outbox",
+                  "owner_epoch": "1",
+                  "sequence": "1"
+                }
+              },
+              "manifest_sha256": "df512f744bed170f67790e1d0c1efb3b3d38464c4a8fd4ef67e916315dad5c81",
+              "source_scope_id": "11e2b27ac05748cd0c776bbc86effb02cb60318141eef4e97f16a776be464eff"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 1,
+        "followup_recipe": "fixture.query-history-compilation-context",
+        "followup_recipe_version": 1,
+        "issue": {
+          "kind": "unsupported"
+        },
+        "reasons": [
+          "This follow-up was unsupported.",
+          "The immediately preceding revision was not selected; the earlier transition chain remains incomplete.",
+          "A source question retained its bounded answer.",
+          "Read retained compilation context for the original Query Store query incarnation; this does not select an execution plan or test parameter sensitivity.",
+          "This bounded compilation capture did not retain the original query incarnation. That does not establish removal, recovery or zero compilation work.",
+          "These later compilation totals and their read clocks are independent of the original runtime interval. The acquisition member does not identify the historical executor or the plan used by the failed executions.",
+          "Compilation context acquisition: 2020-01-01T12:00:02.000000000Z to 2020-01-01T12:00:03.000000000Z. Original runtime interval: 2020-01-01T06:00:00Z to 2020-01-01T07:00:00Z.",
+          "The native compilation source was unavailable or inapplicable. Its contents remain unknown.",
+          "The actual plan used by the failed execution population remains unestablished.",
+          "The original runtime parameter values and TVP input population remain unestablished.",
+          "Comparable measured execution work for the same supported inputs remains unavailable; plan count and cache reuse do not establish harmful reuse.",
+          "Blocking and competing execution-grant demand for the original execution interval remain unresolved.",
+          "Original statistics and applied forcing context remain unresolved; compilation totals do not establish an exclusive cause.",
+          "A follow-up capture was retained. The original work owner confirmed settlement.",
+          "A typed analysis reference is retained in this revision."
+        ],
+        "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
+      }
+    ]
+  },
   "exact": {
     "provenance": "imported-artifact",
     "selected_read_complete": true,
@@ -16,9 +954,9 @@
     ],
     "entries": [
       {
-        "controller_version": 15,
-        "revision_id": "a85fb25809d94e9a0fc354d5775ea6cf854098c55b77049009f3ac77d7891352",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "326d3683d020d29d211fe5680443afcc091bdb518f025eade31a041f96c641b9",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -79,7 +1017,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -127,7 +1065,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -142,9 +1080,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "ca58b289d2dd8185c51490e9513247a6389aa9e83aa5f082c62125e4476f6314",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "6ce0b7ced504c3d87f5b1ffa8a1b685fee2663584fcb6889253534534846dfe3",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -205,7 +1143,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -253,7 +1191,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -272,9 +1210,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "b5992bbc4bf86b9a0f29187dedd89485bfb02b29dafd58dee3d601683392805e",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "93e201d959e1422651274e70adee79e6af2d75141a5363ef7952d1852672695d",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -335,7 +1273,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -383,7 +1321,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -402,9 +1340,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "471218de851347a42bec43efe2e1f7fcdcadec81e5a23050c86f972202c1960c",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "7d80e88b6aaa81db99eb1629a7118b044c14631a1833e0ce3f6ced74dd621dfb",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -465,7 +1403,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -513,7 +1451,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -532,9 +1470,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "165fac1ee768ecb3868541ffd1f23a7665aab510651d8bfe84c48d4a5f985727",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "4e1fb18478e3cbefeea270c7ad49fb57bd3bf43cdc0c05140f1a9bac61a6246e",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -595,7 +1533,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -643,7 +1581,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -662,9 +1600,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "c62c90faa4cbc4fd059a4646456640bb2de6bb63eadffb110f9cc31d0b145619",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "e5f7b313755d4d21d99a1481c2e91d16a2ed9a91337dee7d2b5e993b0e837095",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -725,7 +1663,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -773,7 +1711,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -792,9 +1730,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "05582928ab7c7100bf7c3808fbce5231cb7cc1cae1d1452ee85ada35bf977a10",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "7c51daace987fe6f1dca0edb549eeda5d12e4076476b2625344c12a384c3101b",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -855,7 +1793,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -903,7 +1841,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -922,9 +1860,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "146b2b7ad97e8a7753246b8bc4d5c2568b14a8a832b867734e0106852f13780b",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "e4a27cf258a4365f7ed974abc85b3ad5d6daa90b3bdb74f2045973573bf1ba8f",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -985,7 +1923,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1033,7 +1971,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1052,9 +1990,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "cc48a203d8941f0ea7fad33f45e0dc3b166c3aa73787b1e795217ccf89041944",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "16c819e39ebab01f6287b7c3e436d7c3a3bd82b5489e960e0765bf138acd4fd4",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -1115,7 +2053,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1163,7 +2101,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1182,9 +2120,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "471605cac864a5eb6f552365d4b924732c551291dc00a0b7a2863976be8be21c",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "6dfedf7a00e3f843e2dcdce5973be0d503bd0167190ea9e506fca6afbbd159fe",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -1245,7 +2183,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1293,7 +2231,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1312,9 +2250,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "b0514352690038e58a7f121486b1a1c64133f535516dfa3bbe4ff1629f994a7e",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "5f6fe19f908640cde78e884d0845e5ce3e2f09067e7750e8a6fb789a9f44b0c2",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -1375,7 +2313,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1423,7 +2361,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1442,9 +2380,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "ac71659b00dcdb5007ee10d66733b08976901dcdecda916a55a228f27b690561",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "7dd0fa5b50854c9a5d5cbfdd16a0b19d9bd3009aea8244bbdfe83e75408ba23b",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -1505,7 +2443,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1553,7 +2491,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1572,9 +2510,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "b5d6d593859ce98b4d6b67aa0f05528de768315f397a8c8c58c746b855335494",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "f9c7d30067452ca8f23ff0a48eba2ada42509fca3818ce2127e8821ff1c34912",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -1635,7 +2573,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1683,7 +2621,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1737,9 +2675,9 @@
     ],
     "entries": [
       {
-        "controller_version": 15,
-        "revision_id": "a85fb25809d94e9a0fc354d5775ea6cf854098c55b77049009f3ac77d7891352",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "326d3683d020d29d211fe5680443afcc091bdb518f025eade31a041f96c641b9",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -1800,7 +2738,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1848,7 +2786,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1881,9 +2819,9 @@
     ],
     "entries": [
       {
-        "controller_version": 15,
-        "revision_id": "743be00d12c61716f4ee5256c14756ce9151d897135656c04972981bc494f198",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "9a42a315ff9bf5807b5cf2a5d0786ae833f23fe61f74202f0c883dcce405cd48",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -1944,7 +2882,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -1992,7 +2930,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2047,9 +2985,9 @@
     ],
     "entries": [
       {
-        "controller_version": 15,
-        "revision_id": "a85fb25809d94e9a0fc354d5775ea6cf854098c55b77049009f3ac77d7891352",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "326d3683d020d29d211fe5680443afcc091bdb518f025eade31a041f96c641b9",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -2110,7 +3048,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2158,7 +3096,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2173,9 +3111,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "ca58b289d2dd8185c51490e9513247a6389aa9e83aa5f082c62125e4476f6314",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "6ce0b7ced504c3d87f5b1ffa8a1b685fee2663584fcb6889253534534846dfe3",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -2236,7 +3174,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2284,7 +3222,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2303,9 +3241,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "743be00d12c61716f4ee5256c14756ce9151d897135656c04972981bc494f198",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "9a42a315ff9bf5807b5cf2a5d0786ae833f23fe61f74202f0c883dcce405cd48",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -2366,7 +3304,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2414,7 +3352,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2451,6 +3389,432 @@
       }
     ]
   },
+  "temporary": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "1 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 16,
+        "revision_id": "5afa5a3a2db2fb8059c2f95503078bf05c8e6f4d7c55e196d55bf68b7ab574a7",
+        "episode_id": "503dc4a5e80fcc85dbd130ee912f280081707bc6acda41bfdab53b311fa82fb3",
+        "target_id": "e07fa26bc9d41533f42691d2889c08a1b1ee0f6c4875f9fe5daa309a58d3b996",
+        "target_scope": "database",
+        "scope_id": "fe309c90da5ab17593e4b35adb2610e44e9e702fee121fa9cfc19de66ff6a367",
+        "source": "mssql-cleanup",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "1",
+        "previous_revision": null,
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "unresolved",
+        "title": "Tempdb question: which native contributors are visible alongside this recorded cleanup boundary? · revision 1",
+        "phase": "Observed active in this revision. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:01Z",
+        "last_seen_at": "2020-01-01T12:00:01Z",
+        "recorded_at": "2020-01-01T12:00:12Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f",
+              "stream": "operational-samples",
+              "native_key": {
+                "kind": "operational",
+                "data": {
+                  "source": "open transactions",
+                  "key": "oldest-cleanup-transaction"
+                }
+              },
+              "batch_id": "bf2236388feffc32e671c270cf805ac87c6f2644ae927ff83325a69534ed944a",
+              "record_id": "0ea2b2b7d4b220994568e8334508d064598830fedbb67b84ca5ebfbfc7545e3d",
+              "payload_sha256": "c4cba4356c5fb0b906f9b8cf586a089319641f7fd2fce90ebec34065cc341c8d",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f",
+              "stream": "operational-samples",
+              "native_key": {
+                "kind": "operational",
+                "data": {
+                  "source": "open transactions",
+                  "key": "oldest-cleanup-transaction"
+                }
+              },
+              "batch_id": "bf2236388feffc32e671c270cf805ac87c6f2644ae927ff83325a69534ed944a",
+              "record_id": "0ea2b2b7d4b220994568e8334508d064598830fedbb67b84ca5ebfbfc7545e3d",
+              "payload_sha256": "c4cba4356c5fb0b906f9b8cf586a089319641f7fd2fce90ebec34065cc341c8d",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Historical source result",
+            "capture": {
+              "capture": {
+                "observation_id": "temporary-task-result",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "104c1c9ce8f64810c66e4005b0503adc1adbcd9c4972c43359aa924e38aef04f",
+              "source_scope_id": "e9cacc0ae111bc7b001384dadd405781728e66d9a439208ff263019410c6721c"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Typed analysis original",
+            "capture": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f",
+              "stream": "operational-samples",
+              "native_key": {
+                "kind": "operational",
+                "data": {
+                  "source": "open transactions",
+                  "key": "oldest-cleanup-transaction"
+                }
+              },
+              "batch_id": "bf2236388feffc32e671c270cf805ac87c6f2644ae927ff83325a69534ed944a",
+              "record_id": "0ea2b2b7d4b220994568e8334508d064598830fedbb67b84ca5ebfbfc7545e3d",
+              "payload_sha256": "c4cba4356c5fb0b906f9b8cf586a089319641f7fd2fce90ebec34065cc341c8d",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 3,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "unsupported"
+        },
+        "reasons": [
+          "This follow-up was unsupported.",
+          "A source question retained its bounded answer.",
+          "Tempdb question: which native contributors are visible alongside this recorded cleanup boundary?",
+          "Several contributors may coexist. The selected originals establish context, without proving a dominant or exclusive cause.",
+          "Cleanup observation: 2020-01-01T12:00:00Z to 2020-01-01T12:00:01Z. Task observation: 2020-01-01T12:00:10Z to 2020-01-01T12:00:11Z. These captures are not atomic.",
+          "The bounded task source returned native rows; this does not establish complete workload coverage.",
+          "Task counters record reserved or allocated and deallocated pages during a request. Caching and earlier statements can contribute; these counters do not measure current footprint or spill time.",
+          "Task counters concern tempdb on the captured member. Without checked request-database context, a task has no proven association with the selected database or allocating statement. Role checks are separate points, not continuous coverage.",
+          "2 captured task rows have checked current-request context; this does not identify the allocating statement.",
+          "Evidence links show bounded original row prefixes; all 2 captured task rows remain in the retained result.",
+          "Native user-object allocation counters were recorded; legitimate work and excessive allocation remain competing explanations.",
+          "Internal-object allocation activity remains unresolved in these originals.",
+          "The original retained an exact native cleanup boundary with session and transaction generations. This alone does not prove tempdb pressure.",
+          "The original boundary includes a native snapshot-isolation participant. It may protect versions, without attributing retained bytes.",
+          "Version generation is unresolved; task allocations and a cleanup boundary do not measure generated versions.",
+          "A spill or bad estimate is unresolved; internal allocations alone do not establish either.",
+          "Concurrent memory reservations are unresolved without separately qualified grant evidence.",
+          "Tempdb data-file capacity and growth limits are unresolved without their own native observations.",
+          "Tempdb log capacity and reuse constraints are unresolved without their own native observations.",
+          "Allocation-page latch contention is unresolved without exact native wait and page-target evidence.",
+          "Physical I/O is unresolved without separately scoped native wait or file-I/O observations.",
+          "A typed analysis reference is retained in this revision."
+        ],
+        "next_step": "Compare separately retained plans, grant reservations, version-store activity, data/log capacity and native wait/page evidence for the relevant interval. Keep multiple contributors and unresolved ownership visible."
+      }
+    ]
+  },
+  "temporary_partial": {
+    "provenance": "imported-artifact",
+    "selected_read_complete": true,
+    "source_state": null,
+    "source_reason": null,
+    "title": "Recorded diagnostic history",
+    "summary": "1 selected diagnostic revisions.",
+    "limitations": [
+      "Only selected immutable revisions are shown. Unselected or later transitions may change the lifecycle or analysis; this selection does not establish current controller state.",
+      "A source-observation group may recur. Revision counts are neither distinct incident occurrences nor execution counts.",
+      "First and latest are original observation times. Recorded is collector analysis time; a native recovery time is not inferred.",
+      "Evidence links retain original identities. Their payloads were not reopened, so current payload availability remains unknown.",
+      "Recorded admissions and outcomes are historical. They confer no authority to act on current sessions or start source work.",
+      "This imported JSONL was checked structurally only. Its source, manifest, completeness and references are unverified."
+    ],
+    "entries": [
+      {
+        "controller_version": 16,
+        "revision_id": "ae1de063b9e322330608cd21261525c93e223fb87e98369e26ff026822425eb2",
+        "episode_id": "503dc4a5e80fcc85dbd130ee912f280081707bc6acda41bfdab53b311fa82fb3",
+        "target_id": "e07fa26bc9d41533f42691d2889c08a1b1ee0f6c4875f9fe5daa309a58d3b996",
+        "target_scope": "database",
+        "scope_id": "fe309c90da5ab17593e4b35adb2610e44e9e702fee121fa9cfc19de66ff6a367",
+        "source": "mssql-cleanup",
+        "scope": "database",
+        "scope_label": "Original database scope",
+        "revision": "1",
+        "previous_revision": null,
+        "predecessor_selected": true,
+        "lifecycle": "active",
+        "analysis": "unresolved",
+        "title": "Tempdb question: which native contributors are visible alongside this recorded cleanup boundary? · revision 1",
+        "phase": "Observed active in this revision. Analysis remained unresolved.",
+        "first_seen_at": "2020-01-01T12:00:01Z",
+        "last_seen_at": "2020-01-01T12:00:01Z",
+        "recorded_at": "2020-01-01T12:00:12Z",
+        "original": null,
+        "evidence": [
+          {
+            "label": "First observation",
+            "capture": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f",
+              "stream": "operational-samples",
+              "native_key": {
+                "kind": "operational",
+                "data": {
+                  "source": "open transactions",
+                  "key": "oldest-cleanup-transaction"
+                }
+              },
+              "batch_id": "bf2236388feffc32e671c270cf805ac87c6f2644ae927ff83325a69534ed944a",
+              "record_id": "0ea2b2b7d4b220994568e8334508d064598830fedbb67b84ca5ebfbfc7545e3d",
+              "payload_sha256": "c4cba4356c5fb0b906f9b8cf586a089319641f7fd2fce90ebec34065cc341c8d",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Latest observation",
+            "capture": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f",
+              "stream": "operational-samples",
+              "native_key": {
+                "kind": "operational",
+                "data": {
+                  "source": "open transactions",
+                  "key": "oldest-cleanup-transaction"
+                }
+              },
+              "batch_id": "bf2236388feffc32e671c270cf805ac87c6f2644ae927ff83325a69534ed944a",
+              "record_id": "0ea2b2b7d4b220994568e8334508d064598830fedbb67b84ca5ebfbfc7545e3d",
+              "payload_sha256": "c4cba4356c5fb0b906f9b8cf586a089319641f7fd2fce90ebec34065cc341c8d",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Historical source result",
+            "capture": {
+              "capture": {
+                "observation_id": "temporary-task-result",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "104c1c9ce8f64810c66e4005b0503adc1adbcd9c4972c43359aa924e38aef04f",
+              "source_scope_id": "e9cacc0ae111bc7b001384dadd405781728e66d9a439208ff263019410c6721c"
+            },
+            "reference": null,
+            "availability": "Unverified imported reference; payload availability not checked."
+          },
+          {
+            "label": "Typed analysis original",
+            "capture": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f"
+            },
+            "reference": {
+              "capture": {
+                "observation_id": "temporary-cleanup-original",
+                "revision": {
+                  "outbox_id": "outbox",
+                  "owner_epoch": "1",
+                  "sequence": "2"
+                }
+              },
+              "manifest_sha256": "db4cbf0e0d3e7ec5097b825a067ea158ed955a3f1083d62a79baa82a0e3bb058",
+              "source_scope_id": "772ba001546680543d8d38118251da7bb94b9e2871a69d6979aaa68116f8415f",
+              "stream": "operational-samples",
+              "native_key": {
+                "kind": "operational",
+                "data": {
+                  "source": "open transactions",
+                  "key": "oldest-cleanup-transaction"
+                }
+              },
+              "batch_id": "bf2236388feffc32e671c270cf805ac87c6f2644ae927ff83325a69534ed944a",
+              "record_id": "0ea2b2b7d4b220994568e8334508d064598830fedbb67b84ca5ebfbfc7545e3d",
+              "payload_sha256": "c4cba4356c5fb0b906f9b8cf586a089319641f7fd2fce90ebec34065cc341c8d",
+              "representation_version": 2,
+              "row_ordinal": 0
+            },
+            "availability": "Unverified imported reference; payload availability not checked."
+          }
+        ],
+        "input_references": 5,
+        "followup_recipe": null,
+        "followup_recipe_version": null,
+        "issue": {
+          "kind": "unsupported"
+        },
+        "reasons": [
+          "This follow-up was unsupported.",
+          "A source question retained its bounded answer.",
+          "Tempdb question: which native contributors are visible alongside this recorded cleanup boundary?",
+          "Several contributors may coexist. The selected originals establish context, without proving a dominant or exclusive cause.",
+          "Cleanup observation: 2020-01-01T12:00:00Z to 2020-01-01T12:00:01Z. Task observation: 2020-01-01T12:00:10Z to 2020-01-01T12:00:11Z. These captures are not atomic.",
+          "The task source is partial; missing rows or request details remain unknown.",
+          "Task counters record reserved or allocated and deallocated pages during a request. Caching and earlier statements can contribute; these counters do not measure current footprint or spill time.",
+          "Task counters concern tempdb on the captured member. Without checked request-database context, a task has no proven association with the selected database or allocating statement. Role checks are separate points, not continuous coverage.",
+          "2 captured task rows have checked current-request context; this does not identify the allocating statement.",
+          "Evidence links show bounded original row prefixes; all 5 captured task rows remain in the retained result.",
+          "Native user-object allocation counters were recorded; legitimate work and excessive allocation remain competing explanations.",
+          "Internal-object allocation activity remains unresolved in these originals.",
+          "The original retained an exact native cleanup boundary with session and transaction generations. This alone does not prove tempdb pressure.",
+          "The original boundary includes a native snapshot-isolation participant. It may protect versions, without attributing retained bytes.",
+          "Version generation is unresolved; task allocations and a cleanup boundary do not measure generated versions.",
+          "A spill or bad estimate is unresolved; internal allocations alone do not establish either.",
+          "Concurrent memory reservations are unresolved without separately qualified grant evidence.",
+          "Tempdb data-file capacity and growth limits are unresolved without their own native observations.",
+          "Tempdb log capacity and reuse constraints are unresolved without their own native observations.",
+          "Allocation-page latch contention is unresolved without exact native wait and page-target evidence.",
+          "Physical I/O is unresolved without separately scoped native wait or file-I/O observations.",
+          "A typed analysis reference is retained in this revision."
+        ],
+        "next_step": "Compare separately retained plans, grant reservations, version-store activity, data/log capacity and native wait/page evidence for the relevant interval. Keep multiple contributors and unresolved ownership visible."
+      }
+    ]
+  },
   "uncertain": {
     "provenance": "imported-artifact",
     "selected_read_complete": true,
@@ -2468,9 +3832,9 @@
     ],
     "entries": [
       {
-        "controller_version": 15,
-        "revision_id": "a85fb25809d94e9a0fc354d5775ea6cf854098c55b77049009f3ac77d7891352",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "326d3683d020d29d211fe5680443afcc091bdb518f025eade31a041f96c641b9",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -2531,7 +3895,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2579,7 +3943,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2594,9 +3958,9 @@
         "next_step": "Inspect the retained originals and recorded reason. Unfinished analysis remains unresolved until qualified evidence answers it."
       },
       {
-        "controller_version": 15,
-        "revision_id": "ca58b289d2dd8185c51490e9513247a6389aa9e83aa5f082c62125e4476f6314",
-        "episode_id": "0d6afc49f162e8db9248601ce20714984e16afc33dd52f45430c4ff72d94abf3",
+        "controller_version": 16,
+        "revision_id": "6ce0b7ced504c3d87f5b1ffa8a1b685fee2663584fcb6889253534534846dfe3",
+        "episode_id": "183817b95e010ff04ac1913a98133b94ddee09be507c4f1787842884d16cd7b0",
         "target_id": "6117a569dfb2e93ff3d030cc4e3ff2693e8275ba5473617e9a41fc985de86faa",
         "target_scope": "database",
         "scope_id": "7aaaacbcbc486bb383b2a06e12fca07dd2b137c207543c5b20b8a0db34753610",
@@ -2657,7 +4021,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },
@@ -2705,7 +4069,7 @@
               },
               "batch_id": "b4e71dd3f0e10be386412533f5cb5bc490f3de53ab698d16ccd2b4d37fde8caa",
               "record_id": "4571ebb65c5cb7104c00f41760bf104551d7f0d4c82022b4677aaf44a91f2157",
-              "payload_sha256": "b3215c3cb098d30a5bbbce4136b83a66c3483e78382b7d88ee0706f70de44f42",
+              "payload_sha256": "01013fe48f789ec0eb3454905dbafa5963946409b6099382e1b097f7c2123997",
               "representation_version": 2,
               "row_ordinal": 0
             },

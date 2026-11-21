@@ -39,7 +39,7 @@ impl TelemetryCollection {
 pub enum CollectionSelection {
     SourceRead {
         focus: Box<SourceReadFocus>,
-        execution: Box<NativeSourceReadScope>,
+        execution: Box<SourceReadExecutionScope>,
     },
     QueryHistory {
         from: String,
@@ -410,6 +410,11 @@ impl DiagnosticCaptureDescription {
 #[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum SourceObservation {
+    /// Existing held local readers retain their actual native role; identity/bounds stay in the source/snapshot.
+    LocalResource {
+        snapshot: StateSnapshotDescription,
+        database_writable: bool,
+    },
     /// The dataset keeps its logical namespace. Execution is the original source-owned native read owner,
     /// separate from query/compile population identities and from the private incident retained in lineage.
     SourceRead {
@@ -614,7 +619,7 @@ impl SourceObservation {
             Self::MysqlEvents { .. } | Self::Jobs { .. } | Self::MssqlAgentJobs { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::Jobs)
             }
-            Self::Snapshot(snapshot) | Self::SourceRead { snapshot, .. } => {
+            Self::Snapshot(snapshot) | Self::LocalResource { snapshot, .. } | Self::SourceRead { snapshot, .. } => {
                 TelemetryCollection::Snapshot(snapshot.dataset)
             }
             Self::PagedSnapshot(snapshot) | Self::PagedSourceRead { snapshot, .. } => {
@@ -676,6 +681,7 @@ impl SourceObservation {
             | Self::MssqlReplication { .. }
             | Self::GroupReplication { .. }
             | Self::Galera { .. }
+            | Self::LocalResource { .. }
             | Self::Snapshot(_)
             | Self::PagedSnapshot(_) => TelemetryRange::Current,
         })
@@ -714,11 +720,13 @@ impl SourceObservation {
 
     pub fn covers_request(&self) -> bool {
         match self {
+            Self::LocalResource { snapshot, .. } => local_resource_header_is_valid(snapshot),
             Self::SourceRead { snapshot, focus_key, execution } => {
                 snapshot.is_valid()
                     && SourceReadQuestion::for_dataset(snapshot.dataset).is_some()
                     && valid_digest(focus_key)
-                    && NativeSourceReadScope::from_context(execution).is_ok()
+                    && SourceReadQuestion::for_dataset(snapshot.dataset)
+                        .is_some_and(|question| SourceReadExecutionScope::from_context(question, execution).is_ok())
                     && same_time(&snapshot.observed_from, &execution.observed_from)
                     && same_time(&snapshot.observed_until, &execution.observed_until)
             }
@@ -854,6 +862,7 @@ impl SourceObservation {
     pub fn snapshot(&self) -> Option<&StateSnapshotDescription> {
         match self {
             Self::Snapshot(snapshot)
+            | Self::LocalResource { snapshot, .. }
             | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
             | Self::MysqlEvents { snapshot, .. }
@@ -884,6 +893,7 @@ impl SourceObservation {
     pub fn accepts_snapshot_record(&self, stream: TelemetryStream, source: &str) -> bool {
         match self {
             Self::Snapshot(snapshot)
+            | Self::LocalResource { snapshot, .. }
             | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
             | Self::MysqlEvents { snapshot, .. }
@@ -957,6 +967,7 @@ impl SourceObservation {
                     && count(TelemetryStream::DiagnosticCheckpoints) == u64::from(description.checkpoint_records)
             }
             Self::Snapshot(snapshot)
+            | Self::LocalResource { snapshot, .. }
             | Self::SourceRead { snapshot, .. }
             | Self::MssqlReplication { snapshot, .. }
             | Self::MssqlPoolCurrent { snapshot, .. }
@@ -1025,7 +1036,12 @@ impl CollectionDescription {
                     return Err(CollectionStop::InvalidPage.error());
                 };
                 if !declared.accepts_completion(&snapshot)
-                    || !NativeSourceReadScope::from_context(initial)?.matches_context(&execution)
+                    || !SourceReadExecutionScope::from_context(
+                        SourceReadQuestion::for_dataset(snapshot.dataset)
+                            .ok_or_else(|| CollectionStop::InvalidPage.error())?,
+                        initial,
+                    )?
+                    .matches_context(&execution)
                     || !same_time(&initial.observed_from, &execution.observed_from)
                     || ObservationBounds::new(&initial.observed_until, &execution.observed_until).is_none()
                 {
@@ -1086,6 +1102,7 @@ impl CollectionDescription {
             return valid
                 && focus.question.accepts_dataset(dataset)
                 && focus.key().ok().as_ref() == Some(focus_key)
+                && expected.accepts_question(focus.question)
                 && expected.matches_context(actual)
                 && expected.matches_target(&self.target)
                 && self.partition == SourcePartition::Target
@@ -1282,6 +1299,7 @@ impl CollectionDescription {
         }
         if let (
             SourceObservation::Snapshot(snapshot)
+            | SourceObservation::LocalResource { snapshot, .. }
             | SourceObservation::MssqlPoolCurrent { snapshot, .. }
             | SourceObservation::BackupHistory { snapshot, .. }
             | SourceObservation::MssqlReplication { snapshot, .. }

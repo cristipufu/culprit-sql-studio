@@ -6,7 +6,7 @@ use super::*;
 #[ts(export)]
 pub enum DiagnosticExecutionBinding {
     Database,
-    NativeRead { execution: Box<NativeSourceReadScope> },
+    NativeRead { execution: Box<SourceReadExecutionScope> },
     Shared { owner: Box<DiagnosticEvidenceRef> },
 }
 
@@ -38,7 +38,8 @@ impl DiagnosticExecutionBinding {
             (Self::NativeRead { execution }, RecipeCostScope::NativeRead(scope)) => {
                 execution.is_valid()
                     && execution.key().ok() == scope.key().ok()
-                    && matches!(focus, DiagnosticFocus::SourceRead { focus } if execution.matches_target(&focus.target))
+                    && matches!(focus, DiagnosticFocus::SourceRead { focus }
+                        if execution.accepts_question(focus.question) && execution.matches_target(&focus.target))
             }
             _ => false,
         }

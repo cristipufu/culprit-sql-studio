@@ -85,3 +85,36 @@ pub(super) fn event(value: &DiagnosticInvestigationEvent) -> Result<Value> {
         "outcome": value.outcome,
     }))
 }
+
+#[derive(Serialize)]
+struct PublicSourceReadStage<'a> {
+    question: SourceReadQuestion,
+    focus_key: String,
+    state: &'static str,
+    result: Option<&'a DiagnosticCaptureRef>,
+    /// Consistency only. Public keys cannot recreate original scope, cost authority or an answer.
+    content_sha256: String,
+}
+
+pub(super) fn source_stage(stage: &SourceReadStage) -> Result<Value> {
+    if !stage.is_valid() {
+        return Err(DeliveryProblem::Integrity.error());
+    }
+    let body = serde_json::to_vec(stage).map_err(|_| DeliveryProblem::Integrity.error())?;
+    serde_json::to_value(PublicSourceReadStage {
+        question: stage.focus.question,
+        focus_key: stage.focus.key()?,
+        state: match &stage.state {
+            SourceReadStageState::Pending => "pending",
+            SourceReadStageState::Deferred { .. } => "deferred",
+            SourceReadStageState::Collecting => "collecting",
+            SourceReadStageState::Captured { .. } => "captured",
+            SourceReadStageState::Answered { .. } => "answered",
+            SourceReadStageState::Recovered => "recovered",
+            SourceReadStageState::Stopped { .. } => "stopped",
+        },
+        result: stage.result(),
+        content_sha256: digest(&body),
+    })
+    .map_err(|_| DeliveryProblem::Integrity.error())
+}

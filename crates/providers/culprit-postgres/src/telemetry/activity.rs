@@ -24,6 +24,7 @@ struct ActivityReader<R = ReadSession> {
     host: String,
     port: u16,
     verified: Option<CollectionDescription>,
+    profile: Option<culprit_read::SourceProfileGuard>,
 }
 #[cfg(test)]
 pub(crate) fn fixture_source(
@@ -31,8 +32,11 @@ pub(crate) fn fixture_source(
     request: &CollectionRequest,
 ) -> Box<dyn TelemetrySource> {
     Box::new(
-        FrozenSource::new(ActivityReader { io, host: "fixture.invalid".into(), port: 9, verified: None }, request)
-            .unwrap(),
+        FrozenSource::new(
+            ActivityReader { io, host: "fixture.invalid".into(), port: 9, verified: None, profile: None },
+            request,
+        )
+        .unwrap(),
     )
 }
 pub(super) fn source(connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
@@ -48,18 +52,45 @@ pub(super) fn source(connector: Connector, request: &CollectionRequest) -> Resul
         port: connector.port,
         io: ReadSession::new(connector, request.budget.clone()),
         verified: None,
+        profile: None,
     };
     Ok(Box::new(FrozenSource::new(reader, &request)?))
+}
+pub(crate) fn profile_source(
+    connector: Connector,
+    request: &CollectionRequest,
+    admission: &SourceProfileAdmission,
+) -> Result<Box<dyn TelemetrySource>> {
+    request.validate()?;
+    request.subject.require_database()?;
+    if request.selection != CollectionSelection::Activity || bounded_budget(&request.budget) != request.budget {
+        return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+    }
+    let profile = culprit_read::SourceProfileGuard::new(request, admission)?;
+    let reader = ActivityReader {
+        host: connector.host.clone(),
+        port: connector.port,
+        io: ReadSession::new(connector, request.budget.clone()).with_profile(profile.clone()),
+        verified: None,
+        profile: Some(profile),
+    };
+    Ok(Box::new(FrozenSource::new(reader, request)?))
 }
 #[async_trait::async_trait]
 impl<R: crate::read::NativeRead> ObservationReader for ActivityReader<R> {
     async fn observe(&mut self, request: &CollectionRequest) -> Result<FrozenObservation> {
-        let capture = capture(&mut self.io, &self.host, self.port, request).await?;
+        let capture = match &self.profile {
+            Some(profile) => capture_with_profile(&mut self.io, &self.host, self.port, request, Some(profile)).await?,
+            None => capture(&mut self.io, &self.host, self.port, request).await?,
+        };
         self.verified = Some(capture.description.clone());
         Ok(capture)
     }
     async fn verify(&mut self, description: &CollectionDescription) -> Result<bool> {
         // Required source checks already bracket the frozen native observation. Paging performs no more SQL.
+        if let Some(profile) = &self.profile {
+            profile.verify_final(&NativeReadContext::from_activity(description)?, self.io.connection_generation())?;
+        }
         Ok(self.verified.as_ref() == Some(description))
     }
     fn query_count(&self) -> u32 {
@@ -79,11 +110,27 @@ async fn capture<R: crate::read::QueryRead>(
     port: u16,
     request: &CollectionRequest,
 ) -> Result<FrozenObservation> {
+    capture_with_profile(reader, host, port, request, None).await
+}
+async fn capture_with_profile<R: crate::read::QueryRead>(
+    reader: &mut R,
+    host: &str,
+    port: u16,
+    request: &CollectionRequest,
+    profile: Option<&culprit_read::SourceProfileGuard>,
+) -> Result<FrozenObservation> {
+    if let Some(profile) = profile {
+        profile.ensure_active()?;
+    }
     let before = metadata::activity(reader, host, port).await?;
     if before.version < 120_000 {
         return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
     }
     let owner = Context::observe(reader, &before).await?;
+    if let Some(profile) = profile {
+        let owner = owner.as_ref().ok_or_else(|| CollectionStop::SourceChanged.error())?;
+        profile.bind_native(&owner.read_context()?, reader.connection_generation())?;
+    }
     let read = activity::observe_baseline_rows(
         reader,
         &activity::query(before.version, request.budget.max_snapshot_rows as usize + 1),
@@ -100,6 +147,9 @@ async fn capture<R: crate::read::QueryRead>(
     let completion = local_context::complete(reader, host, port, &before, owner.as_ref()).await?;
     let visible = completion.full_visibility && read.frame.fully_visible_for(&before.database_oid);
     let context = completion.context;
+    if let Some(profile) = profile {
+        profile.verify_final(&context, reader.connection_generation())?;
+    }
     let qualified = context.has_qualified_local_owner();
     let mut observations = read.frame.observations();
     for row in &mut observations {

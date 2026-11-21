@@ -116,7 +116,7 @@ impl Files {
             {
                 return Err(integrity());
             }
-            row_references(&parent, &source, decode(&restored)?)?
+            positioned_references(&parent, &source, decode(&restored)?, investigation.as_ref())?
         } else {
             let (validated, rows) = self.validated_rows(id, RowSelection::Diagnostic)?;
             if validated.manifest_sha != parent.manifest_sha256
@@ -126,7 +126,7 @@ impl Files {
             {
                 return Err(integrity());
             }
-            referenced_rows(&parent, &source, rows)?
+            referenced_rows(&parent, &source, rows, investigation.as_ref())?
         };
         let key = controller_key(&parent, controller_target(&source, investigation.as_ref())?, controller_version)?;
         let head: Option<(String, String)> = self
@@ -201,7 +201,7 @@ impl Files {
             {
                 return Err(integrity());
             }
-            let rows = row_references(&parent, &source, decode::<Vec<ExportedRecord>>(restored)?)?;
+            let rows = positioned_references(&parent, &source, decode(restored)?, investigation.as_ref())?;
             (parent, source, rows)
         } else {
             let (validated, rows) = self.validated_rows(id, RowSelection::All)?;
@@ -211,7 +211,7 @@ impl Files {
                 source_scope_id: validated.range()?.scope_id,
             };
             let source = validated.manifest.description.ok_or_else(integrity)?;
-            let rows = referenced_rows(&parent, &source, rows)?;
+            let rows = referenced_rows(&parent, &source, rows, None)?;
             (parent, source, rows)
         };
         if parent != reference.capture_ref() {
@@ -327,9 +327,16 @@ impl Files {
     pub(in crate::outbox) fn verify_source_read_parent(
         &mut self,
         focus: &SourceReadFocus,
-        execution: &NativeSourceReadScope,
+        execution: &SourceReadExecutionScope,
     ) -> Result<()> {
-        let (source, row) = self.diagnostic_reference_for(&focus.basis, ReferenceUse::ActivityAuthority)?;
+        let purpose = match focus.prerequisite {
+            SourceReadPrerequisite::CompilationAdmission { .. } | SourceReadPrerequisite::ObservedLogRateWait => {
+                ReferenceUse::ActivityAuthority
+            }
+            SourceReadPrerequisite::ObservedCleanupBoundary { .. }
+            | SourceReadPrerequisite::ObservedQueryHistoryFailure { .. } => ReferenceUse::Evidence,
+        };
+        let (source, row) = self.diagnostic_reference_for(&focus.basis, purpose)?;
         if !focus.matches_basis(&source, &row, execution) {
             return Err(integrity());
         }
@@ -414,7 +421,7 @@ impl Files {
             manifest_sha256: validated.manifest_sha.clone(),
             source_scope_id: source.captured_range()?.scope_id,
         };
-        let rows = referenced_rows(&parent, &source, rows)?;
+        let rows = referenced_rows(&parent, &source, rows, None)?;
         Ok(rows.into_iter().find_map(|row| {
             let TelemetryRecord::Operational(observation) = &row.row.record else { return None };
             let positive = source.observation.snapshot()?.sources.iter().any(|coverage| {
@@ -464,11 +471,15 @@ impl Files {
         if !accepted {
             return Err(integrity());
         }
-        let rows = row_references(&input.parent, &input.source, input.rows.clone())?;
+        let rows =
+            positioned_references(&input.parent, &input.source, input.rows.clone(), input.investigation.as_ref())?;
         if rows.iter().any(|row| !row.row.record.is_valid()) {
             return Err(integrity());
         }
-        if matches!(input.source.observation, SourceObservation::SourceRead { .. }) && !input.rows.is_empty() {
+        if matches!(input.source.observation, SourceObservation::SourceRead { .. })
+            && !source_read_retains_rows(&input.source, input.investigation.as_ref())?
+            && !input.rows.is_empty()
+        {
             return Err(integrity());
         }
         let encoded = encode(&input.rows)?;

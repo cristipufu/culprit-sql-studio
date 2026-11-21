@@ -66,7 +66,12 @@ mod blocking;
 pub use blocking::{BlockingCase, assert_blocking_capture, blocking_evidence, blocking_evidence_cases};
 pub use compilation_intervals::compilation_interval_evidence;
 mod diagnostics;
+mod query_compilation_followup;
 pub use diagnostics::{assert_diagnostic_capture, diagnostic_evidence_cases};
+pub use query_compilation_followup::{
+    QueryCompilationFollowupCase, QueryCompilationOriginal, assert_query_compilation_followup_capture,
+    query_compilation_followup_evidence, query_compilation_followup_original, query_compilation_followup_result,
+};
 mod source_overhead;
 pub use source_overhead::{
     SOURCE_OVERHEAD_QUERY_COUNT, assert_native_source_overhead_summary, connection_source_overhead_read_metrics,
@@ -1112,3 +1117,9 @@ pub use incident_history::{IncidentHistoryCase, assert_incident_history_capture,
 
 mod diagnostic_originals;
 pub use diagnostic_originals::{DiagnosticOriginalCase, diagnostic_original_evidence};
+
+mod temporary_resources;
+pub use temporary_resources::{temporary_resource_basis, temporary_resource_history, temporary_resource_result};
+
+mod baseline_profile;
+pub use baseline_profile::baseline_profile_expectation;

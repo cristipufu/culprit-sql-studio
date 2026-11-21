@@ -2,7 +2,7 @@
 use culprit_core::{Result, telemetry::*};
 use serde_json::{Value, json};
 
-pub const PREPARATION_VERSION: u32 = 58;
+pub const PREPARATION_VERSION: u32 = 59;
 const MAX_PREVIEW_BYTES: usize = 1024;
 const MAX_INLINE_DETAIL_BYTES: usize = 128 * 1024;
 
@@ -81,6 +81,10 @@ fn operational(input: &mut Value, row: &OperationalObservation) -> Result<()> {
         // preserves older replica epochs without duplicating private database or compute-member identity.
         *input.pointer_mut("/record/data/fact/data/episode/scope").ok_or_else(invalid)? =
             json!({"key": revision.episode.scope.key()?});
+        if let Some(stage) = &revision.episode.source_read {
+            *input.pointer_mut("/record/data/fact/data/episode/source_read").ok_or_else(invalid)? =
+                super::investigations::source_stage(stage)?;
+        }
         if let Some(investigation) = &revision.investigation {
             *input.pointer_mut("/record/data/fact/data/investigation").ok_or_else(invalid)? =
                 super::investigations::event(investigation)?;

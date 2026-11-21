@@ -172,6 +172,13 @@ impl Provider for MssqlProvider {
     ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
         telemetry::source(self.pool.clone(), request, self.endpoint_host.clone(), self.endpoint_port)
     }
+    fn telemetry_source_for_profile(
+        &self,
+        request: &culprit_core::telemetry::CollectionRequest,
+        profile: &culprit_core::telemetry::SourceProfileAdmission,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        telemetry::profile_source(self.pool.clone(), request, self.endpoint_host.clone(), self.endpoint_port, profile)
+    }
     async fn telemetry_intervals(
         &self,
         request: &culprit_core::telemetry::IntervalDiscoveryRequest,

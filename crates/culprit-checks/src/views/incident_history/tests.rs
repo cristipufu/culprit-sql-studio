@@ -1,5 +1,5 @@
 use super::*;
-fn first() -> DiagnosticRevision {
+pub(super) fn first() -> DiagnosticRevision {
     let reference = DiagnosticEvidenceRef {
         capture: CaptureIdentity {
             observation_id: "native-first".into(),

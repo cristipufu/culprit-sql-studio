@@ -18,7 +18,7 @@ use tokio::time::Instant;
 
 mod qualification_pins;
 
-async fn restart(runtime: Runtime, expected_source_debts: u32) -> Runtime {
+pub(super) async fn restart(runtime: Runtime, expected_source_debts: u32) -> Runtime {
     let Harness { _directory, inventory, outbox, journal, bindings, backend } = runtime.fixture;
     drop(outbox);
     drop(journal);
@@ -154,7 +154,7 @@ async fn cold_pending_control_replays_exact_original_and_gateway_proofs_with_no_
     assert_eq!(runtime.native_calls(), before);
 }
 
-async fn archive_ready(
+pub(super) async fn archive_ready(
     runtime: &mut Runtime,
     store: &FileRecoveryStore,
     fence: &Fence,

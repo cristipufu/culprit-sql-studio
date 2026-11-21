@@ -146,14 +146,14 @@ impl DiagnosticHeads {
 
 pub struct RecoveredDiagnosticInput {
     range: CommittedRange,
-    rows: Vec<ExportedRecord>,
+    rows: Vec<(u32, ExportedRecord)>,
 }
 /// One exact immutable row authenticated by the recovery manifest and bounded payload reader.
 /// Loading it never installs or acknowledges a diagnostic input obligation.
 pub struct RecoveredDiagnosticEvidence {
     range: CommittedRange,
     record: ExportedRecord,
-    cached_rows: Option<Vec<ExportedRecord>>,
+    cached_rows: Option<Vec<(u32, ExportedRecord)>>,
 }
 impl RecoveredDiagnosticEvidence {
     pub fn source(&self) -> &CollectionDescription {
@@ -193,14 +193,15 @@ pub async fn load_diagnostic_evidence(
     }
     let cacheable =
         crate::outbox::evidence_cache_source(&range.manifest().source, range.manifest().investigation.as_ref())?;
-    let rows = read_rows(store, range.manifest(), (!cacheable).then_some(reference.stream)).await?;
+    let focus =
+        crate::outbox::source_read_result_focus(&range.manifest().source, range.manifest().investigation.as_ref())?;
+    let (rows, _) = read_positions(store, range.manifest(), (!cacheable).then_some(reference.stream), focus).await?;
     // A validated range has one batch per stream. EOF authenticates the entire selected batch before its
     // exact receipt position is returned, including when the requested row occurs near the start.
     let record = rows
         .iter()
-        .filter(|row| row.batch_id == reference.batch_id)
-        .nth(reference.row_ordinal as usize)
-        .cloned()
+        .find(|(ordinal, row)| row.batch_id == reference.batch_id && *ordinal == reference.row_ordinal)
+        .map(|(_, row)| row.clone())
         .ok_or_else(invalid)?;
     let candidate = DiagnosticEvidenceRef::from_export(
         &range.manifest().source,
@@ -217,7 +218,7 @@ impl RecoveredDiagnosticInput {
     pub fn range(&self) -> &CommittedRange {
         &self.range
     }
-    pub(crate) fn into_parts(self) -> (CommittedRange, Vec<ExportedRecord>) {
+    pub(crate) fn into_parts(self) -> (CommittedRange, Vec<(u32, ExportedRecord)>) {
         (self.range, self.rows)
     }
 }
@@ -280,18 +281,18 @@ pub async fn load_diagnostic_input(store: &dyn RecoveryStore, range_id: &str) ->
             range.manifest().investigation.as_ref().ok_or_else(invalid)?.intent_for_source(&range.manifest().source)?;
         source_reads::authenticate(store, &intent).await?;
         // A control input attests the committed capture pointer. It neither loads nor interprets history rows.
-        return Ok(RecoveredDiagnosticInput { range, rows: vec![] });
+        if !crate::outbox::source_read_retains_rows(&range.manifest().source, range.manifest().investigation.as_ref())?
+        {
+            return Ok(RecoveredDiagnosticInput { range, rows: vec![] });
+        }
     }
     let rows = input_body(store, range.manifest()).await?;
     Ok(RecoveredDiagnosticInput { range, rows })
 }
 
-async fn input_body(store: &dyn RecoveryStore, manifest: &RangeManifest) -> Result<Vec<ExportedRecord>> {
-    let rows = read_rows(store, manifest, None).await?;
-    let mut references = crate::collection_references::ObservationReferences::default();
-    for row in &rows {
-        references.record(&row.record);
-    }
+async fn input_body(store: &dyn RecoveryStore, manifest: &RangeManifest) -> Result<Vec<(u32, ExportedRecord)>> {
+    let focus = crate::outbox::source_read_result_focus(&manifest.source, manifest.investigation.as_ref())?;
+    let (rows, references) = read_positions(store, manifest, None, focus).await?;
     if !references.coverage(true, Some(&manifest.source)).complete {
         return Err(invalid());
     }
@@ -551,15 +552,12 @@ fn native_intent(manifest: &RangeManifest) -> Result<Option<DiagnosticInvestigat
 
 fn input_rows(input: &RecoveredDiagnosticInput) -> Result<Vec<(DiagnosticEvidenceRef, &ExportedRecord)>> {
     let manifest = input.range().manifest();
-    let mut ordinals = BTreeMap::<&str, u32>::new();
     input
         .rows
         .iter()
-        .map(|row| {
-            let ordinal = ordinals.entry(&row.batch_id).or_default();
+        .map(|(ordinal, row)| {
             let reference =
                 DiagnosticEvidenceRef::from_export(&manifest.source, &manifest.capture_manifest_sha256, row, *ordinal)?;
-            *ordinal = ordinal.checked_add(1).ok_or_else(invalid)?;
             Ok((reference, row))
         })
         .collect()
@@ -921,6 +919,18 @@ async fn read_rows(
     manifest: &RangeManifest,
     only: Option<TelemetryStream>,
 ) -> Result<Vec<ExportedRecord>> {
+    let (rows, _) = read_positions(store, manifest, only, None).await?;
+    Ok(rows.into_iter().map(|(_, row)| row).collect())
+}
+
+/// Selection changes retained memory only. The same paid stream still verifies all original bytes, rows,
+/// source references and EOF before any selected native position becomes usable.
+async fn read_positions(
+    store: &dyn RecoveryStore,
+    manifest: &RangeManifest,
+    only: Option<TelemetryStream>,
+    focus: Option<&SourceReadFocus>,
+) -> Result<(Vec<(u32, ExportedRecord)>, crate::collection_references::ObservationReferences)> {
     let batches =
         manifest.batches.iter().filter(|batch| only.is_none_or(|stream| stream == batch.stream)).collect::<Vec<_>>();
     if batches.iter().map(|batch| batch.bytes).sum::<u64>() > MAX_DIAGNOSTIC_RECOVERY_BYTES
@@ -928,21 +938,26 @@ async fn read_rows(
     {
         return Err(DeliveryProblem::Capacity.error());
     }
-    let mut output = Vec::new();
+    let mut output = vec![];
+    let mut references = crate::collection_references::ObservationReferences::default();
     for batch in batches {
         let mut records = RecoveryRecords::open(store, batch).await?;
         let mut ordinal = 0;
         while let Some(row) = records.next().await? {
             batch.validate_row(&manifest.source, &manifest.capture, ordinal + 1, &row)?;
-            output.push(row);
+            references.record(&row.record);
+            if focus.is_none_or(|focus| focus.retains_result_record(&row.record)) {
+                output.push((u32::try_from(ordinal).map_err(|_| invalid())?, row));
+            }
             ordinal += 1;
         }
         if ordinal != batch.rows.len() {
             return Err(invalid());
         }
     }
-    Ok(output)
+    Ok((output, references))
 }
+
 fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()
 }

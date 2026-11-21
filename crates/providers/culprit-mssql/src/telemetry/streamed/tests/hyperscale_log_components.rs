@@ -128,10 +128,10 @@ fn log_rate_request() -> CollectionRequest {
     .unwrap();
     let focus = episode.source_read_focus().unwrap().unwrap();
     let execution = NativeSourceReadScope::from_context(&NativeReadContext::from_activity(&source).unwrap()).unwrap();
-    assert!(focus.matches_basis(&source, &row, &execution));
+    assert!(focus.matches_basis(&source, &row, &execution.clone().into()));
     CollectionRequest {
         subject: CollectionSubject::Database,
-        selection: CollectionSelection::SourceRead { focus: Box::new(focus), execution: Box::new(execution) },
+        selection: CollectionSelection::SourceRead { focus: Box::new(focus), execution: Box::new(execution.into()) },
         budget: crate::telemetry::hyperscale_log_components::bounded_budget(&CollectionBudget::upper_limits()),
     }
 }

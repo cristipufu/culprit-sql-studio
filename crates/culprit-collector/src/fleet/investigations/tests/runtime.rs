@@ -31,14 +31,32 @@ impl Runtime {
     }
 
     pub(super) async fn from_fixture(fixture: Harness) -> Self {
+        let mut runtime = Self::initialize(fixture).await;
+        runtime.baseline().await;
+        runtime
+    }
+
+    /// The Harness already sealed this original through the same factory/Outbox owner. Resume scheduler
+    /// bookkeeping from that confirmed capture instead of inventing a second historical native discovery.
+    pub(super) async fn from_captured_fixture(fixture: Harness) -> Self {
+        let mut runtime = Self::initialize(fixture).await;
+        let Work::Scheduled(_) = runtime.scheduler.take_allowed(runtime.started.elapsed(), |_| false).unwrap().unwrap()
+        else {
+            panic!("one existing captured baseline")
+        };
+        runtime.persist_admission().await;
+        runtime.finish(Outcome::Complete).await;
+        runtime.investigations.bindings = std::mem::take(&mut runtime.fixture.bindings);
+        runtime
+    }
+
+    async fn initialize(fixture: Harness) -> Self {
         let mut scheduler = Scheduler::new(&fixture.inventory, "one").unwrap();
         let started = Instant::now();
         let state = scheduler.initial_state(started.elapsed(), chrono::Utc::now()).unwrap();
         scheduler.persisted(fixture.journal.initialize_scheduler(state).await.unwrap()).unwrap();
         let investigations = Investigations::new(&fixture.inventory, "one");
-        let mut runtime = Self { fixture, investigations, scheduler, started };
-        runtime.baseline().await;
-        runtime
+        Self { fixture, investigations, scheduler, started }
     }
 
     pub(super) async fn baseline(&mut self) {
@@ -135,6 +153,10 @@ impl Runtime {
     }
 
     pub(super) async fn execute(&mut self, job: &FocusedJob) -> WorkResult {
+        self.try_execute(job).await.unwrap()
+    }
+
+    pub(super) async fn try_execute(&mut self, job: &FocusedJob) -> culprit_core::Result<WorkResult> {
         let admitted = AdmittedBackend::new(&self.fixture.backend, Instant::now());
         self.investigations
             .execute(
@@ -146,7 +168,6 @@ impl Runtime {
                 &CollectionCancellation::default(),
             )
             .await
-            .unwrap()
     }
 
     pub(super) async fn finish(&mut self, outcome: Outcome) {

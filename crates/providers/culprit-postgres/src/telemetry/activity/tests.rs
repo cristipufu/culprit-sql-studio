@@ -441,3 +441,5 @@ async fn client_only_selected_database_frame_refuses_foreign_or_unknown_native_b
         assert_eq!(reader.calls.len(), 3);
     }
 }
+
+mod profile;

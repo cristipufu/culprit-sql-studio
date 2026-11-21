@@ -309,8 +309,8 @@ async fn owned_report_rejects_replaced_lineage_even_when_native_payload_and_rece
     let reference = DiagnosticEvidenceRef::from_export(
         &fixture.native.source,
         &fixture.native.capture_manifest_sha256,
-        &native.rows[0],
-        0,
+        &native.rows[0].1,
+        native.rows[0].0,
     )
     .unwrap();
     let mut episode = fixture.episode.clone();

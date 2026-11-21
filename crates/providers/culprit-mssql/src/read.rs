@@ -83,6 +83,7 @@ struct ReadQuery {
     byte_limit: usize,
     output: Output,
     admission: Option<Arc<qualification::Admission>>,
+    profile: Option<culprit_read::SourceProfileGuard>,
 }
 
 enum QueryDispatch {
@@ -104,7 +105,7 @@ impl ReadQuery {
             #[cfg(test)]
             QueryDispatch::OwnedApplication => sql.into(),
         };
-        Self { sql, parameters, row_limit, byte_limit, output, admission: None }
+        Self { sql, parameters, row_limit, byte_limit, output, admission: None, profile: None }
     }
 }
 
@@ -168,6 +169,7 @@ pub(crate) struct ReadSession {
     native_work: session_work::SessionWork,
     admission: Option<Arc<qualification::Admission>>,
     session_setup: Option<qualification::SetupWork>,
+    profile: Option<culprit_read::SourceProfileGuard>,
     observation: Option<culprit_core::ProviderReaderObservation>,
 }
 struct StreamingRead {
@@ -234,9 +236,16 @@ impl ReadSession {
             first_query_attempt: None,
             native_work: session_work::SessionWork::default(),
             admission: None,
+            profile: None,
             session_setup: observed.then(qualification::SetupWork::observation),
             observation,
         }
+    }
+
+    pub(crate) fn with_profile(mut self, profile: culprit_read::SourceProfileGuard) -> Self {
+        self.session_setup = Some(qualification::SetupWork::for_profile(profile.clone()));
+        self.profile = Some(profile);
+        self
     }
 
     fn observe_work(&self) {
@@ -342,11 +351,18 @@ impl ReadSession {
             None => self.acquire(timeout).await?,
         };
         let timeout = self.remaining_statement_time()?;
+        if let Some(profile) = &self.profile
+            && let Err(error) = profile.check_connection(Some(self.connection_generation))
+        {
+            self.client = Some(client);
+            return Err(ReadError::Source(error));
+        }
         let (owner, cancelled) = tokio::sync::oneshot::channel::<()>();
         // The task owns the socket until result completion or Attention acknowledgement/disconnect. Dropping the
         // caller requests cancellation instead of dropping a future while leaving SQL work running on the server.
         let mut query = ReadQuery::new(sql, parameters, row_limit, byte_limit, output, dispatch);
         query.admission = self.admission.clone();
+        query.profile = self.profile.clone();
         let transport = self.pool.transport_owner();
         let template = self.metrics.begin(sql);
         let connection_phase = self.first_query_attempt.take().map(|attempt| {
@@ -391,6 +407,11 @@ impl ReadSession {
         }
         if !self.cancellation_confirmed {
             return Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed));
+        }
+        if let Some(profile) = &self.profile {
+            profile
+                .check_connection(self.client.as_ref().map(|_| self.connection_generation))
+                .map_err(ReadError::Source)?;
         }
         if self.queries >= self.budget.max_queries {
             return Err(ReadError::Stopped(CollectionStop::QueryLimit));
@@ -590,7 +611,11 @@ async fn read_owned(
     let started = std::time::Instant::now();
     let progress = Arc::new(crate::read_metrics::Progress::default());
     let retention = query.output.retention_control();
-    let outcome = finish_or_interrupt(read(&mut client, query, progress.clone()), timeout, cancelled, retention).await;
+    let outcome = if query.profile.as_ref().is_some_and(|profile| profile.ensure_active().is_err()) {
+        ReadOutcome::QuiescentStop(CollectionStop::SourceChanged)
+    } else {
+        finish_or_interrupt(read(&mut client, query, progress.clone()), timeout, cancelled, retention).await
+    };
     let mut accounting = crate::read_metrics::requested(&outcome);
     let result = match outcome {
         ReadOutcome::Completed(rows) => Ok((client, rows)),
@@ -636,7 +661,7 @@ async fn read(
     request: ReadQuery,
     progress: Arc<crate::read_metrics::Progress>,
 ) -> ReadResult<Vec<Rec>> {
-    let ReadQuery { sql, parameters, row_limit, byte_limit, mut output, admission } = request;
+    let ReadQuery { sql, parameters, row_limit, byte_limit, mut output, admission, profile: _ } = request;
     let mut query = Query::new(&sql);
     for parameter in &parameters {
         match parameter {

@@ -78,6 +78,7 @@ pub struct SourceProfileAdmission {
     qualification: Box<RecipeCostReceipt>,
     budget: CollectionBudget,
     approval_is_active: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    retired: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl SourceProfileAdmission {
     pub fn new(
@@ -99,12 +100,22 @@ impl SourceProfileAdmission {
             qualification: Box::new(qualification),
             budget,
             approval_is_active: std::sync::Arc::new(approval_is_active),
+            retired: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
+    /// Observed retirement is permanent for this original profile and all its clones. A later approval needs a
+    /// new admitted profile; a callback returning true cannot revive a retired source lifetime.
     /// Liveness is necessary, not authority. Only the selected registration plus authenticated issued original
     /// may supply this check; a caller-created callback or structurally valid receipt grants no permission.
     pub fn approval_is_active(&self) -> bool {
-        (self.approval_is_active)()
+        use std::sync::atomic::Ordering;
+        if self.retired.load(Ordering::Acquire) {
+            return false;
+        }
+        if !(self.approval_is_active)() {
+            self.retired.store(true, Ordering::Release);
+        }
+        !self.retired.load(Ordering::Acquire)
     }
     pub fn route_revision(&self) -> &str {
         &self.route_revision

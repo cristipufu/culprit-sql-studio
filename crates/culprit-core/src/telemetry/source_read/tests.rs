@@ -1,6 +1,7 @@
 use super::*;
 use crate::{DatabaseIdentity, Engine, MeasurementScope};
 mod log_rates;
+mod temporary;
 
 struct Original {
     source: CollectionDescription,
@@ -214,8 +215,10 @@ fn source_question_has_no_synthetic_activity_and_always_requires_parent_authenti
     assert!(focus.activity_participant().is_none());
     assert_eq!(focus.parent(), original.focus.basis.as_ref());
     assert_eq!(focus.references().count(), 3);
-    let selection =
-        CollectionSelection::SourceRead { focus: Box::new(original.focus), execution: Box::new(original.execution) };
+    let selection = CollectionSelection::SourceRead {
+        focus: Box::new(original.focus),
+        execution: Box::new(original.execution.into()),
+    };
     let request =
         CollectionRequest { subject: CollectionSubject::Database, selection, budget: CollectionBudget::default() };
     request.validate().unwrap();
@@ -227,14 +230,14 @@ fn source_question_has_no_synthetic_activity_and_always_requires_parent_authenti
 #[test]
 fn first_canonical_receipt_is_required_not_same_actor_in_another_capture_or_a_repaired_body() {
     let original = original();
-    assert!(original.focus.matches_basis(&original.source, &original.row, &original.execution));
+    assert!(original.focus.matches_basis(&original.source, &original.row, &original.execution.clone().into()));
     let mut another = original.row.clone();
     another.capture.observation_id = "later-same-actor".into();
-    assert!(!original.focus.matches_basis(&original.source, &another, &original.execution));
+    assert!(!original.focus.matches_basis(&original.source, &another, &original.execution.clone().into()));
     let mut changed = original.row.clone();
     let TelemetryRecord::Activity(actor) = &mut changed.record else { panic!() };
     actor.key.request.as_mut().unwrap().generation = "recycled-request".into();
-    assert!(!original.focus.matches_basis(&original.source, &changed, &original.execution));
+    assert!(!original.focus.matches_basis(&original.source, &changed, &original.execution.clone().into()));
     assert!(original.episode.plan_source_read_focus(&original.source, &changed).is_err());
 }
 
@@ -259,7 +262,7 @@ fn a_canonical_original_wait_cannot_grant_source_read_authority_to_a_known_prelo
         *original.focus.basis = basis;
         assert!(original.focus.is_valid());
         assert_eq!(
-            original.focus.matches_basis(&original.source, &row, &original.execution),
+            original.focus.matches_basis(&original.source, &row, &original.execution.clone().into()),
             lifecycle == SessionLifecycle::Unknown
         );
     }
@@ -337,7 +340,7 @@ fn typed_result_keeps_logical_counter_scope_separate_from_qualified_execution_up
         budget: CollectionBudget::default(),
         selection: CollectionSelection::SourceRead {
             focus: Box::new(original.focus.clone()),
-            execution: Box::new(original.execution.clone()),
+            execution: Box::new(original.execution.clone().into()),
         },
     };
     assert!(source.matches_request(&request));
@@ -426,7 +429,7 @@ fn recipe(original: &Original) -> (RecipeDescriptor, crate::ComponentVersion) {
         recipe_version: 1,
         purpose: RecipePurpose::Investigation,
         selector: SourceReadQuestion::CompilationHistory.selector(),
-        scope: RecipeCostScope::NativeRead(original.execution.clone()),
+        scope: RecipeCostScope::NativeRead(original.execution.clone().into()),
         component: component.clone(),
         tested_budget: CollectionBudget::default(),
         // This is structurally separate retained evidence. A selected provider's authenticated native-cost
@@ -500,6 +503,7 @@ fn finite_source_admission_is_question_specific_and_requires_exact_native_cost_s
     }
     let mut changed = intent;
     let DiagnosticExecutionBinding::NativeRead { execution } = &mut changed.execution else { panic!() };
+    let SourceReadExecutionScope::Logical(execution) = execution.as_mut() else { panic!() };
     execution.database_writable = false;
     assert!(!changed.is_valid());
 }
@@ -534,7 +538,7 @@ fn source_completion_retains_one_actual_result_capture_and_never_completes_the_w
 #[test]
 fn a_fresh_activity_route_can_prove_the_same_execution_owner_but_not_a_logical_snapshot_or_changed_updateability() {
     let original = original();
-    let expected = RecipeCostScope::NativeRead(original.execution.clone());
+    let expected = RecipeCostScope::NativeRead(original.execution.clone().into());
     assert!(expected.matches_source(&original.source));
     for defect in ["updateability", "unknown-updateability", "unknown-owner", "process", "database"] {
         let mut current = original.source.clone();
