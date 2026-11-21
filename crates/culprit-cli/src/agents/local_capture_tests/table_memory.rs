@@ -94,7 +94,3 @@ async fn local_mcp_wrong_kind_connection_and_missing_table_memory_originals_neve
     assert!(analyze(&server, id, LocalCaptureAnalysisKind::TableMemory).await.0);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
-
-fn manifest_digest(fixture: &LocalCaptureFixture) -> String {
-    digest(&std::fs::read(fixture.capture_directory.join("manifest.json")).unwrap())
-}

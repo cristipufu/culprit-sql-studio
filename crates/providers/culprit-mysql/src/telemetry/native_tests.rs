@@ -1018,3 +1018,5 @@ async fn session_memory_actor_ready(reader: &mut ReadSession, actor_id: &str, no
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
+
+mod group_replication;

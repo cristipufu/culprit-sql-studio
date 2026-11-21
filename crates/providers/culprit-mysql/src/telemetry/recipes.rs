@@ -9,6 +9,7 @@ enum Acquisition {
     NativeFailures,
     Jobs,
     SessionMemory,
+    GroupReplication,
     CurrentRequestWork,
     Snapshot(Recipe),
 }
@@ -21,13 +22,16 @@ impl Acquisition {
             Self::NativeFailures => TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures),
             Self::Jobs => TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
             Self::SessionMemory => TelemetryCollection::Snapshot(SnapshotDataset::SessionMemory),
+            Self::GroupReplication => TelemetryCollection::Snapshot(SnapshotDataset::GroupReplication),
             Self::CurrentRequestWork => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::Snapshot(recipe) => TelemetryCollection::Snapshot(recipe.dataset()),
         }
     }
     fn subject(self) -> RecipeSubject {
         match self {
-            Self::NativeFailures | Self::SessionMemory => RecipeSubject::Shared(SharedResourceKind::Instance),
+            Self::NativeFailures | Self::SessionMemory | Self::GroupReplication => {
+                RecipeSubject::Shared(SharedResourceKind::Instance)
+            }
             _ => RecipeSubject::Database,
         }
     }
@@ -39,6 +43,7 @@ impl Acquisition {
             Self::NativeFailures => crate::native_failures::bounded_budget(&budget),
             Self::Jobs => crate::jobs::bounded_budget(&budget),
             Self::SessionMemory => crate::session_memory::bounded_budget(&budget),
+            Self::GroupReplication => crate::group_replication::bounded_budget(&budget),
             Self::CurrentRequestWork => crate::progress::bounded_budget(&budget),
             Self::Deadlocks | Self::Snapshot(_) => budget,
         }
@@ -51,6 +56,7 @@ impl Acquisition {
             Self::NativeFailures => native_failures::source(connector, request),
             Self::Jobs => crate::jobs::source(connector, request),
             Self::SessionMemory => session_memory::source(connector, request),
+            Self::GroupReplication => crate::group_replication::source(connector, request),
             Self::CurrentRequestWork => crate::progress::source(connector, request),
             Self::Snapshot(recipe) => snapshot_source(connector, request, recipe),
         }
@@ -60,6 +66,9 @@ impl Acquisition {
             Self::NativeFailures => {
                 native::error_log::availability(platform.flavor, &platform.version, platform.performance_schema)
                     == native::error_log::Availability::Available
+            }
+            Self::GroupReplication => {
+                native::group_replication::supported(platform.flavor, &platform.version, platform.performance_schema)
             }
             Self::SessionMemory => {
                 native::session_memory::availability(platform.flavor, &platform.version, platform.performance_schema)
@@ -126,6 +135,7 @@ const REGISTRATIONS: &[Registration] = &[
     Registration::baseline("mysql.native-failures", Acquisition::NativeFailures),
     Registration::investigation("mysql.runtime-distributions", Acquisition::RuntimeDistributions),
     Registration::investigation("mysql.session-memory", Acquisition::SessionMemory),
+    Registration::investigation("mysql.group-replication", Acquisition::GroupReplication),
     Registration::investigation("mysql.jobs", Acquisition::Jobs),
     Registration::investigation("mysql.current-request-work", Acquisition::CurrentRequestWork),
     Registration::investigation("mysql.statement-definitions", Acquisition::Snapshot(Recipe::Definitions)),

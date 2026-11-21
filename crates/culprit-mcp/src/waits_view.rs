@@ -120,6 +120,7 @@ pub fn report(report: &Report) -> Value {
     counter_ratios::attach(&mut response, report);
     performance_counters::attach(&mut response, report);
     table_memory::attach(&mut response, report);
+    group_replication::attach(&mut response, report);
     suspect_pages::attach(&mut response, report);
     configured_log_rates::attach(&mut response, report);
     instance_resources::attach(&mut response, report);
@@ -967,3 +968,5 @@ mod tests {
         }
     }
 }
+
+pub(crate) mod group_replication;

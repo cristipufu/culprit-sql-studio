@@ -336,3 +336,7 @@ impl SnapshotReader for MysqlSnapshotReader {
         self.io.close().await
     }
 }
+
+pub(crate) fn require_group_instance(request: &CollectionRequest) -> Result<&SharedResourceIdentity> {
+    shared_instance(request, SnapshotDataset::GroupReplication)
+}

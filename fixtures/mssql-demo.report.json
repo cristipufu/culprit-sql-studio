@@ -3383,7 +3383,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 36,
+    "format": 37,
     "histograms": null,
     "id": "20261011T121347.162Z",
     "identity": {
@@ -4079,6 +4079,7 @@
     "operations": {
       "cluster": null,
       "counters": [],
+      "group_replication": [],
       "full_text_populations": [],
       "index_usage_scope": "all-read-members",
       "log_failures": [],

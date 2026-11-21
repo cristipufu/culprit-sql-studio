@@ -87,6 +87,10 @@ async fn analyze(
     (result.is_error == Some(true), serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap())
 }
 
+fn manifest_digest(fixture: &LocalCaptureFixture) -> String {
+    digest(&std::fs::read(fixture.capture_directory.join("manifest.json")).unwrap())
+}
+
 #[tokio::test]
 async fn genuine_ready_originals_reach_mcp_with_exact_counts_folded_definitions_and_no_private_authority() {
     for name in
@@ -302,3 +306,5 @@ async fn selecting_the_wrong_local_family_never_returns_an_empty_success_or_cons
 mod session_census;
 
 mod instance_resources;
+
+mod group_replication;

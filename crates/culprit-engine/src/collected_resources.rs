@@ -169,3 +169,6 @@ mod session_census;
 mod storage;
 pub use session_census::session_census;
 pub use storage::storage;
+
+mod group_replication;
+pub use group_replication::group_replication;

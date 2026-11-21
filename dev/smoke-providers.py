@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from replication_fixtures import MySqlReplication, PostgresReplication
 from mssql_replication_fixture import SqlServerReplication
 from mysql_replication_fixture import MySqlMovingReplication
+from mysql_group_replication_fixture import MySqlGroupReplication
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -70,7 +71,10 @@ REPLICATION_FIXTURES = (
 POSTGRES_REPLICATION_IMAGES = {"postgres-replication": "postgres:18.6", "postgres-16-replication": "postgres:16"}
 OPTIONAL_NATIVE_MODULES = {
     "culprit-postgres": ("telemetry::native_tests::replication::", "jobs::", "maintenance_waits::"),
-    "culprit-mysql": ("telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::"),
+    "culprit-mysql": (
+        "telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::",
+        "telemetry::native_tests::group_replication::",
+    ),
     "culprit-mssql": (
         "telemetry::replication::native_tests::", "jobs::",
         "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request",
@@ -698,7 +702,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("fixtures", nargs="+", choices=[f.name for f in FIXTURES + REPLICATION_FIXTURES]
                         + list(POSTGRES_REPLICATION_IMAGES)
-                        + ["mssql-agent", "mssql-hadr", "mssql-replication", "mysql-moving-replication", "yugabyte-cluster", "ssh", "all"])
+                        + ["mssql-agent", "mssql-hadr", "mssql-replication", "mysql-moving-replication", "mysql-group-replication", "yugabyte-cluster", "ssh", "all"])
     parser.add_argument("--test", nargs=2, action="append", metavar=("CRATE", "FILTER"),
                         help="run only this live test selection; repeat for multiple commands in the same fixture")
     args = parser.parse_args()
@@ -745,6 +749,11 @@ def main():
         source = Database(replace(fixture, name="mysql-source"))
         replica = Database(replace(fixture, name="mysql-replica"))
         with MySqlMovingReplication(source, replica, OWNER_LABEL) as database:
+            database.verify(args.test)
+        count += 1
+    if "mysql-group-replication" in args.fixtures:
+        fixture = replace(next(fixture for fixture in FIXTURES if fixture.name == "mysql"), name="mysql-group-replication")
+        with MySqlGroupReplication(Database(fixture)) as database:
             database.verify(args.test)
         count += 1
     if "yugabyte-cluster" in args.fixtures or "all" in args.fixtures:

@@ -358,6 +358,12 @@ impl CollectionRequest {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::GroupReplication } => {
+                if !matches!(&self.subject, CollectionSubject::Shared { resource } if resource.kind == SharedResourceKind::Instance)
+                {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
             CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs } => {
                 if matches!(&self.subject, CollectionSubject::Shared {resource} if resource.kind!=SharedResourceKind::Instance)
                 {
@@ -753,6 +759,8 @@ impl TelemetryRecord {
                     }
                     (SourceObservation::MaintenanceProgress { .. }, _)
                     | (_, OperationalFact::MaintenanceProgress(_)) => false,
+                    (_, OperationalFact::MysqlGroupReplication(point)) => accepted && point.fits_source(source),
+                    (SourceObservation::GroupReplication { .. }, _) => false,
                     (_, OperationalFact::MssqlTableMemory(point)) => accepted && point.fits_source(source),
                     (SourceObservation::TableMemory { .. }, _) => false,
                     (_, OperationalFact::MssqlColumnstoreRowgroup(point)) => accepted && point.fits_source(source),
@@ -1163,3 +1171,6 @@ mod tests {
 
 #[cfg(test)]
 mod contracts_tests;
+
+mod group_replication;
+pub use group_replication::*;

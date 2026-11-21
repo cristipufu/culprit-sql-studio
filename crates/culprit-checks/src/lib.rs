@@ -151,3 +151,5 @@ mod tests {
         }
     }
 }
+
+pub use views::group_replication;

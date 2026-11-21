@@ -105,7 +105,7 @@ function Reference({ entry }: { entry: ReplicationEntry }) {
   </Disclosure>;
 }
 
-function Entry({ entry }: { entry: ReplicationEntry }) {
+export function ReplicationEntryEvidence({ entry }: { entry: ReplicationEntry }) {
   return <Disclosure className="replication-entry" summary={<>
     <span className="replication-entry-title">{entry.title}</span>
     <span className="replication-badge">{scopeLabel(entry.scope)}</span>
@@ -132,7 +132,7 @@ function Body({ report }: { report: ReplicationReport }) {
   const first = currentPage * PAGE_SIZE;
   return <div className="replication-body">
     <ReadContext report={report} />
-    <div className="replication-entries">{report.entries.slice(first, first + PAGE_SIZE).map((entry) => <Entry entry={entry} key={`${entry.reference.source}:${entry.reference.observation_key}`} />)}</div>
+    <div className="replication-entries">{report.entries.slice(first, first + PAGE_SIZE).map((entry) => <ReplicationEntryEvidence entry={entry} key={`${entry.reference.source}:${entry.reference.observation_key}`} />)}</div>
     {report.entries.length > PAGE_SIZE && <div className="actions replication-pages">
       <button type="button" className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t("ui.termination_history.previous")}</button>
       <span className="muted">{t("ui.memory_failures.page", { first: digits(String(first + 1)), last: digits(String(Math.min(first + PAGE_SIZE, report.entries.length))), total: digits(String(report.entries.length)) })}</span>

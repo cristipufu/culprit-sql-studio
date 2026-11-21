@@ -77,6 +77,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
             let native = JobsSnapshot::from_source(source, read.observations.clone(), read.read_complete)?;
             Ok(LocalSnapshotReport::Jobs(Box::new(culprit_checks::jobs::explain(&native)?)))
         }
+        LocalCaptureAnalysisKind::GroupReplication => Ok(LocalSnapshotReport::GroupReplication(Box::new(
+            culprit_checks::group_replication::explain_captured(read)?,
+        ))),
         LocalCaptureAnalysisKind::TableMemory => {
             Ok(LocalSnapshotReport::TableMemory(Box::new(culprit_checks::table_memory::explain_captured(read)?)))
         }

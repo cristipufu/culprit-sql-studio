@@ -1308,3 +1308,6 @@ pub(crate) use session_census::session_census;
 
 #[cfg(test)]
 mod jobs_tests;
+
+mod group_replication;
+pub(crate) use group_replication::{compact as compact_group_replication, group_replication};

@@ -33,6 +33,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         table_memory: &'a Option<Vec<culprit_core::TableMemoryReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        group_replication: &'a Option<Vec<culprit_core::GroupReplicationReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         full_text_populations: &'a Option<Vec<culprit_core::FullTextPopulationReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         tempdb_metadata_memory: &'a Option<Box<culprit_core::TempdbMetadataMemoryReport>>,
@@ -115,6 +117,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         memory_clerks,
         tempdb_metadata_memory,
         table_memory,
+        group_replication,
         full_text_populations,
         database_properties,
         suspect_pages,
@@ -155,6 +158,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         memory_clerks,
         tempdb_metadata_memory,
         table_memory,
+        group_replication,
         full_text_populations,
         database_properties,
         suspect_pages,

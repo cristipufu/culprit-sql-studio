@@ -13,6 +13,7 @@ pub(crate) enum CapturedScanEvidence {
     MemoryClerks(Box<CapturedOperationalRead>),
     TempdbMetadataMemory(Box<CapturedOperationalRead>),
     TableMemory(Box<CapturedOperationalRead>),
+    GroupReplication(Box<CapturedOperationalRead>),
     FullTextPopulations(Box<CapturedOperationalRead>),
     DatabasePerformanceCounters(Box<CapturedOperationalRead>),
     HyperscaleLogComponents(Box<CapturedOperationalRead>),
@@ -21,6 +22,11 @@ impl CapturedScanEvidence {
     pub(crate) fn database_performance_counters(read: Box<CapturedOperationalRead>) -> Result<Self> {
         culprit_checks::performance_counters::explain_database_captured(&read)?;
         Ok(Self::DatabasePerformanceCounters(read))
+    }
+
+    pub(crate) fn group_replication(read: Box<CapturedOperationalRead>) -> Result<Self> {
+        culprit_checks::group_replication::explain_captured(&read)?;
+        Ok(Self::GroupReplication(read))
     }
 
     pub(crate) fn table_memory(read: Box<CapturedOperationalRead>) -> Result<Self> {
@@ -79,6 +85,13 @@ impl CapturedScanEvidence {
                 // The original is independently scoped and never enters shared counters or workload grading.
                 snapshot.operations.database_performance_counters =
                     Some(culprit_core::telemetry::RecordedPerformanceCounters::Captured { read });
+            }
+            Self::GroupReplication(read) => {
+                // Exact saved connection authorizes this historical attachment; no current route/member join.
+                culprit_core::telemetry::append_recorded_operational_read(
+                    &mut snapshot.operations.group_replication,
+                    read,
+                )?;
             }
             Self::TableMemory(read) => {
                 // Saved-connection admission does not establish a match to current scan tables or native members.

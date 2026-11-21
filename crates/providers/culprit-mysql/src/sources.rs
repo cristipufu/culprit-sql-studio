@@ -126,7 +126,7 @@ pub const SERVER_VARIABLES: Source = Source {
     reads: culprit_core::key!("provider.mysql.source.server_variables"),
     delivers: &[],
 };
-/// SHOW REPLICA STATUS (or SLAVE STATUS) and Group Replication.
+/// SHOW REPLICA STATUS (or SLAVE STATUS): asynchronous channels.
 pub const REPLICATION: Source = Source {
     name: source_id::REPLICATION,
     reads: culprit_core::key!("provider.mysql.source.replication"),
@@ -148,6 +148,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    GROUP_REPLICATION,
     SCHEDULED_EVENTS,
     CURRENT_REQUEST_WORK,
     SESSION_MEMORY,
@@ -174,3 +175,9 @@ pub const ALL: &[Source] = &[
     SERVER_VARIABLES,
     REPLICATION,
 ];
+
+pub const GROUP_REPLICATION: Source = Source {
+    name: culprit_core::telemetry::MYSQL_GROUP_REPLICATION_SOURCE,
+    reads: culprit_core::key!("provider.mysql.source.group_replication"),
+    delivers: &[],
+};

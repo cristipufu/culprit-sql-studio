@@ -177,6 +177,36 @@ Culprit does not attribute shared redo or host observations to this database's q
 A slow-log workload covers only logged runs and its own timestamps. Rates and unused-index conclusions follow the shared [evidence rules](coverage.md).
 The table's returned-row limit does not bound its unindexed native scan or sort; the owned read timeout still applies.
 
+### Group Replication observations
+
+The explicit `mysql.group-replication` investigation recipe captures one native observer’s Group Replication view.
+Use resource discovery to obtain the native shared-instance identity, then select `group-replication` with that
+identity. Ordinary scans and asynchronous replication-channel reads are unchanged. MariaDB Galera is a different
+native source and is not admitted by this recipe.
+
+The reader observes MySQL 5.7.17+ and Performance Schema before compiling plugin/table references. It discovers
+both table layouts, preserves unknown optional columns, and reads membership and statistics independently.
+Member UUID/state/role, certification and applier queues, certification rows and transaction/conflict totals
+retain their native meaning. Remote statistics propagate periodically; neither one group view nor the observer’s
+process marker establishes the remote counters’ reset history. No delta, rate, lag duration, byte backlog,
+application-query owner or overall-health verdict is derived.
+
+The source intersects caller limits with 23 SQL phases (including existing session setup, preparation and final
+verification), one second per statement, five seconds total, 128 retained rows per table and one MiB total.
+Layout discovery retains at most 64 columns plus a lookahead. Row caps do not establish bounded server work on
+these unindexed native tables. The recipe remains cost-Unqualified and is not automatically scheduled.
+A missing plugin/layout or denied SELECT is unavailable, not a healthy empty group; the other readable source
+can remain useful. No installation, grants or telemetry setup are performed.
+
+Original captures replay through the canonical SDK, both offline stores, local CLI/MCP analysis and explicit
+saved-scan attachment. Historical native scope/time remain independent of the current scan, and sharing
+withdraws the indivisible original rather than manufacturing replacement native identities.
+
+Native definitions: [members](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-replication-group-members-table.html),
+[statistics](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-replication-group-member-stats-table.html),
+[remote-statistics propagation](https://dev.mysql.com/doc/refman/8.4/en/group-replication-replication-group-member-stats.html)
+and [SELECT privileges](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-table-characteristics.html).
+
 ### Operational evidence
 
 InnoDB redo buffer waits, auto-increment bounds and metadata blocking involving exclusive locks retain their source scope and measurement period.

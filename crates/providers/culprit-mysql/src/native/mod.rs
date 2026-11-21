@@ -38,3 +38,5 @@ pub(crate) async fn one<R: QueryRead>(reader: &mut R, sql: &str, parameters: Vec
     }
     Ok(rows.remove(0))
 }
+
+pub(crate) mod group_replication;

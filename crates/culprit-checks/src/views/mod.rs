@@ -61,3 +61,5 @@ pub mod tempdb_metadata_memory;
 
 pub mod instance_resources;
 pub mod storage;
+
+pub mod group_replication;

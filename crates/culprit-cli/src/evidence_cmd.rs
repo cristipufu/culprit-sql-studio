@@ -248,6 +248,7 @@ enum Analysis {
     ColumnstoreRowgroups,
     FullTextPopulations,
     TableMemory,
+    GroupReplication,
     BackupHistory,
     Tuning,
 }
@@ -285,6 +286,7 @@ impl Analysis {
             | Self::ColumnstoreRowgroups
             | Self::FullTextPopulations
             | Self::TableMemory
+            | Self::GroupReplication
             | Self::BackupHistory
             | Self::TempdbMetadataMemory
             | Self::InstanceResources
@@ -483,6 +485,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::MemoryClerks) => {
             let analysis = culprit_engine::collected_resources::memory_clerks(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::memory_clerks(&analysis.report))?;
+        }
+        Some(Analysis::GroupReplication) => {
+            let analysis = culprit_engine::collected_resources::group_replication(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::group_replication(&analysis.report))?;
         }
         Some(Analysis::TableMemory) => {
             let analysis = culprit_engine::collected_resources::table_memory(&capture)?;

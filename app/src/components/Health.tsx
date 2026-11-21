@@ -31,6 +31,7 @@ import { CounterRatios } from "./CounterRatios";
 import { MemoryClerks } from "./MemoryClerks";
 import { TempdbMetadataMemory } from "./TempdbMetadataMemory";
 import { TableMemory } from "./TableMemory";
+import { GroupReplication } from "./GroupReplication";
 import { FullTextPopulations } from "./FullTextPopulations";
 import { HyperscaleLogComponents } from "./HyperscaleLogComponents";
 import { DatabaseProperties } from "./DatabaseProperties";
@@ -170,6 +171,7 @@ export function HealthTab({
   const databasePropertiesRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "database-properties");
   const databasePropertiesIssue = observationReadIssue("database-properties", report.snapshot.sources ?? [], Boolean(databasePropertiesRead || databasePropertiesRecorded));
   const tableMemory = report.table_memory ?? [];
+  const groupReplication = report.group_replication ?? [];
   const fullTextPopulations = report.full_text_populations ?? [];
   const tempdbMetadataMemory = report.tempdb_metadata_memory;
   const tempdbMetadataRead = report.snapshot.operations.tempdb_metadata_memory;
@@ -198,7 +200,7 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, tableMemory.length > 0, fullTextPopulations.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, suspectPages, suspectRecorded, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters.length > 0, tableMemory.length > 0, groupReplication.length > 0, fullTextPopulations.length > 0, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, suspectPages, suspectRecorded, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, tempdbMetadataMemory, tempdbMetadataRead, tempdbMetadataRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
   const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, suspectIssue, databasePropertiesIssue, memoryClerkIssue, tempdbMetadataIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
@@ -292,6 +294,7 @@ export function HealthTab({
       {!databaseProperties && databasePropertiesIssue && <ObservationSourceIssue source={databasePropertiesIssue} title={t("view.database_properties.title")} />}
       {!databaseProperties && (databasePropertiesRead || databasePropertiesRecorded) && !databasePropertiesIssue && <ObservationExplanationIssue title={t("view.database_properties.title")} reason={t("view.database_properties.invalid")} />}
       {tableMemory.length > 0 && <TableMemory key={report.snapshot.id} reports={tableMemory} />}
+      {groupReplication.length > 0 && <GroupReplication key={report.snapshot.id} reports={groupReplication} />}
       {fullTextPopulations.length > 0 && <FullTextPopulations key={report.snapshot.id} reports={fullTextPopulations} />}
       {tempdbMetadataMemory && <TempdbMetadataMemory key={report.snapshot.id} report={tempdbMetadataMemory} />}
       {!tempdbMetadataMemory && tempdbMetadataIssue && <ObservationSourceIssue source={tempdbMetadataIssue} title={t("view.tempdb_metadata_memory.title")} />}

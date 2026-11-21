@@ -1904,7 +1904,7 @@
         "table": "orders"
       }
     ],
-    "format": 36,
+    "format": 37,
     "histograms": [
       {
         "buckets": 4.0,
@@ -2318,6 +2318,7 @@
     "operations": {
       "cluster": null,
       "counters": [],
+      "group_replication": [],
       "full_text_populations": [],
       "index_usage_scope": "all-read-members",
       "log_failures": [],

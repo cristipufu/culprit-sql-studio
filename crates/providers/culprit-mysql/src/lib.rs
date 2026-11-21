@@ -868,3 +868,5 @@ mod tests {
         );
     }
 }
+
+mod group_replication;

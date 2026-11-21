@@ -51,6 +51,8 @@ pub struct OperationalStats {
     pub database_performance_counters: Option<crate::telemetry::RecordedPerformanceCounters>,
     /// One authenticated selected-table memory original, independent of a later scan's table/member identities.
     pub table_memory: Vec<crate::telemetry::RecordedOperationalRead>,
+    /// Independently captured observer/group points never grade the current database or workload.
+    pub group_replication: Vec<crate::telemetry::RecordedOperationalRead>,
     pub full_text_populations: Vec<crate::telemetry::RecordedOperationalRead>,
     /// Historical shared tempdb points retain their original scope and receipt; the current database supplies none.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -197,6 +199,7 @@ impl OperationalStats {
             memory_clerks: _,
             database_performance_counters: _,
             table_memory: _,
+            group_replication: _,
             full_text_populations: _,
             tempdb_metadata_memory: _,
             storage: _,

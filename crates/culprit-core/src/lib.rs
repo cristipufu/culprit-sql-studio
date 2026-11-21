@@ -261,3 +261,6 @@ pub use window::{MAX_WINDOW_MINUTES, MINUTES_PER_DAY, parse_window, window_label
 
 mod recipe_qualification;
 pub use recipe_qualification::*;
+
+mod group_replication_report;
+pub use group_replication_report::{GroupReplicationOrigin, GroupReplicationReport};

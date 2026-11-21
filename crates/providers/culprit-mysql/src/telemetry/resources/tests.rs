@@ -12,7 +12,7 @@ fn frame() -> Vec<Result<Vec<crate::rows::Rec>>> {
 }
 
 #[tokio::test]
-async fn resource_discovery_closes_and_advertises_both_native_profiles_on_one_exact_owner() {
+async fn resource_discovery_closes_and_advertises_supported_native_profiles_on_one_exact_owner() {
     let mut reader = Read::with(frame());
     let discovered = discover_from(&mut reader, &request()).await.unwrap();
     assert_eq!(discovered.len(), 1);
@@ -22,6 +22,7 @@ async fn resource_discovery_closes_and_advertises_both_native_profiles_on_one_ex
         [
             TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures),
             TelemetryCollection::Snapshot(SnapshotDataset::SessionMemory),
+            TelemetryCollection::Snapshot(SnapshotDataset::GroupReplication),
         ]
     );
     assert_eq!(reader.queries.len(), 6);
@@ -31,14 +32,28 @@ async fn resource_discovery_closes_and_advertises_both_native_profiles_on_one_ex
 
 #[tokio::test]
 async fn each_native_profile_keeps_its_own_product_and_version_boundary() {
-    let mut replies = frame();
-    for index in [0, 3] {
-        replies[index] = Ok(vec![rows::platform("8.0.30", true)]);
+    for (version, expected) in [
+        (
+            "8.0.30",
+            vec![
+                TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures),
+                TelemetryCollection::Snapshot(SnapshotDataset::GroupReplication),
+            ],
+        ),
+        ("8.0.21", vec![TelemetryCollection::Snapshot(SnapshotDataset::GroupReplication)]),
+        ("5.7.17", vec![TelemetryCollection::Snapshot(SnapshotDataset::GroupReplication)]),
+    ] {
+        let mut replies = frame();
+        for index in [0, 3] {
+            replies[index] = Ok(vec![rows::platform(version, true)]);
+        }
+        let mut reader = Read::with(replies);
+        let discovered = discover_from(&mut reader, &request()).await.unwrap();
+        assert_eq!(discovered[0].collections, expected);
+        assert_eq!(reader.queries.len(), 6);
+        assert_eq!(reader.closed, 1);
     }
-    let mut reader = Read::with(replies);
-    let discovered = discover_from(&mut reader, &request()).await.unwrap();
-    assert_eq!(discovered[0].collections, [TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures)]);
-    for (version, instrumentation) in [("11.8.0-MariaDB", true), ("8.0.21", true), ("8.4.0", false)] {
+    for (version, instrumentation) in [("11.8.0-MariaDB", true), ("5.7.16", true), ("8.4.0", false)] {
         let mut reader = Read::with(vec![Ok(vec![rows::platform(version, instrumentation)])]);
         assert_eq!(discover_from(&mut reader, &request()).await.err().unwrap().code, ErrorCode::Unsupported);
         assert_eq!(reader.queries.len(), 1);

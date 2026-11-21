@@ -679,6 +679,7 @@ class NativeSelection(unittest.TestCase):
                 self.assertEqual(run_tests.call_args.kwargs["skip"], [
                     "telemetry::native_tests::replication::",
                     "telemetry::native_tests::replication_movement::",
+                    "telemetry::native_tests::group_replication::",
                 ])
 
     def test_explicit_topology_selection_runs_only_that_topology(self):
@@ -686,7 +687,22 @@ class NativeSelection(unittest.TestCase):
         database.test_environment = Mock(return_value={})
         with patch.object(smoke, "run_tests") as run_tests:
             database.test("culprit-mysql", "telemetry::native_tests::replication_movement::")
-        self.assertEqual(run_tests.call_args.kwargs["skip"], ["telemetry::native_tests::replication::"])
+        self.assertEqual(run_tests.call_args.kwargs["skip"], [
+            "telemetry::native_tests::replication::", "telemetry::native_tests::group_replication::",
+        ])
+
+    def test_explicit_group_replication_selection_keeps_both_native_cases_admitted(self):
+        database = smoke.Database(smoke.FIXTURES[1])
+        database.test_environment = Mock(return_value={})
+        for selection in (
+            "telemetry::native_tests::group_replication::",
+            "telemetry::native_tests::group_replication::owned_plain_mysql_preserves_qualified_unavailable_group_sources_instead_of_healthy_empty",
+        ):
+            with patch.object(smoke, "run_tests") as run_tests:
+                database.test("culprit-mysql", selection)
+            self.assertEqual(run_tests.call_args.kwargs["skip"], [
+                "telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::",
+            ])
 
     def test_generic_postgres_selections_skip_optional_native_fixtures(self):
         for name in ("postgres", "timescale"):

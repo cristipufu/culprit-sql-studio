@@ -1,5 +1,6 @@
 {
   "operations": {
+    "group_replication": [],
     "full_text_populations": [],
     "table_memory": [],
     "log_failures": [],
@@ -2574,7 +2575,7 @@
       ]
     }
   },
-  "format": 36,
+  "format": 37,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",

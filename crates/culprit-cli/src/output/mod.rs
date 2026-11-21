@@ -437,6 +437,9 @@ impl Out {
         if let Some(history) = &report.suspect_pages {
             println!("\n{}", observations::suspect_pages(history));
         }
+        for group in report.group_replication.as_deref().unwrap_or_default() {
+            println!("\n{}", observations::group_replication(group));
+        }
         for memory in report.table_memory.as_deref().unwrap_or_default() {
             println!("\n{}", observations::table_memory(memory));
         }
@@ -788,6 +791,7 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
         "assessments": report.assessments,
         "engine_limitations": s.server.engine.spec().limitations(),
         "table_memory": report.table_memory.as_ref().map(|reports|reports.iter().map(observations::compact_table_memory).collect::<Vec<_>>()),
+        "group_replication": report.group_replication.as_ref().map(|reports|reports.iter().map(observations::compact_group_replication).collect::<Vec<_>>()),
         "performance_counters": report.performance_counters,
         "suspect_pages": report.suspect_pages.as_deref().map(observations::compact_suspect_pages),
         "notes": s.notes,
@@ -832,6 +836,9 @@ pub(super) fn markdown_report(report: &Report) -> String {
     if !stopped.is_empty() {
         out.push_str(&format!("\n## {}\n\n", t!("cli.findings.history", count = stopped.len().to_string())));
         table(&mut out, &stopped, active.len());
+    }
+    for group in report.group_replication.as_deref().unwrap_or_default() {
+        out.push_str(&markdown_text_block(&observations::group_replication(group)));
     }
     for memory in report.table_memory.as_deref().unwrap_or_default() {
         out.push_str(&markdown_text_block(&observations::table_memory(memory)));

@@ -5,6 +5,7 @@ fn selected_rowgroups_and_backup_archive_analyses_select_only_original_operation
         ("columnstore-rowgroups", Analysis::ColumnstoreRowgroups),
         ("backup-history", Analysis::BackupHistory),
         ("table-memory", Analysis::TableMemory),
+        ("group-replication", Analysis::GroupReplication),
     ] {
         for (options, format) in [(&["--json"][..], Format::Json), (&[][..], Format::Text)] {
             let args = analyze_args(name, options);

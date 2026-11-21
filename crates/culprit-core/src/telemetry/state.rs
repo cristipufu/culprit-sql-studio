@@ -15,6 +15,7 @@ pub enum SnapshotDataset {
     BackupHistory,
     ColumnstoreRowgroups,
     TableMemory,
+    GroupReplication,
     FullTextPopulations,
     Operational,
     DatabasePerformanceCounters,
@@ -69,6 +70,7 @@ impl SnapshotDataset {
             | Self::BackupHistory
             | Self::ColumnstoreRowgroups
             | Self::TableMemory
+            | Self::GroupReplication
             | Self::FullTextPopulations
             | Self::Operational
             | Self::DatabasePerformanceCounters
@@ -494,6 +496,7 @@ pub enum OperationalFact {
     MssqlBackupHistory(Box<MssqlBackupHistoryObservation>),
     MssqlColumnstoreRowgroup(Box<MssqlColumnstoreRowgroup>),
     MssqlTableMemory(Box<MssqlTableMemory>),
+    MysqlGroupReplication(Box<MysqlGroupReplicationPoint>),
     MssqlFullTextPopulation(Box<MssqlFullTextPopulation>),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
     MssqlPersistentVersionStore(Box<MssqlPersistentVersionStore>),
@@ -518,6 +521,7 @@ impl OperationalFact {
             Self::MssqlBackupHistory(point) => point.key(),
             Self::MssqlColumnstoreRowgroup(point) => point.key(),
             Self::MssqlTableMemory(point) => point.key(),
+            Self::MysqlGroupReplication(point) => point.key(),
             Self::MssqlFullTextPopulation(point) => point.key(),
             Self::CounterSet(counters) => counters.key(),
             Self::CompilerWaiter(waiter) => waiter.key(),
@@ -578,6 +582,7 @@ impl OperationalFact {
             | Self::MssqlBackupHistory(_)
             | Self::MssqlColumnstoreRowgroup(_)
             | Self::MssqlTableMemory(_)
+            | Self::MysqlGroupReplication(_)
             | Self::MssqlFullTextPopulation(_)
             | Self::ConfiguredLogRateLimits(_)
             | Self::HyperscaleLogComponent(_)
@@ -703,6 +708,7 @@ impl OperationalFact {
             Self::MssqlBackupHistory(point) => point.is_valid(),
             Self::MssqlColumnstoreRowgroup(point) => point.is_valid(),
             Self::MssqlTableMemory(point) => point.is_valid(),
+            Self::MysqlGroupReplication(point) => point.is_valid(),
             Self::MssqlFullTextPopulation(point) => point.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),
@@ -750,6 +756,7 @@ impl OperationalObservation {
                 OperationalFact::MssqlBackupHistory(_) => self.source == MSSQL_BACKUP_HISTORY_SOURCE,
                 OperationalFact::MssqlColumnstoreRowgroup(_) => self.source == MSSQL_COLUMNSTORE_ROWGROUPS_SOURCE,
                 OperationalFact::MssqlTableMemory(_) => self.source == MSSQL_TABLE_MEMORY_SOURCE,
+                OperationalFact::MysqlGroupReplication(point) => self.source == point.source(),
                 OperationalFact::MssqlFullTextPopulation(_) => self.source == MSSQL_FULL_TEXT_POPULATIONS_SOURCE,
                 OperationalFact::MssqlAgentJob(_) => self.source == MSSQL_AGENT_JOBS_SOURCE,
                 OperationalFact::MysqlScheduledEvent(_) => self.source == MYSQL_SCHEDULED_EVENTS_SOURCE,

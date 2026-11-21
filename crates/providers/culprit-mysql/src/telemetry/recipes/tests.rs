@@ -86,6 +86,7 @@ fn baseline_and_investigation_meaning_is_explicit_without_qualifying_native_cost
     }
     for id in [
         "mysql.session-memory",
+        "mysql.group-replication",
         "mysql.runtime-distributions",
         "mysql.tables",
         "mysql.statement-definitions",
@@ -127,6 +128,9 @@ fn profiles_reuse_native_caps_and_preserve_every_stricter_caller_dimension() {
     assert_eq!((activity.budget.statement_timeout_ms, activity.budget.total_timeout_ms), (1000, 5000));
     let distribution = declarations().into_iter().find(|recipe| recipe.id == "mysql.runtime-distributions").unwrap();
     assert_eq!((distribution.budget.max_queries, distribution.budget.total_timeout_ms), (24, 10_000));
+    let group = declarations().into_iter().find(|recipe| recipe.id == "mysql.group-replication").unwrap();
+    assert_eq!((group.budget.max_queries, group.budget.max_snapshot_rows), (23, 256));
+    assert_eq!((group.budget.statement_timeout_ms, group.budget.total_timeout_ms), (1000, 5000));
     let current = declarations().into_iter().find(|recipe| recipe.id == "mysql.current-request-work").unwrap();
     assert_eq!(current.selector, RecipeSelector::CurrentRequestWork);
     assert_eq!((current.budget.max_queries, current.budget.max_snapshot_rows), (24, 1));

@@ -533,3 +533,5 @@ mod boxed_query_history;
 
 #[cfg(feature = "mssql")]
 mod vendor_conformance;
+
+mod group_replication;

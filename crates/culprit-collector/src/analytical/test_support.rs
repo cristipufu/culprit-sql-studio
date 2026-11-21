@@ -1065,3 +1065,6 @@ pub use instance_resources::{InstanceResourceCase, instance_resource_evidence};
 
 mod boxed_query_history;
 pub use boxed_query_history::boxed_query_history_evidence;
+
+mod group_replication;
+pub use group_replication::{GroupReplicationCase, group_replication_evidence};

@@ -211,3 +211,5 @@ mod settlement;
 mod session_census;
 
 mod instance_resources;
+
+mod group_replication;

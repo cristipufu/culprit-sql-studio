@@ -421,3 +421,5 @@ async fn ordinary_scans_do_not_read_or_attach_existing_local_captures() {
     assert!(report.completed_spills.is_none());
     assert_eq!(state.acquisitions.load(Ordering::SeqCst), 1);
 }
+
+mod group_replication;

@@ -65,6 +65,12 @@ enum PublicObservation<'a> {
         #[serde(flatten)]
         context: FocusedRequestContext<'a>,
     },
+    GroupReplicationContext {
+        snapshot: &'a StateSnapshotDescription,
+        plugin_status: Option<&'a str>,
+        members_layout: bool,
+        statistics_layout: bool,
+    },
     TableMemoryContext {
         snapshot: &'a StateSnapshotDescription,
         target_key: String,
@@ -197,6 +203,12 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::MssqlAgentJobs { snapshot, metadata } => {
             PublicObservation::MssqlAgentJobs { snapshot, metadata }
         }
+        SourceObservation::GroupReplication { snapshot, metadata } => PublicObservation::GroupReplicationContext {
+            snapshot,
+            plugin_status: metadata.plugin_status.as_deref(),
+            members_layout: metadata.members_layout,
+            statistics_layout: metadata.statistics_layout,
+        },
         SourceObservation::TableMemory { snapshot, target, metadata, database_writable } => {
             PublicObservation::TableMemoryContext {
                 snapshot,
@@ -397,6 +409,31 @@ mod table_memory_tests {
                 "native_database",
             ] {
                 assert!(!public.to_string().contains(private), "{case:?}: {private}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod group_replication_tests {
+    use super::*;
+    #[test]
+    fn native_group_context_publication_keeps_counts_and_layout_but_withholds_native_group_and_process_proof() {
+        for case in crate::analytical::test_support::GroupReplicationCase::ALL {
+            let (source, _) = crate::analytical::test_support::group_replication_evidence(case);
+            let public = observation(&source.observation).unwrap();
+            assert_eq!(public["kind"], "group-replication-context");
+            assert_eq!(
+                public["data"]["snapshot"],
+                serde_json::to_value(source.observation.snapshot().unwrap()).unwrap()
+            );
+            let text = serde_json::to_string(&public).unwrap();
+            for private in [
+                "aaaaaaaa-0000-4000-8000-000000000001",
+                "bbbbbbbb-0000-4000-8000-000000000002",
+                "private-observer-process-canary",
+            ] {
+                assert!(!text.contains(private));
             }
         }
     }

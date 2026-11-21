@@ -149,6 +149,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
         | SourceObservation::ColumnstoreRowgroups { snapshot, .. }
         | SourceObservation::FullTextPopulations { snapshot, .. }
         | SourceObservation::TableMemory { snapshot, .. }
+        | SourceObservation::GroupReplication { snapshot, .. }
         | SourceObservation::CacheEntryMemory { snapshot, .. } => {
             context["dataset"] = json!(snapshot.dataset);
             context["observed_from"] = json!(snapshot.observed_from);

@@ -230,6 +230,7 @@ enum CollectionChoice {
     HyperscaleLogComponents,
     WaitCounters,
     Replication,
+    GroupReplication,
     Settings,
     PlanCacheSummary,
     StatementGrants,
@@ -272,6 +273,7 @@ impl CollectionChoice {
             Self::HyperscaleLogComponents => SnapshotDataset::HyperscaleLogComponents,
             Self::WaitCounters => SnapshotDataset::WaitCounters,
             Self::Replication => SnapshotDataset::Replication,
+            Self::GroupReplication => SnapshotDataset::GroupReplication,
             Self::Settings => SnapshotDataset::Settings,
             Self::PlanCacheSummary => SnapshotDataset::PlanCacheSummary,
             Self::StatementGrants => SnapshotDataset::StatementGrants,
@@ -720,3 +722,6 @@ mod tests {
         assert!(crate::Cli::try_parse_from(["culprit", "collect", "once", "pilot", "--outbox", "journal"]).is_err());
     }
 }
+
+#[cfg(test)]
+mod group_replication_tests;
