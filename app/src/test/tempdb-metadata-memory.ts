@@ -3,6 +3,7 @@ import type { Report } from "../gen/Report";
 import type { TempdbMetadataMemoryReport } from "../gen/TempdbMetadataMemoryReport";
 import { t } from "../lib/i18n";
 import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 export const EXACT_TEMPDB_RESERVATION = "9007199254740993";
 export type MetadataMode = "usage" | "disabled" | "unknown" | "partial";
@@ -38,7 +39,7 @@ export function tempdbMetadataReport(mode: MetadataMode = "usage", count = 12): 
 }
 
 export function tempdbMetadataHealthReport(view: TempdbMetadataMemoryReport | null = tempdbMetadataReport()): Report {
-  return partial<Report>({
+  return healthReportFixture({
     snapshot: { id: "metadata-presentation", server: { engine: "mssql" }, pressure: null, resources: [],
       sources: [{ source: "tempdb metadata memory", state: view ? view.source_state : "unavailable",
         reason: view ? null : t("view.tempdb_metadata_memory.source.denied") }],

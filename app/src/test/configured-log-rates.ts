@@ -2,6 +2,7 @@ import type { ConfiguredLogRateReport } from "../gen/ConfiguredLogRateReport";
 import type { Report } from "../gen/Report";
 import { t } from "../lib/i18n";
 import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 /** Presentation data is already interpreted and formatted by the Rust report contract. */
 export function configuredLogRateReport(): ConfiguredLogRateReport {
@@ -20,7 +21,7 @@ export function configuredLogRateReport(): ConfiguredLogRateReport {
 }
 
 export function configuredLogRateHealthReport(view: ConfiguredLogRateReport | null = configuredLogRateReport()): Report {
-  return partial<Report>({
+  return healthReportFixture({
     snapshot: { id: "configured-limit-presentation", server: { engine: "mssql" }, sources: view ? [] : [{ source: "configured-log-rates", state: "unavailable", reason: t("view.configured_log_rates.unavailable") }], resources: [], pressure: null,
       operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } },
     configured_log_rates: view ?? undefined,

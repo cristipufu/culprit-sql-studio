@@ -2,6 +2,7 @@ import type { DatabasePropertiesReport } from "../gen/DatabasePropertiesReport";
 import type { Report } from "../gen/Report";
 import { t } from "../lib/i18n";
 import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 /** Controlled display values only; native code interpretation and validation stay in the Rust view. */
 export function databasePropertiesReport(): DatabasePropertiesReport {
@@ -32,7 +33,7 @@ export function databasePropertiesReport(): DatabasePropertiesReport {
   });
 }
 export function databasePropertiesHealthReport(view: DatabasePropertiesReport | null = databasePropertiesReport()): Report {
-  return partial<Report>({ snapshot: { id: "database-properties-test", server: { engine: "mssql" }, resources: [], pressure: null,
+  return healthReportFixture({ snapshot: { id: "database-properties-test", server: { engine: "mssql" }, resources: [], pressure: null,
     sources: [{ source: "database-properties", state: view ? "partial" : "unavailable", reason: null }],
     operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } },
     database_properties: view ?? undefined,

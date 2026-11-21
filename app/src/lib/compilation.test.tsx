@@ -2,10 +2,9 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryCompilation } from "../components/QueryCompilation";
 import { HealthTab } from "../components/Health";
-import type { Report } from "../gen/Report";
 import { compilationComparisonReport, compilationEvidence, compilationObservation, compilationReport, unavailableCompilationComparisonReport } from "../test/compilation";
-import { partial } from "../test/fixtures";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 test("compilation records retain exact counts and native context inside collapsed, paged evidence", () => {
   const rows = Array.from({ length: 12 }, (_, index) => compilationObservation(index));
@@ -39,7 +38,7 @@ test("native context stays text and a failed read remains visible without an adm
   const html = renderToStaticMarkup(<QueryCompilation evidence={compilationEvidence([row])} report={compilationReport([row])} />);
   expect(html).toContain("&lt;script&gt;");
   expect(html).not.toContain("<script>");
-  const report = partial<Report>({ snapshot: { server: { engine: "mssql" }, sources: [{ source: "query compilation", state: "unavailable", reason: "Native permission denied." }], operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
+  const report = healthReportFixture({ snapshot: { server: { engine: "mssql" }, sources: [{ source: "query compilation", state: "unavailable", reason: "Native permission denied." }], operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
   const failed = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server" />);
   expect(failed).toContain(t("view.compilation.title"));
   expect(failed).toContain("Native permission denied.");

@@ -2,6 +2,7 @@ import type { HyperscaleLogComponentReport } from "../gen/HyperscaleLogComponent
 import type { Report } from "../gen/Report";
 import { partial } from "./fixtures";
 import { t } from "../lib/i18n";
+import { healthReportFixture } from "./health-report";
 export function hyperscaleLogComponentsReport(count = 11): HyperscaleLogComponentReport {
   return partial<HyperscaleLogComponentReport>({
     title: t("view.hyperscale_log_components.title"), summary: t("view.hyperscale_log_components.summary.observed", { count: String(count) }),
@@ -17,7 +18,7 @@ export function hyperscaleLogComponentsReport(count = 11): HyperscaleLogComponen
   });
 }
 export function hyperscaleLogHealthReport(): Report {
-  return partial<Report>({
+  return healthReportFixture({
     hyperscale_log_components: hyperscaleLogComponentsReport(),
     snapshot: partial<Report["snapshot"]>({ id: "native-hs-components", server: partial({ engine: "mssql" }), operations: partial({ spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null }), sources: [] }),
   });

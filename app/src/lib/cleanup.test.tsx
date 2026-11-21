@@ -5,14 +5,13 @@ import { CleanupEvidence } from "../components/CleanupEvidence";
 import { HealthTab } from "../components/Health";
 import type { CleanupReport } from "../gen/CleanupReport";
 import type { CleanupSnapshot } from "../gen/CleanupSnapshot";
-import type { Report } from "../gen/Report";
 import type { RetentionSnapshot } from "../gen/RetentionSnapshot";
 import {
   EXACT_REASON_COUNT, NATIVE_COLUMN_CANARY, PREPARED_AT, PVS_SOURCE,
   persistentVersionObservation, persistentVersionRead, persistentVersionReport,
   preparedRetainer, retainer, retentionEvidence, retentionReport,
 } from "../test/cleanup";
-import { partial } from "../test/fixtures";
+import { healthReportFixture } from "../test/health-report";
 
 function show(reads: CleanupSnapshot[], retention: RetentionSnapshot | null, report: CleanupReport): string {
   return renderToStaticMarkup(<CleanupEvidence reads={reads} retention={retention} report={report} />);
@@ -99,7 +98,7 @@ test("an unresolved native session number remains visible without acquiring a ge
 
 test("failed reads and raw evidence without an admitted explanation remain visible instead of healthy empty", () => {
   for (const failed of [true, false]) {
-    const report = partial<Report>({ snapshot: {
+    const report = healthReportFixture({ snapshot: {
       server: { engine: "mssql" },
       sources: [{ source: PVS_SOURCE, state: failed ? "unavailable" : "collected", reason: failed ? "Native cleanup permission denied." : null }],
       operations: { cleanup: failed ? [] : [persistentVersionRead()], spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null },

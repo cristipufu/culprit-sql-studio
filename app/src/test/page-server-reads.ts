@@ -2,7 +2,7 @@ import type { PageServerReadEntry } from "../gen/PageServerReadEntry";
 import type { PageServerReadReport } from "../gen/PageServerReadReport";
 import type { Report } from "../gen/Report";
 import { t } from "../lib/i18n";
-import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 export const EXACT_PAGE_SERVER_PAGES = "9007199254740993";
 
@@ -43,7 +43,7 @@ export function unavailablePageServerReads(): PageServerReadReport {
 }
 
 export function pageServerReadHealthReport(view: PageServerReadReport | null = pageServerReadReport()): Report {
-  return partial<Report>({ snapshot: { id: "page-server-presentation", server: { engine: "postgres" }, pressure: null,
+  return healthReportFixture({ snapshot: { id: "page-server-presentation", server: { engine: "postgres" }, pressure: null,
     sources: view ? [] : [{ source: "query_store", state: "unavailable", reason: t("view.page_server_reads.invalid"),
       reason_message: { kind: "catalog", key: "view.page_server_reads.invalid", arguments: {} } }],
     resources: [], operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } },

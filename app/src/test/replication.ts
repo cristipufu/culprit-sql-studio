@@ -2,7 +2,8 @@ import examples from "../../../fixtures/replication.sample.json" with { type: "j
 import type { ReplicationReport } from "../gen/ReplicationReport";
 import type { ReplicationField } from "../gen/ReplicationField";
 import type { Report } from "../gen/Report";
-import { fromRust, partial } from "./fixtures";
+import { fromRust } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 const reports = fromRust<Record<string, ReplicationReport>>(examples);
 
@@ -19,7 +20,7 @@ export function replicationFields(report: ReplicationReport): ReplicationField[]
 
 /** A surface containing only the supplied derived view; this supplies no new native evidence or diagnosis. */
 export function replicationOnlyReport(replication: ReplicationReport): Report {
-  return partial<Report>({
+  return healthReportFixture({
     findings: [], replication,
     snapshot: {
       id: "replication-ui-test", server: { engine: "mssql" }, sources: [], pressure: null, resources: [],

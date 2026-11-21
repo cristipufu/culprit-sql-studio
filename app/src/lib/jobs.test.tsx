@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Jobs } from "../components/Jobs";
 import { HealthTab } from "../components/Health";
-import type { Report } from "../gen/Report";
 import type { OperationalObservation } from "../gen/OperationalObservation";
 import { partial } from "../test/fixtures";
 import { JOBS_SOURCE, jobPoint, jobsEvidence, jobsReport, agentJobEvidence, agentJobsReport, mysqlEventEvidence, mysqlEventsReport } from "../test/jobs";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 test("continuous-aggregate settings render as exact folded text without becoming a job or refresh verdict", () => {
   const row = partial<OperationalObservation>({ source: "timescale-continuous-aggregates", key: "original-catalog-point", fact: { kind: "timescale-continuous-aggregate", data: {
@@ -29,7 +29,7 @@ test("continuous-aggregate settings render as exact folded text without becoming
 });
 
 test("an unavailable continuous-aggregate catalog remains visible in Health without a raw point", () => {
-  const report = partial<Report>({ snapshot: { server: { engine: "postgres" }, sources: [{ source: "timescale-continuous-aggregates", state: "unavailable", reason: "Native aggregate catalog permission denied." }],
+  const report = healthReportFixture({ snapshot: { server: { engine: "postgres" }, sources: [{ source: "timescale-continuous-aggregates", state: "unavailable", reason: "Native aggregate catalog permission denied." }],
     operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
   const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="PostgreSQL" />);
   expect(html).toContain("Native aggregate catalog permission denied.");
@@ -65,7 +65,7 @@ test("a missing, duplicate, foreign-source or different-job row cannot supply di
 });
 
 test("failed scan acquisition stays visible under Health without a typed raw job wrapper", () => {
-  const report = partial<Report>({ snapshot: { server: { engine: "postgres" }, sources: [{ source: JOBS_SOURCE, state: "unavailable", reason: "Native job permission denied." }],
+  const report = healthReportFixture({ snapshot: { server: { engine: "postgres" }, sources: [{ source: JOBS_SOURCE, state: "unavailable", reason: "Native job permission denied." }],
     operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
   const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="PostgreSQL" />);
   expect(html).toContain(t("view.jobs.title"));
@@ -83,7 +83,7 @@ test("a view from different native read bounds cannot authorize job detail prese
 });
 
 test("Jobs assesses the native-failure opt-in while an explicitly recorded log-source gap remains visible", () => {
-  const report = partial<Report>({ snapshot: { server: { engine: "postgres" }, options: { collect_native_failures: true },
+  const report = healthReportFixture({ snapshot: { server: { engine: "postgres" }, options: { collect_native_failures: true },
     sources: [{ source: JOBS_SOURCE, state: "unavailable", reason: "Native job permission denied." }],
     operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
   const render = () => renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="PostgreSQL" />);
@@ -105,14 +105,14 @@ test("Agent history reuses folded exact text, local-clock limits and source bind
   const mismatch=renderToStaticMarkup(<Jobs evidence={evidence} report={report}/>);expect(mismatch).toContain(t("ui.memory_failures.missing_row"));expect(mismatch).not.toContain("2147483647");
 });
 test("Agent source-only gap cannot fall through to healthy Health emptiness", () => {
-  const report=partial<Report>({snapshot:{server:{engine:"mssql"},sources:[{source:"mssql-agent-jobs",state:"unavailable",reason:"Native msdb visibility denied."}],operations:{spaces:[],counters:[],sequences:[],multixacts:[],sqlite:null,cluster:null}}});
+  const report=healthReportFixture({snapshot:{server:{engine:"mssql"},sources:[{source:"mssql-agent-jobs",state:"unavailable",reason:"Native msdb visibility denied."}],operations:{spaces:[],counters:[],sequences:[],multixacts:[],sqlite:null,cluster:null}}});
   const html=renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server"/>);
   expect(html).toContain(t("view.mssql_agent_jobs.title"));expect(html).toContain("Native msdb visibility denied.");expect(html).not.toContain(t("ui.health.empty"));
 });
 
 test("Agent not-applicable and acquired-without-view markers retain explicit Health coverage", () => {
   for (const state of ["not-applicable","collected"] as const) {
-    const report=partial<Report>({snapshot:{server:{engine:"mssql"},sources:[{source:"mssql-agent-jobs",state,reason:null}],operations:{spaces:[],counters:[],sequences:[],multixacts:[],sqlite:null,cluster:null}}});
+    const report=healthReportFixture({snapshot:{server:{engine:"mssql"},sources:[{source:"mssql-agent-jobs",state,reason:null}],operations:{spaces:[],counters:[],sequences:[],multixacts:[],sqlite:null,cluster:null}}});
     const html=renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server"/>);
     expect(html).toContain(t("view.mssql_agent_jobs.title"));expect(html).not.toContain(t("ui.health.empty"));
     if (state==="collected") expect(html).toContain(t("view.jobs.invalid"));
@@ -133,7 +133,7 @@ test("scheduled-event context stays folded plain text and requires its original 
 });
 
 test("unavailable scheduled-event catalog keeps its own source title without Agent or empty-health labels", () => {
-  const report = partial<Report>({ snapshot: { server: { engine: "mysql" }, sources: [{ source: "mysql-scheduled-events", state: "unavailable", reason: "Native event catalog permission denied." }], operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
+  const report = healthReportFixture({ snapshot: { server: { engine: "mysql" }, sources: [{ source: "mysql-scheduled-events", state: "unavailable", reason: "Native event catalog permission denied." }], operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
   const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="MySQL" />);
   expect(html).toContain(t("view.mysql_events.title")); expect(html).toContain("Native event catalog permission denied.");
   expect(html).not.toContain(t("view.mssql_agent_jobs.title")); expect(html).not.toContain(t("ui.health.empty"));

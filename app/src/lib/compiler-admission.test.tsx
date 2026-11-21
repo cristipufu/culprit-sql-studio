@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompilerAdmission } from "../components/CompilerAdmission";
 import { HealthTab } from "../components/Health";
-import type { Report } from "../gen/Report";
 import type { NativeReadContext } from "../gen/NativeReadContext";
 import { compilerAdmissionEvidence, compilerAdmissionReport, compilerGateway, compilerWaiter, COMPILER_ADMISSION_SOURCE } from "../test/compiler-admission";
 import { partial } from "../test/fixtures";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 test("compiler admission keeps separate affected requests and exact gateway values inside collapsed paged evidence", () => {
   const rows = [compilerWaiter(), ...Array.from({ length: 12 }, (_, index) => compilerGateway(index))];
@@ -50,7 +50,7 @@ test("native read bounds can be shown without leaking the source owner and faile
   const html = renderToStaticMarkup(<CompilerAdmission evidence={evidence} report={compilerAdmissionReport()} />);
   expect(html).toContain("2026-11-16T10:00:01Z");
   expect(html).not.toContain("private-read-route-canary");
-  const report = partial<Report>({ snapshot: { server: { engine: "mssql" }, sources: [{ source: COMPILER_ADMISSION_SOURCE, state: "unavailable", reason: "Native compiler permission denied." }],
+  const report = healthReportFixture({ snapshot: { server: { engine: "mssql" }, sources: [{ source: COMPILER_ADMISSION_SOURCE, state: "unavailable", reason: "Native compiler permission denied." }],
     operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
   const failed = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server" />);
   expect(failed).toContain(t("view.compiler_admission.title"));

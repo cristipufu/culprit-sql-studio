@@ -2,11 +2,10 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HealthTab } from "../components/Health";
 import { PageWaitTargets } from "../components/PageWaitTargets";
-import type { Report } from "../gen/Report";
-import { partial } from "../test/fixtures";
 import { PAGE_AFTER, PAGE_BEFORE, PAGE_EARLIER, PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait, recordedPageIncident, recordedPageRequest } from "../test/page-waits";
 import { t } from "./i18n";
 import { pageWaitReferenceKey } from "./page-wait-reference";
+import { healthReportFixture } from "../test/health-report";
 
 test("page references preserve session and request generations, transactions, raw resources and wait kinds without order-sensitive qualifiers", () => {
   const row = pageWait();
@@ -228,7 +227,7 @@ test("page observations start collapsed and remain bounded by the shared ten-row
 });
 
 test("a requested page profile with missing source coverage stays visible in Health without a fake empty result", () => {
-  const report = partial<Report>({ snapshot: {
+  const report = healthReportFixture({ snapshot: {
     server: { engine: "mssql" }, sources: [], options: { collect_page_wait_targets: true },
     operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null },
   } });

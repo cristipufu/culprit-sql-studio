@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HealthTab, SignalTile } from "../components/Health";
 import type { Pressure } from "../gen/Pressure";
-import type { Report } from "../gen/Report";
 import type { Signal } from "../gen/Signal";
 import { partial } from "../test/fixtures";
 import { duration } from "./format";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 function signal(scope: Signal["scope"]): Signal {
   return partial<Signal>({ key: scope, label: `native-${scope}`, value: 123, unit: "count", scope, healthy: null, status: "info" });
@@ -14,7 +14,7 @@ function signal(scope: Signal["scope"]): Signal {
 
 function health(signals: Signal[]): string {
   const pressure = partial<Pressure>({ signals, uptime_hours: 48, files: [], replicas: [], oldest_transaction: null });
-  const report = partial<Report>({ findings: [], snapshot: {
+  const report = healthReportFixture({ findings: [], snapshot: {
     server: { engine: "mssql" }, sources: [], options: {},
     operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null },
   } });

@@ -2,7 +2,8 @@ import nativeCases from "../../../fixtures/instance-resources.sample.json" with 
 import type { InstanceResourceRead } from "../gen/InstanceResourceRead";
 import type { InstanceResourceReport } from "../gen/InstanceResourceReport";
 import type { Report } from "../gen/Report";
-import { fromRust, partial } from "./fixtures";
+import { fromRust } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 /** Actual Rust output from the canonical controlled source; UI supplies no measurement or pressure policy. */
 export function instanceResourceCase(name: keyof typeof nativeCases = "exact") {
@@ -11,7 +12,7 @@ export function instanceResourceCase(name: keyof typeof nativeCases = "exact") {
 
 export function instanceResourceHealthReport(name: keyof typeof nativeCases = "exact"): Report {
   const { read, report } = instanceResourceCase(name);
-  return partial<Report>({
+  return healthReportFixture({
     instance_resources: report,
     snapshot: {
       id: "instance-resource-display",

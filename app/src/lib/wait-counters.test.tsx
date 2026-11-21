@@ -7,6 +7,7 @@ import type { Report } from "../gen/Report";
 import type { WaitCounterReport } from "../gen/WaitCounterReport";
 import { partial } from "../test/fixtures";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 function report(): WaitCounterReport {
   return {
@@ -64,7 +65,7 @@ test("missing acquisition authority never borrows a native clock from another re
 });
 
 function waitOnlyHealthReport(): Report {
-  return partial<Report>({
+  return healthReportFixture({
     snapshot: {
       id: "wait-only-snapshot", server: { engine: "mssql" }, pressure: null, sources: [],
       operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null },

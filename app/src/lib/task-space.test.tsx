@@ -2,10 +2,9 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TaskSpace } from "../components/TaskSpace";
 import { HealthTab } from "../components/Health";
-import type { Report } from "../gen/Report";
-import { partial } from "../test/fixtures";
 import { taskSpace, taskSpaceEvidence, taskSpaceReport } from "../test/task-space";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 test("task rows join exact capture-local tuples despite native order and preserve exact counts, zero and unknown", () => {
   const wanted = taskSpace();
@@ -65,7 +64,7 @@ test("task observations stay collapsed and paged rather than filling Health with
 
 test("requested missing or unsupported task profiles stay visible without an invented healthy empty result", () => {
   for (const sources of [[], [{ source: "task space", state: "unavailable" as const, reason: "This native source is unsupported here." }]]) {
-    const report = partial<Report>({ snapshot: { server: { engine: "mssql" }, sources, options: { collect_task_space: true }, operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
+    const report = healthReportFixture({ snapshot: { server: { engine: "mssql" }, sources, options: { collect_task_space: true }, operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
     const html = renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server" />);
     expect(html).toContain(t("view.task_space.title"));
     expect(html).not.toContain(t("ui.health.empty"));

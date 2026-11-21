@@ -3,7 +3,7 @@ import type { ConnectionOutcomeReport } from "../gen/ConnectionOutcomeReport";
 import type { ConnectionOutcomeSnapshot } from "../gen/ConnectionOutcomeSnapshot";
 import type { Report } from "../gen/Report";
 import { t } from "../lib/i18n";
-import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 export const CONNECTION_OUTCOME_SOURCE = "pg_stat_database";
 export const EXACT_SESSION_COUNT = "9007199254740993";
@@ -87,7 +87,7 @@ export function unavailableConnectionOutcomeRead(): ConnectionOutcomeSnapshot {
 }
 
 export function connectionOutcomeHealthReport(view: ConnectionOutcomeReport | null = connectionOutcomeReport()): Report {
-  return partial<Report>({
+  return healthReportFixture({
     snapshot: { id: "connection-outcome-presentation", server: { engine: "postgres" }, sources: [], resources: [],
       pressure: view ? null : { signals: [], files: [], replicas: [], connection_outcomes: unavailableConnectionOutcomeRead() },
       operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } },

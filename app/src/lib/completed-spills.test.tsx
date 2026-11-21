@@ -4,11 +4,11 @@ import { CompletedSpills } from "../components/CompletedSpills";
 import { HealthTab } from "../components/Health";
 import type { Report } from "../gen/Report";
 import { COMPLETED_SPILL_SOURCE, EXACT_SPILL_COUNT, SPILL_FROM, SPILL_UNTIL, completedSpillFixture, partialCompletedSpillFixture } from "../test/completed-spills";
-import { partial } from "../test/fixtures";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 function health(input: Partial<Report> = {}, sources: Report["snapshot"]["sources"] = []) {
-  return partial<Report>({ ...input, snapshot: { ...input.snapshot, server: { engine: "mssql" }, sources,
+  return healthReportFixture({ ...input, snapshot: { ...input.snapshot, server: { engine: "mssql" }, sources,
     operations: { ...input.snapshot?.operations, spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } } });
 }
 
@@ -96,7 +96,7 @@ test("failed acquisition, raw-only data and stale derived-only data cannot becom
   expect(gap).toContain(t("view.completed_spills.title"));
   expect(gap).toContain("Native source permission denied.");
   expect(gap).not.toContain(t("ui.health.empty"));
-  const rawOnly = partial<Report>({ snapshot: { operations: { cached_runtime: fixture.read } } });
+  const rawOnly = healthReportFixture({ snapshot: { operations: { cached_runtime: fixture.read } } });
   for (const report of [health(rawOnly), health({ completed_spills: fixture.report })]) {
     const html = renderHealth(report);
     expect(html).toContain(t("view.completed_spills.invalid"));

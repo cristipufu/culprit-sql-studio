@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StatementWork } from "../components/StatementWork";
 import { HealthTab } from "../components/Health";
 import type { Report } from "../gen/Report";
-import { partial } from "../test/fixtures";
 import { statementEvidence, statementPoint, statementReport } from "../test/statement-work";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 test("statement points stay folded and paged with exact backend counts and complete native identities", () => {
   const rows = Array.from({ length: 12 }, (_, index) => statementPoint(index));
@@ -82,7 +82,7 @@ function health(report: Report): string {
 }
 
 function healthReport(): Report {
-  return partial<Report>({ snapshot: { id: "counter-snapshot", server: { engine: "mysql" }, sources: [],
+  return healthReportFixture({ snapshot: { id: "counter-snapshot", server: { engine: "mysql" }, sources: [],
     operations: { statement_work: statementEvidence(), spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null } },
     statement_work: statementReport(),
   });

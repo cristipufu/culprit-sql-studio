@@ -7,13 +7,13 @@ import type { ExecutionGrantObservation } from "../gen/ExecutionGrantObservation
 import type { MemoryParticipantExplanation } from "../gen/MemoryParticipantExplanation";
 import type { MemoryParticipantsReport } from "../gen/MemoryParticipantsReport";
 import type { NativeIdentity } from "../gen/NativeIdentity";
-import type { Report } from "../gen/Report";
 import type { RequestMemorySnapshot } from "../gen/RequestMemorySnapshot";
 import type { SessionMemoryObservation } from "../gen/SessionMemoryObservation";
 import type { SessionMemorySnapshot } from "../gen/SessionMemorySnapshot";
 import type { SourceOutcome } from "../gen/SourceOutcome";
 import { partial } from "../test/fixtures";
 import { t } from "./i18n";
+import { healthReportFixture } from "../test/health-report";
 
 function identity(id = "120"): NativeIdentity {
   return { id, qualifiers: { generation: "1770000000", namespace: "native-instance" } };
@@ -277,7 +277,7 @@ test("a different canonical source cannot hide an exact custom failure and unkno
 });
 
 test("Health shows requested participant profiles with unknown source coverage instead of omitting their panels", () => {
-  const value = partial<Report>({
+  const value = healthReportFixture({
     snapshot: {
       server: { engine: "mysql" }, options: { collect_request_memory: true, collect_session_memory: true }, sources: [],
       operations: { spaces: [], counters: [], sequences: [], multixacts: [], sqlite: null, cluster: null },

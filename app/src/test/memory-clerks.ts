@@ -3,6 +3,7 @@ import type { MemoryClerkReport } from "../gen/MemoryClerkReport";
 import type { Report } from "../gen/Report";
 import { t } from "../lib/i18n";
 import { partial } from "./fixtures";
+import { healthReportFixture } from "./health-report";
 
 export const EXACT_CLERK_ALLOCATION = "9007199254740993";
 
@@ -39,7 +40,7 @@ function allocationFields(): MemoryClerkField[] {
 }
 
 export function memoryClerkHealthReport(view: MemoryClerkReport | null = memoryClerkReport()): Report {
-  return partial<Report>({
+  return healthReportFixture({
     snapshot: { id: "memory-clerk-presentation", server: { engine: "mssql" }, resources: [], pressure: null,
       sources: [{ source: "memory clerks", state: view ? "partial" : "unavailable",
         reason: view ? null : t("collected.memory_clerks.source.unavailable") }],
